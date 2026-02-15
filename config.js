@@ -35,7 +35,7 @@ const CONFIG = {
     // Le Client ID ressemble à :
     // "123456789-abcdefg.apps.googleusercontent.com"
     //
-    GOOGLE_CLIENT_ID: 'VOTRE_GOOGLE_CLIENT_ID_ICI',
+    GOOGLE_CLIENT_ID: '271626095959-hkrtfv1vbghukgatn7qqp811r1e2vrb2.apps.googleusercontent.com',
 
     // ===========================================
     // STRIPE (Paiement sécurisé)
@@ -58,7 +58,7 @@ const CONFIG = {
     //   - Date : n'importe quelle date future
     //   - CVC : n'importe quels 3 chiffres
     //
-    STRIPE_PUBLISHABLE_KEY: 'VOTRE_STRIPE_PUBLISHABLE_KEY_ICI',
+    STRIPE_PUBLISHABLE_KEY: 'pk_test_51T1BvgRyBZrzbLTwwI89Y8FxgFi4o5t4ePcqyTbfPlbsQy7RmvXhkkSC4dbCigGDZe2MlEatvoI4sMzS0bn0Gk6600qNw1gjZA',
 
     // ===========================================
     // NOTE IMPORTANTE — PRODUCTION
