@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentVerse — La Marketplace d'Agents IA</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar" id="navbar">
+        <div class="container navbar-content">
+            <a href="#" class="logo">
+                <i class="fas fa-robot"></i>
+                <span>Agent<strong>Verse</strong></span>
+            </a>
+            <div class="nav-links" id="navLinks">
+                <a href="#marketplace">Offres</a>
+                <a href="#categories">Catégories</a>
+                <a href="#how-it-works">Comment ça marche</a>
+                <a href="#sell">Vendre</a>
+            </div>
+            <div class="nav-actions">
+                <div class="nav-auth" id="navAuthLoggedOut">
+                    <button class="btn btn-ghost" id="btnLogin">Connexion</button>
+                    <button class="btn btn-primary" id="btnSignup">S'inscrire</button>
+                </div>
+                <div class="nav-auth nav-logged-in hidden" id="navAuthLoggedIn">
+                    <button class="btn btn-primary btn-sm" id="btnNavSell"><i class="fas fa-plus"></i> Vendre un agent</button>
+                    <button class="nav-cart" id="navCart">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span class="cart-badge" id="cartBadge">0</span>
+                    </button>
+                    <div class="nav-user-avatar" id="navUserAvatar">
+                        <span id="navUserInitials">JD</span>
+                    </div>
+                </div>
+                <!-- Cart dropdown -->
+                <div class="cart-dropdown hidden" id="cartDropdown">
+                    <div class="cart-dropdown-header">
+                        <h4><i class="fas fa-shopping-cart"></i> Mon panier</h4>
+                        <button class="btn btn-ghost btn-sm" id="cartClearAll">Tout vider</button>
+                    </div>
+                    <div class="cart-items" id="cartItems">
+                        <div class="cart-empty">
+                            <i class="fas fa-shopping-basket"></i>
+                            <p>Votre panier est vide</p>
+                        </div>
+                    </div>
+                    <div class="cart-dropdown-footer" id="cartFooter" style="display:none;">
+                        <div class="cart-total">
+                            <span>Total</span>
+                            <strong id="cartTotal">€0</strong>
+                        </div>
+                        <button class="btn btn-primary btn-block" id="cartCheckout"><i class="fas fa-lock"></i> Passer commande</button>
+                    </div>
+                </div>
+                <button class="hamburger" id="hamburger">
+                    <span></span><span></span><span></span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-bg-shapes">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+        </div>
+        <div class="container hero-content">
+            <div class="hero-badge">
+                <i class="fas fa-sparkles"></i>
+                <span>La première marketplace française d'agents IA</span>
+            </div>
+            <h1>Achetez & Vendez des <span class="gradient-text">Agents IA</span> prêts à l'emploi</h1>
+            <p class="hero-subtitle">Découvrez des milliers d'agents intelligents créés par les meilleurs développeurs. Automatisez vos tâches, boostez votre productivité, ou vendez vos propres créations.</p>
+            <div class="hero-search">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="heroSearch" placeholder="Rechercher un agent IA (ex: assistant email, data analyst, chatbot...)">
+                    <button class="btn btn-primary btn-search">Rechercher</button>
+                </div>
+                <div class="search-tags">
+                    <span>Populaires :</span>
+                    <button class="tag" data-search="chatbot">Chatbot</button>
+                    <button class="tag" data-search="automatisation">Automatisation</button>
+                    <button class="tag" data-search="analyse">Analyse de données</button>
+                    <button class="tag" data-search="rédaction">Rédaction IA</button>
+                </div>
+            </div>
+            <div class="hero-stats">
+                <div class="stat">
+                    <strong>2,400+</strong>
+                    <span>Agents disponibles</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <strong>850+</strong>
+                    <span>Vendeurs actifs</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <strong>15K+</strong>
+                    <span>Transactions réussies</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TRUSTED BY -->
+    <section class="trusted-by">
+        <div class="container">
+            <p class="trusted-label">Ils nous font confiance</p>
+            <div class="trusted-logos">
+                <div class="trusted-logo"><i class="fas fa-building"></i> TechCorp</div>
+                <div class="trusted-logo"><i class="fas fa-rocket"></i> StartupAI</div>
+                <div class="trusted-logo"><i class="fas fa-brain"></i> NeuralLab</div>
+                <div class="trusted-logo"><i class="fas fa-microchip"></i> DataFlow</div>
+                <div class="trusted-logo"><i class="fas fa-cloud"></i> CloudMinds</div>
+                <div class="trusted-logo"><i class="fas fa-cogs"></i> AutomatIQ</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CATEGORIES -->
+    <section class="categories" id="categories">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Catégories</span>
+                <h2>Trouvez l'agent IA parfait pour votre besoin</h2>
+                <p>Parcourez nos catégories soigneusement organisées pour trouver exactement ce qu'il vous faut.</p>
+            </div>
+            <div class="categories-grid">
+                <div class="category-card" data-category="chatbot">
+                    <div class="category-icon" style="--clr: #6366f1"><i class="fas fa-comments"></i></div>
+                    <h3>Chatbots & Assistants</h3>
+                    <p>Agents conversationnels pour le support client, FAQ, et assistance personnalisée.</p>
+                    <span class="category-count">420 agents</span>
+                </div>
+                <div class="category-card" data-category="automatisation">
+                    <div class="category-icon" style="--clr: #f59e0b"><i class="fas fa-bolt"></i></div>
+                    <h3>Automatisation</h3>
+                    <p>Agents d'automatisation de workflows, tâches répétitives et processus métier.</p>
+                    <span class="category-count">380 agents</span>
+                </div>
+                <div class="category-card" data-category="analyse">
+                    <div class="category-icon" style="--clr: #10b981"><i class="fas fa-chart-line"></i></div>
+                    <h3>Analyse de Données</h3>
+                    <p>Agents spécialisés dans l'analyse, la visualisation et l'interprétation de données.</p>
+                    <span class="category-count">310 agents</span>
+                </div>
+                <div class="category-card" data-category="rédaction">
+                    <div class="category-icon" style="--clr: #ec4899"><i class="fas fa-pen-fancy"></i></div>
+                    <h3>Rédaction & Contenu</h3>
+                    <p>Agents de génération de contenu, copywriting, traduction et résumé automatique.</p>
+                    <span class="category-count">520 agents</span>
+                </div>
+                <div class="category-card" data-category="code">
+                    <div class="category-icon" style="--clr: #8b5cf6"><i class="fas fa-code"></i></div>
+                    <h3>Code & Développement</h3>
+                    <p>Agents de génération de code, review, debugging et documentation technique.</p>
+                    <span class="category-count">290 agents</span>
+                </div>
+                <div class="category-card" data-category="marketing">
+                    <div class="category-icon" style="--clr: #f97316"><i class="fas fa-bullhorn"></i></div>
+                    <h3>Marketing & Ventes</h3>
+                    <p>Agents SEO, génération de leads, email marketing et stratégie commerciale.</p>
+                    <span class="category-count">350 agents</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- MARKETPLACE LISTING -->
+    <section class="marketplace" id="marketplace">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Marketplace</span>
+                <h2>Agents IA les plus populaires</h2>
+                <p>Découvrez les agents les mieux notés et les plus vendus de notre plateforme.</p>
+            </div>
+            <div class="marketplace-toolbar">
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all">Tous</button>
+                    <button class="filter-tab" data-filter="chatbot">Chatbots</button>
+                    <button class="filter-tab" data-filter="automatisation">Automatisation</button>
+                    <button class="filter-tab" data-filter="analyse">Analyse</button>
+                    <button class="filter-tab" data-filter="rédaction">Rédaction</button>
+                    <button class="filter-tab" data-filter="code">Code</button>
+                    <button class="filter-tab" data-filter="marketing">Marketing</button>
+                </div>
+                <div class="sort-select">
+                    <select id="sortSelect">
+                        <option value="popular">Plus populaires</option>
+                        <option value="recent">Plus récents</option>
+                        <option value="price-asc">Prix croissant</option>
+                        <option value="price-desc">Prix décroissant</option>
+                        <option value="rating">Mieux notés</option>
+                    </select>
+                </div>
+            </div>
+            <div class="agents-grid" id="agentsGrid">
+                <!-- Agents will be rendered via JS -->
+            </div>
+            <div class="load-more-container">
+                <button class="btn btn-outline" id="loadMore">Voir plus d'agents <i class="fas fa-arrow-down"></i></button>
+            </div>
+        </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Comment ça marche</span>
+                <h2>Simple, rapide et sécurisé</h2>
+                <p>Que vous soyez acheteur ou vendeur, notre plateforme rend tout facile.</p>
+            </div>
+            <div class="steps-container">
+                <div class="steps-col">
+                    <h3 class="steps-title"><i class="fas fa-shopping-cart"></i> Pour les acheteurs</h3>
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Explorez le catalogue</h4>
+                            <p>Parcourez des milliers d'agents IA classés par catégorie, prix et note.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Testez avant d'acheter</h4>
+                            <p>Essayez les agents en démo gratuite pour vous assurer qu'ils correspondent à vos besoins.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Achetez et déployez</h4>
+                            <p>Paiement sécurisé, accès instantané. Intégrez l'agent via notre API simple.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="steps-divider"></div>
+                <div class="steps-col">
+                    <h3 class="steps-title"><i class="fas fa-store"></i> Pour les vendeurs</h3>
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Créez votre agent</h4>
+                            <p>Développez votre agent IA et préparez sa documentation et sa démo.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Publiez sur la marketplace</h4>
+                            <p>Soumettez votre agent. Notre équipe le valide sous 24h.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Gagnez de l'argent</h4>
+                            <p>Recevez 85% de chaque vente directement sur votre compte.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FEATURED SELLER (CTA to sell) -->
+    <section class="sell-cta" id="sell">
+        <div class="container">
+            <div class="sell-cta-content">
+                <div class="sell-cta-text">
+                    <span class="section-badge">Devenir vendeur</span>
+                    <h2>Monétisez vos agents IA</h2>
+                    <p>Rejoignez plus de 850 développeurs qui gagnent déjà de l'argent en vendant leurs agents IA sur AgentVerse. Commission de seulement 15%.</p>
+                    <ul class="sell-features">
+                        <li><i class="fas fa-check-circle"></i> Paiements rapides et sécurisés</li>
+                        <li><i class="fas fa-check-circle"></i> Dashboard vendeur complet</li>
+                        <li><i class="fas fa-check-circle"></i> Support dédié aux créateurs</li>
+                        <li><i class="fas fa-check-circle"></i> Analytics et statistiques détaillées</li>
+                    </ul>
+                    <button class="btn btn-primary btn-lg" id="btnStartSelling">Commencer à vendre <i class="fas fa-arrow-right"></i></button>
+                </div>
+                <div class="sell-cta-visual">
+                    <div class="earnings-card">
+                        <div class="earnings-header">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Revenus du mois</span>
+                        </div>
+                        <div class="earnings-amount">€4,280</div>
+                        <div class="earnings-change"><i class="fas fa-arrow-up"></i> +23% vs mois dernier</div>
+                        <div class="earnings-chart">
+                            <div class="bar" style="--h: 40%"></div>
+                            <div class="bar" style="--h: 55%"></div>
+                            <div class="bar" style="--h: 35%"></div>
+                            <div class="bar" style="--h: 70%"></div>
+                            <div class="bar" style="--h: 60%"></div>
+                            <div class="bar" style="--h: 85%"></div>
+                            <div class="bar active" style="--h: 95%"></div>
+                        </div>
+                        <div class="earnings-footer">
+                            <div><strong>127</strong> ventes</div>
+                            <div><strong>4.9</strong> <i class="fas fa-star"></i> note moyenne</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TESTIMONIALS -->
+    <section class="testimonials">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">Témoignages</span>
+                <h2>Ce que disent nos utilisateurs</h2>
+                <p>Des milliers d'entreprises et de développeurs nous font confiance.</p>
+            </div>
+            <div class="testimonials-grid">
+                <div class="testimonial-card">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                    </div>
+                    <p>"AgentVerse a transformé notre service client. L'agent chatbot que nous avons acheté gère 70% des demandes automatiquement."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar" style="--bg: #6366f1">SL</div>
+                        <div>
+                            <strong>Sophie Laurent</strong>
+                            <span>Directrice CX, RetailPlus</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="testimonial-card">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                    </div>
+                    <p>"En tant que développeur, j'ai gagné plus de 12 000€ en 3 mois en vendant mes agents. La plateforme est incroyable."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar" style="--bg: #10b981">MD</div>
+                        <div>
+                            <strong>Marc Dubois</strong>
+                            <span>Développeur IA indépendant</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="testimonial-card">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star-half-alt"></i>
+                    </div>
+                    <p>"L'agent d'analyse de données nous fait gagner 20h par semaine. Le meilleur investissement de notre startup."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar" style="--bg: #f59e0b">AC</div>
+                        <div>
+                            <strong>Amina Cherif</strong>
+                            <span>CEO, DataDriven</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- NEWSLETTER -->
+    <section class="newsletter">
+        <div class="container">
+            <div class="newsletter-content">
+                <h2>Restez informé des nouveaux agents</h2>
+                <p>Recevez chaque semaine notre sélection des meilleurs agents IA et les dernières tendances du marché.</p>
+                <div class="newsletter-form">
+                    <input type="email" placeholder="Votre adresse email" id="emailInput">
+                    <button class="btn btn-primary" id="btnNewsletter">S'abonner</button>
+                </div>
+                <span class="newsletter-note"><i class="fas fa-lock"></i> Pas de spam. Désabonnement en un clic.</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="#" class="logo">
+                        <i class="fas fa-robot"></i>
+                        <span>Agent<strong>Verse</strong></span>
+                    </a>
+                    <p>La première marketplace française dédiée à l'achat et la vente d'agents IA. Connectez acheteurs et créateurs d'intelligence artificielle.</p>
+                    <div class="social-links">
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin"></i></a>
+                        <a href="#"><i class="fab fa-github"></i></a>
+                        <a href="#"><i class="fab fa-discord"></i></a>
+                    </div>
+                </div>
+                <div class="footer-col">
+                    <h4>Marketplace</h4>
+                    <a href="#">Explorer les agents</a>
+                    <a href="#">Catégories</a>
+                    <a href="#">Agents populaires</a>
+                    <a href="#">Nouveautés</a>
+                    <a href="#">Promotions</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Vendeurs</h4>
+                    <a href="#">Devenir vendeur</a>
+                    <a href="#">Dashboard</a>
+                    <a href="#">Documentation API</a>
+                    <a href="#">Tarifs & commissions</a>
+                    <a href="#">Ressources</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Entreprise</h4>
+                    <a href="#">À propos</a>
+                    <a href="#">Blog</a>
+                    <a href="#">Carrières</a>
+                    <a href="#">Contact</a>
+                    <a href="#">Presse</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 AgentVerse. Tous droits réservés.</p>
+                <div class="footer-legal">
+                    <a href="#">Conditions d'utilisation</a>
+                    <a href="#">Politique de confidentialité</a>
+                    <a href="#">Mentions légales</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- AGENT DETAIL MODAL -->
+    <div class="modal-overlay" id="agentModal">
+        <div class="modal">
+            <button class="modal-close" id="modalClose"><i class="fas fa-times"></i></button>
+            <div class="modal-body" id="modalBody">
+                <!-- Filled via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTH MODAL -->
+    <div class="modal-overlay" id="authModal">
+        <div class="modal modal-sm">
+            <button class="modal-close" id="authModalClose"><i class="fas fa-times"></i></button>
+            <div class="modal-body" id="authModalBody">
+                <div class="auth-form">
+                    <h2 id="authTitle">Connexion</h2>
+                    <p id="authSubtitle">Connectez-vous pour accéder à votre compte</p>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" placeholder="votre@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Mot de passe</label>
+                        <input type="password" placeholder="••••••••">
+                    </div>
+                    <button class="btn btn-primary btn-block" id="authSubmitBtn">Se connecter</button>
+                    <div class="auth-divider"><span>ou</span></div>
+                    <button class="btn-google" id="googleAuthBtn">
+                        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                        <span>Continuer avec Google</span>
+                    </button>
+                    <p class="auth-switch" id="authSwitch">Pas encore de compte ? <a href="#">S'inscrire</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SELL AGENT MODAL (Multi-step) -->
+    <div class="modal-overlay" id="sellModal">
+        <div class="modal modal-lg">
+            <button class="modal-close" id="sellModalClose"><i class="fas fa-times"></i></button>
+            <div class="modal-body">
+                <!-- STEP INDICATOR -->
+                <div class="sell-steps-indicator">
+                    <div class="sell-step-dot active" data-step="1">
+                        <span class="dot-number">1</span>
+                        <span class="dot-label">Connexion</span>
+                    </div>
+                    <div class="sell-step-line active"></div>
+                    <div class="sell-step-dot" data-step="2">
+                        <span class="dot-number">2</span>
+                        <span class="dot-label">Infos agent</span>
+                    </div>
+                    <div class="sell-step-line"></div>
+                    <div class="sell-step-dot" data-step="3">
+                        <span class="dot-number">3</span>
+                        <span class="dot-label">Tarification</span>
+                    </div>
+                    <div class="sell-step-line"></div>
+                    <div class="sell-step-dot" data-step="4">
+                        <span class="dot-number">4</span>
+                        <span class="dot-label">Publication</span>
+                    </div>
+                </div>
+
+                <!-- STEP 1: Connexion vendeur -->
+                <div class="sell-step" id="sellStep1">
+                    <div class="sell-step-header">
+                        <div class="sell-step-icon"><i class="fas fa-user-circle"></i></div>
+                        <h2>Connectez-vous pour vendre</h2>
+                        <p>Créez un compte vendeur ou connectez-vous pour publier votre agent IA sur la marketplace.</p>
+                    </div>
+                    <div class="sell-form-section">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label><i class="fas fa-user"></i> Nom complet</label>
+                                <input type="text" id="sellerName" placeholder="Jean Dupont">
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-envelope"></i> Email</label>
+                                <input type="email" id="sellerEmail" placeholder="jean@exemple.com">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-lock"></i> Mot de passe</label>
+                            <input type="password" id="sellerPassword" placeholder="Minimum 8 caractères">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-building"></i> Nom d'entreprise ou pseudo vendeur</label>
+                            <input type="text" id="sellerBrand" placeholder="Ex: NeuralChat, DevForge...">
+                        </div>
+                        <div class="auth-divider"><span>ou</span></div>
+                        <button class="btn-google" id="googleSellBtn">
+                            <svg viewBox="0 0 24 24" width="20" height="20"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                            <span>S'inscrire avec Google</span>
+                        </button>
+                    </div>
+                    <div class="sell-nav">
+                        <div></div>
+                        <button class="btn btn-primary btn-lg" id="sellNext1">Continuer <i class="fas fa-arrow-right"></i></button>
+                    </div>
+                </div>
+
+                <!-- STEP 2: Informations de l'agent -->
+                <div class="sell-step hidden" id="sellStep2">
+                    <div class="sell-step-header">
+                        <div class="sell-step-icon"><i class="fas fa-robot"></i></div>
+                        <h2>Décrivez votre agent IA</h2>
+                        <p>Renseignez les informations essentielles pour que les acheteurs comprennent votre agent.</p>
+                    </div>
+                    <div class="sell-form-section">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label><i class="fas fa-tag"></i> Nom de l'agent *</label>
+                                <input type="text" id="agentName" placeholder="Ex: ChatGenius Pro">
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-layer-group"></i> Catégorie *</label>
+                                <select id="agentCategory">
+                                    <option value="">— Choisir une catégorie —</option>
+                                    <option value="chatbot">Chatbot & Assistant</option>
+                                    <option value="automatisation">Automatisation</option>
+                                    <option value="analyse">Analyse de Données</option>
+                                    <option value="rédaction">Rédaction & Contenu</option>
+                                    <option value="code">Code & Développement</option>
+                                    <option value="marketing">Marketing & Ventes</option>
+                                    <option value="__custom__">+ Créer une catégorie...</option>
+                                </select>
+                                <div class="custom-category-input hidden" id="customCategoryWrapper">
+                                    <div class="input-with-icon">
+                                        <i class="fas fa-pen"></i>
+                                        <input type="text" id="customCategoryName" placeholder="Nom de votre nouvelle catégorie">
+                                    </div>
+                                    <button class="btn btn-sm btn-ghost" id="cancelCustomCategory"><i class="fas fa-times"></i> Annuler</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-align-left"></i> Description courte * <span class="label-hint">(visible sur la carte)</span></label>
+                            <input type="text" id="agentShortDesc" placeholder="Résumez votre agent en une phrase percutante (max 150 caractères)" maxlength="150">
+                            <div class="char-count"><span id="shortDescCount">0</span>/150</div>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-file-alt"></i> Description complète * <span class="label-hint">(visible dans la fiche détaillée)</span></label>
+                            <textarea id="agentLongDesc" rows="4" placeholder="Décrivez en détail ce que fait votre agent, ses cas d'usage, ses avantages..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-image"></i> Icône de l'agent</label>
+                            <div class="icon-mode-tabs">
+                                <button class="icon-mode-tab active" data-mode="emoji"><i class="fas fa-smile"></i> Emoji</button>
+                                <button class="icon-mode-tab" data-mode="upload"><i class="fas fa-camera"></i> Photo / Image</button>
+                            </div>
+                            <div class="icon-mode-content" id="iconModeEmoji">
+                                <div class="emoji-picker">
+                                    <button class="emoji-btn selected" data-emoji="🤖">🤖</button>
+                                    <button class="emoji-btn" data-emoji="🧠">🧠</button>
+                                    <button class="emoji-btn" data-emoji="⚡">⚡</button>
+                                    <button class="emoji-btn" data-emoji="📊">📊</button>
+                                    <button class="emoji-btn" data-emoji="✍️">✍️</button>
+                                    <button class="emoji-btn" data-emoji="💻">💻</button>
+                                    <button class="emoji-btn" data-emoji="🎯">🎯</button>
+                                    <button class="emoji-btn" data-emoji="📧">📧</button>
+                                    <button class="emoji-btn" data-emoji="🌍">🌍</button>
+                                    <button class="emoji-btn" data-emoji="👁️">👁️</button>
+                                    <button class="emoji-btn" data-emoji="⚖️">⚖️</button>
+                                    <button class="emoji-btn" data-emoji="📱">📱</button>
+                                    <button class="emoji-btn" data-emoji="🔒">🔒</button>
+                                    <button class="emoji-btn" data-emoji="🎨">🎨</button>
+                                    <button class="emoji-btn" data-emoji="🚀">🚀</button>
+                                </div>
+                            </div>
+                            <div class="icon-mode-content hidden" id="iconModeUpload">
+                                <div class="upload-zone" id="uploadZone">
+                                    <input type="file" id="agentImageInput" accept="image/*" hidden>
+                                    <div class="upload-placeholder" id="uploadPlaceholder">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <p>Cliquez ou glissez une image ici</p>
+                                        <span>PNG, JPG ou SVG — max 2 Mo</span>
+                                    </div>
+                                    <div class="upload-preview hidden" id="uploadPreview">
+                                        <img id="uploadPreviewImg" src="" alt="Aperçu">
+                                        <button class="upload-remove" id="uploadRemove"><i class="fas fa-trash-alt"></i> Supprimer</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-list-check"></i> Fonctionnalités principales <span class="label-hint">(une par ligne, max 6)</span></label>
+                            <textarea id="agentFeatures" rows="6" placeholder="Ex:
+Support multilingue (30+ langues)
+Intégration API en 5 minutes
+Dashboard analytique inclus
+Personnalisation complète du ton
+Escalade vers un humain
+Réponses contextuelles"></textarea>
+                        </div>
+                    </div>
+                    <div class="sell-nav">
+                        <button class="btn btn-ghost btn-lg" id="sellBack2"><i class="fas fa-arrow-left"></i> Retour</button>
+                        <button class="btn btn-primary btn-lg" id="sellNext2">Continuer <i class="fas fa-arrow-right"></i></button>
+                    </div>
+                </div>
+
+                <!-- STEP 3: Tarification -->
+                <div class="sell-step hidden" id="sellStep3">
+                    <div class="sell-step-header">
+                        <div class="sell-step-icon"><i class="fas fa-euro-sign"></i></div>
+                        <h2>Fixez votre tarification</h2>
+                        <p>Définissez le prix et le modèle de tarification de votre agent IA.</p>
+                    </div>
+                    <div class="sell-form-section">
+                        <div class="form-group">
+                            <label><i class="fas fa-money-bill-wave"></i> Modèle de tarification *</label>
+                            <div class="pricing-options">
+                                <label class="pricing-option selected" data-pricing="monthly">
+                                    <input type="radio" name="pricingModel" value="monthly" checked>
+                                    <div class="pricing-option-content">
+                                        <i class="fas fa-calendar-alt"></i>
+                                        <strong>Abonnement mensuel</strong>
+                                        <span>Facturation récurrente chaque mois</span>
+                                    </div>
+                                </label>
+                                <label class="pricing-option" data-pricing="onetime">
+                                    <input type="radio" name="pricingModel" value="onetime">
+                                    <div class="pricing-option-content">
+                                        <i class="fas fa-shopping-bag"></i>
+                                        <strong>Achat unique</strong>
+                                        <span>Paiement en une seule fois</span>
+                                    </div>
+                                </label>
+                                <label class="pricing-option" data-pricing="freemium">
+                                    <input type="radio" name="pricingModel" value="freemium">
+                                    <div class="pricing-option-content">
+                                        <i class="fas fa-gift"></i>
+                                        <strong>Freemium</strong>
+                                        <span>Version gratuite + options payantes</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label><i class="fas fa-euro-sign"></i> Prix (en €) *</label>
+                                <div class="input-with-addon">
+                                    <span class="input-addon">€</span>
+                                    <input type="number" id="agentPrice" placeholder="49" min="0" step="1">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-percent"></i> Réduction de lancement</label>
+                                <div class="input-with-addon">
+                                    <input type="number" id="agentDiscount" placeholder="0" min="0" max="50">
+                                    <span class="input-addon-right">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pricing-summary" id="pricingSummary">
+                            <div class="pricing-summary-row">
+                                <span>Prix affiché</span>
+                                <strong id="displayPrice">€0 /mois</strong>
+                            </div>
+                            <div class="pricing-summary-row">
+                                <span>Commission AgentVerse (15%)</span>
+                                <span id="commissionAmount">-€0</span>
+                            </div>
+                            <div class="pricing-summary-row total">
+                                <span>Vous recevez par vente</span>
+                                <strong id="sellerEarnings">€0</strong>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-link"></i> Lien de démo (optionnel)</label>
+                            <input type="url" id="agentDemoUrl" placeholder="https://votre-demo.com">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-file-code"></i> Lien vers la documentation / API (optionnel)</label>
+                            <input type="url" id="agentDocsUrl" placeholder="https://docs.votre-agent.com">
+                        </div>
+                    </div>
+                    <div class="sell-nav">
+                        <button class="btn btn-ghost btn-lg" id="sellBack3"><i class="fas fa-arrow-left"></i> Retour</button>
+                        <button class="btn btn-primary btn-lg" id="sellNext3">Continuer <i class="fas fa-arrow-right"></i></button>
+                    </div>
+                </div>
+
+                <!-- STEP 4: Preview & Publication -->
+                <div class="sell-step hidden" id="sellStep4">
+                    <div class="sell-step-header">
+                        <div class="sell-step-icon"><i class="fas fa-rocket"></i></div>
+                        <h2>Vérifiez et publiez</h2>
+                        <p>Voici un aperçu de votre annonce. Vérifiez les informations puis publiez votre agent.</p>
+                    </div>
+                    <div class="sell-form-section">
+                        <div class="preview-card-wrapper">
+                            <h3 class="preview-label"><i class="fas fa-eye"></i> Aperçu de votre annonce</h3>
+                            <div class="preview-agent-card" id="previewCard">
+                                <!-- Rendered via JS -->
+                            </div>
+                        </div>
+                        <div class="preview-details" id="previewDetails">
+                            <!-- Rendered via JS -->
+                        </div>
+                        <div class="publish-notice">
+                            <i class="fas fa-info-circle"></i>
+                            <div>
+                                <strong>Validation par notre équipe</strong>
+                                <p>Votre agent sera examiné par notre équipe sous 24h avant d'être visible publiquement sur la marketplace. Vous recevrez un email de confirmation.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sell-nav">
+                        <button class="btn btn-ghost btn-lg" id="sellBack4"><i class="fas fa-arrow-left"></i> Retour</button>
+                        <button class="btn btn-primary btn-lg" id="sellPublish"><i class="fas fa-rocket"></i> Publier mon agent</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- CHECKOUT MODAL -->
+    <div class="modal-overlay" id="checkoutModal">
+        <div class="modal modal-checkout">
+            <button class="modal-close" id="checkoutModalClose"><i class="fas fa-times"></i></button>
+            <div class="modal-body">
+                <div class="checkout-header">
+                    <div class="checkout-icon"><i class="fas fa-lock"></i></div>
+                    <h2>Paiement sécurisé</h2>
+                    <p>Vérifiez votre commande puis procédez au paiement via Stripe.</p>
+                </div>
+
+                <!-- Order Summary -->
+                <div class="checkout-summary">
+                    <h3><i class="fas fa-receipt"></i> Récapitulatif de commande</h3>
+                    <div class="checkout-items" id="checkoutItems">
+                        <!-- Rendered via JS -->
+                    </div>
+                    <div class="checkout-totals">
+                        <div class="checkout-row">
+                            <span>Sous-total</span>
+                            <span id="checkoutSubtotal">€0</span>
+                        </div>
+                        <div class="checkout-row">
+                            <span>TVA (20%)</span>
+                            <span id="checkoutTva">€0</span>
+                        </div>
+                        <div class="checkout-row checkout-total-row">
+                            <strong>Total TTC</strong>
+                            <strong id="checkoutTotal">€0</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stripe Payment -->
+                <div class="checkout-payment">
+                    <div class="checkout-secure-badge">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Paiement sécurisé par</span>
+                        <svg class="stripe-logo" viewBox="0 0 60 25" width="50" height="20"><path fill="#635BFF" d="M5 10.2c0-.7.6-1 1.5-1 1.3 0 3 .4 4.3 1.1V6.7c-1.4-.6-2.9-.8-4.3-.8C3.2 5.9.8 7.8.8 10.5c0 4.1 5.7 3.5 5.7 5.2 0 .8-.7 1.1-1.7 1.1-1.5 0-3.4-.6-4.9-1.4v3.6c1.7.7 3.3 1 4.9 1 3.4 0 5.7-1.7 5.7-4.5 0-4.4-5.7-3.7-5.7-5.3zM16.2 3l-4 .9v3.7h-1.7v3.5h1.7V17c0-3.3 1.7-4.7 4.7-4.7.7 0 1.4.1 1.4.1v3.5c-.2 0-.9-.1-1.5-.1-1.1 0-1.5.4-1.5 1.3v3.8h3v-3.5h-3V3zM25.5 5.9c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.5v18l4-.8v-4.4c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5-.1-4.1-2.4-6.4-4.8-6.4zm-.8 9.8c-.8 0-1.3-.3-1.7-.7V10c.4-.4.9-.8 1.7-.8 1.3 0 2.2 1.5 2.2 3.2 0 1.9-.9 3.3-2.2 3.3zM36.2 5.9c-2.8 0-4.6 2.8-4.6 6.5s1.7 6.5 4.5 6.5c1.3 0 2.3-.6 2.8-1.2l.2 1h3.5V6.1h-3.5l-.2 1c-.5-.6-1.4-1.2-2.7-1.2zm.7 9.8c-.8 0-1.3-.4-1.6-.8l-.1-4.6c.3-.5.9-.8 1.7-.8 1.3 0 2.1 1.4 2.1 3.1 0 1.8-.8 3.1-2.1 3.1zM47.8 2l-4 .9V6h4V2zM43.8 6.1h4v12.8h-4V6.1zM56.5 6.1l-.2 1c-.5-.7-1.4-1.2-2.7-1.2-2.5 0-4.7 2.5-4.7 6.5 0 3.6 1.9 6.5 4.6 6.5 1.1 0 2.1-.5 2.7-1.2l.2 1h3.5V6.1h-3.4zm-2 9.8c-1.3 0-2.2-1.4-2.2-3.2 0-1.8.9-3.2 2.2-3.2.8 0 1.3.3 1.7.8v4.7c-.4.5-1 .9-1.7.9z"/></svg>
+                    </div>
+
+                    <button class="btn-stripe-pay" id="stripePayBtn">
+                        <i class="fas fa-credit-card"></i>
+                        <span>Payer <strong id="stripePayAmount">€0</strong></span>
+                    </button>
+
+                    <div class="checkout-methods">
+                        <span>Moyens de paiement acceptés</span>
+                        <div class="payment-icons">
+                            <i class="fab fa-cc-visa"></i>
+                            <i class="fab fa-cc-mastercard"></i>
+                            <i class="fab fa-cc-amex"></i>
+                            <i class="fab fa-apple-pay"></i>
+                            <i class="fab fa-google-pay"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Legal -->
+                <div class="checkout-legal">
+                    <p><i class="fas fa-check-circle"></i> En cliquant sur "Payer", vous acceptez nos <a href="#">Conditions Générales de Vente</a> et notre <a href="#">Politique de remboursement</a> (14 jours).</p>
+                    <p><i class="fas fa-shield-alt"></i> Vos données bancaires sont traitées exclusivement par Stripe (certifié PCI DSS Niveau 1). AgentVerse n'a jamais accès à vos informations de carte.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
