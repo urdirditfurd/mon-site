@@ -1,85 +1,19 @@
-// =============================================
-// AgentVerse — Configuration
-// =============================================
-//
-// Ce fichier contient les clés API nécessaires au
-// fonctionnement de l'authentification Google et
-// du paiement Stripe. Suivez les instructions
-// ci-dessous pour les obtenir.
-//
-// ⚠️  Les clés ci-dessous sont des PLACEHOLDERS.
-//     Le site fonctionne en mode démo tant qu'elles
-//     ne sont pas remplacées par de vraies clés.
-// =============================================
+window.CLIPFORGE_CONFIG = {
+  appName: "ClipForge Studio",
+  defaults: {
+    clipDurationSec: 30,
+    clipsCount: 4,
+    minGapSecBetweenClips: 4
+  },
+  sampleTranscript: `Salut et bienvenue dans cette vidéo. Aujourd'hui, on va voir comment transformer une longue vidéo en plusieurs clips courts optimisés pour les réseaux sociaux.
 
-const CONFIG = {
+La première étape consiste à identifier les passages avec une forte valeur d'information. Ce sont souvent les moments où l'on donne une astuce concrète, un exemple chiffré ou une idée facile à appliquer.
 
-    // ===========================================
-    // GOOGLE SIGN-IN (OAuth 2.0)
-    // ===========================================
-    //
-    // COMMENT OBTENIR VOTRE CLIENT ID GOOGLE :
-    //
-    // 1. Allez sur https://console.cloud.google.com/
-    // 2. Créez un nouveau projet (ou sélectionnez-en un existant)
-    // 3. Dans le menu latéral : "APIs & Services" > "Credentials"
-    // 4. Cliquez "Create Credentials" > "OAuth client ID"
-    // 5. Type d'application : "Web application"
-    // 6. Nom : "AgentVerse" (ou ce que vous voulez)
-    // 7. Origines JavaScript autorisées :
-    //    - Pour le développement local : http://localhost
-    //    - Pour la production : https://votre-domaine.com
-    // 8. Cliquez "Create" et copiez le Client ID
-    // 9. Collez-le ci-dessous à la place du placeholder
-    //
-    // Le Client ID ressemble à :
-    // "123456789-abcdefg.apps.googleusercontent.com"
-    //
-    GOOGLE_CLIENT_ID: '271626095959-hkrtfv1vbghukgatn7qqp811r1e2vrb2.apps.googleusercontent.com',
+Ensuite, il faut découper ces moments dans un format clair et rythmé. Un clip efficace a une ouverture forte, une idée principale et une conclusion rapide qui donne envie de passer à l'action.
 
-    // ===========================================
-    // STRIPE (Paiement sécurisé)
-    // ===========================================
-    //
-    // COMMENT OBTENIR VOTRE CLÉ STRIPE :
-    //
-    // 1. Créez un compte sur https://stripe.com/fr
-    // 2. Allez dans "Developers" > "API keys"
-    //    (https://dashboard.stripe.com/test/apikeys)
-    // 3. Copiez la "Publishable key" (clé publique)
-    //    ⚠️  NE JAMAIS exposer la "Secret key" côté client !
-    // 4. Collez la clé publique ci-dessous
-    //
-    // En mode TEST, la clé commence par "pk_test_..."
-    // En mode PRODUCTION, elle commence par "pk_live_..."
-    //
-    // Pour tester les paiements en mode test, utilisez :
-    //   - Carte : 4242 4242 4242 4242
-    //   - Date : n'importe quelle date future
-    //   - CVC : n'importe quels 3 chiffres
-    //
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_51T1BvgRyBZrzbLTwwI89Y8FxgFi4o5t4ePcqyTbfPlbsQy7RmvXhkkSC4dbCigGDZe2MlEatvoI4sMzS0bn0Gk6600qNw1gjZA',
+N'oubliez pas les sous-titres, car beaucoup d'utilisateurs regardent les vidéos sans le son. Des sous-titres lisibles augmentent le taux de rétention et améliorent la compréhension du message.
 
-    // ===========================================
-    // NOTE IMPORTANTE — PRODUCTION
-    // ===========================================
-    //
-    // Ce site est actuellement un frontend statique.
-    // Pour la PRODUCTION avec de vrais paiements :
-    //
-    // 1. Vous aurez besoin d'un serveur backend
-    //    (Node.js, Python, PHP...) pour créer des
-    //    Stripe Checkout Sessions de manière sécurisée
-    //    avec votre Secret Key.
-    //
-    // 2. Le flux sera :
-    //    Frontend → appel API votre backend → Stripe API
-    //    → Session créée → redirection client vers Stripe
-    //
-    // 3. Documentation Stripe Checkout :
-    //    https://stripe.com/docs/checkout/quickstart
-    //
-    // En attendant, le mode démo simule le paiement
-    // si la clé n'est pas configurée.
-    //
+Pour finir, adaptez le format de vos exports. Le neuf-seize est idéal pour TikTok et Reels, le carré fonctionne bien pour certains feeds, et le seize-neuf reste utile pour YouTube.
+
+Avec cette méthode, vous pouvez recycler une seule vidéo longue en plusieurs contenus courts prêts à publier.`
 };
