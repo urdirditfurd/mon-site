@@ -125,6 +125,25 @@ input[type="range"] {
   gap: 10px;
 }
 
+.toggles {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--primary);
+}
+
 .grid-3 {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -239,6 +258,33 @@ input[type="range"] {
   border: 1px solid rgba(255, 255, 255, .2);
   border-radius: 8px;
   padding: 6px 10px;
+}
+
+.subtitle-overlay.theme-classic span {
+  background: rgba(4, 9, 20, .45);
+  color: #fff;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+.subtitle-overlay.theme-neon span {
+  background: rgba(6, 10, 20, .55);
+  color: #e7ff5f;
+  border-color: rgba(111, 140, 255, .55);
+  box-shadow: 0 0 20px rgba(111, 140, 255, .45);
+}
+
+.subtitle-overlay.theme-cinema span {
+  background: rgba(0, 0, 0, .58);
+  color: #f6f1dd;
+  border-color: rgba(255, 255, 255, .25);
+  letter-spacing: .02em;
+}
+
+.subtitle-overlay.theme-bold span {
+  background: rgba(0, 0, 0, .66);
+  color: #fff;
+  border-color: rgba(255, 255, 255, .35);
+  font-weight: 800;
 }
 
 .player-actions {

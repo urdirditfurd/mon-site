@@ -62,7 +62,7 @@
       <div class="grid-2">
         <label class="field">
           <span>Style sous-titres</span>
-          <select id="captionTheme">
+          <select id="subtitleTheme">
             <option value="classic" selected>Classic</option>
             <option value="bold">Bold</option>
             <option value="cinema">Cinema</option>
@@ -80,14 +80,22 @@
       </div>
       <div class="toggles">
         <label class="toggle-row">
-          <input type="checkbox" id="autoTranscript">
+          <input type="checkbox" id="includeAutoTranscript">
           <span>Transcription auto (si transcript vide)</span>
         </label>
         <label class="toggle-row">
           <input type="checkbox" id="burnSubtitles">
           <span>Brûler les sous-titres dans les exports MP4</span>
         </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="includeSrtInZip" checked>
+          <span>Inclure les fichiers .srt dans le ZIP global</span>
+        </label>
       </div>
+      <label class="field">
+        <span>Écart minimum entre clips: <strong id="minGapValue">3s</strong></span>
+        <input type="range" id="minGapSecBetweenClips" min="0" max="10" value="3">
+      </label>
 
       <div class="buttons-row">
         <button id="generateScriptBtn" class="btn btn-ghost" type="button">Générer un script exemple</button>
@@ -95,8 +103,9 @@
       </div>
 
       <p class="hint">
-        V2 backend: jobs asynchrones + FFmpeg. Lance le serveur avec <strong>npm start</strong>.
+        Backend V3: jobs persistés + FFmpeg + SRT/ZIP. Lance le serveur avec <strong>npm start</strong>.
       </p>
+      <p class="hint small" id="backendMeta">Chargement des capacités backend…</p>
     </section>
 
     <section class="workspace">

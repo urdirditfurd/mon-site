@@ -6,9 +6,7 @@ window.CLIPFORGE_CONFIG = {
   defaults: {
     clipDurationSec: 30,
     clipsCount: 4,
-    minGapSecBetweenClips: 3,
-    subtitlePreset: "bold-dark",
-    generateFakeTranscript: true
+    minGapSecBetweenClips: 3
   },
   sampleTranscript: `Salut et bienvenue. Aujourd'hui, on va voir comment transformer une longue vidéo en plusieurs clips courts optimisés pour les réseaux sociaux.
 
