@@ -1,5 +1,6 @@
 const cors = require("cors");
 const express = require("express");
+const archiver = require("archiver");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const multer = require("multer");
@@ -11,6 +12,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
+const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
 const PORT = Number(process.env.PORT) || 3000;
 
 const app = express();
@@ -37,6 +39,84 @@ let isProcessing = false;
 async function ensureDirs() {
   await fsp.mkdir(UPLOADS_DIR, { recursive: true });
   await fsp.mkdir(JOBS_DIR, { recursive: true });
+}
+
+function getJobDir(jobId) {
+  return path.join(JOBS_DIR, jobId);
+}
+
+function getJobPlanPath(jobId) {
+  return path.join(getJobDir(jobId), "plan.json");
+}
+
+function getJobSrtPath(jobId, clipId) {
+  return path.join(getJobDir(jobId), `${clipId}.srt`);
+}
+
+function getJobCaptionsBurnPath(jobId, clipId) {
+  return path.join(getJobDir(jobId), `${clipId}-captions.mp4`);
+}
+
+function asPublicJobSnapshot(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    originalFilename: job.originalFilename,
+    inputPath: job.inputPath,
+    duration: job.duration || 0,
+    params: job.params || {},
+    error: job.error || null,
+    clips: (job.clips || []).map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: clip.score,
+      filePath: clip.filePath,
+      captions: clip.captions || []
+    }))
+  };
+}
+
+async function persistJobsDb() {
+  const list = Array.from(jobs.values()).map(asPublicJobSnapshot);
+  await fsp.writeFile(JOBS_DB_FILE, JSON.stringify(list, null, 2), "utf8");
+}
+
+async function restoreJobsDb() {
+  if (!fs.existsSync(JOBS_DB_FILE)) {
+    return;
+  }
+  try {
+    const raw = await fsp.readFile(JOBS_DB_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    parsed.forEach((job) => {
+      if (!job || !job.id) return;
+      const normalized = {
+        ...job,
+        status: ["queued", "processing", "completed", "failed"].includes(job.status)
+          ? job.status
+          : "failed",
+        progress: Number.isFinite(job.progress) ? job.progress : 0,
+        clips: Array.isArray(job.clips) ? job.clips : [],
+        params: job.params || {},
+        duration: Number.isFinite(job.duration) ? job.duration : 0
+      };
+      if (normalized.status === "processing") {
+        normalized.status = "failed";
+        normalized.error = normalized.error || "Interruption serveur pendant traitement";
+        normalized.progress = 100;
+      }
+      jobs.set(normalized.id, normalized);
+    });
+  } catch (_error) {
+    // Ignore invalid persisted state.
+  }
 }
 
 function toNumber(value, fallback) {

@@ -58,6 +58,37 @@
         <textarea id="transcriptInput" rows="8" placeholder="Collez ici la transcription de votre vidéo. Le moteur répartira le texte automatiquement sur les clips."></textarea>
       </label>
 
+      <h2>3) Réglages avancés V3</h2>
+      <div class="grid-2">
+        <label class="field">
+          <span>Style sous-titres</span>
+          <select id="captionTheme">
+            <option value="classic" selected>Classic</option>
+            <option value="bold">Bold</option>
+            <option value="cinema">Cinema</option>
+            <option value="neon">Neon</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Détection</span>
+          <select id="highlightMode">
+            <option value="balanced" selected>Balanced</option>
+            <option value="hook-first">Hook-first</option>
+            <option value="viral">Viral</option>
+          </select>
+        </label>
+      </div>
+      <div class="toggles">
+        <label class="toggle-row">
+          <input type="checkbox" id="autoTranscript">
+          <span>Transcription auto (si transcript vide)</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="burnSubtitles">
+          <span>Brûler les sous-titres dans les exports MP4</span>
+        </label>
+      </div>
+
       <div class="buttons-row">
         <button id="generateScriptBtn" class="btn btn-ghost" type="button">Générer un script exemple</button>
         <button id="analyzeBtn" class="btn btn-primary" type="button">Analyser & générer</button>
@@ -80,7 +111,9 @@
         </div>
         <div class="player-actions">
           <button id="playClipBtn" class="btn btn-ghost" type="button" disabled>Lire le clip sélectionné</button>
-          <button id="exportClipBtn" class="btn btn-primary" type="button" disabled>Exporter le clip (.webm)</button>
+          <button id="exportClipBtn" class="btn btn-primary" type="button" disabled>Exporter le clip (.mp4)</button>
+          <button id="downloadSrtBtn" class="btn btn-ghost" type="button" disabled>Télécharger sous-titres (.srt)</button>
+          <button id="downloadZipBtn" class="btn btn-ghost" type="button" disabled>Exporter pack complet (.zip)</button>
           <button id="downloadJsonBtn" class="btn btn-ghost" type="button" disabled>Télécharger le plan (.json)</button>
         </div>
       </div>
@@ -95,7 +128,7 @@
   </main>
 
   <footer class="footer">
-    <p>Prototype éducatif — sans copie de code propriétaire. V2: export MP4 avec piste audio conservée + plan JSON.</p>
+    <p>Prototype éducatif — sans copie de code propriétaire. V3: jobs persistés, SRT/ZIP, styles de captions et transcription auto optionnelle.</p>
   </footer>
 
   <script src="config.js"></script>

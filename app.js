@@ -18,7 +18,10 @@ const state = {
   activeJobId: "",
   pollTimer: null,
   clips: [],
-  selectedClipIndex: -1
+  selectedClipIndex: -1,
+  subtitleTheme: "classic",
+  includeAutoTranscript: false,
+  includeSrtInZip: true
 };
 
 const dom = {
@@ -28,6 +31,11 @@ const dom = {
   clipsCountValue: document.getElementById("clipsCountValue"),
   aspectRatio: document.getElementById("aspectRatio"),
   transcriptInput: document.getElementById("transcriptInput"),
+  subtitleTheme: document.getElementById("subtitleTheme"),
+  includeAutoTranscript: document.getElementById("includeAutoTranscript"),
+  includeSrtInZip: document.getElementById("includeSrtInZip"),
+  minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
+  minGapValue: document.getElementById("minGapValue"),
   generateScriptBtn: document.getElementById("generateScriptBtn"),
   analyzeBtn: document.getElementById("analyzeBtn"),
   player: document.getElementById("player"),
@@ -36,12 +44,14 @@ const dom = {
   statusBadge: document.getElementById("statusBadge"),
   playClipBtn: document.getElementById("playClipBtn"),
   exportClipBtn: document.getElementById("exportClipBtn"),
-  downloadJsonBtn: document.getElementById("downloadJsonBtn")
+  downloadJsonBtn: document.getElementById("downloadJsonBtn"),
+  downloadZipBtn: document.getElementById("downloadZipBtn"),
+  downloadSrtBtn: document.getElementById("downloadSrtBtn"),
+  backendMeta: document.getElementById("backendMeta")
 };
 
 function apiUrl(path) {
-  const base = config.apiBase.trim();
-  return `${base}${path}`;
+  return `${config.apiBase.trim()}${path}`;
 }
 
 function secondsToClock(value) {
@@ -49,9 +59,7 @@ function secondsToClock(value) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  if (h > 0) {
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
+  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
@@ -64,6 +72,8 @@ function setButtonsEnabled(enabled) {
   dom.playClipBtn.disabled = !enabled;
   dom.exportClipBtn.disabled = !enabled;
   dom.downloadJsonBtn.disabled = !enabled;
+  dom.downloadZipBtn.disabled = !enabled;
+  dom.downloadSrtBtn.disabled = !enabled;
 }
 
 function clearPolling() {
@@ -82,6 +92,11 @@ function resetClipState() {
   dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
 }
 
+function applySubtitleTheme(theme) {
+  dom.subtitleOverlay.classList.remove("theme-classic", "theme-neon", "theme-minimal");
+  dom.subtitleOverlay.classList.add(`theme-${theme}`);
+}
+
 function renderClips() {
   dom.clipsList.innerHTML = "";
   if (!state.clips.length) {
@@ -92,15 +107,18 @@ function renderClips() {
   state.clips.forEach((clip, idx) => {
     const li = document.createElement("li");
     li.className = "clip-item";
-    if (idx === state.selectedClipIndex) {
-      li.classList.add("active");
-    }
+    if (idx === state.selectedClipIndex) li.classList.add("active");
+
+    const wordsCount = (clip.captions || []).map((c) => c.text).join(" ").split(/\s+/).filter(Boolean).length;
     li.innerHTML = `
       <div class="clip-top">
         <h3 class="clip-title">${clip.title}</h3>
         <span class="chip">Score ${clip.score}</span>
       </div>
-      <p class="clip-times">${secondsToClock(clip.start)} → ${secondsToClock(clip.end)} (${Math.round(clip.duration)}s)</p>
+      <p class="clip-times">
+        ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)}
+        (${Math.round(clip.duration)}s) · ${wordsCount} mots
+      </p>
       <div class="clip-actions">
         <button class="mini-btn" data-action="select">Sélectionner</button>
         <button class="mini-btn" data-action="play">Lire</button>
@@ -120,7 +138,6 @@ function updateSubtitleOverlay() {
   }
   const clip = state.clips[state.selectedClipIndex];
   if (!clip) return;
-
   const t = dom.player.currentTime || 0;
   const cue = (clip.captions || []).find((item) => t >= item.start && t <= item.end);
   if (!cue) {
@@ -143,17 +160,13 @@ function selectClip(index, autoplay = false) {
   dom.subtitleOverlay.innerHTML = "";
   updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
 
-  if (autoplay) {
-    dom.player.play().catch(() => {});
-  }
+  if (autoplay) dom.player.play().catch(() => {});
 }
 
 function triggerDownload(url, filenameHint = "") {
   const link = document.createElement("a");
   link.href = apiUrl(url);
-  if (filenameHint) {
-    link.download = filenameHint;
-  }
+  if (filenameHint) link.download = filenameHint;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -163,12 +176,15 @@ async function checkBackendHealth() {
   try {
     const response = await fetch(apiUrl("/api/health"));
     if (!response.ok) throw new Error("health check failed");
+    const payload = await response.json();
     state.backendAvailable = true;
     updateStatus("Backend prêt", true);
+    dom.backendMeta.textContent = `Queue: ${payload.queueSize} · Processing: ${payload.processing ? "oui" : "non"} · Whisper: ${payload.whisperAvailable ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
     updateStatus("Backend indisponible — lance: npm start", false);
+    dom.backendMeta.textContent = "Aucune connexion backend";
   }
 }
 
@@ -188,17 +204,17 @@ async function createJob() {
   body.append("clipsCount", String(Number(dom.clipsCount.value)));
   body.append("aspectRatio", dom.aspectRatio.value);
   body.append("transcript", dom.transcriptInput.value.trim());
-  body.append("minGapSecBetweenClips", String(config.defaultMinGapSec));
+  body.append("subtitleTheme", state.subtitleTheme);
+  body.append("includeAutoTranscript", String(state.includeAutoTranscript));
+  body.append("includeSrtInZip", String(state.includeSrtInZip));
+  body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
 
   dom.analyzeBtn.disabled = true;
   resetClipState();
   updateStatus("Upload et création du job…", false);
 
   try {
-    const response = await fetch(apiUrl("/api/jobs"), {
-      method: "POST",
-      body
-    });
+    const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
     if (!response.ok) {
       const details = await response.json().catch(() => ({}));
       throw new Error(details.error || "Impossible de créer le job");
@@ -224,9 +240,7 @@ async function pollJob() {
   if (!state.activeJobId) return;
   try {
     const response = await fetch(apiUrl(`/api/jobs/${state.activeJobId}`));
-    if (!response.ok) {
-      throw new Error("Job introuvable");
-    }
+    if (!response.ok) throw new Error("Job introuvable");
     const job = await response.json();
 
     if (job.status === "queued") {
@@ -234,31 +248,34 @@ async function pollJob() {
       scheduleJobPolling();
       return;
     }
-
     if (job.status === "processing") {
       updateStatus(`Traitement en cours… ${job.progress || 0}%`, false);
       scheduleJobPolling();
       return;
     }
-
     if (job.status === "failed") {
       updateStatus(job.error || "Traitement échoué", false);
       dom.analyzeBtn.disabled = false;
       return;
     }
-
     if (job.status === "completed") {
       state.clips = job.clips || [];
+      state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
+      dom.subtitleTheme.value = state.subtitleTheme;
+      applySubtitleTheme(state.subtitleTheme);
+
       renderClips();
       if (state.clips.length > 0) {
         setButtonsEnabled(true);
         selectClip(0, false);
       }
       dom.analyzeBtn.disabled = false;
-      updateStatus(`${state.clips.length} clips générés (audio conservé)`, true);
+      updateStatus(`${state.clips.length} clips générés (V3 full pipeline)`, true);
+      if (job.autoTranscriptUsed) {
+        dom.backendMeta.textContent = "Transcription auto utilisée (fallback transcript activé)";
+      }
       return;
     }
-
     scheduleJobPolling();
   } catch (error) {
     updateStatus(error instanceof Error ? error.message : "Erreur polling", false);
@@ -297,6 +314,24 @@ function initEvents() {
   dom.clipsCount.addEventListener("input", () => {
     dom.clipsCountValue.textContent = dom.clipsCount.value;
   });
+
+  dom.minGapSecBetweenClips.addEventListener("input", () => {
+    dom.minGapValue.textContent = `${dom.minGapSecBetweenClips.value}s`;
+  });
+
+  dom.subtitleTheme.addEventListener("change", () => {
+    state.subtitleTheme = dom.subtitleTheme.value;
+    applySubtitleTheme(state.subtitleTheme);
+  });
+
+  dom.includeAutoTranscript.addEventListener("change", () => {
+    state.includeAutoTranscript = dom.includeAutoTranscript.checked;
+  });
+
+  dom.includeSrtInZip.addEventListener("change", () => {
+    state.includeSrtInZip = dom.includeSrtInZip.checked;
+  });
+
   dom.generateScriptBtn.addEventListener("click", useSampleTranscript);
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
@@ -320,6 +355,18 @@ function initEvents() {
     triggerDownload(`/api/jobs/${state.activeJobId}/plan`, `clipforge-plan-${state.activeJobId}.json`);
   });
 
+  dom.downloadZipBtn.addEventListener("click", () => {
+    if (!state.activeJobId) return;
+    triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-bundle-${state.activeJobId}.zip`);
+  });
+
+  dom.downloadSrtBtn.addEventListener("click", () => {
+    if (state.selectedClipIndex < 0 || !state.activeJobId) return;
+    const clip = state.clips[state.selectedClipIndex];
+    if (!clip) return;
+    triggerDownload(`/api/jobs/${state.activeJobId}/clips/${clip.id}/srt`, `${clip.id}.srt`);
+  });
+
   dom.player.addEventListener("timeupdate", updateSubtitleOverlay);
 }
 
@@ -327,6 +374,10 @@ function initDefaults() {
   dom.clipDuration.value = String(config.defaultClipDuration);
   dom.clipsCount.value = String(config.defaultClipsCount);
   dom.clipsCountValue.textContent = String(config.defaultClipsCount);
+  dom.minGapSecBetweenClips.value = String(config.defaultMinGapSec);
+  dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
+  dom.subtitleTheme.value = state.subtitleTheme;
+  applySubtitleTheme(state.subtitleTheme);
 }
 
 async function init() {

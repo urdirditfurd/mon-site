@@ -125,6 +125,12 @@ input[type="range"] {
   gap: 10px;
 }
 
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
 .buttons-row {
   display: flex;
   gap: 10px;
@@ -166,6 +172,10 @@ input[type="range"] {
   color: var(--muted);
   font-size: .82rem;
   margin: 10px 0 0;
+}
+
+.small {
+  font-size: .78rem;
 }
 
 .player-card {
