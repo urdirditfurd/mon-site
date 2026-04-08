@@ -7,7 +7,7 @@ const config = {
   sampleTranscript: runtimeConfig.sampleTranscript || "",
   defaultClipDuration: Number(defaults.clipDurationSec) || 30,
   defaultClipsCount: Number(defaults.clipsCount) || 4,
-  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 4
+  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 0
 };
 
 const state = {

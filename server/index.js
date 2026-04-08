@@ -84,12 +84,8 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec) {
   const moments = generateCandidateMoments(duration, Math.min(4, clipDuration / 3));
   const chosen = [];
 
-  for (const moment of moments) {
-    let start = Math.max(0, moment.t - clipDuration * 0.25);
-    start = Math.min(start, maxStart);
-    const end = Math.min(duration, start + clipDuration);
-
-    const tooClose = chosen.some((clip) => {
+  const hasConflict = (start, end) =>
+    chosen.some((clip) => {
       const inter = Math.max(0, Math.min(clip.end, end) - Math.max(clip.start, start));
       if (inter > clipDuration * 0.45) return true;
       const distance = Math.min(
@@ -101,7 +97,12 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec) {
       return distance < minGapSec;
     });
 
-    if (!tooClose) {
+  for (const moment of moments) {
+    let start = Math.max(0, moment.t - clipDuration * 0.25);
+    start = Math.min(start, maxStart);
+    const end = Math.min(duration, start + clipDuration);
+
+    if (!hasConflict(start, end)) {
       chosen.push({
         start,
         end,
@@ -111,6 +112,23 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec) {
       if (chosen.length >= clipsCount) {
         break;
       }
+    }
+  }
+
+  if (chosen.length < clipsCount) {
+    for (let i = 0; i < clipsCount; i += 1) {
+      const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
+      const start = Number((maxStart * ratio).toFixed(3));
+      const end = Math.min(duration, start + clipDuration);
+      if (!hasConflict(start, end)) {
+        chosen.push({
+          start,
+          end,
+          duration: end - start,
+          score: Number(mockEnergyAtTime(start, duration).toFixed(3))
+        });
+      }
+      if (chosen.length >= clipsCount) break;
     }
   }
 
@@ -125,6 +143,7 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec) {
 
   return chosen
     .sort((a, b) => a.start - b.start)
+    .slice(0, clipsCount)
     .map((clip, idx) => ({
       id: `clip-${idx + 1}`,
       title: `Clip ${idx + 1}`,
@@ -419,7 +438,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(
       0,
-      toNumber(req.body.minGapSecBetweenClips, 4)
+      toNumber(req.body.minGapSecBetweenClips, 0)
     );
 
     const id = uuidv4();
