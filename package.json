@@ -1,0 +1,28 @@
+{
+  "name": "clipforge-studio",
+  "version": "1.0.0",
+  "description": "ClipForge V2 - backend FFmpeg + jobs async + API",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "check": "node --check app.js && node --check server/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/urdirditfurd/mon-site.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/urdirditfurd/mon-site/issues"
+  },
+  "homepage": "https://github.com/urdirditfurd/mon-site#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "uuid": "^13.0.0"
+  }
+}

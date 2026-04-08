@@ -15,7 +15,7 @@
     <div>
       <p class="eyebrow">MVP clone-like de Klap</p>
       <h1>ClipForge Studio</h1>
-      <p class="subtitle">Upload vidéo, détection des moments forts, sous-titres automatiques (à partir d’un transcript) et export d’un clip vertical.</p>
+      <p class="subtitle">Upload vidéo, détection des moments forts, sous-titres automatiques (à partir d’un transcript), génération serveur FFmpeg (audio conservé) et export social-ready.</p>
     </div>
   </header>
 
@@ -64,7 +64,7 @@
       </div>
 
       <p class="hint">
-        Détection “moments forts” = scoring heuristique (pics simulés + densité du script).
+        V2 backend: jobs asynchrones + FFmpeg. Lance le serveur avec <strong>npm start</strong>.
       </p>
     </section>
 
@@ -72,7 +72,7 @@
       <div class="player-card">
         <div class="player-head">
           <h2>3) Prévisualisation</h2>
-          <div class="status" id="statusBadge">En attente d’une vidéo</div>
+          <div class="status" id="statusBadge">Initialisation backend...</div>
         </div>
         <div class="video-shell">
           <video id="player" controls playsinline></video>
@@ -95,7 +95,7 @@
   </main>
 
   <footer class="footer">
-    <p>Prototype éducatif — sans copie de code propriétaire. Export actuel: vidéo + sous-titres brûlés (sans piste audio).</p>
+    <p>Prototype éducatif — sans copie de code propriétaire. V2: export MP4 avec piste audio conservée + plan JSON.</p>
   </footer>
 
   <script src="config.js"></script>
