@@ -20,8 +20,10 @@ const state = {
   clips: [],
   selectedClipIndex: -1,
   subtitleTheme: "classic",
+  highlightMode: "balanced",
   includeAutoTranscript: false,
-  includeSrtInZip: true
+  includeSrtInZip: true,
+  burnSubtitles: false
 };
 
 const dom = {
@@ -32,8 +34,10 @@ const dom = {
   aspectRatio: document.getElementById("aspectRatio"),
   transcriptInput: document.getElementById("transcriptInput"),
   subtitleTheme: document.getElementById("subtitleTheme"),
+  highlightMode: document.getElementById("highlightMode"),
   includeAutoTranscript: document.getElementById("includeAutoTranscript"),
   includeSrtInZip: document.getElementById("includeSrtInZip"),
+  burnSubtitles: document.getElementById("burnSubtitles"),
   minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
   minGapValue: document.getElementById("minGapValue"),
   generateScriptBtn: document.getElementById("generateScriptBtn"),
@@ -93,7 +97,7 @@ function resetClipState() {
 }
 
 function applySubtitleTheme(theme) {
-  dom.subtitleOverlay.classList.remove("theme-classic", "theme-neon", "theme-minimal");
+  dom.subtitleOverlay.classList.remove("theme-classic", "theme-bold", "theme-cinema", "theme-neon");
   dom.subtitleOverlay.classList.add(`theme-${theme}`);
 }
 
@@ -174,12 +178,28 @@ function triggerDownload(url, filenameHint = "") {
 
 async function checkBackendHealth() {
   try {
-    const response = await fetch(apiUrl("/api/health"));
-    if (!response.ok) throw new Error("health check failed");
-    const payload = await response.json();
+    const [healthRes, cfgRes] = await Promise.all([
+      fetch(apiUrl("/api/health")),
+      fetch(apiUrl("/api/config"))
+    ]);
+    if (!healthRes.ok) throw new Error("health check failed");
+    const payload = await healthRes.json();
+    const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
     updateStatus("Backend prêt", true);
-    dom.backendMeta.textContent = `Queue: ${payload.queueSize} · Processing: ${payload.processing ? "oui" : "non"} · Whisper: ${payload.whisperAvailable ? "oui" : "non"}`;
+    if (serverConfig?.defaults) {
+      const defaultsCfg = serverConfig.defaults;
+      if (typeof defaultsCfg.clipDuration === "number") dom.clipDuration.value = String(defaultsCfg.clipDuration);
+      if (typeof defaultsCfg.clipsCount === "number") {
+        dom.clipsCount.value = String(defaultsCfg.clipsCount);
+        dom.clipsCountValue.textContent = String(defaultsCfg.clipsCount);
+      }
+      if (typeof defaultsCfg.minGap === "number") {
+        dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
+        dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
+      }
+    }
+    dom.backendMeta.textContent = `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · Whisper: ${payload.whisperAvailable ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
@@ -205,8 +225,10 @@ async function createJob() {
   body.append("aspectRatio", dom.aspectRatio.value);
   body.append("transcript", dom.transcriptInput.value.trim());
   body.append("subtitleTheme", state.subtitleTheme);
+  body.append("highlightMode", state.highlightMode);
   body.append("includeAutoTranscript", String(state.includeAutoTranscript));
   body.append("includeSrtInZip", String(state.includeSrtInZip));
+  body.append("burnSubtitles", String(state.burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
 
   dom.analyzeBtn.disabled = true;
@@ -324,12 +346,20 @@ function initEvents() {
     applySubtitleTheme(state.subtitleTheme);
   });
 
+  dom.highlightMode.addEventListener("change", () => {
+    state.highlightMode = dom.highlightMode.value;
+  });
+
   dom.includeAutoTranscript.addEventListener("change", () => {
     state.includeAutoTranscript = dom.includeAutoTranscript.checked;
   });
 
   dom.includeSrtInZip.addEventListener("change", () => {
     state.includeSrtInZip = dom.includeSrtInZip.checked;
+  });
+
+  dom.burnSubtitles.addEventListener("change", () => {
+    state.burnSubtitles = dom.burnSubtitles.checked;
   });
 
   dom.generateScriptBtn.addEventListener("click", useSampleTranscript);
@@ -377,6 +407,7 @@ function initDefaults() {
   dom.minGapSecBetweenClips.value = String(config.defaultMinGapSec);
   dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
   dom.subtitleTheme.value = state.subtitleTheme;
+  dom.highlightMode.value = state.highlightMode;
   applySubtitleTheme(state.subtitleTheme);
 }
 

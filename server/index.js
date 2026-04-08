@@ -1,6 +1,8 @@
 const cors = require("cors");
 const express = require("express");
 const archiver = require("archiver");
+const { Queue, Worker } = require("bullmq");
+const IORedis = require("ioredis");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const multer = require("multer");
@@ -14,6 +16,9 @@ const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
 const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
 const PORT = Number(process.env.PORT) || 3000;
+const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
+const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
+const REDIS_URL = process.env.REDIS_URL || "";
 
 const app = express();
 app.use(cors());
@@ -32,7 +37,11 @@ const upload = multer({
 
 const jobs = new Map();
 const pendingJobIds = [];
-let isProcessing = false;
+let activeMemoryJobs = 0;
+let queueModeRuntime = "memory";
+let redisConnection = null;
+let bullQueue = null;
+let bullWorker = null;
 let ffmpegReady = true;
 let whisperAvailable = false;
 
@@ -402,8 +411,38 @@ async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
 async function transcribeVideoMaybe(inputPath, duration, includeAutoTranscript) {
   if (!includeAutoTranscript) return { transcript: "", autoTranscriptUsed: false };
   if (whisperAvailable) {
-    // Placeholder hook: whisper CLI integration can be wired here.
-    // Fallback below keeps deterministic behavior if whisper args differ.
+    const outDir = path.join(STORAGE_DIR, "uploads");
+    const model = process.env.WHISPER_MODEL || "base";
+    const language = process.env.WHISPER_LANGUAGE || "fr";
+    const whisperArgs = [
+      inputPath,
+      "--model",
+      model,
+      "--language",
+      language,
+      "--output_format",
+      "txt",
+      "--output_dir",
+      outDir,
+      "--fp16",
+      "False",
+      "--verbose",
+      "False"
+    ];
+
+    try {
+      await runCommand("whisper", whisperArgs);
+      const transcriptPath = path.join(outDir, `${path.parse(inputPath).name}.txt`);
+      if (fs.existsSync(transcriptPath)) {
+        const raw = await fsp.readFile(transcriptPath, "utf8");
+        const cleaned = raw.replace(/\s+/g, " ").trim();
+        if (cleaned.length > 20) {
+          return { transcript: cleaned, autoTranscriptUsed: true };
+        }
+      }
+    } catch (_error) {
+      // fallback below
+    }
   }
   const blocks = Math.max(3, Math.min(8, Math.round(duration / 15)));
   const generated = [];
@@ -441,29 +480,107 @@ function sanitizeJobForClient(job) {
   };
 }
 
-function enqueueJob(jobId) {
-  pendingJobIds.push(jobId);
-  void processQueue();
+async function failJob(job, err) {
+  job.status = "failed";
+  job.progress = 100;
+  job.error = err instanceof Error ? err.message : String(err);
+  job.updatedAt = new Date().toISOString();
+  await persistJobsDb();
 }
 
-async function processQueue() {
-  if (isProcessing) return;
-  isProcessing = true;
-  while (pendingJobIds.length > 0) {
-    const jobId = pendingJobIds.shift();
-    const job = jobs.get(jobId);
-    if (!job) continue;
-    try {
-      await processJob(job);
-    } catch (err) {
-      job.status = "failed";
-      job.progress = 100;
-      job.error = err instanceof Error ? err.message : String(err);
-      job.updatedAt = new Date().toISOString();
-      await persistJobsDb();
+async function processJobById(jobId) {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  try {
+    await processJob(job);
+  } catch (err) {
+    await failJob(job, err);
+  }
+}
+
+function pumpMemoryQueue() {
+  while (activeMemoryJobs < WORKER_CONCURRENCY && pendingJobIds.length > 0) {
+    const nextJobId = pendingJobIds.shift();
+    activeMemoryJobs += 1;
+    void processJobById(nextJobId).finally(() => {
+      activeMemoryJobs = Math.max(0, activeMemoryJobs - 1);
+      pumpMemoryQueue();
+    });
+  }
+}
+
+function enqueueMemoryJob(jobId) {
+  pendingJobIds.push(jobId);
+  pumpMemoryQueue();
+}
+
+async function initBullQueue() {
+  const shouldUseBullmq =
+    (QUEUE_MODE === "bullmq" || QUEUE_MODE === "auto") &&
+    Boolean(REDIS_URL);
+
+  if (!shouldUseBullmq) {
+    queueModeRuntime = "memory";
+    return;
+  }
+
+  try {
+    redisConnection = new IORedis(REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true
+    });
+    bullQueue = new Queue("clipforge-jobs", { connection: redisConnection });
+    bullWorker = new Worker(
+      "clipforge-jobs",
+      async (job) => {
+        await processJobById(String(job.data.jobId || ""));
+      },
+      {
+        connection: redisConnection,
+        concurrency: WORKER_CONCURRENCY
+      }
+    );
+    bullWorker.on("failed", async (job, err) => {
+      const candidateId = String(job?.data?.jobId || "");
+      const model = jobs.get(candidateId);
+      if (model && model.status !== "completed") {
+        await failJob(model, err);
+      }
+    });
+    queueModeRuntime = "bullmq";
+  } catch (_error) {
+    queueModeRuntime = "memory";
+    bullQueue = null;
+    bullWorker = null;
+    if (redisConnection) {
+      try {
+        redisConnection.disconnect();
+      } catch (_e) {
+        // ignore
+      }
+      redisConnection = null;
     }
   }
-  isProcessing = false;
+}
+
+async function enqueueJob(jobId) {
+  if (queueModeRuntime === "bullmq" && bullQueue) {
+    await bullQueue.add("process", { jobId }, { removeOnComplete: 200, removeOnFail: 200 });
+    return;
+  }
+  enqueueMemoryJob(jobId);
+}
+
+async function readQueueStats() {
+  if (queueModeRuntime === "bullmq" && bullQueue) {
+    const [waiting, active, delayed] = await Promise.all([
+      bullQueue.getWaitingCount(),
+      bullQueue.getActiveCount(),
+      bullQueue.getDelayedCount()
+    ]);
+    return { waiting, active, delayed };
+  }
+  return { waiting: pendingJobIds.length, active: activeMemoryJobs, delayed: 0 };
 }
 
 async function processJob(job) {
@@ -550,19 +667,27 @@ async function processJob(job) {
   await persistJobsDb();
 }
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
+  const q = await readQueueStats();
   res.json({
     ok: true,
     ffmpeg: ffmpegReady,
     whisperAvailable,
-    queueSize: pendingJobIds.length,
-    processing: isProcessing
+    queueMode: queueModeRuntime,
+    workerConcurrency: WORKER_CONCURRENCY,
+    queueSize: q.waiting,
+    processing: q.active > 0,
+    queue: q
   });
 });
 
 app.get("/api/config", (_req, res) => {
   res.json({
     defaults: DEFAULTS,
+    queue: {
+      mode: queueModeRuntime,
+      workerConcurrency: WORKER_CONCURRENCY
+    },
     capabilities: {
       ffmpeg: ffmpegReady,
       whisperAvailable,
@@ -620,7 +745,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
 
     jobs.set(id, job);
     await persistJobsDb();
-    enqueueJob(id);
+    await enqueueJob(id);
     return res.status(202).json({ id, status: job.status, progress: job.progress });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur interne" });
@@ -711,6 +836,7 @@ ensureDirs()
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     whisperAvailable = checkBinary("whisper", "--help");
     await restoreJobsDb();
+    await initBullQueue();
     app.listen(PORT, () => {
       console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);
     });
