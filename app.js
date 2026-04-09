@@ -29,6 +29,7 @@ const state = {
 
 const dom = {
   videoUrlInput: document.getElementById("videoUrlInput"),
+  youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
   videoInput: document.getElementById("videoInput"),
   clipDuration: document.getElementById("clipDuration"),
   clipsCount: document.getElementById("clipsCount"),
@@ -241,6 +242,10 @@ async function createJob() {
   body.append("includeSrtInZip", String(state.includeSrtInZip));
   body.append("burnSubtitles", String(state.burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (youtubeCookies) {
+    body.append("youtubeCookies", youtubeCookies);
+  }
 
   dom.analyzeBtn.disabled = true;
   resetClipState();
@@ -345,6 +350,12 @@ function initFileInput() {
   dom.videoUrlInput.addEventListener("input", () => {
     state.sourceVideoUrl = dom.videoUrlInput.value.trim();
   });
+
+  if (dom.youtubeCookiesInput) {
+    dom.youtubeCookiesInput.addEventListener("input", () => {
+      // keep latest value via DOM read in createJob
+    });
+  }
 }
 
 function initEvents() {

@@ -199,6 +199,10 @@ input[type="range"] {
   font-size: .78rem;
 }
 
+.note-error {
+  color: #ffb3b3;
+}
+
 .player-card {
   padding: 16px;
 }

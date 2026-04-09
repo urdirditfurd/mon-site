@@ -58,6 +58,17 @@ const DEFAULTS = {
   burnSubtitles: false
 };
 
+function normalizeYouTubeErrorMessage(rawMessage) {
+  const message = String(rawMessage || "");
+  if (message.includes("Sign in to confirm you") && message.includes("not a bot")) {
+    return "YouTube a demandé une vérification anti-bot. Ajoute les cookies YouTube dans le champ dédié (format Netscape) puis relance.";
+  }
+  if (message.includes("Video unavailable")) {
+    return "La vidéo YouTube est indisponible (privée, supprimée, géo-restreinte, ou inaccessible anonymement).";
+  }
+  return message;
+}
+
 async function ensureDirs() {
   await fsp.mkdir(UPLOADS_DIR, { recursive: true });
   await fsp.mkdir(JOBS_DIR, { recursive: true });
@@ -101,6 +112,7 @@ function asPublicJobSnapshot(job) {
     originalFilename: job.originalFilename,
     sourceType: job.sourceType || "upload",
     sourceUrl: job.sourceUrl || "",
+    youtubeCookiesFilePath: job.youtubeCookiesFilePath || "",
     inputPath: job.inputPath,
     duration: job.duration || 0,
     params: job.params || {},
@@ -389,15 +401,26 @@ async function resolveDownloadedVideoByPrefix(prefixPath) {
 }
 
 async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
+  const downloadOptions = arguments[2] || {};
+  const ytCookiesFile = downloadOptions.ytCookiesFile || "";
+  const ytExtractorArgs = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=tv,android,web";
+  const ytUserAgent =
+    process.env.YTDLP_USER_AGENT ||
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
   const tryYtDlpDownload = async () => {
     if (!ytDlpAvailable) return null;
     const template = `${outputPrefix}.%(ext)s`;
-    await runCommand("python3", [
+    const args = [
       "-m",
       "yt_dlp",
       "--no-playlist",
       "--no-progress",
       "--restrict-filenames",
+      "--extractor-args",
+      ytExtractorArgs,
+      "--user-agent",
+      ytUserAgent,
       "--js-runtimes",
       "node",
       "--merge-output-format",
@@ -407,7 +430,11 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
       "-o",
       template,
       sourceUrl
-    ]);
+    ];
+    if (ytCookiesFile) {
+      args.push("--cookies", ytCookiesFile);
+    }
+    await runCommand("python3", args);
     return resolveDownloadedVideoByPrefix(outputPrefix);
   };
 
@@ -784,7 +811,16 @@ async function processJob(job) {
     await persistJobsDb();
 
     const outputPrefix = path.join(UPLOADS_DIR, `${job.id}-source`);
-    const downloadedPath = await downloadVideoFromUrl(job.sourceUrl, outputPrefix);
+    const ytCookiesFile =
+      job.youtubeCookiesFilePath && fs.existsSync(job.youtubeCookiesFilePath)
+        ? job.youtubeCookiesFilePath
+        : "";
+    let downloadedPath;
+    try {
+      downloadedPath = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, { ytCookiesFile });
+    } catch (downloadErr) {
+      throw new Error(normalizeYouTubeErrorMessage(downloadErr instanceof Error ? downloadErr.message : String(downloadErr)));
+    }
     job.inputPath = downloadedPath;
     if (!job.originalFilename) {
       job.originalFilename = path.basename(downloadedPath);
@@ -943,9 +979,17 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
+    const youtubeCookies = String(req.body.youtubeCookies || "");
 
     const id = uuidv4();
     const useUrlSource = hasVideoUrl;
+    const jobDir = getJobDir(id);
+    let youtubeCookiesFilePath = "";
+    if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && youtubeCookies.trim()) {
+      await fsp.mkdir(jobDir, { recursive: true });
+      youtubeCookiesFilePath = path.join(jobDir, "youtube-cookies.txt");
+      await fsp.writeFile(youtubeCookiesFilePath, youtubeCookies, "utf8");
+    }
     const job = {
       id,
       status: "queued",
@@ -954,6 +998,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
       updatedAt: new Date().toISOString(),
       sourceType: useUrlSource ? "url" : "upload",
       sourceUrl: useUrlSource ? rawVideoUrl : "",
+      youtubeCookiesFilePath,
       inputPath: useUrlSource ? "" : req.file.path,
       originalFilename: useUrlSource ? "" : req.file.originalname,
       duration: 0,
@@ -968,7 +1013,8 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         highlightMode,
         includeAutoTranscript,
         includeSrtInZip,
-        burnSubtitles
+        burnSubtitles,
+        hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
       },
       clips: [],
       error: null
