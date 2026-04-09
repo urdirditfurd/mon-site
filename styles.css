@@ -158,6 +158,28 @@ input[type="range"] {
   flex-wrap: wrap;
 }
 
+.cookies-actions,
+.youtube-cookies-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.cookies-status,
+#youtubeCookiesStatus {
+  margin-top: 6px;
+  font-size: .8rem;
+}
+
+.cookies-status.ok {
+  color: #9ff0c2;
+}
+
+.cookies-status.warn {
+  color: #ffd48a;
+}
+
 .btn {
   border: 1px solid transparent;
   border-radius: 10px;

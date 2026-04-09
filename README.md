@@ -82,6 +82,9 @@ Ouvrir ensuite:
 
 - `GET /api/health`
 - `GET /api/config`
+- `GET /api/youtube-cookies/status`
+- `POST /api/youtube-cookies` (JSON: `{ "youtubeCookies": "..." }`)
+- `DELETE /api/youtube-cookies`
 - `POST /api/jobs` (multipart/form-data avec `video` **ou** JSON avec `videoUrl`)
 - `GET /api/jobs/:jobId`
 - `GET /api/jobs/:jobId/plan`
@@ -104,6 +107,20 @@ Ouvrir ensuite:
 - `includeAutoTranscript` (`true`/`false`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
+
+### Cookies YouTube persistants (recommandé)
+
+Pour éviter de recoller les cookies à chaque génération:
+
+1. Colle tes cookies YouTube dans l’interface.
+2. Clique **Enregistrer les cookies**.
+3. L’app les stocke côté serveur (`storage/secrets/youtube-cookies.txt`) et les réutilise automatiquement pour les liens YouTube.
+4. Tu peux les supprimer avec **Supprimer cookies serveur**.
+
+Le champ `youtubeCookies` dans `POST /api/jobs` reste supporté:
+- si fourni, il est normalisé puis utilisé pour ce job
+- il met aussi à jour le store persistant serveur
+- si non fourni, le backend tente automatiquement le store persistant
 
 ### Exemple JSON (source URL)
 

@@ -39,6 +39,11 @@
           placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;2147483647&#9;VISITOR_INFO1_LIVE&#9;..."
         ></textarea>
       </label>
+      <div class="buttons-row youtube-cookies-actions">
+        <button id="saveYoutubeCookiesBtn" class="btn btn-ghost" type="button">Enregistrer les cookies</button>
+        <button id="clearYoutubeCookiesBtn" class="btn btn-ghost" type="button">Supprimer cookies serveur</button>
+      </div>
+      <p class="hint small" id="youtubeCookiesStatus">État cookies YouTube: vérification…</p>
       <label class="field">
         <span>Ou fichier local (optionnel)</span>
         <input type="file" id="videoInput" accept="video/*">

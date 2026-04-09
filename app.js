@@ -12,6 +12,8 @@ const config = {
 
 const state = {
   backendAvailable: false,
+  youtubeCookiesConfigured: false,
+  youtubeCookiesUpdatedAt: "",
   localVideoFile: null,
   localVideoObjectUrl: "",
   localVideoDuration: 0,
@@ -30,6 +32,9 @@ const state = {
 const dom = {
   videoUrlInput: document.getElementById("videoUrlInput"),
   youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
+  saveYoutubeCookiesBtn: document.getElementById("saveYoutubeCookiesBtn"),
+  clearYoutubeCookiesBtn: document.getElementById("clearYoutubeCookiesBtn"),
+  youtubeCookiesStatus: document.getElementById("youtubeCookiesStatus"),
   videoInput: document.getElementById("videoInput"),
   clipDuration: document.getElementById("clipDuration"),
   clipsCount: document.getElementById("clipsCount"),
@@ -179,6 +184,101 @@ function triggerDownload(url, filenameHint = "") {
   link.remove();
 }
 
+function formatFrenchDate(isoDate) {
+  if (!isoDate) return "";
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function setYoutubeCookiesButtonsDisabled(disabled) {
+  if (dom.saveYoutubeCookiesBtn) dom.saveYoutubeCookiesBtn.disabled = disabled;
+  if (dom.clearYoutubeCookiesBtn) dom.clearYoutubeCookiesBtn.disabled = disabled;
+}
+
+function renderYoutubeCookiesStatus(meta = {}) {
+  if (!dom.youtubeCookiesStatus) return;
+  const configured = Boolean(meta.configured);
+  const sizeBytes = Number(meta.sizeBytes || 0);
+  const updatedAt = formatFrenchDate(meta.updatedAt || "");
+  state.youtubeCookiesConfigured = configured;
+  state.youtubeCookiesUpdatedAt = meta.updatedAt || "";
+
+  if (configured) {
+    const details = updatedAt ? ` · MAJ ${updatedAt}` : "";
+    dom.youtubeCookiesStatus.textContent = `Cookies serveur: configurés (${sizeBytes} octets${details})`;
+    dom.youtubeCookiesStatus.classList.remove("note-error");
+    return;
+  }
+
+  dom.youtubeCookiesStatus.textContent = "Cookies serveur: non configurés";
+  dom.youtubeCookiesStatus.classList.add("note-error");
+}
+
+async function refreshYoutubeCookiesStatus() {
+  if (!state.backendAvailable) return;
+  const response = await fetch(apiUrl("/api/youtube-cookies/status"));
+  if (!response.ok) throw new Error("Impossible de lire le statut des cookies serveur");
+  const meta = await response.json();
+  renderYoutubeCookiesStatus(meta);
+}
+
+async function saveYoutubeCookies() {
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (!youtubeCookies) {
+    updateStatus("Colle d'abord tes cookies YouTube avant de les enregistrer.", false);
+    return;
+  }
+
+  setYoutubeCookiesButtonsDisabled(true);
+  try {
+    const response = await fetch(apiUrl("/api/youtube-cookies"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ youtubeCookies })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible d'enregistrer les cookies YouTube");
+    }
+    renderYoutubeCookiesStatus(payload);
+    if (dom.youtubeCookiesInput) dom.youtubeCookiesInput.value = "";
+    updateStatus("Cookies YouTube enregistrés. Ils seront réutilisés automatiquement.", true);
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur lors de la sauvegarde des cookies", false);
+  } finally {
+    setYoutubeCookiesButtonsDisabled(false);
+  }
+}
+
+async function clearYoutubeCookies() {
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  setYoutubeCookiesButtonsDisabled(true);
+  try {
+    const response = await fetch(apiUrl("/api/youtube-cookies"), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de supprimer les cookies YouTube");
+    }
+    renderYoutubeCookiesStatus(payload);
+    updateStatus("Cookies YouTube supprimés du serveur.", true);
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur lors de la suppression des cookies", false);
+  } finally {
+    setYoutubeCookiesButtonsDisabled(false);
+  }
+}
+
 async function checkBackendHealth() {
   try {
     const [healthRes, cfgRes] = await Promise.all([
@@ -202,14 +302,26 @@ async function checkBackendHealth() {
         dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
       }
     }
+    if (serverConfig?.youtubeCookies) {
+      renderYoutubeCookiesStatus(serverConfig.youtubeCookies);
+    } else {
+      renderYoutubeCookiesStatus({
+        configured: Boolean(payload.youtubeCookiesConfigured),
+        sizeBytes: 0,
+        updatedAt: null
+      });
+    }
+
     dom.backendMeta.textContent =
       `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
-      `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"}`;
+      `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · ` +
+      `Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
     updateStatus("Backend indisponible — lance: npm start", false);
     dom.backendMeta.textContent = "Aucune connexion backend";
+    renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
   }
 }
 
@@ -392,6 +504,16 @@ function initEvents() {
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
   });
+  if (dom.saveYoutubeCookiesBtn) {
+    dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
+      void saveYoutubeCookies();
+    });
+  }
+  if (dom.clearYoutubeCookiesBtn) {
+    dom.clearYoutubeCookiesBtn.addEventListener("click", () => {
+      void clearYoutubeCookies();
+    });
+  }
 
   dom.playClipBtn.addEventListener("click", () => {
     if (state.selectedClipIndex < 0) return;
@@ -443,6 +565,13 @@ async function init() {
   initFileInput();
   setButtonsEnabled(false);
   await checkBackendHealth();
+  if (state.backendAvailable) {
+    try {
+      await refreshYoutubeCookiesStatus();
+    } catch (_error) {
+      // ignore: status already derived from /api/config or /api/health
+    }
+  }
 }
 
 void init();

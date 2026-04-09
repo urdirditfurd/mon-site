@@ -14,7 +14,9 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
+const SECRETS_DIR = path.join(STORAGE_DIR, "secrets");
 const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
+const YOUTUBE_COOKIES_STORE_PATH = path.join(SECRETS_DIR, "youtube-cookies.txt");
 const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
@@ -72,6 +74,7 @@ function normalizeYouTubeErrorMessage(rawMessage) {
 async function ensureDirs() {
   await fsp.mkdir(UPLOADS_DIR, { recursive: true });
   await fsp.mkdir(JOBS_DIR, { recursive: true });
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
 }
 
 function boolFrom(value, fallback) {
@@ -209,6 +212,186 @@ function isLikelyYouTubeUrl(value) {
   } catch (_error) {
     return false;
   }
+}
+
+function normalizeCookieBoolean(value, fallback = "FALSE") {
+  const upper = String(value || "").trim().toUpperCase();
+  if (upper === "TRUE" || upper === "1" || upper === "YES") return "TRUE";
+  if (upper === "FALSE" || upper === "0" || upper === "NO") return "FALSE";
+  return fallback;
+}
+
+function normalizeCookieExpiry(value) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num >= 0) return String(Math.floor(num));
+  return "2147483647";
+}
+
+function toNetscapeCookieLineFromObject(cookie) {
+  const name = String(cookie?.name || "").trim();
+  if (!name) return "";
+  const value = cookie?.value == null ? "" : String(cookie.value);
+  const rawDomain = String(cookie?.domain || ".youtube.com").trim();
+  const domain = rawDomain
+    ? rawDomain.startsWith(".")
+      ? rawDomain
+      : `.${rawDomain}`
+    : ".youtube.com";
+  const includeSubdomains = cookie?.hostOnly === true ? "FALSE" : "TRUE";
+  const pathValue = String(cookie?.path || "/").trim() || "/";
+  const secure = cookie?.secure ? "TRUE" : "FALSE";
+  const expiry = normalizeCookieExpiry(
+    cookie?.expirationDate ?? cookie?.expires ?? cookie?.expiry ?? cookie?.expire ?? 2147483647
+  );
+  return `${domain}\t${includeSubdomains}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`;
+}
+
+function parseCookiesJson(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed) return "";
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return "";
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (_error) {
+    return "";
+  }
+
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.cookies)
+      ? parsed.cookies
+      : Array.isArray(parsed?.data)
+        ? parsed.data
+        : null;
+
+  if (!Array.isArray(list)) {
+    return "";
+  }
+
+  const lines = list
+    .map((cookie) => toNetscapeCookieLineFromObject(cookie))
+    .filter(Boolean);
+
+  if (!lines.length) {
+    throw new Error("Le JSON de cookies est valide, mais aucun cookie exploitable n'a été trouvé.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseCookiesHeaderString(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed || trimmed.includes("\n")) return "";
+  if (!trimmed.includes("=") || trimmed.includes("\t")) return "";
+
+  const parts = trimmed
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return "";
+
+  const lines = [];
+  for (const part of parts) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const name = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1).trim();
+    if (!name) continue;
+    lines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+  }
+
+  if (!lines.length) {
+    throw new Error("Format de cookies invalide.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseNetscapeCookies(rawText) {
+  const input = String(rawText || "").trim();
+  if (!input) {
+    throw new Error("Cookies YouTube vides.");
+  }
+
+  const outLines = ["# Netscape HTTP Cookie File"];
+  const lines = input.split(/\r?\n/);
+  let hasCookieLine = false;
+
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#HttpOnly_")) {
+      line = line.replace(/^#HttpOnly_/, "");
+    } else if (line.startsWith("#")) {
+      continue;
+    }
+
+    let parts = line.split("\t").filter((p) => p !== "");
+    if (parts.length < 7) {
+      parts = line.split(/\s+/).filter(Boolean);
+    }
+
+    if (parts.length < 7) {
+      throw new Error(
+        "Format Netscape invalide. Chaque ligne doit contenir: domain, include_subdomains, path, secure, expiry, name, value."
+      );
+    }
+
+    const [domainRaw, includeRaw, pathRaw, secureRaw, expiryRaw, nameRaw, ...valueParts] = parts;
+    const domain = String(domainRaw || "").trim();
+    const name = String(nameRaw || "").trim();
+    if (!domain || !name) {
+      throw new Error("Une ligne de cookie est incomplète (domain ou name manquant).");
+    }
+    const value = valueParts.join(" ");
+    const include = normalizeCookieBoolean(includeRaw, domain.startsWith(".") ? "TRUE" : "FALSE");
+    const pathValue = String(pathRaw || "/").trim() || "/";
+    const secure = normalizeCookieBoolean(secureRaw, "FALSE");
+    const expiry = normalizeCookieExpiry(expiryRaw);
+    outLines.push(`${domain}\t${include}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`);
+    hasCookieLine = true;
+  }
+
+  if (!hasCookieLine) {
+    throw new Error("Aucune ligne de cookie valide détectée.");
+  }
+
+  return `${outLines.join("\n")}\n`;
+}
+
+function normalizeYouTubeCookies(rawCookies) {
+  const rawText = String(rawCookies || "").trim();
+  if (!rawText) {
+    throw new Error("Cookies YouTube vides.");
+  }
+  const asJson = parseCookiesJson(rawText);
+  if (asJson) return asJson;
+  const asHeader = parseCookiesHeaderString(rawText);
+  if (asHeader) return asHeader;
+  return parseNetscapeCookies(rawText);
+}
+
+function getStoredYoutubeCookiesMeta() {
+  if (!fs.existsSync(YOUTUBE_COOKIES_STORE_PATH)) {
+    return {
+      configured: false,
+      sizeBytes: 0,
+      updatedAt: null
+    };
+  }
+  const stats = fs.statSync(YOUTUBE_COOKIES_STORE_PATH);
+  return {
+    configured: true,
+    sizeBytes: stats.size,
+    updatedAt: stats.mtime.toISOString()
+  };
+}
+
+function hasStoredYoutubeCookies() {
+  return fs.existsSync(YOUTUBE_COOKIES_STORE_PATH);
 }
 
 function tokenizeTranscript(transcript) {
@@ -914,11 +1097,13 @@ async function processJob(job) {
 
 app.get("/api/health", async (_req, res) => {
   const q = await readQueueStats();
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
   res.json({
     ok: true,
     ffmpeg: ffmpegReady,
     whisperAvailable,
     ytDlpAvailable,
+    youtubeCookiesConfigured: cookiesMeta.configured,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
     queueSize: q.waiting,
@@ -928,6 +1113,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api/config", (_req, res) => {
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
   res.json({
     defaults: DEFAULTS,
     queue: {
@@ -940,11 +1126,55 @@ app.get("/api/config", (_req, res) => {
       ytDlpAvailable,
       urlIngestion: true,
       youtubeIngestion: ytDlpAvailable,
+      youtubeCookiesPersistence: true,
       srt: true,
       zip: true,
       burnSubtitles: true
-    }
+    },
+    youtubeCookies: cookiesMeta
   });
+});
+
+app.get("/api/youtube-cookies/status", (_req, res) => {
+  const meta = getStoredYoutubeCookiesMeta();
+  return res.json(meta);
+});
+
+app.post("/api/youtube-cookies", async (req, res) => {
+  const rawCookies = String(req.body.youtubeCookies || "");
+  if (!rawCookies.trim()) {
+    return res.status(400).json({ error: "Le champ youtubeCookies est requis." });
+  }
+
+  try {
+    const normalizedCookies = normalizeYouTubeCookies(rawCookies);
+    await fsp.mkdir(SECRETS_DIR, { recursive: true });
+    await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.status(201).json({
+      ok: true,
+      message: "Cookies YouTube enregistrés sur le serveur.",
+      ...meta
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Format de cookies invalide."
+    });
+  }
+});
+
+app.delete("/api/youtube-cookies", async (_req, res) => {
+  try {
+    if (hasStoredYoutubeCookies()) {
+      await fsp.unlink(YOUTUBE_COOKIES_STORE_PATH);
+    }
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.json({ ok: true, message: "Cookies YouTube supprimés.", ...meta });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de supprimer les cookies YouTube."
+    });
+  }
 });
 
 app.post("/api/jobs", upload.single("video"), async (req, res) => {
@@ -986,9 +1216,21 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const jobDir = getJobDir(id);
     let youtubeCookiesFilePath = "";
     if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && youtubeCookies.trim()) {
+      let normalizedCookies = "";
+      try {
+        normalizedCookies = normalizeYouTubeCookies(youtubeCookies);
+      } catch (error) {
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : "Format de cookies invalide."
+        });
+      }
       await fsp.mkdir(jobDir, { recursive: true });
       youtubeCookiesFilePath = path.join(jobDir, "youtube-cookies.txt");
-      await fsp.writeFile(youtubeCookiesFilePath, youtubeCookies, "utf8");
+      await fsp.writeFile(youtubeCookiesFilePath, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+      await fsp.mkdir(SECRETS_DIR, { recursive: true });
+      await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    } else if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && hasStoredYoutubeCookies()) {
+      youtubeCookiesFilePath = YOUTUBE_COOKIES_STORE_PATH;
     }
     const job = {
       id,
