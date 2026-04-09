@@ -23,7 +23,16 @@
     <section class="panel">
       <h2>1) Source vidéo</h2>
       <label class="field">
-        <span>Fichier vidéo</span>
+        <span>Lien vidéo (YouTube, Vimeo, MP4 direct...)</span>
+        <input
+          type="url"
+          id="videoUrlInput"
+          placeholder="https://www.youtube.com/watch?v=..."
+          autocomplete="off"
+        >
+      </label>
+      <label class="field">
+        <span>Ou fichier local (optionnel)</span>
         <input type="file" id="videoInput" accept="video/*">
       </label>
 
@@ -103,7 +112,7 @@
       </div>
 
       <p class="hint">
-        Backend V3: jobs persistés + FFmpeg + SRT/ZIP. Lance le serveur avec <strong>npm start</strong>.
+        Tu peux lancer via lien. Pour YouTube, le backend utilise yt-dlp.
       </p>
       <p class="hint small" id="backendMeta">Chargement des capacités backend…</p>
     </section>

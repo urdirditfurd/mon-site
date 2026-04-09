@@ -7,7 +7,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const multer = require("multer");
 const path = require("path");
-const { spawn, spawnSync } = require("child_process");
+const { spawn, spawnSync, execSync } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -44,6 +44,7 @@ let bullQueue = null;
 let bullWorker = null;
 let ffmpegReady = true;
 let whisperAvailable = false;
+let ytDlpAvailable = false;
 
 const DEFAULTS = {
   clipDuration: 30,
@@ -98,6 +99,8 @@ function asPublicJobSnapshot(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     originalFilename: job.originalFilename,
+    sourceType: job.sourceType || "upload",
+    sourceUrl: job.sourceUrl || "",
     inputPath: job.inputPath,
     duration: job.duration || 0,
     params: job.params || {},
@@ -153,6 +156,47 @@ async function restoreJobsDb() {
 function checkBinary(binaryName, testArg = "-version") {
   const result = spawnSync(binaryName, [testArg], { stdio: "ignore" });
   return result.status === 0;
+}
+
+function resolveYtDlpBinary() {
+  if (checkBinary("yt-dlp", "--version")) return "yt-dlp";
+  try {
+    const candidate = execSync("python3 -m site --user-base", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    if (candidate) {
+      const localBin = path.join(candidate, "bin", "yt-dlp");
+      if (fs.existsSync(localBin)) return localBin;
+    }
+  } catch (_error) {
+    // ignore
+  }
+  const fallback = path.join(process.env.HOME || "", ".local", "bin", "yt-dlp");
+  if (fallback && fs.existsSync(fallback)) return fallback;
+  return "yt-dlp";
+}
+
+function checkPythonModule(moduleName, testArgs = ["--version"]) {
+  const result = spawnSync("python3", ["-m", moduleName, ...testArgs], { stdio: "ignore" });
+  return result.status === 0;
+}
+
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isLikelyYouTubeUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.includes("youtube.com") || host.includes("youtu.be");
+  } catch (_error) {
+    return false;
+  }
 }
 
 function tokenizeTranscript(transcript) {
@@ -311,6 +355,143 @@ function runCommand(cmd, args) {
   });
 }
 
+async function isPlayableVideoFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  try {
+    await ffprobeDuration(filePath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function resolveDownloadedVideoByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  const entries = await fsp.readdir(dir);
+  const matches = entries
+    .filter((name) => name === base || name.startsWith(`${base}.`))
+    .map((name) => path.join(dir, name));
+
+  if (!matches.length) {
+    throw new Error("Téléchargement terminé mais fichier introuvable");
+  }
+
+  const ranked = matches.sort((a, b) => {
+    const extA = path.extname(a).toLowerCase();
+    const extB = path.extname(b).toLowerCase();
+    if (extA === ".mp4" && extB !== ".mp4") return -1;
+    if (extB === ".mp4" && extA !== ".mp4") return 1;
+    return 0;
+  });
+
+  return ranked[0];
+}
+
+async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
+  const tryYtDlpDownload = async () => {
+    if (!ytDlpAvailable) return null;
+    const template = `${outputPrefix}.%(ext)s`;
+    await runCommand("python3", [
+      "-m",
+      "yt_dlp",
+      "--no-playlist",
+      "--no-progress",
+      "--restrict-filenames",
+      "--js-runtimes",
+      "node",
+      "--merge-output-format",
+      "mp4",
+      "-f",
+      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+      "-o",
+      template,
+      sourceUrl
+    ]);
+    return resolveDownloadedVideoByPrefix(outputPrefix);
+  };
+
+  if (isLikelyYouTubeUrl(sourceUrl)) {
+    if (!ytDlpAvailable) {
+      throw new Error("Lien YouTube détecté mais yt-dlp est indisponible sur le serveur");
+    }
+    const ytFile = await tryYtDlpDownload();
+    if (await isPlayableVideoFile(ytFile)) return ytFile;
+    throw new Error("Impossible de télécharger une vidéo YouTube exploitable");
+  }
+
+  // For generic URLs, attempt yt-dlp first when available.
+  if (ytDlpAvailable) {
+    try {
+      const ytFile = await tryYtDlpDownload();
+      if (await isPlayableVideoFile(ytFile)) return ytFile;
+    } catch (_ytError) {
+      // Fallback below.
+    }
+  }
+
+  const outputPath = `${outputPrefix}.mp4`;
+
+  try {
+    await runCommand("ffmpeg", [
+      "-y",
+      "-rw_timeout",
+      "15000000",
+      "-reconnect",
+      "1",
+      "-reconnect_streamed",
+      "1",
+      "-reconnect_delay_max",
+      "2",
+      "-i",
+      sourceUrl,
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath
+    ]);
+    if (await isPlayableVideoFile(outputPath)) return outputPath;
+  } catch (_copyErr) {
+    // Fallback below.
+  }
+
+  await runCommand("ffmpeg", [
+    "-y",
+    "-rw_timeout",
+    "15000000",
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_delay_max",
+    "2",
+    "-i",
+    sourceUrl,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ]);
+  if (await isPlayableVideoFile(outputPath)) return outputPath;
+  throw new Error("Téléchargement URL réussi mais fichier vidéo invalide");
+}
+
+function isManagedDownloadedInput(inputPath) {
+  if (!inputPath) return false;
+  const normalized = path.resolve(inputPath);
+  return normalized.startsWith(path.resolve(UPLOADS_DIR));
+}
+
 function ffprobeDuration(inputPath) {
   return new Promise((resolve, reject) => {
     const args = ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", inputPath];
@@ -463,7 +644,12 @@ function sanitizeJobForClient(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     autoTranscriptUsed: !!job.autoTranscriptUsed,
-    source: { filename: job.originalFilename, duration: job.duration },
+    source: {
+      filename: job.originalFilename,
+      duration: job.duration,
+      type: job.sourceType || "upload",
+      url: job.sourceUrl || ""
+    },
     params: job.params,
     clips: (job.clips || []).map((clip) => ({
       id: clip.id,
@@ -589,6 +775,29 @@ async function processJob(job) {
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
 
+  if (!job.inputPath && job.sourceUrl) {
+    if (!isValidHttpUrl(job.sourceUrl)) {
+      throw new Error("URL vidéo invalide");
+    }
+    job.progress = 10;
+    job.updatedAt = new Date().toISOString();
+    await persistJobsDb();
+
+    const outputPrefix = path.join(UPLOADS_DIR, `${job.id}-source`);
+    const downloadedPath = await downloadVideoFromUrl(job.sourceUrl, outputPrefix);
+    job.inputPath = downloadedPath;
+    if (!job.originalFilename) {
+      job.originalFilename = path.basename(downloadedPath);
+    }
+    job.progress = 14;
+    job.updatedAt = new Date().toISOString();
+    await persistJobsDb();
+  }
+
+  if (!job.inputPath) {
+    throw new Error("Aucune source vidéo disponible pour ce job");
+  }
+
   const duration = await ffprobeDuration(job.inputPath);
   job.duration = Number(duration.toFixed(3));
   job.progress = 15;
@@ -673,6 +882,7 @@ app.get("/api/health", async (_req, res) => {
     ok: true,
     ffmpeg: ffmpegReady,
     whisperAvailable,
+    ytDlpAvailable,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
     queueSize: q.waiting,
@@ -691,6 +901,9 @@ app.get("/api/config", (_req, res) => {
     capabilities: {
       ffmpeg: ffmpegReady,
       whisperAvailable,
+      ytDlpAvailable,
+      urlIngestion: true,
+      youtubeIngestion: ytDlpAvailable,
       srt: true,
       zip: true,
       burnSubtitles: true
@@ -699,7 +912,22 @@ app.get("/api/config", (_req, res) => {
 });
 
 app.post("/api/jobs", upload.single("video"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "Fichier vidéo manquant (champ 'video')" });
+  const rawVideoUrl = String(req.body.videoUrl || "").trim();
+  const hasUpload = Boolean(req.file);
+  const hasVideoUrl = rawVideoUrl.length > 0;
+
+  if (!hasUpload && !hasVideoUrl) {
+    return res.status(400).json({ error: "Fichier vidéo ou lien vidéo requis" });
+  }
+  if (hasVideoUrl && !isValidHttpUrl(rawVideoUrl)) {
+    return res.status(400).json({ error: "Le lien vidéo doit être une URL http(s) valide" });
+  }
+  if (hasVideoUrl && isLikelyYouTubeUrl(rawVideoUrl) && !ytDlpAvailable) {
+    return res.status(400).json({
+      error: "Le serveur ne peut pas traiter les liens YouTube (yt-dlp indisponible)"
+    });
+  }
+
   try {
     const clipDuration = Math.min(90, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
     const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
@@ -717,14 +945,17 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
 
     const id = uuidv4();
+    const useUrlSource = hasVideoUrl;
     const job = {
       id,
       status: "queued",
       progress: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      inputPath: req.file.path,
-      originalFilename: req.file.originalname,
+      sourceType: useUrlSource ? "url" : "upload",
+      sourceUrl: useUrlSource ? rawVideoUrl : "",
+      inputPath: useUrlSource ? "" : req.file.path,
+      originalFilename: useUrlSource ? "" : req.file.originalname,
       duration: 0,
       autoTranscriptUsed: false,
       params: {
@@ -835,6 +1066,7 @@ ensureDirs()
   .then(async () => {
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     whisperAvailable = checkBinary("whisper", "--help");
+    ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
     await restoreJobsDb();
     await initBullQueue();
     app.listen(PORT, () => {

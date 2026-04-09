@@ -15,6 +15,7 @@ const state = {
   localVideoFile: null,
   localVideoObjectUrl: "",
   localVideoDuration: 0,
+  sourceVideoUrl: "",
   activeJobId: "",
   pollTimer: null,
   clips: [],
@@ -27,6 +28,7 @@ const state = {
 };
 
 const dom = {
+  videoUrlInput: document.getElementById("videoUrlInput"),
   videoInput: document.getElementById("videoInput"),
   clipDuration: document.getElementById("clipDuration"),
   clipsCount: document.getElementById("clipsCount"),
@@ -199,7 +201,9 @@ async function checkBackendHealth() {
         dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
       }
     }
-    dom.backendMeta.textContent = `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · Whisper: ${payload.whisperAvailable ? "oui" : "non"}`;
+    dom.backendMeta.textContent =
+      `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
+      `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
@@ -209,8 +213,11 @@ async function checkBackendHealth() {
 }
 
 async function createJob() {
-  if (!state.localVideoFile) {
-    updateStatus("Chargez une vidéo avant de générer.", false);
+  const rawVideoUrl = (dom.videoUrlInput.value || "").trim();
+  const hasFile = Boolean(state.localVideoFile);
+  const hasUrl = rawVideoUrl.length > 0;
+  if (!hasFile && !hasUrl) {
+    updateStatus("Ajoute un lien vidéo ou un fichier avant de générer.", false);
     return;
   }
   if (!state.backendAvailable) {
@@ -219,7 +226,11 @@ async function createJob() {
   }
 
   const body = new FormData();
-  body.append("video", state.localVideoFile);
+  if (hasUrl) {
+    body.append("videoUrl", rawVideoUrl);
+  } else if (hasFile) {
+    body.append("video", state.localVideoFile);
+  }
   body.append("clipDuration", String(Number(dom.clipDuration.value)));
   body.append("clipsCount", String(Number(dom.clipsCount.value)));
   body.append("aspectRatio", dom.aspectRatio.value);
@@ -233,7 +244,7 @@ async function createJob() {
 
   dom.analyzeBtn.disabled = true;
   resetClipState();
-  updateStatus("Upload et création du job…", false);
+  updateStatus(hasUrl ? "Analyse du lien et création du job…" : "Upload et création du job…", false);
 
   try {
     const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
@@ -329,6 +340,10 @@ function initFileInput() {
       state.localVideoDuration = dom.player.duration || 0;
       updateStatus(`Vidéo locale prête (${secondsToClock(state.localVideoDuration)})`, true);
     };
+  });
+
+  dom.videoUrlInput.addEventListener("input", () => {
+    state.sourceVideoUrl = dom.videoUrlInput.value.trim();
   });
 }
 

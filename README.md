@@ -65,7 +65,9 @@ Ouvrir ensuite:
 
 ## Utilisation
 
-1. Charger une vidéo.
+1. Fournir une source vidéo:
+   - soit via **URL** (YouTube ou lien direct MP4/MOV/WebM)
+   - soit via **upload fichier** local
 2. Régler durée, nombre de clips, ratio.
 3. Régler options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
 4. Cliquer **Analyser & générer**.
@@ -80,7 +82,7 @@ Ouvrir ensuite:
 
 - `GET /api/health`
 - `GET /api/config`
-- `POST /api/jobs` (multipart/form-data, champ `video`)
+- `POST /api/jobs` (multipart/form-data avec `video` **ou** JSON avec `videoUrl`)
 - `GET /api/jobs/:jobId`
 - `GET /api/jobs/:jobId/plan`
 - `GET /api/jobs/:jobId/bundle`
@@ -90,7 +92,8 @@ Ouvrir ensuite:
 
 ## Paramètres `POST /api/jobs`
 
-- `video` (fichier, requis)
+- `video` (fichier) **ou**
+- `videoUrl` (URL HTTP/HTTPS, YouTube supporté via `yt-dlp`)
 - `clipDuration` (sec)
 - `clipsCount`
 - `aspectRatio` (`9:16` | `1:1` | `16:9`)
@@ -101,6 +104,20 @@ Ouvrir ensuite:
 - `includeAutoTranscript` (`true`/`false`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
+
+### Exemple JSON (source URL)
+
+```json
+{
+  "videoUrl": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "clipDuration": 30,
+  "clipsCount": 4,
+  "aspectRatio": "9:16",
+  "highlightMode": "balanced",
+  "subtitleTheme": "classic",
+  "includeAutoTranscript": true
+}
+```
 
 ## Commandes utiles
 
