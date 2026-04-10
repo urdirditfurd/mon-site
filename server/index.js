@@ -606,10 +606,31 @@ async function resolveDownloadedVideoByPrefix(prefixPath) {
   return ranked[0];
 }
 
+async function cleanupDownloadedArtifactsByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return;
+  const entries = await fsp.readdir(dir);
+  const matches = entries.filter((name) => name === base || name.startsWith(`${base}.`));
+  await Promise.all(
+    matches.map(async (name) => {
+      try {
+        await fsp.unlink(path.join(dir, name));
+      } catch (_error) {
+        // ignore cleanup failures
+      }
+    })
+  );
+}
+
 async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
   const downloadOptions = arguments[2] || {};
   const ytCookiesFile = downloadOptions.ytCookiesFile || "";
-  const ytExtractorArgs = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=tv,android,web";
+  const ytExtractorArgs =
+    process.env.YTDLP_EXTRACTOR_ARGS ||
+    (ytCookiesFile
+      ? "youtube:player_client=web,web_embedded,tv,ios"
+      : "youtube:player_client=web,web_embedded,tv,ios,android");
   const ytUserAgent =
     process.env.YTDLP_USER_AGENT ||
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -617,31 +638,55 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
   const tryYtDlpDownload = async () => {
     if (!ytDlpAvailable) return null;
     const template = `${outputPrefix}.%(ext)s`;
-    const args = [
+    const commonArgs = [
       "-m",
       "yt_dlp",
       "--no-playlist",
       "--no-progress",
       "--restrict-filenames",
+      "--extractor-retries",
+      "3",
+      "--retries",
+      "3",
+      "--fragment-retries",
+      "3",
       "--extractor-args",
       ytExtractorArgs,
       "--user-agent",
       ytUserAgent,
       "--js-runtimes",
       "node",
+      "--remote-components",
+      "ejs:github",
       "--merge-output-format",
       "mp4",
-      "-f",
-      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
       "-o",
-      template,
-      sourceUrl
+      template
     ];
-    if (ytCookiesFile) {
-      args.push("--cookies", ytCookiesFile);
+    if (ytCookiesFile) commonArgs.push("--cookies", ytCookiesFile);
+
+    const profiles = [
+      // Preferred: explicit mp4-compatible muxing.
+      ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best"],
+      // Wider fallback for difficult videos.
+      ["-f", "bestvideo*+bestaudio/best"],
+      // Last resort without format constraints.
+      []
+    ];
+
+    let lastError = null;
+    for (const profileArgs of profiles) {
+      try {
+        await cleanupDownloadedArtifactsByPrefix(outputPrefix);
+        const args = [...commonArgs, ...profileArgs, sourceUrl];
+        await runCommand("python3", args);
+        const downloaded = await resolveDownloadedVideoByPrefix(outputPrefix);
+        if (await isPlayableVideoFile(downloaded)) return downloaded;
+      } catch (error) {
+        lastError = error;
+      }
     }
-    await runCommand("python3", args);
-    return resolveDownloadedVideoByPrefix(outputPrefix);
+    throw lastError || new Error("Impossible de télécharger la vidéo via yt-dlp");
   };
 
   if (isLikelyYouTubeUrl(sourceUrl)) {
