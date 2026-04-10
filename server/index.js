@@ -335,9 +335,30 @@ function parseNetscapeCookies(rawText) {
     }
 
     if (parts.length < 7) {
-      throw new Error(
-        "Format Netscape invalide. Chaque ligne doit contenir: domain, include_subdomains, path, secure, expiry, name, value."
-      );
+      // Fallback tolérant: accepte une ligne "name=value" ou "name=value; other=x"
+      // pour aider quand l'export n'est pas strictement au format Netscape.
+      const cookiePairs = line
+        .split(";")
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+      let foundLoosePair = false;
+      for (const pair of cookiePairs) {
+        const eqIndex = pair.indexOf("=");
+        if (eqIndex <= 0) continue;
+        const name = pair.slice(0, eqIndex).trim();
+        const value = pair.slice(eqIndex + 1).trim();
+        if (!name) continue;
+        outLines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+        hasCookieLine = true;
+        foundLoosePair = true;
+      }
+
+      if (foundLoosePair) {
+        continue;
+      }
+      // Ignore les lignes non interprétables (au lieu d'échouer tout le fichier).
+      continue;
     }
 
     const [domainRaw, includeRaw, pathRaw, secureRaw, expiryRaw, nameRaw, ...valueParts] = parts;
@@ -356,7 +377,9 @@ function parseNetscapeCookies(rawText) {
   }
 
   if (!hasCookieLine) {
-    throw new Error("Aucune ligne de cookie valide détectée.");
+    throw new Error(
+      "Aucune ligne de cookie valide détectée. Utilise de préférence un export Netscape (cookies.txt) ou une chaîne du type NAME=VALUE; NAME2=VALUE2."
+    );
   }
 
   return `${outLines.join("\n")}\n`;
