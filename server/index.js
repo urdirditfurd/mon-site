@@ -811,6 +811,7 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
 
   candidates.sort((a, b) => b.score - a.score);
   const chosen = [];
+  const preferredCandidates = candidates.filter((candidate) => candidate.start >= preferredMinStart && candidate.start <= preferredMaxStart);
 
   const hasConflict = (candidate) =>
     chosen.some((clip) => {
@@ -828,10 +829,19 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
       return similarity > 0.62;
     });
 
-  for (const candidate of candidates) {
+  for (const candidate of preferredCandidates) {
     if (!hasConflict(candidate)) {
       chosen.push(candidate);
       if (chosen.length >= clipsCount) break;
+    }
+  }
+
+  if (chosen.length < clipsCount) {
+    for (const candidate of candidates) {
+      if (!hasConflict(candidate)) {
+        chosen.push(candidate);
+        if (chosen.length >= clipsCount) break;
+      }
     }
   }
 
