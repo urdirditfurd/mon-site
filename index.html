@@ -13,18 +13,17 @@
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">Mode simple & rapide</p>
+      <p class="eyebrow">Création rapide de shorts</p>
       <h1>ClipForge Studio</h1>
-      <p class="subtitle">Colle ton lien YouTube, clique générer, récupère des shorts verticaux prêts pour TikTok/Reels avec sous-titres et doublage FR.</p>
+      <p class="subtitle">Colle un lien vidéo, lance la génération, puis exporte les meilleurs clips.</p>
     </div>
   </header>
 
   <main class="layout">
     <section class="panel">
-      <h2>1) Génération express</h2>
-      <p class="hint no-margin">Comme Klap : colle ton lien YouTube, puis clique sur “Générer mes shorts”.</p>
+      <h2>Créer des clips</h2>
       <label class="field">
-        <span>Lien vidéo</span>
+        <span>Lien vidéo (YouTube ou URL directe)</span>
         <input
           type="url"
           id="videoUrlInput"
@@ -33,10 +32,10 @@
         >
       </label>
       <div class="buttons-row quick-actions">
-        <button id="analyzeBtn" class="btn btn-primary" type="button">Générer mes shorts</button>
+        <button id="analyzeBtn" class="btn btn-primary" type="button">Lancer la génération</button>
         <label class="toggle-row compact">
           <input type="checkbox" id="quickMode" checked>
-          <span>Mode express (recommandé)</span>
+          <span>Mode simple</span>
         </label>
       </div>
       <div class="progress-box">
@@ -47,7 +46,7 @@
       </div>
 
       <details class="details-box">
-        <summary>Connexion YouTube (si anti-bot)</summary>
+        <summary>Connexion YouTube (anti-bot)</summary>
         <label class="field">
           <span>Cookies YouTube (format Netscape)</span>
           <textarea
@@ -64,7 +63,7 @@
       </details>
 
       <details class="details-box">
-        <summary>Fichier local (optionnel)</summary>
+        <summary>Importer un fichier local (optionnel)</summary>
         <label class="field no-margin">
           <span>Uploader une vidéo locale</span>
           <input type="file" id="videoInput" accept="video/*">
@@ -72,7 +71,7 @@
       </details>
 
       <details class="details-box">
-        <summary>Réglages avancés</summary>
+        <summary>Réglages avancés (optionnel)</summary>
         <div class="grid-2">
           <label class="field">
             <span>Durée par clip</span>
@@ -107,7 +106,7 @@
         </label>
 
         <label class="field">
-          <span>Transcript / script (optionnel)</span>
+          <span>Transcript (optionnel)</span>
           <textarea id="transcriptInput" rows="6" placeholder="Collez ici la transcription de votre vidéo."></textarea>
         </label>
 
@@ -131,7 +130,7 @@
           </label>
         </div>
         <label class="field">
-          <span>Ignorer les X premières secondes</span>
+          <span>Ignorer l’intro (X premières secondes)</span>
           <select id="ignoreIntroSec">
             <option value="0">0 seconde</option>
             <option value="10">10 secondes</option>
@@ -182,13 +181,13 @@
         <button id="generateScriptBtn" class="btn btn-ghost" type="button">Générer un script exemple</button>
       </details>
 
-      <p class="hint small" id="backendMeta">Chargement des capacités backend…</p>
+      <p class="hint small" id="backendMeta">Connexion serveur…</p>
     </section>
 
     <section class="workspace">
       <div class="player-card">
         <div class="player-head">
-          <h2>3) Prévisualisation</h2>
+          <h2>Prévisualisation</h2>
           <div class="status" id="statusBadge">Initialisation backend...</div>
         </div>
         <div class="video-shell">
@@ -210,17 +209,13 @@
       </div>
 
       <div class="timeline-card">
-        <h2>4) Clips générés</h2>
+        <h2>Clips générés</h2>
         <ul id="clipsList" class="clips-list">
           <li class="empty">Aucun clip généré pour le moment.</li>
         </ul>
       </div>
     </section>
   </main>
-
-  <footer class="footer">
-    <p>Prototype éducatif — sans copie de code propriétaire. V3: jobs persistés, SRT/ZIP, styles de captions et transcription auto optionnelle.</p>
-  </footer>
 
   <script src="config.js"></script>
   <script src="app.js"></script>

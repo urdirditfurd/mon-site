@@ -25,7 +25,7 @@ body {
 .topbar {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 28px 24px 16px;
+  padding: 24px 24px 12px;
 }
 
 .eyebrow {
@@ -43,15 +43,17 @@ h1 {
 }
 
 .subtitle {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
-  max-width: 820px;
+  max-width: 760px;
+  font-size: .93rem;
+  line-height: 1.45;
 }
 
 .layout {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 20px 24px 24px;
+  padding: 14px 24px 24px;
   display: grid;
   grid-template-columns: 420px 1fr;
   gap: 18px;
@@ -67,7 +69,7 @@ h1 {
 }
 
 .panel {
-  padding: 18px;
+  padding: 16px;
 }
 
 .no-margin {
@@ -86,12 +88,12 @@ h2 {
 
 .field {
   display: block;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .field > span {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--muted);
   font-size: .9rem;
 }
@@ -164,7 +166,7 @@ input[type="range"] {
 
 .quick-actions {
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .toggle-row.compact {
@@ -173,7 +175,7 @@ input[type="range"] {
 }
 
 .progress-box {
-  margin: 8px 0 14px;
+  margin: 6px 0 12px;
 }
 
 .progress-track {
@@ -193,22 +195,22 @@ input[type="range"] {
 }
 
 .details-box {
-  margin: 10px 0;
+  margin: 8px 0;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #10193a;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .details-box summary {
   cursor: pointer;
   font-weight: 600;
   color: #dbe4ff;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .details-box[open] summary {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .cookies-actions,
@@ -266,8 +268,8 @@ input[type="range"] {
 
 .hint {
   color: var(--muted);
-  font-size: .82rem;
-  margin: 10px 0 0;
+  font-size: .8rem;
+  margin: 8px 0 0;
 }
 
 .small {
@@ -279,7 +281,7 @@ input[type="range"] {
 }
 
 .player-card {
-  padding: 16px;
+  padding: 14px;
 }
 
 .player-head {
@@ -389,7 +391,7 @@ input[type="range"] {
 }
 
 .timeline-card {
-  padding: 16px;
+  padding: 14px;
 }
 
 .clips-list {
@@ -405,7 +407,7 @@ input[type="range"] {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #0f1735;
-  padding: 12px;
+  padding: 10px;
 }
 
 .clip-item.active {
@@ -442,7 +444,7 @@ input[type="range"] {
 
 .clip-snippet {
   margin: 0 0 10px;
-  font-size: .82rem;
+  font-size: .8rem;
   color: #cfdaff;
   line-height: 1.4;
 }
@@ -460,6 +462,14 @@ input[type="range"] {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.app-footer {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 2px 24px 20px;
+  color: var(--muted);
+  font-size: .78rem;
 }
 
 .empty {
