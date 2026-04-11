@@ -120,7 +120,7 @@ Le mode express force automatiquement des réglages adaptés short-form:
 
 - `video` (fichier) **ou**
 - `videoUrl` (URL HTTP/HTTPS, YouTube supporté via `yt-dlp`)
-- `clipDuration` (sec)
+- `clipDuration` (sec, jusqu’à 300)
 - `clipsCount`
 - `aspectRatio` (`9:16` | `1:1` | `16:9`)
 - `transcript` (optionnel)

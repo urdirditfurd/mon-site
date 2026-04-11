@@ -1522,7 +1522,8 @@ async function processJob(job) {
 
   let effectiveClipDuration = job.params.clipDuration;
   const uniquenessBudget = duration / Math.max(1, job.params.clipsCount);
-  if (uniquenessBudget < job.params.clipDuration * 0.9) {
+  const isLongClipRequest = job.params.clipDuration >= 120;
+  if (!isLongClipRequest && uniquenessBudget < job.params.clipDuration * 0.9) {
     effectiveClipDuration = Math.max(8, Math.floor(uniquenessBudget * 0.92));
   }
   job.params.effectiveClipDuration = effectiveClipDuration;
@@ -1736,7 +1737,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
   }
 
   try {
-    const clipDuration = Math.min(90, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
+    const clipDuration = Math.min(600, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
     const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
     const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
     const transcript = String(req.body.transcript || "");
