@@ -787,6 +787,7 @@ function computeBoundaryGuards(duration, clipDuration, ignoreIntroSec = 0) {
 
 function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = [], ignoreIntroSec = 0) {
   const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration, ignoreIntroSec);
+  const hardMinStart = Math.min(maxStart, Math.max(0, ignoreIntroSec));
   const step = Math.max(2, Math.min(7, clipDuration * 0.4));
   const moments = generateCandidateMoments(duration, step, mode);
   const candidates = moments.map((moment) => {
@@ -813,7 +814,10 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
 
   candidates.sort((a, b) => b.score - a.score);
   const chosen = [];
-  const preferredCandidates = candidates.filter((candidate) => candidate.start >= preferredMinStart && candidate.start <= preferredMaxStart);
+  const eligibleCandidates = candidates.filter((candidate) => candidate.start >= hardMinStart);
+  const preferredCandidates = eligibleCandidates.filter(
+    (candidate) => candidate.start >= preferredMinStart && candidate.start <= preferredMaxStart
+  );
 
   const hasConflict = (candidate) =>
     chosen.some((clip) => {
@@ -839,7 +843,7 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
   }
 
   if (chosen.length < clipsCount) {
-    for (const candidate of candidates) {
+    for (const candidate of eligibleCandidates) {
       if (!hasConflict(candidate)) {
         chosen.push(candidate);
         if (chosen.length >= clipsCount) break;
@@ -850,8 +854,9 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
   if (chosen.length < clipsCount) {
     for (let i = 0; i < clipsCount; i += 1) {
       const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
-      const fallbackSpan = Math.max(0, preferredMaxStart - preferredMinStart);
-      const start = Number((preferredMinStart + fallbackSpan * ratio).toFixed(3));
+      const fallbackStart = Math.max(hardMinStart, preferredMinStart);
+      const fallbackSpan = Math.max(0, preferredMaxStart - fallbackStart);
+      const start = Number((fallbackStart + fallbackSpan * ratio).toFixed(3));
       const end = Math.min(duration, start + clipDuration);
       const fallback = {
         start,
@@ -869,7 +874,7 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
   }
 
   if (!chosen.length) {
-    const safeStart = Math.min(Math.max(0, preferredMinStart), maxStart);
+    const safeStart = Math.min(Math.max(hardMinStart, preferredMinStart), maxStart);
     chosen.push({
       start: safeStart,
       end: Math.min(duration, safeStart + clipDuration),
