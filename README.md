@@ -15,11 +15,17 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - `viral`
 - Transcription auto optionnelle:
   - tente Whisper CLI réel si disponible
-  - fallback local si Whisper absent/erreur
+  - aucun faux transcript injecté si Whisper absent/erreur
 - Sous-titres:
   - overlay preview frontend
   - export `.srt` par clip
-  - burn-in optionnel dans MP4
+  - burn-in optionnel dans MP4 (sans doublon overlay en preview)
+- Doublage FR:
+  - remplace l'audio original
+  - voix auto homme/femme selon la voix détectée
+- Sélection highlights améliorée:
+  - anti-duplication des clips
+  - scoring plus orienté "hook/viral" sur le contenu sous-titré
   - extraction des sous-titres YouTube (quand disponibles) pour un meilleur alignement temporel
 - Doublage audio FR optionnel:
   - synthèse vocale française (edge-tts)

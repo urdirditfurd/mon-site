@@ -58,6 +58,7 @@ const DEFAULTS = {
   highlightMode: "balanced",
   includeAutoTranscript: false,
   dubFrenchAudio: true,
+  autoDubVoiceBySpeaker: true,
   includeSrtInZip: true,
   burnSubtitles: false
 };
@@ -132,6 +133,7 @@ function asPublicJobSnapshot(job) {
       score: clip.score,
       filePath: clip.filePath,
       dubbedAudioPath: clip.dubbedAudioPath || null,
+      dubVoice: clip.dubVoice || null,
       burnedFilePath: clip.burnedFilePath || null,
       aspectRatio: clip.aspectRatio || null,
       captions: clip.captions || []
@@ -533,15 +535,48 @@ function buildDubTextFromCaptions(captions) {
     .trim();
 }
 
-async function synthesizeFrenchSpeech(text, outputAudioPath) {
+async function detectLikelyFrenchVoiceForClip(inputClipPath) {
+  const maleVoice = process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+  const femaleVoice = process.env.EDGE_TTS_DEFAULT_FEMALE_VOICE || "fr-FR-DeniseNeural";
+  const threshold = Number(process.env.EDGE_TTS_GENDER_ZCR_THRESHOLD) || 0.095;
+  if (!inputClipPath || !fs.existsSync(inputClipPath)) return maleVoice;
+
+  try {
+    const { stderr } = await runCommandCapture("ffmpeg", [
+      "-hide_banner",
+      "-i",
+      inputClipPath,
+      "-af",
+      "astats=metadata=1:reset=1",
+      "-f",
+      "null",
+      "-"
+    ]);
+
+    const matches = Array.from(String(stderr || "").matchAll(/Zero crossings rate:\s*([0-9.]+)/gi));
+    const values = matches
+      .map((match) => Number(match[1]))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (!values.length) return maleVoice;
+    const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return avg >= threshold ? femaleVoice : maleVoice;
+  } catch (_error) {
+    return maleVoice;
+  }
+}
+
+async function synthesizeFrenchSpeech(text, outputAudioPath, preferredVoice = "") {
   const spokenText = String(text || "").replace(/\s+/g, " ").trim();
   if (!spokenText) return false;
   const trimmed = spokenText.length > 1500 ? spokenText.slice(0, 1500) : spokenText;
+  const selectedVoice =
+    preferredVoice || process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
   await runCommand("python3", [
     "-m",
     "edge_tts",
     "--voice",
-    process.env.EDGE_TTS_VOICE || "fr-FR-DeniseNeural",
+    selectedVoice,
     "--text",
     trimmed,
     "--write-media",
@@ -581,6 +616,107 @@ function tokenizeTranscript(transcript) {
     .filter(Boolean);
 }
 
+const VIRAL_KEYWORDS = new Set([
+  "choc",
+  "incroyable",
+  "secret",
+  "erreur",
+  "danger",
+  "risque",
+  "urgent",
+  "revele",
+  "explose",
+  "cash",
+  "million",
+  "milliard",
+  "guerre",
+  "attaque",
+  "strategie",
+  "preuve",
+  "comment",
+  "pourquoi",
+  "top",
+  "viral",
+  "buzz",
+  "impact",
+  "grave",
+  "impossible"
+]);
+
+function normalizeScoringToken(rawToken) {
+  return String(rawToken || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function tokenizeForScoring(text) {
+  return String(text || "")
+    .split(/\s+/)
+    .map((token) => normalizeScoringToken(token))
+    .filter(Boolean);
+}
+
+function jaccardSetSimilarity(setA, setB) {
+  if (!setA.size && !setB.size) return 0;
+  if (!setA.size || !setB.size) return 0;
+  let inter = 0;
+  for (const token of setA) {
+    if (setB.has(token)) inter += 1;
+  }
+  const union = setA.size + setB.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function buildClipTitleFromText(text, index) {
+  const clean = stripSubtitleMarkup(text);
+  if (!clean) return `Clip ${index + 1}`;
+  const words = clean.split(/\s+/).filter(Boolean).slice(0, 11);
+  const short = words.join(" ");
+  if (!short) return `Clip ${index + 1}`;
+  return short.length > 80 ? `${short.slice(0, 77)}...` : short;
+}
+
+function scoreWindowFromTimedCaptions(windowStart, windowEnd, timedCaptions, clipDuration, mode, duration) {
+  const texts = [];
+  let coveredSeconds = 0;
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(windowStart, cue.start);
+    const overlapEnd = Math.min(windowEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    coveredSeconds += overlapEnd - overlapStart;
+    const text = stripSubtitleMarkup(cue.text);
+    if (text) texts.push(text);
+  }
+
+  const mergedText = texts.join(" ").replace(/\s+/g, " ").trim();
+  const tokens = tokenizeForScoring(mergedText);
+  const tokenSet = new Set(tokens);
+  const hookHits = tokens.reduce((sum, token) => sum + (VIRAL_KEYWORDS.has(token) ? 1 : 0), 0);
+  const punctuationHits = (mergedText.match(/[!?]/g) || []).length;
+  const numericHits = (mergedText.match(/\d+/g) || []).length;
+  const density = Math.min(1, tokens.length / Math.max(8, clipDuration * 2.6));
+  const information = Math.min(1, tokenSet.size / Math.max(1, tokens.length || 1));
+  const hook = Math.min(1, (hookHits * 0.22 + punctuationHits * 0.12 + numericHits * 0.1) / 1.2);
+  const coverage = Math.min(1, coveredSeconds / Math.max(1, clipDuration));
+  const centerTime = (windowStart + windowEnd) / 2;
+  const energy = highlightScore(centerTime, duration, mode);
+
+  let score = density * 0.22 + information * 0.16 + hook * 0.28 + coverage * 0.14 + energy * 0.2;
+  const earlyBias = 1 - centerTime / Math.max(duration, 1);
+  if (mode === "hook-first") score += earlyBias * 0.12;
+  if (mode === "viral") score += hook * 0.08 + Math.min(1, density * 1.2) * 0.06;
+  if (mode === "balanced") score += information * 0.06;
+
+  return {
+    score: Number(score.toFixed(4)),
+    tokenSet,
+    text: mergedText
+  };
+}
+
 function mockEnergyAtTime(time, duration) {
   const x = time / Math.max(duration, 1);
   const base = 0.45 + 0.2 * Math.sin(x * Math.PI * 8);
@@ -605,30 +741,50 @@ function generateCandidateMoments(duration, step, mode) {
   return out.sort((a, b) => b.score - a.score);
 }
 
-function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode) {
+function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = []) {
   const maxStart = Math.max(0, duration - clipDuration);
-  const moments = generateCandidateMoments(duration, Math.min(4, clipDuration / 3), mode);
-  const chosen = [];
-
-  const hasConflict = (start, end) =>
-    chosen.some((clip) => {
-      const inter = Math.max(0, Math.min(clip.end, end) - Math.max(clip.start, start));
-      if (inter > clipDuration * 0.45) return true;
-      const distance = Math.min(
-        Math.abs(clip.start - start),
-        Math.abs(clip.end - end),
-        Math.abs(clip.start - end),
-        Math.abs(clip.end - start)
-      );
-      return distance < minGapSec;
-    });
-
-  for (const moment of moments) {
-    let start = Math.max(0, moment.t - clipDuration * 0.25);
+  const step = Math.max(2, Math.min(7, clipDuration * 0.4));
+  const moments = generateCandidateMoments(duration, step, mode);
+  const candidates = moments.map((moment) => {
+    let start = Math.max(0, moment.t - clipDuration * 0.18);
     start = Math.min(start, maxStart);
     const end = Math.min(duration, start + clipDuration);
-    if (!hasConflict(start, end)) {
-      chosen.push({ start, end, duration: end - start, score: Number(moment.score.toFixed(3)) });
+    const timed = scoreWindowFromTimedCaptions(start, end, timedCaptions, clipDuration, mode, duration);
+    const fallbackText = "";
+    const title = buildClipTitleFromText(timed.text || fallbackText, 0);
+    const combinedScore = timed.tokenSet.size > 0 ? timed.score : Number(moment.score.toFixed(4));
+    return {
+      start,
+      end,
+      duration: end - start,
+      score: combinedScore,
+      title,
+      tokenSet: timed.tokenSet
+    };
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+  const chosen = [];
+
+  const hasConflict = (candidate) =>
+    chosen.some((clip) => {
+      const inter = Math.max(0, Math.min(clip.end, candidate.end) - Math.max(clip.start, candidate.start));
+      if (inter > clipDuration * 0.28) return true;
+      const distance = Math.min(
+        Math.abs(clip.start - candidate.start),
+        Math.abs(clip.end - candidate.end),
+        Math.abs(clip.start - candidate.end),
+        Math.abs(clip.end - candidate.start)
+      );
+      if (distance < minGapSec) return true;
+      const similarity = jaccardSetSimilarity(clip.tokenSet || new Set(), candidate.tokenSet || new Set());
+      if ((clip.tokenSet || new Set()).size === 0 || (candidate.tokenSet || new Set()).size === 0) return false;
+      return similarity > 0.62;
+    });
+
+  for (const candidate of candidates) {
+    if (!hasConflict(candidate)) {
+      chosen.push(candidate);
       if (chosen.length >= clipsCount) break;
     }
   }
@@ -638,13 +794,16 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode) {
       const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
       const start = Number((maxStart * ratio).toFixed(3));
       const end = Math.min(duration, start + clipDuration);
-      if (!hasConflict(start, end)) {
-        chosen.push({
-          start,
-          end,
-          duration: end - start,
-          score: Number(highlightScore(start, duration, mode).toFixed(3))
-        });
+      const fallback = {
+        start,
+        end,
+        duration: end - start,
+        score: Number(highlightScore(start, duration, mode).toFixed(3)),
+        title: buildClipTitleFromText("", i),
+        tokenSet: new Set()
+      };
+      if (!hasConflict(fallback)) {
+        chosen.push(fallback);
       }
       if (chosen.length >= clipsCount) break;
     }
@@ -655,14 +814,23 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode) {
       start: 0,
       end: Math.min(duration, clipDuration),
       duration: Math.min(duration, clipDuration),
-      score: 0.5
+      score: 0.5,
+      title: "Clip 1",
+      tokenSet: new Set()
     });
   }
 
   return chosen
     .sort((a, b) => a.start - b.start)
     .slice(0, clipsCount)
-    .map((clip, idx) => ({ id: `clip-${idx + 1}`, title: `Clip ${idx + 1}`, ...clip }));
+    .map((clip, idx) => ({
+      id: `clip-${idx + 1}`,
+      title: clip.title || `Clip ${idx + 1}`,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: Number(clip.score.toFixed(3))
+    }));
 }
 
 function splitIntoSubtitleChunks(words, minWords = 4, maxWords = 10) {
@@ -723,6 +891,25 @@ function runCommand(cmd, args) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) return resolve();
+      return reject(new Error(stderr || `${cmd} exited with code ${code}`));
+    });
+  });
+}
+
+function runCommandCapture(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (buf) => {
+      stdout += String(buf);
+    });
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) return resolve({ stdout, stderr });
       return reject(new Error(stderr || `${cmd} exited with code ${code}`));
     });
   });
@@ -1124,14 +1311,8 @@ async function transcribeVideoMaybe(inputPath, duration, includeAutoTranscript) 
       // fallback below
     }
   }
-  const blocks = Math.max(3, Math.min(8, Math.round(duration / 15)));
-  const generated = [];
-  for (let i = 0; i < blocks; i += 1) {
-    generated.push(
-      `Segment ${i + 1}: idée forte, démonstration concrète et transition vers le point suivant pour maintenir la rétention.`
-    );
-  }
-  return { transcript: generated.join(" "), autoTranscriptUsed: true };
+  // Avoid fake transcripts that can create nonsensical captions.
+  return { transcript: "", autoTranscriptUsed: false };
 }
 
 function sanitizeJobForClient(job) {
@@ -1159,6 +1340,8 @@ function sanitizeJobForClient(job) {
       score: clip.score,
       aspectRatio: clip.aspectRatio || job.params?.aspectRatio || DEFAULTS.aspectRatio,
       hasBurnedSubtitles: Boolean(clip.burnedFilePath),
+      hasDubbedAudio: Boolean(clip.dubbedAudioPath),
+      dubVoice: clip.dubVoice || "",
       streamUrl: `/api/jobs/${job.id}/clips/${clip.id}/stream`,
       downloadUrl: `/api/jobs/${job.id}/clips/${clip.id}/download`,
       srtUrl: `/api/jobs/${job.id}/clips/${clip.id}/srt`,
@@ -1337,12 +1520,20 @@ async function processJob(job) {
     job.autoTranscriptUsed = generated.autoTranscriptUsed;
   }
 
+  let effectiveClipDuration = job.params.clipDuration;
+  const uniquenessBudget = duration / Math.max(1, job.params.clipsCount);
+  if (uniquenessBudget < job.params.clipDuration * 0.9) {
+    effectiveClipDuration = Math.max(8, Math.floor(uniquenessBudget * 0.92));
+  }
+  job.params.effectiveClipDuration = effectiveClipDuration;
+
   const clips = selectBestClips(
     duration,
-    job.params.clipDuration,
+    effectiveClipDuration,
     job.params.clipsCount,
     job.params.minGapSecBetweenClips,
-    job.params.highlightMode
+    job.params.highlightMode,
+    sourceTimedCaptions
   );
   const transcriptParts = segmentTranscriptForClips(job.params.transcript, clips);
   if (!job.params.transcript && sourceTimedCaptions.length) {
@@ -1374,11 +1565,15 @@ async function processJob(job) {
         const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
         const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
         try {
-          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath);
+          const detectedVoice = boolFrom(job.params.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker)
+            ? await detectLikelyFrenchVoiceForClip(outputPath)
+            : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
           if (hasTtsAudio) {
             await replaceClipAudioWithFrenchDub(outputPath, ttsPath, dubbedPath);
             finalClipPath = dubbedPath;
             dubbedAudioPath = ttsPath;
+            clip.dubVoice = detectedVoice;
           }
         } catch (_error) {
           finalClipPath = outputPath;
@@ -1402,6 +1597,7 @@ async function processJob(job) {
       ...clip,
       filePath: finalClipPath,
       dubbedAudioPath,
+      dubVoice: clip.dubVoice || "",
       burnedFilePath,
       srtPath,
       captions,
@@ -1553,6 +1749,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
       : DEFAULTS.highlightMode;
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
     const dubFrenchAudio = boolFrom(req.body.dubFrenchAudio, DEFAULTS.dubFrenchAudio);
+    const autoDubVoiceBySpeaker = boolFrom(req.body.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
     const youtubeCookies = String(req.body.youtubeCookies || "");
@@ -1601,6 +1798,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         highlightMode,
         includeAutoTranscript,
         dubFrenchAudio,
+        autoDubVoiceBySpeaker,
         includeSrtInZip,
         burnSubtitles,
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath)

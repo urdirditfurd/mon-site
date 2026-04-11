@@ -27,6 +27,7 @@ const state = {
   highlightMode: "balanced",
   includeAutoTranscript: false,
   dubFrenchAudio: true,
+  autoDubVoiceBySpeaker: true,
   includeSrtInZip: true,
   burnSubtitles: false,
   currentAspectRatio: "9:16"
@@ -49,6 +50,7 @@ const dom = {
   highlightMode: document.getElementById("highlightMode"),
   includeAutoTranscript: document.getElementById("includeAutoTranscript"),
   dubFrenchAudio: document.getElementById("dubFrenchAudio"),
+  autoDubVoiceBySpeaker: document.getElementById("autoDubVoiceBySpeaker"),
   includeSrtInZip: document.getElementById("includeSrtInZip"),
   burnSubtitles: document.getElementById("burnSubtitles"),
   minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
@@ -407,6 +409,7 @@ async function createJob() {
   const aspectRatio = useQuickMode ? "9:16" : dom.aspectRatio.value;
   const includeAutoTranscript = useQuickMode ? true : state.includeAutoTranscript;
   const dubFrenchAudio = useQuickMode ? true : state.dubFrenchAudio;
+  const autoDubVoiceBySpeaker = useQuickMode ? true : state.autoDubVoiceBySpeaker;
   const burnSubtitles = useQuickMode ? false : state.burnSubtitles;
 
   const body = new FormData();
@@ -423,6 +426,7 @@ async function createJob() {
   body.append("highlightMode", state.highlightMode);
   body.append("includeAutoTranscript", String(includeAutoTranscript));
   body.append("dubFrenchAudio", String(dubFrenchAudio));
+  body.append("autoDubVoiceBySpeaker", String(autoDubVoiceBySpeaker));
   body.append("includeSrtInZip", String(state.includeSrtInZip));
   body.append("burnSubtitles", String(burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
@@ -490,10 +494,12 @@ async function pollJob() {
       state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
       state.burnSubtitles = Boolean(job.params?.burnSubtitles);
       state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
+      state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
       state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
       dom.subtitleTheme.value = state.subtitleTheme;
       if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
       if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+      if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
       applySubtitleTheme(state.subtitleTheme);
       applyPreviewAspectRatio(state.currentAspectRatio);
 
@@ -592,6 +598,12 @@ function initEvents() {
     });
   }
 
+  if (dom.autoDubVoiceBySpeaker) {
+    dom.autoDubVoiceBySpeaker.addEventListener("change", () => {
+      state.autoDubVoiceBySpeaker = dom.autoDubVoiceBySpeaker.checked;
+    });
+  }
+
   dom.includeSrtInZip.addEventListener("change", () => {
     state.includeSrtInZip = dom.includeSrtInZip.checked;
   });
@@ -657,6 +669,7 @@ function initDefaults() {
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
   if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
   if (dom.quickMode) dom.quickMode.checked = state.quickMode;
   applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
