@@ -15,6 +15,7 @@ const state = {
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
   quickMode: true,
+  languageMode: "translate-to-french",
   localVideoFile: null,
   localVideoObjectUrl: "",
   localVideoDuration: 0,
@@ -36,6 +37,7 @@ const state = {
 const dom = {
   videoUrlInput: document.getElementById("videoUrlInput"),
   quickMode: document.getElementById("quickMode"),
+  languageMode: document.getElementById("languageMode"),
   youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
   saveYoutubeCookiesBtn: document.getElementById("saveYoutubeCookiesBtn"),
   clearYoutubeCookiesBtn: document.getElementById("clearYoutubeCookiesBtn"),
@@ -404,13 +406,26 @@ async function createJob() {
   }
 
   const useQuickMode = Boolean(state.quickMode);
-  const clipDuration = useQuickMode ? 30 : Number(dom.clipDuration.value);
-  const clipsCount = useQuickMode ? 4 : Number(dom.clipsCount.value);
-  const aspectRatio = useQuickMode ? "9:16" : dom.aspectRatio.value;
-  const includeAutoTranscript = useQuickMode ? true : state.includeAutoTranscript;
-  const dubFrenchAudio = useQuickMode ? true : state.dubFrenchAudio;
-  const autoDubVoiceBySpeaker = useQuickMode ? true : state.autoDubVoiceBySpeaker;
-  const burnSubtitles = useQuickMode ? false : state.burnSubtitles;
+  const clipDuration = Number(dom.clipDuration.value);
+  const clipsCount = Number(dom.clipsCount.value);
+  const aspectRatio = dom.aspectRatio.value;
+  const languageMode = dom.languageMode?.value || state.languageMode;
+  state.languageMode = languageMode;
+  let includeAutoTranscript = state.includeAutoTranscript;
+  let dubFrenchAudio = state.dubFrenchAudio;
+  let autoDubVoiceBySpeaker = state.autoDubVoiceBySpeaker;
+  let burnSubtitles = state.burnSubtitles;
+
+  if (languageMode === "already-french") {
+    dubFrenchAudio = false;
+    autoDubVoiceBySpeaker = false;
+  } else if (useQuickMode) {
+    // Quick mode applies recommended defaults without overriding chosen duration.
+    includeAutoTranscript = true;
+    dubFrenchAudio = true;
+    autoDubVoiceBySpeaker = true;
+    burnSubtitles = false;
+  }
 
   const body = new FormData();
   if (hasUrl) {
@@ -421,6 +436,7 @@ async function createJob() {
   body.append("clipDuration", String(clipDuration));
   body.append("clipsCount", String(clipsCount));
   body.append("aspectRatio", aspectRatio);
+  body.append("languageMode", languageMode);
   body.append("transcript", dom.transcriptInput.value.trim());
   body.append("subtitleTheme", state.subtitleTheme);
   body.append("highlightMode", state.highlightMode);
@@ -495,11 +511,13 @@ async function pollJob() {
       state.burnSubtitles = Boolean(job.params?.burnSubtitles);
       state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
       state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
+      state.languageMode = job.params?.languageMode || state.languageMode;
       state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
       dom.subtitleTheme.value = state.subtitleTheme;
       if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
       if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
       if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
+      if (dom.languageMode) dom.languageMode.value = state.languageMode;
       applySubtitleTheme(state.subtitleTheme);
       applyPreviewAspectRatio(state.currentAspectRatio);
 
@@ -588,6 +606,18 @@ function initEvents() {
     });
   }
 
+  if (dom.languageMode) {
+    dom.languageMode.addEventListener("change", () => {
+      state.languageMode = dom.languageMode.value;
+      if (state.languageMode === "already-french") {
+        state.dubFrenchAudio = false;
+        state.autoDubVoiceBySpeaker = false;
+        if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = false;
+        if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = false;
+      }
+    });
+  }
+
   dom.includeAutoTranscript.addEventListener("change", () => {
     state.includeAutoTranscript = dom.includeAutoTranscript.checked;
   });
@@ -671,6 +701,7 @@ function initDefaults() {
   if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
   if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
   if (dom.quickMode) dom.quickMode.checked = state.quickMode;
+  if (dom.languageMode) dom.languageMode.value = state.languageMode;
   applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
   setGenerationProgress(0);

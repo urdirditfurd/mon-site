@@ -81,10 +81,10 @@ Ouvrir ensuite:
 2. Cliquer **Générer mes shorts**.
 3. Récupérer les clips générés.
 
-Le mode express force automatiquement des réglages adaptés short-form:
+Le mode express applique des réglages short-form recommandés **sans écraser la durée choisie**:
 - ratio **9:16** (TikTok/Reels)
 - transcription auto activée
-- doublage audio FR activé
+- doublage audio FR activé (si mode langue = "vidéo à traduire")
 
 ### Mode avancé
 
@@ -92,7 +92,10 @@ Le mode express force automatiquement des réglages adaptés short-form:
    - soit via **URL** (YouTube ou lien direct MP4/MOV/WebM)
    - soit via **upload fichier** local
 2. Régler durée, nombre de clips, ratio.
-3. Régler options V4 (mode highlights, thème captions, auto transcript, dubbing FR, burn subtitles, gap).
+3. Choisir le **mode langue**:
+   - **Vidéo à traduire en français**: active le doublage FR selon vos options.
+   - **Vidéo déjà en français**: coupe automatiquement les options de doublage (pas de traduction audio).
+4. Régler durée, nombre de clips et options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
 4. Cliquer **Générer mes shorts**.
 5. Une fois terminé:
    - prévisualiser les clips
@@ -120,7 +123,7 @@ Le mode express force automatiquement des réglages adaptés short-form:
 
 - `video` (fichier) **ou**
 - `videoUrl` (URL HTTP/HTTPS, YouTube supporté via `yt-dlp`)
-- `clipDuration` (sec, jusqu’à 300)
+- `clipDuration` (sec, jusqu’à 600)
 - `clipsCount`
 - `aspectRatio` (`9:16` | `1:1` | `16:9`)
 - `transcript` (optionnel)
@@ -128,6 +131,7 @@ Le mode express force automatiquement des réglages adaptés short-form:
 - `subtitleTheme` (`classic` | `bold` | `cinema` | `neon`)
 - `highlightMode` (`balanced` | `hook-first` | `viral`)
 - `includeAutoTranscript` (`true`/`false`)
+- `languageMode` (`translate-to-french` | `already-french`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
 - `dubFrenchAudio` (`true`/`false`) — remplace la piste audio par une voix FR synthétique

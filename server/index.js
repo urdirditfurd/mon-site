@@ -54,6 +54,7 @@ const DEFAULTS = {
   clipsCount: 4,
   minGap: 3,
   aspectRatio: "9:16",
+  languageMode: "translate-to-french",
   subtitleTheme: "classic",
   highlightMode: "balanced",
   includeAutoTranscript: false,
@@ -1748,6 +1749,9 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const highlightMode = ["balanced", "hook-first", "viral"].includes(req.body.highlightMode)
       ? req.body.highlightMode
       : DEFAULTS.highlightMode;
+    const languageMode = ["translate-to-french", "already-french"].includes(req.body.languageMode)
+      ? req.body.languageMode
+      : DEFAULTS.languageMode;
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
     const dubFrenchAudio = boolFrom(req.body.dubFrenchAudio, DEFAULTS.dubFrenchAudio);
     const autoDubVoiceBySpeaker = boolFrom(req.body.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker);
@@ -1797,9 +1801,10 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         minGapSecBetweenClips,
         subtitleTheme,
         highlightMode,
+        languageMode,
         includeAutoTranscript,
-        dubFrenchAudio,
-        autoDubVoiceBySpeaker,
+        dubFrenchAudio: languageMode === "already-french" ? false : dubFrenchAudio,
+        autoDubVoiceBySpeaker: languageMode === "already-french" ? false : autoDubVoiceBySpeaker,
         includeSrtInZip,
         burnSubtitles,
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
