@@ -96,6 +96,7 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
    - **Vidéo à traduire en français**: active le doublage FR selon vos options.
    - **Vidéo déjà en français**: coupe automatiquement les options de doublage (pas de traduction audio).
 4. Régler durée, nombre de clips et options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
+5. Utiliser **Ignorer les X premières secondes** pour éviter explicitement les intros/génériques.
 4. Cliquer **Générer mes shorts**.
 5. Une fois terminé:
    - prévisualiser les clips
@@ -128,6 +129,7 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
 - `aspectRatio` (`9:16` | `1:1` | `16:9`)
 - `transcript` (optionnel)
 - `minGapSecBetweenClips`
+- `ignoreIntroSec` (secondes à ignorer en début de vidéo)
 - `subtitleTheme` (`classic` | `bold` | `cinema` | `neon`)
 - `highlightMode` (`balanced` | `hook-first` | `viral`)
 - `includeAutoTranscript` (`true`/`false`)

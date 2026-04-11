@@ -7,7 +7,8 @@ const config = {
   sampleTranscript: runtimeConfig.sampleTranscript || "",
   defaultClipDuration: Number(defaults.clipDurationSec) || 30,
   defaultClipsCount: Number(defaults.clipsCount) || 4,
-  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 0
+  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 0,
+  defaultIgnoreIntroSec: Number(defaults.ignoreIntroSec) || 0
 };
 
 const state = {
@@ -31,6 +32,7 @@ const state = {
   autoDubVoiceBySpeaker: true,
   includeSrtInZip: true,
   burnSubtitles: false,
+  ignoreIntroSec: config.defaultIgnoreIntroSec,
   currentAspectRatio: "9:16"
 };
 
@@ -50,6 +52,7 @@ const dom = {
   transcriptInput: document.getElementById("transcriptInput"),
   subtitleTheme: document.getElementById("subtitleTheme"),
   highlightMode: document.getElementById("highlightMode"),
+  ignoreIntroSec: document.getElementById("ignoreIntroSec"),
   includeAutoTranscript: document.getElementById("includeAutoTranscript"),
   dubFrenchAudio: document.getElementById("dubFrenchAudio"),
   autoDubVoiceBySpeaker: document.getElementById("autoDubVoiceBySpeaker"),
@@ -368,6 +371,10 @@ async function checkBackendHealth() {
         dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
         dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
       }
+      if (typeof defaultsCfg.ignoreIntroSec === "number" && dom.ignoreIntroSec) {
+        state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
+        dom.ignoreIntroSec.value = String(defaultsCfg.ignoreIntroSec);
+      }
     }
     if (serverConfig?.youtubeCookies) {
       renderYoutubeCookiesStatus(serverConfig.youtubeCookies);
@@ -446,6 +453,7 @@ async function createJob() {
   body.append("includeSrtInZip", String(state.includeSrtInZip));
   body.append("burnSubtitles", String(burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
+  body.append("ignoreIntroSec", String(Number(dom.ignoreIntroSec?.value || state.ignoreIntroSec || 0)));
   const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
   if (youtubeCookies) {
     body.append("youtubeCookies", youtubeCookies);
@@ -511,12 +519,14 @@ async function pollJob() {
       state.burnSubtitles = Boolean(job.params?.burnSubtitles);
       state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
       state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
+      state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
       state.languageMode = job.params?.languageMode || state.languageMode;
       state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
       dom.subtitleTheme.value = state.subtitleTheme;
       if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
       if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
       if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
+      if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
       if (dom.languageMode) dom.languageMode.value = state.languageMode;
       applySubtitleTheme(state.subtitleTheme);
       applyPreviewAspectRatio(state.currentAspectRatio);
@@ -599,6 +609,12 @@ function initEvents() {
     state.currentAspectRatio = dom.aspectRatio.value;
     applyPreviewAspectRatio(state.currentAspectRatio);
   });
+
+  if (dom.ignoreIntroSec) {
+    dom.ignoreIntroSec.addEventListener("change", () => {
+      state.ignoreIntroSec = Number(dom.ignoreIntroSec.value || 0);
+    });
+  }
 
   if (dom.quickMode) {
     dom.quickMode.addEventListener("change", () => {
@@ -696,6 +712,8 @@ function initDefaults() {
   dom.clipsCountValue.textContent = String(config.defaultClipsCount);
   dom.minGapSecBetweenClips.value = String(config.defaultMinGapSec);
   dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
+  state.ignoreIntroSec = config.defaultIgnoreIntroSec;
+  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
   if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;

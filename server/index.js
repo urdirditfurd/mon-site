@@ -53,6 +53,7 @@ const DEFAULTS = {
   clipDuration: 30,
   clipsCount: 4,
   minGap: 3,
+  ignoreIntroSec: 20,
   aspectRatio: "9:16",
   languageMode: "translate-to-french",
   subtitleTheme: "classic",
@@ -771,20 +772,21 @@ function generateCandidateMoments(duration, step, mode) {
   return out.sort((a, b) => b.score - a.score);
 }
 
-function computeBoundaryGuards(duration, clipDuration) {
+function computeBoundaryGuards(duration, clipDuration, ignoreIntroSec = 0) {
   const maxStart = Math.max(0, duration - clipDuration);
   if (maxStart <= 0) return { maxStart, introGuardSec: 0, outroGuardSec: 0, preferredMinStart: 0, preferredMaxStart: 0 };
 
   // Keep clips away from generic intros/outros while preserving room for long clips.
   const introGuardSec = Math.min(maxStart, Math.max(0, Math.min(60, duration * 0.12, clipDuration * 0.8)));
+  const manualIntroGuardSec = Math.min(maxStart, Math.max(0, ignoreIntroSec));
   const outroGuardSec = Math.min(maxStart, Math.max(0, Math.min(45, duration * 0.08, clipDuration * 0.65)));
-  const preferredMinStart = introGuardSec;
+  const preferredMinStart = Math.max(introGuardSec, manualIntroGuardSec);
   const preferredMaxStart = Math.max(preferredMinStart, maxStart - outroGuardSec);
-  return { maxStart, introGuardSec, outroGuardSec, preferredMinStart, preferredMaxStart };
+  return { maxStart, introGuardSec, manualIntroGuardSec, outroGuardSec, preferredMinStart, preferredMaxStart };
 }
 
-function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = []) {
-  const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration);
+function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = [], ignoreIntroSec = 0) {
+  const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration, ignoreIntroSec);
   const step = Math.max(2, Math.min(7, clipDuration * 0.4));
   const moments = generateCandidateMoments(duration, step, mode);
   const candidates = moments.map((moment) => {
@@ -1592,7 +1594,8 @@ async function processJob(job) {
     job.params.clipsCount,
     job.params.minGapSecBetweenClips,
     job.params.highlightMode,
-    sourceTimedCaptions
+    sourceTimedCaptions,
+    job.params.ignoreIntroSec
   );
   const transcriptParts = segmentTranscriptForClips(job.params.transcript, clips);
   if (!job.params.transcript && sourceTimedCaptions.length) {
@@ -1800,6 +1803,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
+    const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
     const subtitleTheme = ["classic", "bold", "cinema", "neon"].includes(req.body.subtitleTheme)
       ? req.body.subtitleTheme
       : DEFAULTS.subtitleTheme;
@@ -1856,6 +1860,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         aspectRatio,
         transcript,
         minGapSecBetweenClips,
+        ignoreIntroSec,
         subtitleTheme,
         highlightMode,
         languageMode,
