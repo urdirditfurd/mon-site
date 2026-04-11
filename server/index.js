@@ -644,6 +644,32 @@ const VIRAL_KEYWORDS = new Set([
   "impossible"
 ]);
 
+const INTRO_OUTRO_PROMO_KEYWORDS = new Set([
+  "subscribe",
+  "sub",
+  "abonne",
+  "abonnezvous",
+  "abonnement",
+  "follow",
+  "suivez",
+  "like",
+  "partage",
+  "partagez",
+  "creator",
+  "createur",
+  "createurs",
+  "credits",
+  "credit",
+  "sponsor",
+  "sponsoris",
+  "sponsored",
+  "instagram",
+  "insta",
+  "tiktok",
+  "youtube",
+  "snapchat"
+]);
+
 function normalizeScoringToken(rawToken) {
   return String(rawToken || "")
     .toLowerCase()
@@ -696,16 +722,19 @@ function scoreWindowFromTimedCaptions(windowStart, windowEnd, timedCaptions, cli
   const tokens = tokenizeForScoring(mergedText);
   const tokenSet = new Set(tokens);
   const hookHits = tokens.reduce((sum, token) => sum + (VIRAL_KEYWORDS.has(token) ? 1 : 0), 0);
+  const promoHits = tokens.reduce((sum, token) => sum + (INTRO_OUTRO_PROMO_KEYWORDS.has(token) ? 1 : 0), 0);
   const punctuationHits = (mergedText.match(/[!?]/g) || []).length;
   const numericHits = (mergedText.match(/\d+/g) || []).length;
+  const socialTagHits = (mergedText.match(/[@#][\w.-]+/g) || []).length;
   const density = Math.min(1, tokens.length / Math.max(8, clipDuration * 2.6));
   const information = Math.min(1, tokenSet.size / Math.max(1, tokens.length || 1));
   const hook = Math.min(1, (hookHits * 0.22 + punctuationHits * 0.12 + numericHits * 0.1) / 1.2);
   const coverage = Math.min(1, coveredSeconds / Math.max(1, clipDuration));
   const centerTime = (windowStart + windowEnd) / 2;
   const energy = highlightScore(centerTime, duration, mode);
+  const promoPenalty = Math.min(0.34, promoHits * 0.045 + socialTagHits * 0.07);
 
-  let score = density * 0.22 + information * 0.16 + hook * 0.28 + coverage * 0.14 + energy * 0.2;
+  let score = density * 0.22 + information * 0.16 + hook * 0.28 + coverage * 0.14 + energy * 0.2 - promoPenalty;
   const earlyBias = 1 - centerTime / Math.max(duration, 1);
   if (mode === "hook-first") score += earlyBias * 0.12;
   if (mode === "viral") score += hook * 0.08 + Math.min(1, density * 1.2) * 0.06;
@@ -742,8 +771,20 @@ function generateCandidateMoments(duration, step, mode) {
   return out.sort((a, b) => b.score - a.score);
 }
 
-function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = []) {
+function computeBoundaryGuards(duration, clipDuration) {
   const maxStart = Math.max(0, duration - clipDuration);
+  if (maxStart <= 0) return { maxStart, introGuardSec: 0, outroGuardSec: 0, preferredMinStart: 0, preferredMaxStart: 0 };
+
+  // Keep clips away from generic intros/outros while preserving room for long clips.
+  const introGuardSec = Math.min(maxStart, Math.max(0, Math.min(60, duration * 0.12, clipDuration * 0.8)));
+  const outroGuardSec = Math.min(maxStart, Math.max(0, Math.min(45, duration * 0.08, clipDuration * 0.65)));
+  const preferredMinStart = introGuardSec;
+  const preferredMaxStart = Math.max(preferredMinStart, maxStart - outroGuardSec);
+  return { maxStart, introGuardSec, outroGuardSec, preferredMinStart, preferredMaxStart };
+}
+
+function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = []) {
+  const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration);
   const step = Math.max(2, Math.min(7, clipDuration * 0.4));
   const moments = generateCandidateMoments(duration, step, mode);
   const candidates = moments.map((moment) => {
@@ -753,7 +794,11 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
     const timed = scoreWindowFromTimedCaptions(start, end, timedCaptions, clipDuration, mode, duration);
     const fallbackText = "";
     const title = buildClipTitleFromText(timed.text || fallbackText, 0);
-    const combinedScore = timed.tokenSet.size > 0 ? timed.score : Number(moment.score.toFixed(4));
+    const baseScore = timed.tokenSet.size > 0 ? timed.score : Number(moment.score.toFixed(4));
+    const beforePreferred = Math.max(0, preferredMinStart - start);
+    const afterPreferred = Math.max(0, start - preferredMaxStart);
+    const boundaryPenalty = Math.min(0.45, beforePreferred / Math.max(1, clipDuration) * 0.42 + afterPreferred / Math.max(1, clipDuration) * 0.28);
+    const combinedScore = Number(Math.max(0, baseScore - boundaryPenalty).toFixed(4));
     return {
       start,
       end,
@@ -793,7 +838,8 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
   if (chosen.length < clipsCount) {
     for (let i = 0; i < clipsCount; i += 1) {
       const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
-      const start = Number((maxStart * ratio).toFixed(3));
+      const fallbackSpan = Math.max(0, preferredMaxStart - preferredMinStart);
+      const start = Number((preferredMinStart + fallbackSpan * ratio).toFixed(3));
       const end = Math.min(duration, start + clipDuration);
       const fallback = {
         start,
@@ -811,9 +857,10 @@ function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, ti
   }
 
   if (!chosen.length) {
+    const safeStart = Math.min(Math.max(0, preferredMinStart), maxStart);
     chosen.push({
-      start: 0,
-      end: Math.min(duration, clipDuration),
+      start: safeStart,
+      end: Math.min(duration, safeStart + clipDuration),
       duration: Math.min(duration, clipDuration),
       score: 0.5,
       title: "Clip 1",
