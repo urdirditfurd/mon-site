@@ -47,6 +47,7 @@ let bullWorker = null;
 let ffmpegReady = true;
 let whisperAvailable = false;
 let ytDlpAvailable = false;
+let edgeTtsAvailable = false;
 
 const DEFAULTS = {
   clipDuration: 30,
@@ -56,6 +57,7 @@ const DEFAULTS = {
   subtitleTheme: "classic",
   highlightMode: "balanced",
   includeAutoTranscript: false,
+  dubFrenchAudio: true,
   includeSrtInZip: true,
   burnSubtitles: false
 };
@@ -129,7 +131,9 @@ function asPublicJobSnapshot(job) {
       duration: clip.duration,
       score: clip.score,
       filePath: clip.filePath,
+      dubbedAudioPath: clip.dubbedAudioPath || null,
       burnedFilePath: clip.burnedFilePath || null,
+      aspectRatio: clip.aspectRatio || null,
       captions: clip.captions || []
     }))
   };
@@ -417,6 +421,157 @@ function hasStoredYoutubeCookies() {
   return fs.existsSync(YOUTUBE_COOKIES_STORE_PATH);
 }
 
+function parseSubtitleTimestamp(raw) {
+  const cleaned = String(raw || "").trim().replace(",", ".");
+  const parts = cleaned.split(":").map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  const [hoursRaw, minutesRaw, secondsRaw] =
+    parts.length === 3 ? parts : ["0", parts[0], parts[1]];
+  const hours = Number(hoursRaw);
+  const minutes = Number(minutesRaw);
+  const seconds = Number(secondsRaw);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function stripSubtitleMarkup(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\{\\[^}]+\}/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseSrtCaptions(content) {
+  const blocks = String(content || "")
+    .replace(/\r/g, "")
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const out = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const timeLine = lines.find((line) => line.includes("-->"));
+    if (!timeLine) continue;
+    const [startRaw, endRaw] = timeLine.split("-->").map((x) => x.trim());
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const textLines = lines.slice(lines.indexOf(timeLine) + 1);
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (!text) continue;
+    out.push({ start, end, text });
+  }
+  return out;
+}
+
+function parseVttCaptions(content) {
+  const lines = String(content || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx].trim();
+    if (!line || line.startsWith("WEBVTT") || line.startsWith("NOTE")) {
+      idx += 1;
+      continue;
+    }
+    if (!line.includes("-->")) {
+      idx += 1;
+      continue;
+    }
+    const [startRaw, endRaw] = line.split("-->").map((part) => part.trim().split(" ")[0]);
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    idx += 1;
+    const textLines = [];
+    while (idx < lines.length && lines[idx].trim()) {
+      textLines.push(lines[idx].trim());
+      idx += 1;
+    }
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && text) {
+      out.push({ start, end, text });
+    }
+  }
+  return out;
+}
+
+async function parseSubtitleFileToTimedCaptions(subtitlePath) {
+  if (!subtitlePath || !fs.existsSync(subtitlePath)) return [];
+  const raw = await fsp.readFile(subtitlePath, "utf8");
+  const ext = path.extname(subtitlePath).toLowerCase();
+  if (ext === ".srt") return parseSrtCaptions(raw);
+  if (ext === ".vtt") return parseVttCaptions(raw);
+  return parseSrtCaptions(raw);
+}
+
+function buildCaptionsFromSourceTimedCaptions(clipStart, clipEnd, timedCaptions) {
+  const localCaptions = [];
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(clipStart, cue.start);
+    const overlapEnd = Math.min(clipEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    const text = stripSubtitleMarkup(cue.text);
+    if (!text) continue;
+    localCaptions.push({
+      start: Number((overlapStart - clipStart).toFixed(3)),
+      end: Number((overlapEnd - clipStart).toFixed(3)),
+      text
+    });
+  }
+  return localCaptions;
+}
+
+function buildDubTextFromCaptions(captions) {
+  return (captions || [])
+    .map((cue) => stripSubtitleMarkup(cue.text))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function synthesizeFrenchSpeech(text, outputAudioPath) {
+  const spokenText = String(text || "").replace(/\s+/g, " ").trim();
+  if (!spokenText) return false;
+  const trimmed = spokenText.length > 1500 ? spokenText.slice(0, 1500) : spokenText;
+  await runCommand("python3", [
+    "-m",
+    "edge_tts",
+    "--voice",
+    process.env.EDGE_TTS_VOICE || "fr-FR-DeniseNeural",
+    "--text",
+    trimmed,
+    "--write-media",
+    outputAudioPath
+  ]);
+  return fs.existsSync(outputAudioPath);
+}
+
+async function replaceClipAudioWithFrenchDub(inputClipPath, dubAudioPath, outputClipPath) {
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    dubAudioPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
 function tokenizeTranscript(transcript) {
   return String(transcript || "")
     .replace(/\s+/g, " ")
@@ -623,9 +778,34 @@ async function cleanupDownloadedArtifactsByPrefix(prefixPath) {
   );
 }
 
+async function resolveDownloadedSubtitleByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return null;
+  const entries = await fsp.readdir(dir);
+  const candidates = entries
+    .filter((name) => name.startsWith(`${base}.`) && (name.endsWith(".srt") || name.endsWith(".vtt")))
+    .map((name) => path.join(dir, name));
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidatePath) => {
+    const file = path.basename(candidatePath).toLowerCase();
+    let score = 0;
+    if (file.includes(".fr")) score += 100;
+    if (file.includes(".fr-fr")) score += 10;
+    if (file.endsWith(".srt")) score += 5;
+    if (file.includes(".en")) score += 1;
+    return score;
+  };
+
+  const ordered = candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+  return ordered[0];
+}
+
 async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
   const downloadOptions = arguments[2] || {};
   const ytCookiesFile = downloadOptions.ytCookiesFile || "";
+  const subtitlesPrefix = downloadOptions.subtitlesPrefix || `${outputPrefix}-subs`;
   const ytExtractorArgs =
     process.env.YTDLP_EXTRACTOR_ARGS ||
     (ytCookiesFile
@@ -635,7 +815,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     process.env.YTDLP_USER_AGENT ||
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-  const tryYtDlpDownload = async () => {
+  const runYtDlpDownloadProfiles = async () => {
     if (!ytDlpAvailable) return null;
     const template = `${outputPrefix}.%(ext)s`;
     const commonArgs = [
@@ -689,20 +869,61 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     throw lastError || new Error("Impossible de télécharger la vidéo via yt-dlp");
   };
 
+  const tryYtDlpSubtitleDownload = async () => {
+    if (!ytDlpAvailable || !isLikelyYouTubeUrl(sourceUrl)) return null;
+    const template = `${subtitlesPrefix}.%(ext)s`;
+    await cleanupDownloadedArtifactsByPrefix(subtitlesPrefix);
+    const args = [
+      "-m",
+      "yt_dlp",
+      "--skip-download",
+      "--no-playlist",
+      "--no-progress",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs",
+      process.env.YTDLP_SUB_LANGS || "fr.*,fr,en.*,en",
+      "--sub-format",
+      "srt/vtt/best",
+      "--convert-subs",
+      "srt",
+      "--extractor-args",
+      ytExtractorArgs,
+      "--js-runtimes",
+      "node",
+      "--remote-components",
+      "ejs:github",
+      "--user-agent",
+      ytUserAgent,
+      "-o",
+      template
+    ];
+    if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+    try {
+      await runCommand("python3", args.concat([sourceUrl]));
+    } catch (_error) {
+      return null;
+    }
+    return resolveDownloadedSubtitleByPrefix(subtitlesPrefix);
+  };
+
   if (isLikelyYouTubeUrl(sourceUrl)) {
     if (!ytDlpAvailable) {
       throw new Error("Lien YouTube détecté mais yt-dlp est indisponible sur le serveur");
     }
-    const ytFile = await tryYtDlpDownload();
-    if (await isPlayableVideoFile(ytFile)) return ytFile;
+    const ytFile = await runYtDlpDownloadProfiles();
+    if (await isPlayableVideoFile(ytFile)) {
+      const subtitlePath = await tryYtDlpSubtitleDownload();
+      return { videoPath: ytFile, subtitlePath: subtitlePath || "" };
+    }
     throw new Error("Impossible de télécharger une vidéo YouTube exploitable");
   }
 
   // For generic URLs, attempt yt-dlp first when available.
   if (ytDlpAvailable) {
     try {
-      const ytFile = await tryYtDlpDownload();
-      if (await isPlayableVideoFile(ytFile)) return ytFile;
+      const ytFile = await runYtDlpDownloadProfiles();
+      if (await isPlayableVideoFile(ytFile)) return { videoPath: ytFile, subtitlePath: "" };
     } catch (_ytError) {
       // Fallback below.
     }
@@ -729,7 +950,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
       "+faststart",
       outputPath
     ]);
-    if (await isPlayableVideoFile(outputPath)) return outputPath;
+    if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
   } catch (_copyErr) {
     // Fallback below.
   }
@@ -760,7 +981,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     "+faststart",
     outputPath
   ]);
-  if (await isPlayableVideoFile(outputPath)) return outputPath;
+  if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
   throw new Error("Téléchargement URL réussi mais fichier vidéo invalide");
 }
 
@@ -936,6 +1157,8 @@ function sanitizeJobForClient(job) {
       end: clip.end,
       duration: clip.duration,
       score: clip.score,
+      aspectRatio: clip.aspectRatio || job.params?.aspectRatio || DEFAULTS.aspectRatio,
+      hasBurnedSubtitles: Boolean(clip.burnedFilePath),
       streamUrl: `/api/jobs/${job.id}/clips/${clip.id}/stream`,
       downloadUrl: `/api/jobs/${job.id}/clips/${clip.id}/download`,
       srtUrl: `/api/jobs/${job.id}/clips/${clip.id}/srt`,
@@ -1051,7 +1274,12 @@ async function processJob(job) {
   job.status = "processing";
   job.progress = 5;
   job.updatedAt = new Date().toISOString();
+  if (job.params?.dubFrenchAudio && !edgeTtsAvailable) {
+    job.params.dubFrenchAudio = false;
+  }
   await persistJobsDb();
+  const jobDir = getJobDir(job.id);
+  await fsp.mkdir(jobDir, { recursive: true });
 
   if (!job.inputPath && job.sourceUrl) {
     if (!isValidHttpUrl(job.sourceUrl)) {
@@ -1066,15 +1294,19 @@ async function processJob(job) {
       job.youtubeCookiesFilePath && fs.existsSync(job.youtubeCookiesFilePath)
         ? job.youtubeCookiesFilePath
         : "";
-    let downloadedPath;
+    let downloaded;
     try {
-      downloadedPath = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, { ytCookiesFile });
+      downloaded = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, {
+        ytCookiesFile,
+        subtitlesPrefix: path.join(jobDir, "source-subs")
+      });
     } catch (downloadErr) {
       throw new Error(normalizeYouTubeErrorMessage(downloadErr instanceof Error ? downloadErr.message : String(downloadErr)));
     }
-    job.inputPath = downloadedPath;
+    job.inputPath = downloaded.videoPath;
+    job.sourceSubtitlePath = downloaded.subtitlePath || "";
     if (!job.originalFilename) {
-      job.originalFilename = path.basename(downloadedPath);
+      job.originalFilename = path.basename(downloaded.videoPath);
     }
     job.progress = 14;
     job.updatedAt = new Date().toISOString();
@@ -1090,6 +1322,15 @@ async function processJob(job) {
   job.progress = 15;
   job.updatedAt = new Date().toISOString();
 
+  let sourceTimedCaptions = [];
+  if (job.sourceSubtitlePath) {
+    try {
+      sourceTimedCaptions = await parseSubtitleFileToTimedCaptions(job.sourceSubtitlePath);
+    } catch (_error) {
+      sourceTimedCaptions = [];
+    }
+  }
+
   if (!job.params.transcript && job.params.includeAutoTranscript) {
     const generated = await transcribeVideoMaybe(job.inputPath, duration, true);
     job.params.transcript = generated.transcript;
@@ -1104,35 +1345,68 @@ async function processJob(job) {
     job.params.highlightMode
   );
   const transcriptParts = segmentTranscriptForClips(job.params.transcript, clips);
+  if (!job.params.transcript && sourceTimedCaptions.length) {
+    job.params.transcript = sourceTimedCaptions.map((cue) => cue.text).join(" ");
+  }
   job.progress = 25;
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
-
-  const jobDir = getJobDir(job.id);
-  await fsp.mkdir(jobDir, { recursive: true });
 
   const total = clips.length || 1;
   const rendered = [];
   for (let i = 0; i < clips.length; i += 1) {
     const clip = clips[i];
     const outputPath = path.join(jobDir, `${clip.id}.mp4`);
-    const captions = buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
+    const timedCaptionsForClip = sourceTimedCaptions.length
+      ? buildCaptionsFromSourceTimedCaptions(clip.start, clip.end, sourceTimedCaptions)
+      : [];
+    const captions =
+      timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
     const srtPath = getJobSrtPath(job.id, clip.id);
     await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio);
     await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
+
+    let finalClipPath = outputPath;
+    let dubbedAudioPath = "";
+    if (job.params.dubFrenchAudio && edgeTtsAvailable) {
+      const dubText = buildDubTextFromCaptions(captions);
+      if (dubText) {
+        const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
+        const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
+        try {
+          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath);
+          if (hasTtsAudio) {
+            await replaceClipAudioWithFrenchDub(outputPath, ttsPath, dubbedPath);
+            finalClipPath = dubbedPath;
+            dubbedAudioPath = ttsPath;
+          }
+        } catch (_error) {
+          finalClipPath = outputPath;
+          dubbedAudioPath = "";
+        }
+      }
+    }
 
     let burnedFilePath = null;
     if (job.params.burnSubtitles) {
       const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
       try {
-        await burnCaptionsIntoClip(outputPath, srtPath, burnPath, job.params.subtitleTheme);
+        await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
         burnedFilePath = burnPath;
       } catch (_error) {
         burnedFilePath = null;
       }
     }
 
-    rendered.push({ ...clip, filePath: outputPath, burnedFilePath, srtPath, captions });
+    rendered.push({
+      ...clip,
+      filePath: finalClipPath,
+      dubbedAudioPath,
+      burnedFilePath,
+      srtPath,
+      captions,
+      aspectRatio: job.params.aspectRatio
+    });
     job.progress = Math.round(25 + ((i + 1) / total) * 70);
     job.updatedAt = new Date().toISOString();
     await persistJobsDb();
@@ -1171,6 +1445,7 @@ app.get("/api/health", async (_req, res) => {
     ffmpeg: ffmpegReady,
     whisperAvailable,
     ytDlpAvailable,
+    edgeTtsAvailable,
     youtubeCookiesConfigured: cookiesMeta.configured,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
@@ -1192,9 +1467,11 @@ app.get("/api/config", (_req, res) => {
       ffmpeg: ffmpegReady,
       whisperAvailable,
       ytDlpAvailable,
+      edgeTtsAvailable,
       urlIngestion: true,
       youtubeIngestion: ytDlpAvailable,
       youtubeCookiesPersistence: true,
+      dubFrenchAudio: edgeTtsAvailable,
       srt: true,
       zip: true,
       burnSubtitles: true
@@ -1275,6 +1552,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
       ? req.body.highlightMode
       : DEFAULTS.highlightMode;
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
+    const dubFrenchAudio = boolFrom(req.body.dubFrenchAudio, DEFAULTS.dubFrenchAudio);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
     const youtubeCookies = String(req.body.youtubeCookies || "");
@@ -1322,6 +1600,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         subtitleTheme,
         highlightMode,
         includeAutoTranscript,
+        dubFrenchAudio,
         includeSrtInZip,
         burnSubtitles,
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
@@ -1423,6 +1702,7 @@ ensureDirs()
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
+    edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
     await restoreJobsDb();
     await initBullQueue();
     app.listen(PORT, () => {

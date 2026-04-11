@@ -20,6 +20,10 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - overlay preview frontend
   - export `.srt` par clip
   - burn-in optionnel dans MP4
+  - extraction des sous-titres YouTube (quand disponibles) pour un meilleur alignement temporel
+- Doublage audio FR optionnel:
+  - synthèse vocale française (edge-tts)
+  - remplace l'audio original dans les exports
 - Exports:
   - clip individuel MP4
   - plan JSON
@@ -107,6 +111,7 @@ Ouvrir ensuite:
 - `includeAutoTranscript` (`true`/`false`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
+- `dubFrenchAudio` (`true`/`false`) — remplace la piste audio par une voix FR synthétique
 
 ### Cookies YouTube persistants (recommandé)
 

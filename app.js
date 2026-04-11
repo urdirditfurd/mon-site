@@ -25,8 +25,10 @@ const state = {
   subtitleTheme: "classic",
   highlightMode: "balanced",
   includeAutoTranscript: false,
+  dubFrenchAudio: true,
   includeSrtInZip: true,
-  burnSubtitles: false
+  burnSubtitles: false,
+  currentAspectRatio: "9:16"
 };
 
 const dom = {
@@ -44,6 +46,7 @@ const dom = {
   subtitleTheme: document.getElementById("subtitleTheme"),
   highlightMode: document.getElementById("highlightMode"),
   includeAutoTranscript: document.getElementById("includeAutoTranscript"),
+  dubFrenchAudio: document.getElementById("dubFrenchAudio"),
   includeSrtInZip: document.getElementById("includeSrtInZip"),
   burnSubtitles: document.getElementById("burnSubtitles"),
   minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
@@ -51,6 +54,7 @@ const dom = {
   generateScriptBtn: document.getElementById("generateScriptBtn"),
   analyzeBtn: document.getElementById("analyzeBtn"),
   player: document.getElementById("player"),
+  videoShell: document.querySelector(".video-shell"),
   subtitleOverlay: document.getElementById("subtitleOverlay"),
   clipsList: document.getElementById("clipsList"),
   statusBadge: document.getElementById("statusBadge"),
@@ -109,6 +113,12 @@ function applySubtitleTheme(theme) {
   dom.subtitleOverlay.classList.add(`theme-${theme}`);
 }
 
+function applyPreviewAspectRatio(aspectRatio) {
+  if (!dom.videoShell) return;
+  const ratio = aspectRatio === "1:1" ? "1 / 1" : aspectRatio === "16:9" ? "16 / 9" : "9 / 16";
+  dom.videoShell.style.aspectRatio = ratio;
+}
+
 function renderClips() {
   dom.clipsList.innerHTML = "";
   if (!state.clips.length) {
@@ -150,6 +160,12 @@ function updateSubtitleOverlay() {
   }
   const clip = state.clips[state.selectedClipIndex];
   if (!clip) return;
+  if (clip.hasBurnedSubtitles) {
+    dom.subtitleOverlay.innerHTML = "";
+    dom.subtitleOverlay.style.display = "none";
+    return;
+  }
+  dom.subtitleOverlay.style.display = "block";
   const t = dom.player.currentTime || 0;
   const cue = (clip.captions || []).find((item) => t >= item.start && t <= item.end);
   if (!cue) {
@@ -165,11 +181,14 @@ function selectClip(index, autoplay = false) {
   renderClips();
 
   const clip = state.clips[index];
+  state.currentAspectRatio = clip.aspectRatio || state.currentAspectRatio;
+  applyPreviewAspectRatio(state.currentAspectRatio);
   dom.player.pause();
   dom.player.src = apiUrl(clip.streamUrl);
   dom.player.currentTime = 0;
   dom.player.load();
   dom.subtitleOverlay.innerHTML = "";
+  dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
   updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
 
   if (autoplay) dom.player.play().catch(() => {});
@@ -315,7 +334,7 @@ async function checkBackendHealth() {
     dom.backendMeta.textContent =
       `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
       `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · ` +
-      `Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+      `TTS FR: ${payload.edgeTtsAvailable ? "oui" : "non"} · Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
@@ -351,6 +370,7 @@ async function createJob() {
   body.append("subtitleTheme", state.subtitleTheme);
   body.append("highlightMode", state.highlightMode);
   body.append("includeAutoTranscript", String(state.includeAutoTranscript));
+  body.append("dubFrenchAudio", String(state.dubFrenchAudio));
   body.append("includeSrtInZip", String(state.includeSrtInZip));
   body.append("burnSubtitles", String(state.burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
@@ -411,8 +431,14 @@ async function pollJob() {
     if (job.status === "completed") {
       state.clips = job.clips || [];
       state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
+      state.burnSubtitles = Boolean(job.params?.burnSubtitles);
+      state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
+      state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
       dom.subtitleTheme.value = state.subtitleTheme;
+      if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
+      if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
       applySubtitleTheme(state.subtitleTheme);
+      applyPreviewAspectRatio(state.currentAspectRatio);
 
       renderClips();
       if (state.clips.length > 0) {
@@ -488,9 +514,20 @@ function initEvents() {
     state.highlightMode = dom.highlightMode.value;
   });
 
+  dom.aspectRatio.addEventListener("change", () => {
+    state.currentAspectRatio = dom.aspectRatio.value;
+    applyPreviewAspectRatio(state.currentAspectRatio);
+  });
+
   dom.includeAutoTranscript.addEventListener("change", () => {
     state.includeAutoTranscript = dom.includeAutoTranscript.checked;
   });
+
+  if (dom.dubFrenchAudio) {
+    dom.dubFrenchAudio.addEventListener("change", () => {
+      state.dubFrenchAudio = dom.dubFrenchAudio.checked;
+    });
+  }
 
   dom.includeSrtInZip.addEventListener("change", () => {
     state.includeSrtInZip = dom.includeSrtInZip.checked;
@@ -556,7 +593,9 @@ function initDefaults() {
   dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
+  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
   applySubtitleTheme(state.subtitleTheme);
+  applyPreviewAspectRatio(state.currentAspectRatio);
 }
 
 async function init() {
