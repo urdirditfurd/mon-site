@@ -14,6 +14,7 @@ const state = {
   backendAvailable: false,
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
+  quickMode: true,
   localVideoFile: null,
   localVideoObjectUrl: "",
   localVideoDuration: 0,
@@ -33,6 +34,7 @@ const state = {
 
 const dom = {
   videoUrlInput: document.getElementById("videoUrlInput"),
+  quickMode: document.getElementById("quickMode"),
   youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
   saveYoutubeCookiesBtn: document.getElementById("saveYoutubeCookiesBtn"),
   clearYoutubeCookiesBtn: document.getElementById("clearYoutubeCookiesBtn"),
@@ -53,6 +55,8 @@ const dom = {
   minGapValue: document.getElementById("minGapValue"),
   generateScriptBtn: document.getElementById("generateScriptBtn"),
   analyzeBtn: document.getElementById("analyzeBtn"),
+  generationProgress: document.getElementById("generationProgress"),
+  generationProgressText: document.getElementById("generationProgressText"),
   player: document.getElementById("player"),
   videoShell: document.querySelector(".video-shell"),
   subtitleOverlay: document.getElementById("subtitleOverlay"),
@@ -63,7 +67,10 @@ const dom = {
   downloadJsonBtn: document.getElementById("downloadJsonBtn"),
   downloadZipBtn: document.getElementById("downloadZipBtn"),
   downloadSrtBtn: document.getElementById("downloadSrtBtn"),
-  backendMeta: document.getElementById("backendMeta")
+  backendMeta: document.getElementById("backendMeta"),
+  selectedClipTitle: document.getElementById("selectedClipTitle"),
+  selectedClipScore: document.getElementById("selectedClipScore"),
+  selectedClipSummary: document.getElementById("selectedClipSummary")
 };
 
 function apiUrl(path) {
@@ -92,6 +99,16 @@ function setButtonsEnabled(enabled) {
   dom.downloadSrtBtn.disabled = !enabled;
 }
 
+function setGenerationProgress(value) {
+  const progress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  if (dom.generationProgress) {
+    dom.generationProgress.style.width = `${progress}%`;
+  }
+  if (dom.generationProgressText) {
+    dom.generationProgressText.textContent = `Progression: ${progress}%`;
+  }
+}
+
 function clearPolling() {
   if (state.pollTimer) {
     clearTimeout(state.pollTimer);
@@ -106,6 +123,10 @@ function resetClipState() {
   setButtonsEnabled(false);
   renderClips();
   dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
+  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = "Aucun clip sélectionné";
+  if (dom.selectedClipScore) dom.selectedClipScore.textContent = "Virality score: --";
+  if (dom.selectedClipSummary) dom.selectedClipSummary.textContent = "Le résumé transcript du clip apparaîtra ici.";
+  setGenerationProgress(0);
 }
 
 function applySubtitleTheme(theme) {
@@ -132,15 +153,23 @@ function renderClips() {
     if (idx === state.selectedClipIndex) li.classList.add("active");
 
     const wordsCount = (clip.captions || []).map((c) => c.text).join(" ").split(/\s+/).filter(Boolean).length;
+    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
+    const snippet = (clip.captions || [])
+      .map((c) => c.text)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 140);
     li.innerHTML = `
       <div class="clip-top">
         <h3 class="clip-title">${clip.title}</h3>
-        <span class="chip">Score ${clip.score}</span>
+        <span class="chip">Virality ${viralityScore}/100</span>
       </div>
       <p class="clip-times">
         ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)}
-        (${Math.round(clip.duration)}s) · ${wordsCount} mots
+        (${Math.round(clip.duration)}s) · ${wordsCount} mots · ${clip.aspectRatio || "9:16"}
       </p>
+      <p class="clip-snippet">${snippet || "Résumé transcript indisponible."}</p>
       <div class="clip-actions">
         <button class="mini-btn" data-action="select">Sélectionner</button>
         <button class="mini-btn" data-action="play">Lire</button>
@@ -189,6 +218,21 @@ function selectClip(index, autoplay = false) {
   dom.player.load();
   dom.subtitleOverlay.innerHTML = "";
   dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
+  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = clip.title;
+  if (dom.selectedClipScore) {
+    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
+    dom.selectedClipScore.textContent = `Virality score: ${viralityScore}/100 · ${clip.aspectRatio || state.currentAspectRatio}`;
+  }
+  if (dom.selectedClipSummary) {
+    const summary =
+      (clip.captions || [])
+        .map((c) => c.text)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 220) || "Résumé transcript indisponible.";
+    dom.selectedClipSummary.textContent = summary;
+  }
   updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
 
   if (autoplay) dom.player.play().catch(() => {});
@@ -357,22 +401,30 @@ async function createJob() {
     return;
   }
 
+  const useQuickMode = Boolean(state.quickMode);
+  const clipDuration = useQuickMode ? 30 : Number(dom.clipDuration.value);
+  const clipsCount = useQuickMode ? 4 : Number(dom.clipsCount.value);
+  const aspectRatio = useQuickMode ? "9:16" : dom.aspectRatio.value;
+  const includeAutoTranscript = useQuickMode ? true : state.includeAutoTranscript;
+  const dubFrenchAudio = useQuickMode ? true : state.dubFrenchAudio;
+  const burnSubtitles = useQuickMode ? false : state.burnSubtitles;
+
   const body = new FormData();
   if (hasUrl) {
     body.append("videoUrl", rawVideoUrl);
   } else if (hasFile) {
     body.append("video", state.localVideoFile);
   }
-  body.append("clipDuration", String(Number(dom.clipDuration.value)));
-  body.append("clipsCount", String(Number(dom.clipsCount.value)));
-  body.append("aspectRatio", dom.aspectRatio.value);
+  body.append("clipDuration", String(clipDuration));
+  body.append("clipsCount", String(clipsCount));
+  body.append("aspectRatio", aspectRatio);
   body.append("transcript", dom.transcriptInput.value.trim());
   body.append("subtitleTheme", state.subtitleTheme);
   body.append("highlightMode", state.highlightMode);
-  body.append("includeAutoTranscript", String(state.includeAutoTranscript));
-  body.append("dubFrenchAudio", String(state.dubFrenchAudio));
+  body.append("includeAutoTranscript", String(includeAutoTranscript));
+  body.append("dubFrenchAudio", String(dubFrenchAudio));
   body.append("includeSrtInZip", String(state.includeSrtInZip));
-  body.append("burnSubtitles", String(state.burnSubtitles));
+  body.append("burnSubtitles", String(burnSubtitles));
   body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
   const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
   if (youtubeCookies) {
@@ -381,6 +433,7 @@ async function createJob() {
 
   dom.analyzeBtn.disabled = true;
   resetClipState();
+  setGenerationProgress(5);
   updateStatus(hasUrl ? "Analyse du lien et création du job…" : "Upload et création du job…", false);
 
   try {
@@ -391,7 +444,7 @@ async function createJob() {
     }
     const payload = await response.json();
     state.activeJobId = payload.id;
-    updateStatus(`Job créé (${payload.id.slice(0, 8)}...), en file d'attente`, false);
+    updateStatus(`Job créé (${payload.id.slice(0, 8)}...), démarrage…`, false);
     scheduleJobPolling();
   } catch (error) {
     updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
@@ -414,21 +467,25 @@ async function pollJob() {
     const job = await response.json();
 
     if (job.status === "queued") {
+      setGenerationProgress(Math.max(8, Number(job.progress) || 0));
       updateStatus("Job en file d'attente…", false);
       scheduleJobPolling();
       return;
     }
     if (job.status === "processing") {
+      setGenerationProgress(job.progress || 0);
       updateStatus(`Traitement en cours… ${job.progress || 0}%`, false);
       scheduleJobPolling();
       return;
     }
     if (job.status === "failed") {
+      setGenerationProgress(100);
       updateStatus(job.error || "Traitement échoué", false);
       dom.analyzeBtn.disabled = false;
       return;
     }
     if (job.status === "completed") {
+      setGenerationProgress(100);
       state.clips = job.clips || [];
       state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
       state.burnSubtitles = Boolean(job.params?.burnSubtitles);
@@ -446,9 +503,9 @@ async function pollJob() {
         selectClip(0, false);
       }
       dom.analyzeBtn.disabled = false;
-      updateStatus(`${state.clips.length} clips générés (V3 full pipeline)`, true);
+      updateStatus(`${state.clips.length} shorts générés`, true);
       if (job.autoTranscriptUsed) {
-        dom.backendMeta.textContent = "Transcription auto utilisée (fallback transcript activé)";
+        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · transcription auto utilisée`;
       }
       return;
     }
@@ -518,6 +575,12 @@ function initEvents() {
     state.currentAspectRatio = dom.aspectRatio.value;
     applyPreviewAspectRatio(state.currentAspectRatio);
   });
+
+  if (dom.quickMode) {
+    dom.quickMode.addEventListener("change", () => {
+      state.quickMode = dom.quickMode.checked;
+    });
+  }
 
   dom.includeAutoTranscript.addEventListener("change", () => {
     state.includeAutoTranscript = dom.includeAutoTranscript.checked;
@@ -594,8 +657,10 @@ function initDefaults() {
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
   if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+  if (dom.quickMode) dom.quickMode.checked = state.quickMode;
   applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
+  setGenerationProgress(0);
 }
 
 async function init() {

@@ -69,12 +69,25 @@ Ouvrir ensuite:
 
 ## Utilisation
 
+### Mode express (recommandé)
+
+1. Coller le lien YouTube.
+2. Cliquer **Générer mes shorts**.
+3. Récupérer les clips générés.
+
+Le mode express force automatiquement des réglages adaptés short-form:
+- ratio **9:16** (TikTok/Reels)
+- transcription auto activée
+- doublage audio FR activé
+
+### Mode avancé
+
 1. Fournir une source vidéo:
    - soit via **URL** (YouTube ou lien direct MP4/MOV/WebM)
    - soit via **upload fichier** local
 2. Régler durée, nombre de clips, ratio.
-3. Régler options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
-4. Cliquer **Analyser & générer**.
+3. Régler options V4 (mode highlights, thème captions, auto transcript, dubbing FR, burn subtitles, gap).
+4. Cliquer **Générer mes shorts**.
 5. Une fois terminé:
    - prévisualiser les clips
    - exporter MP4
