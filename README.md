@@ -97,13 +97,41 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
    - **Vidéo déjà en français**: coupe automatiquement les options de doublage (pas de traduction audio).
 4. Régler durée, nombre de clips et options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
 5. Utiliser **Ignorer les X premières secondes** pour éviter explicitement les intros/génériques.
-4. Cliquer **Générer mes shorts**.
-5. Une fois terminé:
+6. Cliquer **Générer mes shorts**.
+7. Une fois terminé:
    - prévisualiser les clips
    - exporter MP4
    - exporter SRT
    - exporter JSON
    - exporter ZIP global
+
+## Déploiement 24/7 (lien stable) via GitHub + Render
+
+Les liens tunnels (`trycloudflare`, `loca.lt`) expirent.  
+Pour un lien fixe qui fonctionne en continu, déploie le repo sur Render avec la config fournie.
+
+### 1) Prérequis
+
+- Repo GitHub à jour (ce repo)
+- Compte Render connecté à GitHub
+- Plan **Starter** recommandé (pas de mise en veille)
+
+### 2) Déploiement
+
+1. Ouvre Render > **New +** > **Blueprint**.
+2. Sélectionne ton repo GitHub `urdirditfurd/mon-site`.
+3. Render détecte automatiquement `render.yaml`.
+4. Lance le déploiement.
+
+Render crée:
+- un service web Docker (`clipforge-studio`)
+- un disque persistant monté sur `/app/storage` (uploads/jobs/cookies conservés)
+- un healthcheck sur `/api/health`
+
+### 3) Résultat
+
+- Tu obtiens une URL stable de type `https://clipforge-studio.onrender.com`
+- Le service redéploie automatiquement à chaque push GitHub
 
 ## API
 
