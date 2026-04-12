@@ -105,16 +105,17 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
    - exporter JSON
    - exporter ZIP global
 
-## Déploiement 24/7 (lien stable) via GitHub + Render
+## Déploiement via GitHub + Render (lien stable)
 
 Les liens tunnels (`trycloudflare`, `loca.lt`) expirent.  
-Pour un lien fixe qui fonctionne en continu, déploie le repo sur Render avec la config fournie.
+Pour un lien fixe, déploie le repo sur Render avec la config fournie.
 
 ### 1) Prérequis
 
 - Repo GitHub à jour (ce repo)
 - Compte Render connecté à GitHub
-- Plan **Starter** recommandé (pas de mise en veille)
+- Plan **Free** possible (sans paiement, mais mise en veille après inactivité)
+- Plan **Starter** recommandé si tu veux éviter la veille
 
 ### 2) Déploiement
 
@@ -125,13 +126,13 @@ Pour un lien fixe qui fonctionne en continu, déploie le repo sur Render avec la
 
 Render crée:
 - un service web Docker (`clipforge-studio`)
-- un disque persistant monté sur `/app/storage` (uploads/jobs/cookies conservés)
 - un healthcheck sur `/api/health`
 
 ### 3) Résultat
 
 - Tu obtiens une URL stable de type `https://clipforge-studio.onrender.com`
 - Le service redéploie automatiquement à chaque push GitHub
+- En plan Free, le service peut se mettre en veille (réveil automatique au prochain accès)
 
 ## API
 

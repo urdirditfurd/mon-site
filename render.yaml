@@ -2,7 +2,7 @@ services:
   - type: web
     name: clipforge-studio
     runtime: docker
-    plan: starter
+    plan: free
     autoDeploy: true
     healthCheckPath: /api/health
     envVars:
@@ -12,7 +12,3 @@ services:
         value: memory
       - key: WORKER_CONCURRENCY
         value: "2"
-    disk:
-      name: clipforge-storage
-      mountPath: /app/storage
-      sizeGB: 5
