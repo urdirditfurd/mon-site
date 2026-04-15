@@ -69,9 +69,12 @@ Ouvrir ensuite:
    - soit via **URL** (YouTube ou lien direct MP4/MOV/WebM)
    - soit via **upload fichier** local
 2. Régler durée, nombre de clips, ratio.
-3. Régler options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
-4. Cliquer **Analyser & générer**.
-5. Une fois terminé:
+3. Choisir le **mode vidéo**:
+   - `Vidéo standard`
+   - `Vidéo sans ajout d'audio`
+4. Régler options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
+5. Cliquer **Analyser & générer**.
+6. Une fois terminé:
    - prévisualiser les clips
    - exporter MP4
    - exporter SRT
@@ -101,6 +104,7 @@ Ouvrir ensuite:
 - `minGapSecBetweenClips`
 - `subtitleTheme` (`classic` | `bold` | `cinema` | `neon`)
 - `highlightMode` (`balanced` | `hook-first` | `viral`)
+- `videoMode` (`standard` | `no-added-audio`)
 - `includeAutoTranscript` (`true`/`false`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)

@@ -51,6 +51,7 @@ const DEFAULTS = {
   clipsCount: 4,
   minGap: 3,
   aspectRatio: "9:16",
+  videoMode: "standard",
   subtitleTheme: "classic",
   highlightMode: "balanced",
   includeAutoTranscript: false,
@@ -976,6 +977,9 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const highlightMode = ["balanced", "hook-first", "viral"].includes(req.body.highlightMode)
       ? req.body.highlightMode
       : DEFAULTS.highlightMode;
+    const videoMode = ["standard", "no-added-audio"].includes(req.body.videoMode)
+      ? req.body.videoMode
+      : DEFAULTS.videoMode;
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
@@ -1011,6 +1015,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         minGapSecBetweenClips,
         subtitleTheme,
         highlightMode,
+        videoMode,
         includeAutoTranscript,
         includeSrtInZip,
         burnSubtitles,

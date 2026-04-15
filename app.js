@@ -22,6 +22,7 @@ const state = {
   selectedClipIndex: -1,
   subtitleTheme: "classic",
   highlightMode: "balanced",
+  videoMode: "standard",
   includeAutoTranscript: false,
   includeSrtInZip: true,
   burnSubtitles: false
@@ -38,6 +39,7 @@ const dom = {
   transcriptInput: document.getElementById("transcriptInput"),
   subtitleTheme: document.getElementById("subtitleTheme"),
   highlightMode: document.getElementById("highlightMode"),
+  videoMode: document.getElementById("videoMode"),
   includeAutoTranscript: document.getElementById("includeAutoTranscript"),
   includeSrtInZip: document.getElementById("includeSrtInZip"),
   burnSubtitles: document.getElementById("burnSubtitles"),
@@ -201,6 +203,10 @@ async function checkBackendHealth() {
         dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
         dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
       }
+      if (typeof defaultsCfg.videoMode === "string" && dom.videoMode) {
+        state.videoMode = defaultsCfg.videoMode;
+        dom.videoMode.value = defaultsCfg.videoMode;
+      }
     }
     dom.backendMeta.textContent =
       `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
@@ -238,6 +244,7 @@ async function createJob() {
   body.append("transcript", dom.transcriptInput.value.trim());
   body.append("subtitleTheme", state.subtitleTheme);
   body.append("highlightMode", state.highlightMode);
+  body.append("videoMode", state.videoMode);
   body.append("includeAutoTranscript", String(state.includeAutoTranscript));
   body.append("includeSrtInZip", String(state.includeSrtInZip));
   body.append("burnSubtitles", String(state.burnSubtitles));
@@ -376,6 +383,12 @@ function initEvents() {
     state.highlightMode = dom.highlightMode.value;
   });
 
+  if (dom.videoMode) {
+    dom.videoMode.addEventListener("change", () => {
+      state.videoMode = dom.videoMode.value;
+    });
+  }
+
   dom.includeAutoTranscript.addEventListener("change", () => {
     state.includeAutoTranscript = dom.includeAutoTranscript.checked;
   });
@@ -434,6 +447,7 @@ function initDefaults() {
   dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
+  if (dom.videoMode) dom.videoMode.value = state.videoMode;
   applySubtitleTheme(state.subtitleTheme);
 }
 
