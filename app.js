@@ -28,6 +28,7 @@ const state = {
   selectedClipIndex: -1,
   subtitleTheme: "classic",
   highlightMode: "balanced",
+  frameMode: "blur-fill",
   includeAutoTranscript: false,
   dubFrenchAudio: true,
   autoDubVoiceBySpeaker: true,
@@ -50,6 +51,7 @@ const dom = {
   clipsCount: document.getElementById("clipsCount"),
   clipsCountValue: document.getElementById("clipsCountValue"),
   aspectRatio: document.getElementById("aspectRatio"),
+  frameMode: document.getElementById("frameMode"),
   transcriptInput: document.getElementById("transcriptInput"),
   subtitleTheme: document.getElementById("subtitleTheme"),
   highlightMode: document.getElementById("highlightMode"),
@@ -376,6 +378,10 @@ async function checkBackendHealth() {
         dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
         dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
       }
+      if (typeof defaultsCfg.frameMode === "string" && dom.frameMode) {
+        state.frameMode = defaultsCfg.frameMode;
+        dom.frameMode.value = defaultsCfg.frameMode;
+      }
       if (typeof defaultsCfg.ignoreIntroSec === "number" && dom.ignoreIntroSec) {
         state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
         dom.ignoreIntroSec.value = String(defaultsCfg.ignoreIntroSec);
@@ -421,6 +427,8 @@ async function createJob() {
   const clipDuration = Number(dom.clipDuration.value);
   const clipsCount = Number(dom.clipsCount.value);
   const aspectRatio = dom.aspectRatio.value;
+  const frameMode = dom.frameMode?.value || state.frameMode;
+  state.frameMode = frameMode;
   const languageMode = dom.languageMode?.value || state.languageMode;
   state.languageMode = languageMode;
   state.noAddedAudio = languageMode === "no-added-audio";
@@ -449,6 +457,7 @@ async function createJob() {
   body.append("clipDuration", String(clipDuration));
   body.append("clipsCount", String(clipsCount));
   body.append("aspectRatio", aspectRatio);
+  body.append("frameMode", frameMode);
   body.append("languageMode", languageMode);
   body.append("transcript", dom.transcriptInput.value.trim());
   body.append("subtitleTheme", state.subtitleTheme);
@@ -527,6 +536,7 @@ async function pollJob() {
       state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
       state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
       state.languageMode = job.params?.languageMode || state.languageMode;
+      state.frameMode = job.params?.frameMode || state.frameMode;
       state.noAddedAudio = state.languageMode === "no-added-audio";
       state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
       dom.subtitleTheme.value = state.subtitleTheme;
@@ -535,6 +545,7 @@ async function pollJob() {
       if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
       if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
       if (dom.languageMode) dom.languageMode.value = state.languageMode;
+      if (dom.frameMode) dom.frameMode.value = state.frameMode;
       applySubtitleTheme(state.subtitleTheme);
       applyPreviewAspectRatio(state.currentAspectRatio);
 
@@ -616,6 +627,12 @@ function initEvents() {
     state.currentAspectRatio = dom.aspectRatio.value;
     applyPreviewAspectRatio(state.currentAspectRatio);
   });
+
+  if (dom.frameMode) {
+    dom.frameMode.addEventListener("change", () => {
+      state.frameMode = dom.frameMode.value;
+    });
+  }
 
   if (dom.ignoreIntroSec) {
     dom.ignoreIntroSec.addEventListener("change", () => {
@@ -724,6 +741,7 @@ function initDefaults() {
   if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
   dom.subtitleTheme.value = state.subtitleTheme;
   dom.highlightMode.value = state.highlightMode;
+  if (dom.frameMode) dom.frameMode.value = state.frameMode;
   if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
   if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
   if (dom.quickMode) dom.quickMode.checked = state.quickMode;

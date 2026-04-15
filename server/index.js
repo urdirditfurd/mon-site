@@ -55,6 +55,7 @@ const DEFAULTS = {
   minGap: 3,
   ignoreIntroSec: 20,
   aspectRatio: "9:16",
+  frameMode: "blur-fill",
   languageMode: "translate-to-french",
   subtitleTheme: "classic",
   highlightMode: "balanced",
@@ -1265,13 +1266,19 @@ function ffprobeDuration(inputPath) {
   });
 }
 
-async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, aspectRatio) {
+async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, aspectRatio, frameMode = DEFAULTS.frameMode) {
   const { width, height } = resolveOutputDimensions(aspectRatio);
+  const useBlackBars = frameMode === "black-bars";
   const vf = [
     `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
     "format=yuv420p"
   ].join(",");
+  const vComplex = [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
+    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+  ].join(";");
   const args = [
     "-y",
     "-ss",
@@ -1280,8 +1287,6 @@ async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, as
     String(clipDuration),
     "-i",
     inputPath,
-    "-vf",
-    vf,
     "-c:v",
     "libx264",
     "-preset",
@@ -1291,9 +1296,14 @@ async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, as
     "-c:a",
     "aac",
     "-b:a",
-    "128k",
-    outputPath
+    "128k"
   ];
+  if (useBlackBars) {
+    args.push("-vf", vf);
+  } else {
+    args.push("-filter_complex", vComplex, "-map", "[vout]", "-map", "0:a?");
+  }
+  args.push(outputPath);
   await runCommand("ffmpeg", args);
 }
 
@@ -1621,7 +1631,7 @@ async function processJob(job) {
     const captions =
       timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
     const srtPath = getJobSrtPath(job.id, clip.id);
-    await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio);
+    await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio, job.params.frameMode);
     await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
 
     let finalClipPath = outputPath;
@@ -1806,6 +1816,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const clipDuration = Math.min(600, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
     const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
     const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
+    const frameMode = ["blur-fill", "black-bars"].includes(req.body.frameMode) ? req.body.frameMode : DEFAULTS.frameMode;
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
     const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
@@ -1863,6 +1874,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         clipDuration,
         clipsCount,
         aspectRatio,
+        frameMode,
         transcript,
         minGapSecBetweenClips,
         ignoreIntroSec,

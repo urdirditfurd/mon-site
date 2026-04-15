@@ -97,9 +97,12 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
    - **Vidéo déjà en français**: coupe automatiquement les options de doublage (pas de traduction audio).
    - **Vidéo sans ajout d'audio**: ne génère aucun doublage, conserve l'audio original.
 4. Régler durée, nombre de clips et options V4 (mode highlights, thème captions, auto transcript, burn subtitles, gap).
-5. Utiliser **Ignorer les X premières secondes** pour éviter explicitement les intros/génériques.
-6. Cliquer **Générer mes shorts**.
-7. Une fois terminé:
+5. Choisir la mise en page:
+   - **Fond flou (sans couper l'image)** pour éviter les bandes noires.
+   - **Bandes noires** si vous préférez un cadre neutre.
+6. Utiliser **Ignorer les X premières secondes** pour éviter explicitement les intros/génériques.
+7. Cliquer **Générer mes shorts**.
+8. Une fois terminé:
    - prévisualiser les clips
    - exporter MP4
    - exporter SRT
@@ -157,6 +160,7 @@ Render crée:
 - `clipDuration` (sec, jusqu’à 600)
 - `clipsCount`
 - `aspectRatio` (`9:16` | `1:1` | `16:9`)
+- `frameMode` (`blur-fill` | `black-bars`)
 - `transcript` (optionnel)
 - `minGapSecBetweenClips`
 - `ignoreIntroSec` (secondes à ignorer en début de vidéo)
