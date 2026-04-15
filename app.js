@@ -28,7 +28,7 @@ const state = {
   selectedClipIndex: -1,
   subtitleTheme: "classic",
   highlightMode: "balanced",
-  frameMode: "blur-fill",
+  frameMode: "full-video",
   includeAutoTranscript: false,
   dubFrenchAudio: true,
   autoDubVoiceBySpeaker: true,

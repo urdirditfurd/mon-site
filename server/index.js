@@ -55,7 +55,7 @@ const DEFAULTS = {
   minGap: 3,
   ignoreIntroSec: 20,
   aspectRatio: "9:16",
-  frameMode: "blur-fill",
+  frameMode: "full-video",
   languageMode: "translate-to-french",
   subtitleTheme: "classic",
   highlightMode: "balanced",
@@ -1269,14 +1269,20 @@ function ffprobeDuration(inputPath) {
 async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, aspectRatio, frameMode = DEFAULTS.frameMode) {
   const { width, height } = resolveOutputDimensions(aspectRatio);
   const useBlackBars = frameMode === "black-bars";
+  const useFullVideo = frameMode === "full-video";
   const vf = [
     `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
     "format=yuv420p"
   ].join(",");
-  const vComplex = [
+  const vComplexBlur = [
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
+    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+  ].join(";");
+  const vComplexFullVideo = [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
     "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
   ].join(";");
   const args = [
@@ -1301,7 +1307,7 @@ async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, as
   if (useBlackBars) {
     args.push("-vf", vf);
   } else {
-    args.push("-filter_complex", vComplex, "-map", "[vout]", "-map", "0:a?");
+    args.push("-filter_complex", useFullVideo ? vComplexFullVideo : vComplexBlur, "-map", "[vout]", "-map", "0:a?");
   }
   args.push(outputPath);
   await runCommand("ffmpeg", args);
@@ -1816,7 +1822,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const clipDuration = Math.min(600, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
     const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
     const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
-    const frameMode = ["blur-fill", "black-bars"].includes(req.body.frameMode) ? req.body.frameMode : DEFAULTS.frameMode;
+    const frameMode = ["full-video", "blur-fill", "black-bars"].includes(req.body.frameMode) ? req.body.frameMode : DEFAULTS.frameMode;
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
     const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
