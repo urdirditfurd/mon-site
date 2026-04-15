@@ -13,17 +13,17 @@
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">MVP clone-like de Klap</p>
+      <p class="eyebrow">Création rapide de shorts</p>
       <h1>ClipForge Studio</h1>
-      <p class="subtitle">Upload vidéo, détection des moments forts, sous-titres automatiques (à partir d’un transcript), génération serveur FFmpeg (audio conservé) et export social-ready.</p>
+      <p class="subtitle">Colle un lien vidéo, lance la génération, puis exporte les meilleurs clips.</p>
     </div>
   </header>
 
   <main class="layout">
     <section class="panel">
-      <h2>1) Source vidéo</h2>
+      <h2>Créer des clips</h2>
       <label class="field">
-        <span>Lien vidéo (YouTube, Vimeo, MP4 direct...)</span>
+        <span>Lien vidéo (YouTube ou URL directe)</span>
         <input
           type="url"
           id="videoUrlInput"
@@ -31,111 +31,164 @@
           autocomplete="off"
         >
       </label>
-      <label class="field">
-        <span>Cookies YouTube (optionnel, format Netscape)</span>
-        <textarea
-          id="youtubeCookiesInput"
-          rows="4"
-          placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;2147483647&#9;VISITOR_INFO1_LIVE&#9;..."
-        ></textarea>
-      </label>
-      <label class="field">
-        <span>Ou fichier local (optionnel)</span>
-        <input type="file" id="videoInput" accept="video/*">
-      </label>
+      <div class="buttons-row quick-actions">
+        <button id="analyzeBtn" class="btn btn-primary" type="button">Lancer la génération</button>
+        <label class="toggle-row compact">
+          <input type="checkbox" id="quickMode" checked>
+          <span>Mode simple</span>
+        </label>
+      </div>
+      <div class="progress-box">
+        <div class="progress-track">
+          <div id="generationProgress" class="progress-fill"></div>
+        </div>
+        <p id="generationProgressText" class="hint small">Progression: 0%</p>
+      </div>
 
-      <h2>2) Paramètres de génération</h2>
-      <div class="grid-2">
+      <details class="details-box">
+        <summary>Connexion YouTube (anti-bot)</summary>
         <label class="field">
-          <span>Durée par clip</span>
-          <select id="clipDuration">
-            <option value="15">15 secondes</option>
-            <option value="30" selected>30 secondes</option>
+          <span>Cookies YouTube (format Netscape)</span>
+          <textarea
+            id="youtubeCookiesInput"
+            rows="4"
+            placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;2147483647&#9;VISITOR_INFO1_LIVE&#9;..."
+          ></textarea>
+        </label>
+        <div class="buttons-row youtube-cookies-actions">
+          <button id="saveYoutubeCookiesBtn" class="btn btn-ghost" type="button">Enregistrer les cookies</button>
+          <button id="clearYoutubeCookiesBtn" class="btn btn-ghost" type="button">Supprimer cookies serveur</button>
+        </div>
+        <p class="hint small" id="youtubeCookiesStatus">État cookies YouTube: vérification…</p>
+      </details>
+
+      <details class="details-box">
+        <summary>Importer un fichier local (optionnel)</summary>
+        <label class="field no-margin">
+          <span>Uploader une vidéo locale</span>
+          <input type="file" id="videoInput" accept="video/*">
+        </label>
+      </details>
+
+      <details class="details-box">
+        <summary>Réglages avancés (optionnel)</summary>
+        <div class="grid-2">
+          <label class="field">
+            <span>Durée par clip</span>
+            <select id="clipDuration">
+              <option value="15">15 secondes</option>
+              <option value="30" selected>30 secondes</option>
+              <option value="45">45 secondes</option>
+              <option value="60">60 secondes</option>
+              <option value="90">90 secondes</option>
+              <option value="120">2 minutes</option>
+              <option value="150">2 min 30</option>
+              <option value="180">3 minutes</option>
+              <option value="240">4 minutes</option>
+              <option value="300">5 minutes</option>
+              <option value="420">7 minutes</option>
+              <option value="600">10 minutes</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Format export</span>
+            <select id="aspectRatio">
+              <option value="9:16" selected>9:16 (TikTok/Reels)</option>
+              <option value="1:1">1:1 (Square)</option>
+              <option value="16:9">16:9 (YouTube)</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Nombre de clips: <strong id="clipsCountValue">4</strong></span>
+          <input type="range" id="clipsCount" min="1" max="8" value="4">
+        </label>
+
+        <label class="field">
+          <span>Transcript (optionnel)</span>
+          <textarea id="transcriptInput" rows="6" placeholder="Collez ici la transcription de votre vidéo."></textarea>
+        </label>
+
+        <div class="grid-2">
+          <label class="field">
+            <span>Style sous-titres</span>
+            <select id="subtitleTheme">
+              <option value="classic" selected>Classic</option>
+              <option value="bold">Bold</option>
+              <option value="cinema">Cinema</option>
+              <option value="neon">Neon</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Détection</span>
+            <select id="highlightMode">
+              <option value="balanced" selected>Balanced</option>
+              <option value="hook-first">Hook-first</option>
+              <option value="viral">Viral</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">
+          <span>Ignorer l’intro (X premières secondes)</span>
+          <select id="ignoreIntroSec">
+            <option value="0">0 seconde</option>
+            <option value="10">10 secondes</option>
+            <option value="20" selected>20 secondes</option>
+            <option value="30">30 secondes</option>
             <option value="45">45 secondes</option>
             <option value="60">60 secondes</option>
+            <option value="90">90 secondes</option>
+            <option value="120">120 secondes</option>
           </select>
         </label>
         <label class="field">
-          <span>Format export</span>
-          <select id="aspectRatio">
-            <option value="9:16" selected>9:16 (TikTok/Reels)</option>
-            <option value="1:1">1:1 (Square)</option>
-            <option value="16:9">16:9 (YouTube)</option>
+          <span>Mode vidéo</span>
+          <select id="languageMode">
+            <option value="translate-to-french" selected>Vidéo à traduire en français</option>
+            <option value="already-french">Vidéo déjà en français (pas de traduction audio)</option>
+            <option value="no-added-audio">Vidéo sans ajout d'audio (garde l'audio original)</option>
           </select>
         </label>
-      </div>
 
-      <label class="field">
-        <span>Nombre de clips: <strong id="clipsCountValue">4</strong></span>
-        <input type="range" id="clipsCount" min="1" max="8" value="4">
-      </label>
+        <div class="toggles">
+          <label class="toggle-row">
+            <input type="checkbox" id="includeAutoTranscript">
+            <span>Transcription auto (si transcript vide)</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="dubFrenchAudio" checked>
+            <span>Doublage audio FR (remplace l'audio original)</span>
+          </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="autoDubVoiceBySpeaker" checked>
+          <span>Voix FR auto (homme/femme selon la voix detectee)</span>
+        </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="burnSubtitles">
+            <span>Brûler les sous-titres dans les exports MP4</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="includeSrtInZip" checked>
+            <span>Inclure les fichiers .srt dans le ZIP global</span>
+          </label>
+        </div>
 
-      <label class="field">
-        <span>Transcript / script (optionnel, recommandé pour de meilleurs sous-titres)</span>
-        <textarea id="transcriptInput" rows="8" placeholder="Collez ici la transcription de votre vidéo. Le moteur répartira le texte automatiquement sur les clips."></textarea>
-      </label>
-
-      <h2>3) Réglages avancés V3</h2>
-      <div class="grid-2">
         <label class="field">
-          <span>Style sous-titres</span>
-          <select id="subtitleTheme">
-            <option value="classic" selected>Classic</option>
-            <option value="bold">Bold</option>
-            <option value="cinema">Cinema</option>
-            <option value="neon">Neon</option>
-          </select>
+          <span>Écart minimum entre clips: <strong id="minGapValue">3s</strong></span>
+          <input type="range" id="minGapSecBetweenClips" min="0" max="10" value="3">
         </label>
-        <label class="field">
-          <span>Détection</span>
-          <select id="highlightMode">
-            <option value="balanced" selected>Balanced</option>
-            <option value="hook-first">Hook-first</option>
-            <option value="viral">Viral</option>
-          </select>
-        </label>
-      </div>
-      <label class="field">
-        <span>Mode vidéo</span>
-        <select id="videoMode">
-          <option value="standard" selected>Vidéo standard</option>
-          <option value="no-added-audio">Vidéo sans ajout d'audio</option>
-        </select>
-      </label>
-      <div class="toggles">
-        <label class="toggle-row">
-          <input type="checkbox" id="includeAutoTranscript">
-          <span>Transcription auto (si transcript vide)</span>
-        </label>
-        <label class="toggle-row">
-          <input type="checkbox" id="burnSubtitles">
-          <span>Brûler les sous-titres dans les exports MP4</span>
-        </label>
-        <label class="toggle-row">
-          <input type="checkbox" id="includeSrtInZip" checked>
-          <span>Inclure les fichiers .srt dans le ZIP global</span>
-        </label>
-      </div>
-      <label class="field">
-        <span>Écart minimum entre clips: <strong id="minGapValue">3s</strong></span>
-        <input type="range" id="minGapSecBetweenClips" min="0" max="10" value="3">
-      </label>
 
-      <div class="buttons-row">
         <button id="generateScriptBtn" class="btn btn-ghost" type="button">Générer un script exemple</button>
-        <button id="analyzeBtn" class="btn btn-primary" type="button">Analyser & générer</button>
-      </div>
+      </details>
 
-      <p class="hint">
-        Tu peux lancer via lien. Pour YouTube, le backend utilise yt-dlp.
-      </p>
-      <p class="hint small" id="backendMeta">Chargement des capacités backend…</p>
+      <p class="hint small" id="backendMeta">Connexion serveur…</p>
     </section>
 
     <section class="workspace">
       <div class="player-card">
         <div class="player-head">
-          <h2>3) Prévisualisation</h2>
+          <h2>Prévisualisation</h2>
           <div class="status" id="statusBadge">Initialisation backend...</div>
         </div>
         <div class="video-shell">
@@ -149,20 +202,21 @@
           <button id="downloadZipBtn" class="btn btn-ghost" type="button" disabled>Exporter pack complet (.zip)</button>
           <button id="downloadJsonBtn" class="btn btn-ghost" type="button" disabled>Télécharger le plan (.json)</button>
         </div>
+        <div class="clip-meta" id="selectedClipMeta">
+          <h3 id="selectedClipTitle">Aucun clip sélectionné</h3>
+          <p id="selectedClipScore" class="hint small no-margin">Virality score: --</p>
+          <p id="selectedClipSummary" class="hint no-margin">Le résumé transcript du clip apparaîtra ici.</p>
+        </div>
       </div>
 
       <div class="timeline-card">
-        <h2>4) Clips générés</h2>
+        <h2>Clips générés</h2>
         <ul id="clipsList" class="clips-list">
           <li class="empty">Aucun clip généré pour le moment.</li>
         </ul>
       </div>
     </section>
   </main>
-
-  <footer class="footer">
-    <p>Prototype éducatif — sans copie de code propriétaire. V3: jobs persistés, SRT/ZIP, styles de captions et transcription auto optionnelle.</p>
-  </footer>
 
   <script src="config.js"></script>
   <script src="app.js"></script>

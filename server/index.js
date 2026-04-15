@@ -14,7 +14,9 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
+const SECRETS_DIR = path.join(STORAGE_DIR, "secrets");
 const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
+const YOUTUBE_COOKIES_STORE_PATH = path.join(SECRETS_DIR, "youtube-cookies.txt");
 const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
@@ -45,16 +47,20 @@ let bullWorker = null;
 let ffmpegReady = true;
 let whisperAvailable = false;
 let ytDlpAvailable = false;
+let edgeTtsAvailable = false;
 
 const DEFAULTS = {
   clipDuration: 30,
   clipsCount: 4,
   minGap: 3,
+  ignoreIntroSec: 20,
   aspectRatio: "9:16",
-  videoMode: "standard",
+  languageMode: "translate-to-french",
   subtitleTheme: "classic",
   highlightMode: "balanced",
   includeAutoTranscript: false,
+  dubFrenchAudio: true,
+  autoDubVoiceBySpeaker: true,
   includeSrtInZip: true,
   burnSubtitles: false
 };
@@ -73,6 +79,7 @@ function normalizeYouTubeErrorMessage(rawMessage) {
 async function ensureDirs() {
   await fsp.mkdir(UPLOADS_DIR, { recursive: true });
   await fsp.mkdir(JOBS_DIR, { recursive: true });
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
 }
 
 function boolFrom(value, fallback) {
@@ -127,7 +134,10 @@ function asPublicJobSnapshot(job) {
       duration: clip.duration,
       score: clip.score,
       filePath: clip.filePath,
+      dubbedAudioPath: clip.dubbedAudioPath || null,
+      dubVoice: clip.dubVoice || null,
       burnedFilePath: clip.burnedFilePath || null,
+      aspectRatio: clip.aspectRatio || null,
       captions: clip.captions || []
     }))
   };
@@ -212,6 +222,393 @@ function isLikelyYouTubeUrl(value) {
   }
 }
 
+function normalizeCookieBoolean(value, fallback = "FALSE") {
+  const upper = String(value || "").trim().toUpperCase();
+  if (upper === "TRUE" || upper === "1" || upper === "YES") return "TRUE";
+  if (upper === "FALSE" || upper === "0" || upper === "NO") return "FALSE";
+  return fallback;
+}
+
+function normalizeCookieExpiry(value) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num >= 0) return String(Math.floor(num));
+  return "2147483647";
+}
+
+function toNetscapeCookieLineFromObject(cookie) {
+  const name = String(cookie?.name || "").trim();
+  if (!name) return "";
+  const value = cookie?.value == null ? "" : String(cookie.value);
+  const rawDomain = String(cookie?.domain || ".youtube.com").trim();
+  const domain = rawDomain
+    ? rawDomain.startsWith(".")
+      ? rawDomain
+      : `.${rawDomain}`
+    : ".youtube.com";
+  const includeSubdomains = cookie?.hostOnly === true ? "FALSE" : "TRUE";
+  const pathValue = String(cookie?.path || "/").trim() || "/";
+  const secure = cookie?.secure ? "TRUE" : "FALSE";
+  const expiry = normalizeCookieExpiry(
+    cookie?.expirationDate ?? cookie?.expires ?? cookie?.expiry ?? cookie?.expire ?? 2147483647
+  );
+  return `${domain}\t${includeSubdomains}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`;
+}
+
+function parseCookiesJson(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed) return "";
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return "";
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (_error) {
+    return "";
+  }
+
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.cookies)
+      ? parsed.cookies
+      : Array.isArray(parsed?.data)
+        ? parsed.data
+        : null;
+
+  if (!Array.isArray(list)) {
+    return "";
+  }
+
+  const lines = list
+    .map((cookie) => toNetscapeCookieLineFromObject(cookie))
+    .filter(Boolean);
+
+  if (!lines.length) {
+    throw new Error("Le JSON de cookies est valide, mais aucun cookie exploitable n'a été trouvé.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseCookiesHeaderString(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed || trimmed.includes("\n")) return "";
+  if (!trimmed.includes("=") || trimmed.includes("\t")) return "";
+
+  const parts = trimmed
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return "";
+
+  const lines = [];
+  for (const part of parts) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const name = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1).trim();
+    if (!name) continue;
+    lines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+  }
+
+  if (!lines.length) {
+    throw new Error("Format de cookies invalide.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseNetscapeCookies(rawText) {
+  const input = String(rawText || "").trim();
+  if (!input) {
+    throw new Error("Cookies YouTube vides.");
+  }
+
+  const outLines = ["# Netscape HTTP Cookie File"];
+  const lines = input.split(/\r?\n/);
+  let hasCookieLine = false;
+
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#HttpOnly_")) {
+      line = line.replace(/^#HttpOnly_/, "");
+    } else if (line.startsWith("#")) {
+      continue;
+    }
+
+    let parts = line.split("\t").filter((p) => p !== "");
+    if (parts.length < 7) {
+      parts = line.split(/\s+/).filter(Boolean);
+    }
+
+    if (parts.length < 7) {
+      // Fallback tolérant: accepte une ligne "name=value" ou "name=value; other=x"
+      // pour aider quand l'export n'est pas strictement au format Netscape.
+      const cookiePairs = line
+        .split(";")
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+      let foundLoosePair = false;
+      for (const pair of cookiePairs) {
+        const eqIndex = pair.indexOf("=");
+        if (eqIndex <= 0) continue;
+        const name = pair.slice(0, eqIndex).trim();
+        const value = pair.slice(eqIndex + 1).trim();
+        if (!name) continue;
+        outLines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+        hasCookieLine = true;
+        foundLoosePair = true;
+      }
+
+      if (foundLoosePair) {
+        continue;
+      }
+      // Ignore les lignes non interprétables (au lieu d'échouer tout le fichier).
+      continue;
+    }
+
+    const [domainRaw, includeRaw, pathRaw, secureRaw, expiryRaw, nameRaw, ...valueParts] = parts;
+    const domain = String(domainRaw || "").trim();
+    const name = String(nameRaw || "").trim();
+    if (!domain || !name) {
+      throw new Error("Une ligne de cookie est incomplète (domain ou name manquant).");
+    }
+    const value = valueParts.join(" ");
+    const include = normalizeCookieBoolean(includeRaw, domain.startsWith(".") ? "TRUE" : "FALSE");
+    const pathValue = String(pathRaw || "/").trim() || "/";
+    const secure = normalizeCookieBoolean(secureRaw, "FALSE");
+    const expiry = normalizeCookieExpiry(expiryRaw);
+    outLines.push(`${domain}\t${include}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`);
+    hasCookieLine = true;
+  }
+
+  if (!hasCookieLine) {
+    throw new Error(
+      "Aucune ligne de cookie valide détectée. Utilise de préférence un export Netscape (cookies.txt) ou une chaîne du type NAME=VALUE; NAME2=VALUE2."
+    );
+  }
+
+  return `${outLines.join("\n")}\n`;
+}
+
+function normalizeYouTubeCookies(rawCookies) {
+  const rawText = String(rawCookies || "").trim();
+  if (!rawText) {
+    throw new Error("Cookies YouTube vides.");
+  }
+  const asJson = parseCookiesJson(rawText);
+  if (asJson) return asJson;
+  const asHeader = parseCookiesHeaderString(rawText);
+  if (asHeader) return asHeader;
+  return parseNetscapeCookies(rawText);
+}
+
+function getStoredYoutubeCookiesMeta() {
+  if (!fs.existsSync(YOUTUBE_COOKIES_STORE_PATH)) {
+    return {
+      configured: false,
+      sizeBytes: 0,
+      updatedAt: null
+    };
+  }
+  const stats = fs.statSync(YOUTUBE_COOKIES_STORE_PATH);
+  return {
+    configured: true,
+    sizeBytes: stats.size,
+    updatedAt: stats.mtime.toISOString()
+  };
+}
+
+function hasStoredYoutubeCookies() {
+  return fs.existsSync(YOUTUBE_COOKIES_STORE_PATH);
+}
+
+function parseSubtitleTimestamp(raw) {
+  const cleaned = String(raw || "").trim().replace(",", ".");
+  const parts = cleaned.split(":").map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  const [hoursRaw, minutesRaw, secondsRaw] =
+    parts.length === 3 ? parts : ["0", parts[0], parts[1]];
+  const hours = Number(hoursRaw);
+  const minutes = Number(minutesRaw);
+  const seconds = Number(secondsRaw);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function stripSubtitleMarkup(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\{\\[^}]+\}/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseSrtCaptions(content) {
+  const blocks = String(content || "")
+    .replace(/\r/g, "")
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const out = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const timeLine = lines.find((line) => line.includes("-->"));
+    if (!timeLine) continue;
+    const [startRaw, endRaw] = timeLine.split("-->").map((x) => x.trim());
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const textLines = lines.slice(lines.indexOf(timeLine) + 1);
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (!text) continue;
+    out.push({ start, end, text });
+  }
+  return out;
+}
+
+function parseVttCaptions(content) {
+  const lines = String(content || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx].trim();
+    if (!line || line.startsWith("WEBVTT") || line.startsWith("NOTE")) {
+      idx += 1;
+      continue;
+    }
+    if (!line.includes("-->")) {
+      idx += 1;
+      continue;
+    }
+    const [startRaw, endRaw] = line.split("-->").map((part) => part.trim().split(" ")[0]);
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    idx += 1;
+    const textLines = [];
+    while (idx < lines.length && lines[idx].trim()) {
+      textLines.push(lines[idx].trim());
+      idx += 1;
+    }
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && text) {
+      out.push({ start, end, text });
+    }
+  }
+  return out;
+}
+
+async function parseSubtitleFileToTimedCaptions(subtitlePath) {
+  if (!subtitlePath || !fs.existsSync(subtitlePath)) return [];
+  const raw = await fsp.readFile(subtitlePath, "utf8");
+  const ext = path.extname(subtitlePath).toLowerCase();
+  if (ext === ".srt") return parseSrtCaptions(raw);
+  if (ext === ".vtt") return parseVttCaptions(raw);
+  return parseSrtCaptions(raw);
+}
+
+function buildCaptionsFromSourceTimedCaptions(clipStart, clipEnd, timedCaptions) {
+  const localCaptions = [];
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(clipStart, cue.start);
+    const overlapEnd = Math.min(clipEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    const text = stripSubtitleMarkup(cue.text);
+    if (!text) continue;
+    localCaptions.push({
+      start: Number((overlapStart - clipStart).toFixed(3)),
+      end: Number((overlapEnd - clipStart).toFixed(3)),
+      text
+    });
+  }
+  return localCaptions;
+}
+
+function buildDubTextFromCaptions(captions) {
+  return (captions || [])
+    .map((cue) => stripSubtitleMarkup(cue.text))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function detectLikelyFrenchVoiceForClip(inputClipPath) {
+  const maleVoice = process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+  const femaleVoice = process.env.EDGE_TTS_DEFAULT_FEMALE_VOICE || "fr-FR-DeniseNeural";
+  const threshold = Number(process.env.EDGE_TTS_GENDER_ZCR_THRESHOLD) || 0.095;
+  if (!inputClipPath || !fs.existsSync(inputClipPath)) return maleVoice;
+
+  try {
+    const { stderr } = await runCommandCapture("ffmpeg", [
+      "-hide_banner",
+      "-i",
+      inputClipPath,
+      "-af",
+      "astats=metadata=1:reset=1",
+      "-f",
+      "null",
+      "-"
+    ]);
+
+    const matches = Array.from(String(stderr || "").matchAll(/Zero crossings rate:\s*([0-9.]+)/gi));
+    const values = matches
+      .map((match) => Number(match[1]))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (!values.length) return maleVoice;
+    const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return avg >= threshold ? femaleVoice : maleVoice;
+  } catch (_error) {
+    return maleVoice;
+  }
+}
+
+async function synthesizeFrenchSpeech(text, outputAudioPath, preferredVoice = "") {
+  const spokenText = String(text || "").replace(/\s+/g, " ").trim();
+  if (!spokenText) return false;
+  const trimmed = spokenText.length > 1500 ? spokenText.slice(0, 1500) : spokenText;
+  const selectedVoice =
+    preferredVoice || process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+  await runCommand("python3", [
+    "-m",
+    "edge_tts",
+    "--voice",
+    selectedVoice,
+    "--text",
+    trimmed,
+    "--write-media",
+    outputAudioPath
+  ]);
+  return fs.existsSync(outputAudioPath);
+}
+
+async function replaceClipAudioWithFrenchDub(inputClipPath, dubAudioPath, outputClipPath) {
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    dubAudioPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
 function tokenizeTranscript(transcript) {
   return String(transcript || "")
     .replace(/\s+/g, " ")
@@ -219,6 +616,136 @@ function tokenizeTranscript(transcript) {
     .split(" ")
     .map((w) => w.trim())
     .filter(Boolean);
+}
+
+const VIRAL_KEYWORDS = new Set([
+  "choc",
+  "incroyable",
+  "secret",
+  "erreur",
+  "danger",
+  "risque",
+  "urgent",
+  "revele",
+  "explose",
+  "cash",
+  "million",
+  "milliard",
+  "guerre",
+  "attaque",
+  "strategie",
+  "preuve",
+  "comment",
+  "pourquoi",
+  "top",
+  "viral",
+  "buzz",
+  "impact",
+  "grave",
+  "impossible"
+]);
+
+const INTRO_OUTRO_PROMO_KEYWORDS = new Set([
+  "subscribe",
+  "sub",
+  "abonne",
+  "abonnezvous",
+  "abonnement",
+  "follow",
+  "suivez",
+  "like",
+  "partage",
+  "partagez",
+  "creator",
+  "createur",
+  "createurs",
+  "credits",
+  "credit",
+  "sponsor",
+  "sponsoris",
+  "sponsored",
+  "instagram",
+  "insta",
+  "tiktok",
+  "youtube",
+  "snapchat"
+]);
+
+function normalizeScoringToken(rawToken) {
+  return String(rawToken || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function tokenizeForScoring(text) {
+  return String(text || "")
+    .split(/\s+/)
+    .map((token) => normalizeScoringToken(token))
+    .filter(Boolean);
+}
+
+function jaccardSetSimilarity(setA, setB) {
+  if (!setA.size && !setB.size) return 0;
+  if (!setA.size || !setB.size) return 0;
+  let inter = 0;
+  for (const token of setA) {
+    if (setB.has(token)) inter += 1;
+  }
+  const union = setA.size + setB.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function buildClipTitleFromText(text, index) {
+  const clean = stripSubtitleMarkup(text);
+  if (!clean) return `Clip ${index + 1}`;
+  const words = clean.split(/\s+/).filter(Boolean).slice(0, 11);
+  const short = words.join(" ");
+  if (!short) return `Clip ${index + 1}`;
+  return short.length > 80 ? `${short.slice(0, 77)}...` : short;
+}
+
+function scoreWindowFromTimedCaptions(windowStart, windowEnd, timedCaptions, clipDuration, mode, duration) {
+  const texts = [];
+  let coveredSeconds = 0;
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(windowStart, cue.start);
+    const overlapEnd = Math.min(windowEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    coveredSeconds += overlapEnd - overlapStart;
+    const text = stripSubtitleMarkup(cue.text);
+    if (text) texts.push(text);
+  }
+
+  const mergedText = texts.join(" ").replace(/\s+/g, " ").trim();
+  const tokens = tokenizeForScoring(mergedText);
+  const tokenSet = new Set(tokens);
+  const hookHits = tokens.reduce((sum, token) => sum + (VIRAL_KEYWORDS.has(token) ? 1 : 0), 0);
+  const promoHits = tokens.reduce((sum, token) => sum + (INTRO_OUTRO_PROMO_KEYWORDS.has(token) ? 1 : 0), 0);
+  const punctuationHits = (mergedText.match(/[!?]/g) || []).length;
+  const numericHits = (mergedText.match(/\d+/g) || []).length;
+  const socialTagHits = (mergedText.match(/[@#][\w.-]+/g) || []).length;
+  const density = Math.min(1, tokens.length / Math.max(8, clipDuration * 2.6));
+  const information = Math.min(1, tokenSet.size / Math.max(1, tokens.length || 1));
+  const hook = Math.min(1, (hookHits * 0.22 + punctuationHits * 0.12 + numericHits * 0.1) / 1.2);
+  const coverage = Math.min(1, coveredSeconds / Math.max(1, clipDuration));
+  const centerTime = (windowStart + windowEnd) / 2;
+  const energy = highlightScore(centerTime, duration, mode);
+  const promoPenalty = Math.min(0.34, promoHits * 0.045 + socialTagHits * 0.07);
+
+  let score = density * 0.22 + information * 0.16 + hook * 0.28 + coverage * 0.14 + energy * 0.2 - promoPenalty;
+  const earlyBias = 1 - centerTime / Math.max(duration, 1);
+  if (mode === "hook-first") score += earlyBias * 0.12;
+  if (mode === "viral") score += hook * 0.08 + Math.min(1, density * 1.2) * 0.06;
+  if (mode === "balanced") score += information * 0.06;
+
+  return {
+    score: Number(score.toFixed(4)),
+    tokenSet,
+    text: mergedText
+  };
 }
 
 function mockEnergyAtTime(time, duration) {
@@ -245,64 +772,130 @@ function generateCandidateMoments(duration, step, mode) {
   return out.sort((a, b) => b.score - a.score);
 }
 
-function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode) {
+function computeBoundaryGuards(duration, clipDuration, ignoreIntroSec = 0) {
   const maxStart = Math.max(0, duration - clipDuration);
-  const moments = generateCandidateMoments(duration, Math.min(4, clipDuration / 3), mode);
-  const chosen = [];
+  if (maxStart <= 0) return { maxStart, introGuardSec: 0, outroGuardSec: 0, preferredMinStart: 0, preferredMaxStart: 0 };
 
-  const hasConflict = (start, end) =>
-    chosen.some((clip) => {
-      const inter = Math.max(0, Math.min(clip.end, end) - Math.max(clip.start, start));
-      if (inter > clipDuration * 0.45) return true;
-      const distance = Math.min(
-        Math.abs(clip.start - start),
-        Math.abs(clip.end - end),
-        Math.abs(clip.start - end),
-        Math.abs(clip.end - start)
-      );
-      return distance < minGapSec;
-    });
+  // Keep clips away from generic intros/outros while preserving room for long clips.
+  const introGuardSec = Math.min(maxStart, Math.max(0, Math.min(60, duration * 0.12, clipDuration * 0.8)));
+  const manualIntroGuardSec = Math.min(maxStart, Math.max(0, ignoreIntroSec));
+  const outroGuardSec = Math.min(maxStart, Math.max(0, Math.min(45, duration * 0.08, clipDuration * 0.65)));
+  const preferredMinStart = Math.max(introGuardSec, manualIntroGuardSec);
+  const preferredMaxStart = Math.max(preferredMinStart, maxStart - outroGuardSec);
+  return { maxStart, introGuardSec, manualIntroGuardSec, outroGuardSec, preferredMinStart, preferredMaxStart };
+}
 
-  for (const moment of moments) {
-    let start = Math.max(0, moment.t - clipDuration * 0.25);
+function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = [], ignoreIntroSec = 0) {
+  const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration, ignoreIntroSec);
+  const hardMinStart = Math.min(maxStart, Math.max(0, ignoreIntroSec));
+  const step = Math.max(2, Math.min(7, clipDuration * 0.4));
+  const moments = generateCandidateMoments(duration, step, mode);
+  const candidates = moments.map((moment) => {
+    let start = Math.max(0, moment.t - clipDuration * 0.18);
     start = Math.min(start, maxStart);
     const end = Math.min(duration, start + clipDuration);
-    if (!hasConflict(start, end)) {
-      chosen.push({ start, end, duration: end - start, score: Number(moment.score.toFixed(3)) });
+    const timed = scoreWindowFromTimedCaptions(start, end, timedCaptions, clipDuration, mode, duration);
+    const fallbackText = "";
+    const title = buildClipTitleFromText(timed.text || fallbackText, 0);
+    const baseScore = timed.tokenSet.size > 0 ? timed.score : Number(moment.score.toFixed(4));
+    const beforePreferred = Math.max(0, preferredMinStart - start);
+    const afterPreferred = Math.max(0, start - preferredMaxStart);
+    const boundaryPenalty = Math.min(0.45, beforePreferred / Math.max(1, clipDuration) * 0.42 + afterPreferred / Math.max(1, clipDuration) * 0.28);
+    const combinedScore = Number(Math.max(0, baseScore - boundaryPenalty).toFixed(4));
+    return {
+      start,
+      end,
+      duration: end - start,
+      score: combinedScore,
+      title,
+      tokenSet: timed.tokenSet
+    };
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+  const chosen = [];
+  const eligibleCandidates = candidates.filter((candidate) => candidate.start >= hardMinStart);
+  const preferredCandidates = eligibleCandidates.filter(
+    (candidate) => candidate.start >= preferredMinStart && candidate.start <= preferredMaxStart
+  );
+
+  const hasConflict = (candidate) =>
+    chosen.some((clip) => {
+      const inter = Math.max(0, Math.min(clip.end, candidate.end) - Math.max(clip.start, candidate.start));
+      if (inter > clipDuration * 0.28) return true;
+      const distance = Math.min(
+        Math.abs(clip.start - candidate.start),
+        Math.abs(clip.end - candidate.end),
+        Math.abs(clip.start - candidate.end),
+        Math.abs(clip.end - candidate.start)
+      );
+      if (distance < minGapSec) return true;
+      const similarity = jaccardSetSimilarity(clip.tokenSet || new Set(), candidate.tokenSet || new Set());
+      if ((clip.tokenSet || new Set()).size === 0 || (candidate.tokenSet || new Set()).size === 0) return false;
+      return similarity > 0.62;
+    });
+
+  for (const candidate of preferredCandidates) {
+    if (!hasConflict(candidate)) {
+      chosen.push(candidate);
       if (chosen.length >= clipsCount) break;
+    }
+  }
+
+  if (chosen.length < clipsCount) {
+    for (const candidate of eligibleCandidates) {
+      if (!hasConflict(candidate)) {
+        chosen.push(candidate);
+        if (chosen.length >= clipsCount) break;
+      }
     }
   }
 
   if (chosen.length < clipsCount) {
     for (let i = 0; i < clipsCount; i += 1) {
       const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
-      const start = Number((maxStart * ratio).toFixed(3));
+      const fallbackStart = Math.max(hardMinStart, preferredMinStart);
+      const fallbackSpan = Math.max(0, preferredMaxStart - fallbackStart);
+      const start = Number((fallbackStart + fallbackSpan * ratio).toFixed(3));
       const end = Math.min(duration, start + clipDuration);
-      if (!hasConflict(start, end)) {
-        chosen.push({
-          start,
-          end,
-          duration: end - start,
-          score: Number(highlightScore(start, duration, mode).toFixed(3))
-        });
+      const fallback = {
+        start,
+        end,
+        duration: end - start,
+        score: Number(highlightScore(start, duration, mode).toFixed(3)),
+        title: buildClipTitleFromText("", i),
+        tokenSet: new Set()
+      };
+      if (!hasConflict(fallback)) {
+        chosen.push(fallback);
       }
       if (chosen.length >= clipsCount) break;
     }
   }
 
   if (!chosen.length) {
+    const safeStart = Math.min(Math.max(hardMinStart, preferredMinStart), maxStart);
     chosen.push({
-      start: 0,
-      end: Math.min(duration, clipDuration),
+      start: safeStart,
+      end: Math.min(duration, safeStart + clipDuration),
       duration: Math.min(duration, clipDuration),
-      score: 0.5
+      score: 0.5,
+      title: "Clip 1",
+      tokenSet: new Set()
     });
   }
 
   return chosen
     .sort((a, b) => a.start - b.start)
     .slice(0, clipsCount)
-    .map((clip, idx) => ({ id: `clip-${idx + 1}`, title: `Clip ${idx + 1}`, ...clip }));
+    .map((clip, idx) => ({
+      id: `clip-${idx + 1}`,
+      title: clip.title || `Clip ${idx + 1}`,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: Number(clip.score.toFixed(3))
+    }));
 }
 
 function splitIntoSubtitleChunks(words, minWords = 4, maxWords = 10) {
@@ -368,6 +961,25 @@ function runCommand(cmd, args) {
   });
 }
 
+function runCommandCapture(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (buf) => {
+      stdout += String(buf);
+    });
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) return resolve({ stdout, stderr });
+      return reject(new Error(stderr || `${cmd} exited with code ${code}`));
+    });
+  });
+}
+
 async function isPlayableVideoFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return false;
   try {
@@ -401,58 +1013,169 @@ async function resolveDownloadedVideoByPrefix(prefixPath) {
   return ranked[0];
 }
 
+async function cleanupDownloadedArtifactsByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return;
+  const entries = await fsp.readdir(dir);
+  const matches = entries.filter((name) => name === base || name.startsWith(`${base}.`));
+  await Promise.all(
+    matches.map(async (name) => {
+      try {
+        await fsp.unlink(path.join(dir, name));
+      } catch (_error) {
+        // ignore cleanup failures
+      }
+    })
+  );
+}
+
+async function resolveDownloadedSubtitleByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return null;
+  const entries = await fsp.readdir(dir);
+  const candidates = entries
+    .filter((name) => name.startsWith(`${base}.`) && (name.endsWith(".srt") || name.endsWith(".vtt")))
+    .map((name) => path.join(dir, name));
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidatePath) => {
+    const file = path.basename(candidatePath).toLowerCase();
+    let score = 0;
+    if (file.includes(".fr")) score += 100;
+    if (file.includes(".fr-fr")) score += 10;
+    if (file.endsWith(".srt")) score += 5;
+    if (file.includes(".en")) score += 1;
+    return score;
+  };
+
+  const ordered = candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+  return ordered[0];
+}
+
 async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
   const downloadOptions = arguments[2] || {};
   const ytCookiesFile = downloadOptions.ytCookiesFile || "";
-  const ytExtractorArgs = process.env.YTDLP_EXTRACTOR_ARGS || "youtube:player_client=tv,android,web";
+  const subtitlesPrefix = downloadOptions.subtitlesPrefix || `${outputPrefix}-subs`;
+  const ytExtractorArgs =
+    process.env.YTDLP_EXTRACTOR_ARGS ||
+    (ytCookiesFile
+      ? "youtube:player_client=web,web_embedded,tv,ios"
+      : "youtube:player_client=web,web_embedded,tv,ios,android");
   const ytUserAgent =
     process.env.YTDLP_USER_AGENT ||
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-  const tryYtDlpDownload = async () => {
+  const runYtDlpDownloadProfiles = async () => {
     if (!ytDlpAvailable) return null;
     const template = `${outputPrefix}.%(ext)s`;
-    const args = [
+    const commonArgs = [
       "-m",
       "yt_dlp",
       "--no-playlist",
       "--no-progress",
       "--restrict-filenames",
+      "--extractor-retries",
+      "3",
+      "--retries",
+      "3",
+      "--fragment-retries",
+      "3",
       "--extractor-args",
       ytExtractorArgs,
       "--user-agent",
       ytUserAgent,
       "--js-runtimes",
       "node",
+      "--remote-components",
+      "ejs:github",
       "--merge-output-format",
       "mp4",
-      "-f",
-      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
       "-o",
-      template,
-      sourceUrl
+      template
     ];
-    if (ytCookiesFile) {
-      args.push("--cookies", ytCookiesFile);
+    if (ytCookiesFile) commonArgs.push("--cookies", ytCookiesFile);
+
+    const profiles = [
+      // Preferred: explicit mp4-compatible muxing.
+      ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best"],
+      // Wider fallback for difficult videos.
+      ["-f", "bestvideo*+bestaudio/best"],
+      // Last resort without format constraints.
+      []
+    ];
+
+    let lastError = null;
+    for (const profileArgs of profiles) {
+      try {
+        await cleanupDownloadedArtifactsByPrefix(outputPrefix);
+        const args = [...commonArgs, ...profileArgs, sourceUrl];
+        await runCommand("python3", args);
+        const downloaded = await resolveDownloadedVideoByPrefix(outputPrefix);
+        if (await isPlayableVideoFile(downloaded)) return downloaded;
+      } catch (error) {
+        lastError = error;
+      }
     }
-    await runCommand("python3", args);
-    return resolveDownloadedVideoByPrefix(outputPrefix);
+    throw lastError || new Error("Impossible de télécharger la vidéo via yt-dlp");
+  };
+
+  const tryYtDlpSubtitleDownload = async () => {
+    if (!ytDlpAvailable || !isLikelyYouTubeUrl(sourceUrl)) return null;
+    const template = `${subtitlesPrefix}.%(ext)s`;
+    await cleanupDownloadedArtifactsByPrefix(subtitlesPrefix);
+    const args = [
+      "-m",
+      "yt_dlp",
+      "--skip-download",
+      "--no-playlist",
+      "--no-progress",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs",
+      process.env.YTDLP_SUB_LANGS || "fr.*,fr,en.*,en",
+      "--sub-format",
+      "srt/vtt/best",
+      "--convert-subs",
+      "srt",
+      "--extractor-args",
+      ytExtractorArgs,
+      "--js-runtimes",
+      "node",
+      "--remote-components",
+      "ejs:github",
+      "--user-agent",
+      ytUserAgent,
+      "-o",
+      template
+    ];
+    if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+    try {
+      await runCommand("python3", args.concat([sourceUrl]));
+    } catch (_error) {
+      return null;
+    }
+    return resolveDownloadedSubtitleByPrefix(subtitlesPrefix);
   };
 
   if (isLikelyYouTubeUrl(sourceUrl)) {
     if (!ytDlpAvailable) {
       throw new Error("Lien YouTube détecté mais yt-dlp est indisponible sur le serveur");
     }
-    const ytFile = await tryYtDlpDownload();
-    if (await isPlayableVideoFile(ytFile)) return ytFile;
+    const ytFile = await runYtDlpDownloadProfiles();
+    if (await isPlayableVideoFile(ytFile)) {
+      const subtitlePath = await tryYtDlpSubtitleDownload();
+      return { videoPath: ytFile, subtitlePath: subtitlePath || "" };
+    }
     throw new Error("Impossible de télécharger une vidéo YouTube exploitable");
   }
 
   // For generic URLs, attempt yt-dlp first when available.
   if (ytDlpAvailable) {
     try {
-      const ytFile = await tryYtDlpDownload();
-      if (await isPlayableVideoFile(ytFile)) return ytFile;
+      const ytFile = await runYtDlpDownloadProfiles();
+      if (await isPlayableVideoFile(ytFile)) return { videoPath: ytFile, subtitlePath: "" };
     } catch (_ytError) {
       // Fallback below.
     }
@@ -479,7 +1202,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
       "+faststart",
       outputPath
     ]);
-    if (await isPlayableVideoFile(outputPath)) return outputPath;
+    if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
   } catch (_copyErr) {
     // Fallback below.
   }
@@ -510,7 +1233,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     "+faststart",
     outputPath
   ]);
-  if (await isPlayableVideoFile(outputPath)) return outputPath;
+  if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
   throw new Error("Téléchargement URL réussi mais fichier vidéo invalide");
 }
 
@@ -653,14 +1376,8 @@ async function transcribeVideoMaybe(inputPath, duration, includeAutoTranscript) 
       // fallback below
     }
   }
-  const blocks = Math.max(3, Math.min(8, Math.round(duration / 15)));
-  const generated = [];
-  for (let i = 0; i < blocks; i += 1) {
-    generated.push(
-      `Segment ${i + 1}: idée forte, démonstration concrète et transition vers le point suivant pour maintenir la rétention.`
-    );
-  }
-  return { transcript: generated.join(" "), autoTranscriptUsed: true };
+  // Avoid fake transcripts that can create nonsensical captions.
+  return { transcript: "", autoTranscriptUsed: false };
 }
 
 function sanitizeJobForClient(job) {
@@ -686,6 +1403,10 @@ function sanitizeJobForClient(job) {
       end: clip.end,
       duration: clip.duration,
       score: clip.score,
+      aspectRatio: clip.aspectRatio || job.params?.aspectRatio || DEFAULTS.aspectRatio,
+      hasBurnedSubtitles: Boolean(clip.burnedFilePath),
+      hasDubbedAudio: Boolean(clip.dubbedAudioPath),
+      dubVoice: clip.dubVoice || "",
       streamUrl: `/api/jobs/${job.id}/clips/${clip.id}/stream`,
       downloadUrl: `/api/jobs/${job.id}/clips/${clip.id}/download`,
       srtUrl: `/api/jobs/${job.id}/clips/${clip.id}/srt`,
@@ -801,7 +1522,12 @@ async function processJob(job) {
   job.status = "processing";
   job.progress = 5;
   job.updatedAt = new Date().toISOString();
+  if (job.params?.dubFrenchAudio && !edgeTtsAvailable) {
+    job.params.dubFrenchAudio = false;
+  }
   await persistJobsDb();
+  const jobDir = getJobDir(job.id);
+  await fsp.mkdir(jobDir, { recursive: true });
 
   if (!job.inputPath && job.sourceUrl) {
     if (!isValidHttpUrl(job.sourceUrl)) {
@@ -816,15 +1542,19 @@ async function processJob(job) {
       job.youtubeCookiesFilePath && fs.existsSync(job.youtubeCookiesFilePath)
         ? job.youtubeCookiesFilePath
         : "";
-    let downloadedPath;
+    let downloaded;
     try {
-      downloadedPath = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, { ytCookiesFile });
+      downloaded = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, {
+        ytCookiesFile,
+        subtitlesPrefix: path.join(jobDir, "source-subs")
+      });
     } catch (downloadErr) {
       throw new Error(normalizeYouTubeErrorMessage(downloadErr instanceof Error ? downloadErr.message : String(downloadErr)));
     }
-    job.inputPath = downloadedPath;
+    job.inputPath = downloaded.videoPath;
+    job.sourceSubtitlePath = downloaded.subtitlePath || "";
     if (!job.originalFilename) {
-      job.originalFilename = path.basename(downloadedPath);
+      job.originalFilename = path.basename(downloaded.videoPath);
     }
     job.progress = 14;
     job.updatedAt = new Date().toISOString();
@@ -840,49 +1570,106 @@ async function processJob(job) {
   job.progress = 15;
   job.updatedAt = new Date().toISOString();
 
+  let sourceTimedCaptions = [];
+  if (job.sourceSubtitlePath) {
+    try {
+      sourceTimedCaptions = await parseSubtitleFileToTimedCaptions(job.sourceSubtitlePath);
+    } catch (_error) {
+      sourceTimedCaptions = [];
+    }
+  }
+
   if (!job.params.transcript && job.params.includeAutoTranscript) {
     const generated = await transcribeVideoMaybe(job.inputPath, duration, true);
     job.params.transcript = generated.transcript;
     job.autoTranscriptUsed = generated.autoTranscriptUsed;
   }
 
+  let effectiveClipDuration = job.params.clipDuration;
+  const uniquenessBudget = duration / Math.max(1, job.params.clipsCount);
+  const isLongClipRequest = job.params.clipDuration >= 120;
+  if (!isLongClipRequest && uniquenessBudget < job.params.clipDuration * 0.9) {
+    effectiveClipDuration = Math.max(8, Math.floor(uniquenessBudget * 0.92));
+  }
+  job.params.effectiveClipDuration = effectiveClipDuration;
+
   const clips = selectBestClips(
     duration,
-    job.params.clipDuration,
+    effectiveClipDuration,
     job.params.clipsCount,
     job.params.minGapSecBetweenClips,
-    job.params.highlightMode
+    job.params.highlightMode,
+    sourceTimedCaptions,
+    job.params.ignoreIntroSec
   );
   const transcriptParts = segmentTranscriptForClips(job.params.transcript, clips);
+  if (!job.params.transcript && sourceTimedCaptions.length) {
+    job.params.transcript = sourceTimedCaptions.map((cue) => cue.text).join(" ");
+  }
   job.progress = 25;
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
-
-  const jobDir = getJobDir(job.id);
-  await fsp.mkdir(jobDir, { recursive: true });
 
   const total = clips.length || 1;
   const rendered = [];
   for (let i = 0; i < clips.length; i += 1) {
     const clip = clips[i];
     const outputPath = path.join(jobDir, `${clip.id}.mp4`);
-    const captions = buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
+    const timedCaptionsForClip = sourceTimedCaptions.length
+      ? buildCaptionsFromSourceTimedCaptions(clip.start, clip.end, sourceTimedCaptions)
+      : [];
+    const captions =
+      timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
     const srtPath = getJobSrtPath(job.id, clip.id);
     await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio);
     await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
+
+    let finalClipPath = outputPath;
+    let dubbedAudioPath = "";
+    if (job.params.dubFrenchAudio && edgeTtsAvailable) {
+      const dubText = buildDubTextFromCaptions(captions);
+      if (dubText) {
+        const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
+        const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
+        try {
+          const detectedVoice = boolFrom(job.params.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker)
+            ? await detectLikelyFrenchVoiceForClip(outputPath)
+            : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
+          if (hasTtsAudio) {
+            await replaceClipAudioWithFrenchDub(outputPath, ttsPath, dubbedPath);
+            finalClipPath = dubbedPath;
+            dubbedAudioPath = ttsPath;
+            clip.dubVoice = detectedVoice;
+          }
+        } catch (_error) {
+          finalClipPath = outputPath;
+          dubbedAudioPath = "";
+        }
+      }
+    }
 
     let burnedFilePath = null;
     if (job.params.burnSubtitles) {
       const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
       try {
-        await burnCaptionsIntoClip(outputPath, srtPath, burnPath, job.params.subtitleTheme);
+        await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
         burnedFilePath = burnPath;
       } catch (_error) {
         burnedFilePath = null;
       }
     }
 
-    rendered.push({ ...clip, filePath: outputPath, burnedFilePath, srtPath, captions });
+    rendered.push({
+      ...clip,
+      filePath: finalClipPath,
+      dubbedAudioPath,
+      dubVoice: clip.dubVoice || "",
+      burnedFilePath,
+      srtPath,
+      captions,
+      aspectRatio: job.params.aspectRatio
+    });
     job.progress = Math.round(25 + ((i + 1) / total) * 70);
     job.updatedAt = new Date().toISOString();
     await persistJobsDb();
@@ -915,11 +1702,14 @@ async function processJob(job) {
 
 app.get("/api/health", async (_req, res) => {
   const q = await readQueueStats();
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
   res.json({
     ok: true,
     ffmpeg: ffmpegReady,
     whisperAvailable,
     ytDlpAvailable,
+    edgeTtsAvailable,
+    youtubeCookiesConfigured: cookiesMeta.configured,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
     queueSize: q.waiting,
@@ -929,6 +1719,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api/config", (_req, res) => {
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
   res.json({
     defaults: DEFAULTS,
     queue: {
@@ -939,13 +1730,59 @@ app.get("/api/config", (_req, res) => {
       ffmpeg: ffmpegReady,
       whisperAvailable,
       ytDlpAvailable,
+      edgeTtsAvailable,
       urlIngestion: true,
       youtubeIngestion: ytDlpAvailable,
+      youtubeCookiesPersistence: true,
+      dubFrenchAudio: edgeTtsAvailable,
       srt: true,
       zip: true,
       burnSubtitles: true
-    }
+    },
+    youtubeCookies: cookiesMeta
   });
+});
+
+app.get("/api/youtube-cookies/status", (_req, res) => {
+  const meta = getStoredYoutubeCookiesMeta();
+  return res.json(meta);
+});
+
+app.post("/api/youtube-cookies", async (req, res) => {
+  const rawCookies = String(req.body.youtubeCookies || "");
+  if (!rawCookies.trim()) {
+    return res.status(400).json({ error: "Le champ youtubeCookies est requis." });
+  }
+
+  try {
+    const normalizedCookies = normalizeYouTubeCookies(rawCookies);
+    await fsp.mkdir(SECRETS_DIR, { recursive: true });
+    await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.status(201).json({
+      ok: true,
+      message: "Cookies YouTube enregistrés sur le serveur.",
+      ...meta
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Format de cookies invalide."
+    });
+  }
+});
+
+app.delete("/api/youtube-cookies", async (_req, res) => {
+  try {
+    if (hasStoredYoutubeCookies()) {
+      await fsp.unlink(YOUTUBE_COOKIES_STORE_PATH);
+    }
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.json({ ok: true, message: "Cookies YouTube supprimés.", ...meta });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de supprimer les cookies YouTube."
+    });
+  }
 });
 
 app.post("/api/jobs", upload.single("video"), async (req, res) => {
@@ -966,21 +1803,24 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
   }
 
   try {
-    const clipDuration = Math.min(90, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
+    const clipDuration = Math.min(600, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
     const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
     const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
+    const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
     const subtitleTheme = ["classic", "bold", "cinema", "neon"].includes(req.body.subtitleTheme)
       ? req.body.subtitleTheme
       : DEFAULTS.subtitleTheme;
     const highlightMode = ["balanced", "hook-first", "viral"].includes(req.body.highlightMode)
       ? req.body.highlightMode
       : DEFAULTS.highlightMode;
-    const videoMode = ["standard", "no-added-audio"].includes(req.body.videoMode)
-      ? req.body.videoMode
-      : DEFAULTS.videoMode;
+    const languageMode = ["translate-to-french", "already-french", "no-added-audio"].includes(req.body.languageMode)
+      ? req.body.languageMode
+      : DEFAULTS.languageMode;
     const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
+    const dubFrenchAudio = boolFrom(req.body.dubFrenchAudio, DEFAULTS.dubFrenchAudio);
+    const autoDubVoiceBySpeaker = boolFrom(req.body.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
     const youtubeCookies = String(req.body.youtubeCookies || "");
@@ -990,9 +1830,21 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const jobDir = getJobDir(id);
     let youtubeCookiesFilePath = "";
     if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && youtubeCookies.trim()) {
+      let normalizedCookies = "";
+      try {
+        normalizedCookies = normalizeYouTubeCookies(youtubeCookies);
+      } catch (error) {
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : "Format de cookies invalide."
+        });
+      }
       await fsp.mkdir(jobDir, { recursive: true });
       youtubeCookiesFilePath = path.join(jobDir, "youtube-cookies.txt");
-      await fsp.writeFile(youtubeCookiesFilePath, youtubeCookies, "utf8");
+      await fsp.writeFile(youtubeCookiesFilePath, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+      await fsp.mkdir(SECRETS_DIR, { recursive: true });
+      await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    } else if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && hasStoredYoutubeCookies()) {
+      youtubeCookiesFilePath = YOUTUBE_COOKIES_STORE_PATH;
     }
     const job = {
       id,
@@ -1013,10 +1865,13 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         aspectRatio,
         transcript,
         minGapSecBetweenClips,
+        ignoreIntroSec,
         subtitleTheme,
         highlightMode,
-        videoMode,
+        languageMode,
         includeAutoTranscript,
+        dubFrenchAudio: ["already-french", "no-added-audio"].includes(languageMode) ? false : dubFrenchAudio,
+        autoDubVoiceBySpeaker: ["already-french", "no-added-audio"].includes(languageMode) ? false : autoDubVoiceBySpeaker,
         includeSrtInZip,
         burnSubtitles,
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
@@ -1118,6 +1973,7 @@ ensureDirs()
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
+    edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
     await restoreJobsDb();
     await initBullQueue();
     app.listen(PORT, () => {
