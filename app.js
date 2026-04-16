@@ -35,7 +35,10 @@ const state = {
   includeSrtInZip: true,
   burnSubtitles: false,
   ignoreIntroSec: config.defaultIgnoreIntroSec,
-  currentAspectRatio: "9:16"
+  currentAspectRatio: "9:16",
+  batchRunning: false,
+  batchStopRequested: false,
+  batchJobs: []
 };
 
 const dom = {
@@ -65,6 +68,13 @@ const dom = {
   minGapValue: document.getElementById("minGapValue"),
   generateScriptBtn: document.getElementById("generateScriptBtn"),
   analyzeBtn: document.getElementById("analyzeBtn"),
+  batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
+  batchClipsCount: document.getElementById("batchClipsCount"),
+  batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
+  startBatchBtn: document.getElementById("startBatchBtn"),
+  stopBatchBtn: document.getElementById("stopBatchBtn"),
+  batchStatus: document.getElementById("batchStatus"),
+  batchJobsList: document.getElementById("batchJobsList"),
   generationProgress: document.getElementById("generationProgress"),
   generationProgressText: document.getElementById("generationProgressText"),
   player: document.getElementById("player"),
@@ -117,6 +127,19 @@ function setGenerationProgress(value) {
   if (dom.generationProgressText) {
     dom.generationProgressText.textContent = `Progression: ${progress}%`;
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function clearPolling() {
@@ -194,6 +217,248 @@ function renderClips() {
     li.querySelector('[data-action="play"]').addEventListener("click", () => selectClip(idx, true));
     dom.clipsList.appendChild(li);
   });
+}
+
+function setBatchStatus(message, isError = false) {
+  if (!dom.batchStatus) return;
+  dom.batchStatus.textContent = message;
+  dom.batchStatus.classList.toggle("note-error", isError);
+}
+
+function setBatchControlsDisabled(isRunning) {
+  state.batchRunning = isRunning;
+  if (dom.startBatchBtn) dom.startBatchBtn.disabled = isRunning || !state.backendAvailable;
+  if (dom.stopBatchBtn) dom.stopBatchBtn.disabled = !isRunning;
+}
+
+function parseBatchUrls(rawText) {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const urls = [];
+  for (const line of lines) {
+    let parsed;
+    try {
+      parsed = new URL(line);
+    } catch (_error) {
+      throw new Error(`Lien invalide dans le batch: ${line}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error(`Lien non supporté (http/https requis): ${line}`);
+    }
+    const normalized = parsed.toString();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    urls.push(normalized);
+  }
+  return urls;
+}
+
+function renderBatchJobs() {
+  if (!dom.batchJobsList) return;
+  if (!state.batchJobs.length) {
+    dom.batchJobsList.innerHTML = `<li class="empty">Aucun batch lancé.</li>`;
+    return;
+  }
+
+  dom.batchJobsList.innerHTML = state.batchJobs
+    .map((item, idx) => {
+      const progress =
+        item.status === "processing" || item.status === "queued"
+          ? ` · ${Math.max(0, Math.min(100, Number(item.progress) || 0))}%`
+          : "";
+      const clipsLabel = item.clipsCount ? ` · clips: ${item.clipsCount}` : "";
+      const errorLabel = item.error ? `<p class="hint small note-error no-margin">${escapeHtml(item.error)}</p>` : "";
+      const actions = item.jobId
+        ? `
+          <div class="clip-actions">
+            <button class="mini-btn" data-action="open-job" data-job-id="${item.jobId}">Ouvrir</button>
+            ${
+              item.status === "completed"
+                ? `<button class="mini-btn" data-action="download-bundle" data-job-id="${item.jobId}">ZIP</button>`
+                : ""
+            }
+          </div>
+        `
+        : "";
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">Source ${idx + 1}</h3>
+            <span class="chip">${escapeHtml(item.status)}${progress}${clipsLabel}</span>
+          </div>
+          <p class="clip-snippet">${escapeHtml(item.sourceUrl)}</p>
+          ${actions}
+          ${errorLabel}
+        </li>
+      `;
+    })
+    .join("");
+}
+
+async function createBatchJobFromUrl(sourceUrl, clipsCount, ignoreIntroSec) {
+  const body = new FormData();
+  body.append("videoUrl", sourceUrl);
+  body.append("clipDuration", "120");
+  body.append("clipsCount", String(clipsCount));
+  body.append("aspectRatio", "9:16");
+  body.append("frameMode", "full-video");
+  body.append("languageMode", "no-added-audio");
+  body.append("transcript", "");
+  body.append("subtitleTheme", "classic");
+  body.append("highlightMode", "viral");
+  body.append("includeAutoTranscript", "false");
+  body.append("dubFrenchAudio", "false");
+  body.append("autoDubVoiceBySpeaker", "false");
+  body.append("includeSrtInZip", "false");
+  body.append("burnSubtitles", "false");
+  body.append("minGapSecBetweenClips", "6");
+  body.append("ignoreIntroSec", String(ignoreIntroSec));
+
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (youtubeCookies) {
+    body.append("youtubeCookies", youtubeCookies);
+  }
+
+  const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Impossible de créer le job batch");
+  }
+  return payload;
+}
+
+async function pollJobUntilDone(jobId, onUpdate) {
+  while (true) {
+    const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+    if (!response.ok) {
+      throw new Error(`Job ${jobId.slice(0, 8)} introuvable`);
+    }
+    const job = await response.json();
+    if (typeof onUpdate === "function") onUpdate(job);
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+    await sleep(config.pollIntervalMs);
+  }
+}
+
+async function loadJobIntoWorkspace(jobId) {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+  if (!response.ok) throw new Error("Impossible de charger ce job");
+  const job = await response.json();
+  if (job.status !== "completed") {
+    throw new Error("Le job n'est pas encore terminé");
+  }
+  state.activeJobId = job.id;
+  applyCompletedJob(job, `Job ${job.id.slice(0, 8)} chargé`);
+}
+
+async function startBatchGeneration() {
+  if (state.batchRunning) return;
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+
+  let sources = [];
+  try {
+    sources = parseBatchUrls(dom.batchVideoUrlsInput?.value || "");
+  } catch (error) {
+    setBatchStatus(error instanceof Error ? error.message : "Batch invalide.", true);
+    return;
+  }
+  if (!sources.length) {
+    setBatchStatus("Ajoute au moins un lien vidéo dans la zone batch.", true);
+    return;
+  }
+
+  const clipsCount = Math.max(1, Math.min(8, Number(dom.batchClipsCount?.value || 4)));
+  const ignoreIntroSec = Math.max(0, Math.min(120, Number(dom.batchIgnoreIntroSec?.value || 20)));
+
+  state.batchStopRequested = false;
+  state.batchJobs = sources.map((sourceUrl) => ({
+    sourceUrl,
+    status: "queued",
+    progress: 0,
+    clipsCount: 0,
+    jobId: "",
+    error: ""
+  }));
+  renderBatchJobs();
+  setBatchControlsDisabled(true);
+  updateStatus("Batch V1 lancé…", false);
+  setBatchStatus(`Batch démarré (${sources.length} sources).`, false);
+
+  let completedCount = 0;
+  let failedCount = 0;
+  let stoppedCount = 0;
+  let lastCompletedJob = null;
+
+  for (let index = 0; index < state.batchJobs.length; index += 1) {
+    if (state.batchStopRequested) break;
+
+    const item = state.batchJobs[index];
+    item.status = "creating";
+    item.progress = 0;
+    renderBatchJobs();
+    setBatchStatus(`Création du job ${index + 1}/${state.batchJobs.length}…`, false);
+
+    try {
+      const created = await createBatchJobFromUrl(item.sourceUrl, clipsCount, ignoreIntroSec);
+      item.jobId = created.id;
+      item.status = "queued";
+      renderBatchJobs();
+
+      const finalJob = await pollJobUntilDone(created.id, (job) => {
+        item.status = job.status;
+        item.progress = Number(job.progress) || 0;
+        renderBatchJobs();
+      });
+
+      if (finalJob.status === "completed") {
+        item.status = "completed";
+        item.progress = 100;
+        item.clipsCount = (finalJob.clips || []).length;
+        completedCount += 1;
+        lastCompletedJob = finalJob;
+      } else {
+        item.status = "failed";
+        item.error = finalJob.error || "Traitement échoué";
+        failedCount += 1;
+      }
+    } catch (error) {
+      item.status = "failed";
+      item.error = error instanceof Error ? error.message : "Erreur batch";
+      failedCount += 1;
+    }
+
+    renderBatchJobs();
+    if (state.batchStopRequested) break;
+  }
+
+  if (state.batchStopRequested) {
+    for (const item of state.batchJobs) {
+      if (item.status === "queued") {
+        item.status = "stopped";
+        stoppedCount += 1;
+      }
+    }
+  }
+
+  renderBatchJobs();
+  setBatchControlsDisabled(false);
+  state.batchStopRequested = false;
+  const summary = `Batch terminé · OK: ${completedCount} · Erreurs: ${failedCount} · Arrêtés: ${stoppedCount}`;
+  setBatchStatus(summary, failedCount > 0);
+  updateStatus(summary, failedCount === 0);
+
+  if (lastCompletedJob) {
+    state.activeJobId = lastCompletedJob.id;
+    applyCompletedJob(lastCompletedJob, `${summary} · dernier job chargé`);
+  }
 }
 
 function updateSubtitleOverlay() {
@@ -366,6 +631,7 @@ async function checkBackendHealth() {
     const payload = await healthRes.json();
     const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
+    setBatchControlsDisabled(state.batchRunning);
     updateStatus("Backend prêt", true);
     if (serverConfig?.defaults) {
       const defaultsCfg = serverConfig.defaults;
@@ -404,6 +670,7 @@ async function checkBackendHealth() {
     return;
   } catch (_error) {
     state.backendAvailable = false;
+    setBatchControlsDisabled(false);
     updateStatus("Backend indisponible — lance: npm start", false);
     dom.backendMeta.textContent = "Aucune connexion backend";
     renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
@@ -495,6 +762,40 @@ async function createJob() {
   }
 }
 
+function applyCompletedJob(job, readyStatusText = "") {
+  setGenerationProgress(100);
+  state.clips = job.clips || [];
+  state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
+  state.burnSubtitles = Boolean(job.params?.burnSubtitles);
+  state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
+  state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
+  state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
+  state.languageMode = job.params?.languageMode || state.languageMode;
+  state.frameMode = job.params?.frameMode || state.frameMode;
+  state.noAddedAudio = state.languageMode === "no-added-audio";
+  state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
+  dom.subtitleTheme.value = state.subtitleTheme;
+  if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
+  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
+  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
+  if (dom.languageMode) dom.languageMode.value = state.languageMode;
+  if (dom.frameMode) dom.frameMode.value = state.frameMode;
+  applySubtitleTheme(state.subtitleTheme);
+  applyPreviewAspectRatio(state.currentAspectRatio);
+
+  renderClips();
+  if (state.clips.length > 0) {
+    setButtonsEnabled(true);
+    selectClip(0, false);
+  }
+  dom.analyzeBtn.disabled = false;
+  updateStatus(readyStatusText || `${state.clips.length} shorts générés`, true);
+  if (job.autoTranscriptUsed && dom.backendMeta && !dom.backendMeta.textContent.includes("transcription auto utilisée")) {
+    dom.backendMeta.textContent = `${dom.backendMeta.textContent} · transcription auto utilisée`;
+  }
+}
+
 function scheduleJobPolling() {
   clearPolling();
   state.pollTimer = setTimeout(() => {
@@ -528,37 +829,7 @@ async function pollJob() {
       return;
     }
     if (job.status === "completed") {
-      setGenerationProgress(100);
-      state.clips = job.clips || [];
-      state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
-      state.burnSubtitles = Boolean(job.params?.burnSubtitles);
-      state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
-      state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
-      state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
-      state.languageMode = job.params?.languageMode || state.languageMode;
-      state.frameMode = job.params?.frameMode || state.frameMode;
-      state.noAddedAudio = state.languageMode === "no-added-audio";
-      state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
-      dom.subtitleTheme.value = state.subtitleTheme;
-      if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
-      if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
-      if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
-      if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
-      if (dom.languageMode) dom.languageMode.value = state.languageMode;
-      if (dom.frameMode) dom.frameMode.value = state.frameMode;
-      applySubtitleTheme(state.subtitleTheme);
-      applyPreviewAspectRatio(state.currentAspectRatio);
-
-      renderClips();
-      if (state.clips.length > 0) {
-        setButtonsEnabled(true);
-        selectClip(0, false);
-      }
-      dom.analyzeBtn.disabled = false;
-      updateStatus(`${state.clips.length} shorts générés`, true);
-      if (job.autoTranscriptUsed) {
-        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · transcription auto utilisée`;
-      }
+      applyCompletedJob(job);
       return;
     }
     scheduleJobPolling();
@@ -687,6 +958,36 @@ function initEvents() {
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
   });
+  if (dom.startBatchBtn) {
+    dom.startBatchBtn.addEventListener("click", () => {
+      void startBatchGeneration();
+    });
+  }
+  if (dom.stopBatchBtn) {
+    dom.stopBatchBtn.addEventListener("click", () => {
+      state.batchStopRequested = true;
+      setBatchStatus("Arrêt demandé: fin de la vidéo en cours puis stop.", false);
+    });
+  }
+  if (dom.batchJobsList) {
+    dom.batchJobsList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      const button = target.closest("button[data-action]");
+      if (!button) return;
+      const action = button.getAttribute("data-action");
+      const jobId = button.getAttribute("data-job-id");
+      if (!jobId) return;
+      if (action === "open-job") {
+        void loadJobIntoWorkspace(jobId).catch((error) => {
+          updateStatus(error instanceof Error ? error.message : "Impossible de charger ce job", false);
+        });
+      }
+      if (action === "download-bundle") {
+        triggerDownload(`/api/jobs/${jobId}/bundle`, `clipforge-bundle-${jobId}.zip`);
+      }
+    });
+  }
   if (dom.saveYoutubeCookiesBtn) {
     dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
       void saveYoutubeCookies();
@@ -748,6 +1049,9 @@ function initDefaults() {
   if (dom.languageMode) dom.languageMode.value = state.languageMode;
   applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
+  renderBatchJobs();
+  setBatchStatus("Batch inactif.", false);
+  setBatchControlsDisabled(false);
   setGenerationProgress(0);
 }
 
@@ -756,7 +1060,13 @@ async function init() {
   initEvents();
   initFileInput();
   setButtonsEnabled(false);
+  renderBatchJobs();
+  setBatchControlsDisabled(false);
   await checkBackendHealth();
+  setBatchControlsDisabled(false);
+  if (!state.backendAvailable) {
+    setBatchStatus("Batch inactif (backend indisponible).", true);
+  }
   if (state.backendAvailable) {
     try {
       await refreshYoutubeCookiesStatus();

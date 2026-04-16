@@ -86,6 +86,26 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
 - transcription auto activée
 - doublage audio FR activé (si mode langue = "vidéo à traduire")
 
+### Auto-Pipeline V1 (opérationnel aujourd'hui)
+
+Pour traiter plusieurs vidéos rapidement avec un preset prêt à publier:
+
+1. Ouvre le bloc **Auto-Pipeline V1 (batch aujourd'hui)**.
+2. Colle plusieurs liens (1 lien par ligne).
+3. Choisis:
+   - **Clips 2 min par source**
+   - **Ignorer intro auto**
+4. Clique **Lancer batch V1**.
+5. Le preset applique automatiquement:
+   - `clipDuration=120`
+   - `languageMode=no-added-audio`
+   - `burnSubtitles=false`
+   - `includeSrtInZip=false`
+   - ratio `9:16` + `frameMode=full-video`
+6. Dans la liste batch:
+   - **Ouvrir** charge le résultat dans la prévisualisation
+   - **ZIP** télécharge le pack complet de cette source
+
 ### Mode avancé
 
 1. Fournir une source vidéo:
@@ -168,7 +188,7 @@ Render crée:
 - `subtitleTheme` (`classic` | `bold` | `cinema` | `neon`)
 - `highlightMode` (`balanced` | `hook-first` | `viral`)
 - `includeAutoTranscript` (`true`/`false`)
-- `languageMode` (`translate-to-french` | `already-french`)
+- `languageMode` (`translate-to-french` | `already-french` | `no-added-audio`)
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
 - `dubFrenchAudio` (`true`/`false`) — remplace la piste audio par une voix FR synthétique

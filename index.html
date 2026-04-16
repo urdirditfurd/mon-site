@@ -46,6 +46,51 @@
       </div>
 
       <details class="details-box">
+        <summary>Auto-Pipeline V1 (batch aujourd'hui)</summary>
+        <p class="hint small no-margin">
+          Preset automatique: 2 min, sans audio ajouté, sans sous-titres brûlés, format TikTok 9:16.
+        </p>
+        <label class="field">
+          <span>Liens vidéo (1 lien par ligne)</span>
+          <textarea
+            id="batchVideoUrlsInput"
+            rows="5"
+            placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."
+          ></textarea>
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Clips 2 min par source</span>
+            <select id="batchClipsCount">
+              <option value="2">2 clips</option>
+              <option value="3">3 clips</option>
+              <option value="4" selected>4 clips</option>
+              <option value="6">6 clips</option>
+              <option value="8">8 clips</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Ignorer intro auto</span>
+            <select id="batchIgnoreIntroSec">
+              <option value="10">10 secondes</option>
+              <option value="20" selected>20 secondes</option>
+              <option value="30">30 secondes</option>
+              <option value="45">45 secondes</option>
+              <option value="60">60 secondes</option>
+            </select>
+          </label>
+        </div>
+        <div class="buttons-row">
+          <button id="startBatchBtn" class="btn btn-primary" type="button">Lancer batch V1</button>
+          <button id="stopBatchBtn" class="btn btn-ghost" type="button" disabled>Arrêter après la vidéo en cours</button>
+        </div>
+        <p id="batchStatus" class="hint small">Batch inactif.</p>
+        <ul id="batchJobsList" class="batch-jobs-list">
+          <li class="empty">Aucun batch lancé.</li>
+        </ul>
+      </details>
+
+      <details class="details-box">
         <summary>Connexion YouTube (anti-bot)</summary>
         <label class="field">
           <span>Cookies YouTube (format Netscape)</span>
