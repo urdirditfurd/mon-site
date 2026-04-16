@@ -78,6 +78,8 @@ const dom = {
   discoverLanguage: document.getElementById("discoverLanguage"),
   discoverRegion: document.getElementById("discoverRegion"),
   discoverPublishedWithinDays: document.getElementById("discoverPublishedWithinDays"),
+  discoverExcludeChannels: document.getElementById("discoverExcludeChannels"),
+  discoverExcludeSeen: document.getElementById("discoverExcludeSeen"),
   discoverYoutubeBtn: document.getElementById("discoverYoutubeBtn"),
   useDiscoverResultsBtn: document.getElementById("useDiscoverResultsBtn"),
   discoverAndRunBatchBtn: document.getElementById("discoverAndRunBatchBtn"),
@@ -354,7 +356,9 @@ async function discoverYoutubeSources(autoRunBatch = false) {
     minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
     relevanceLanguage: String(dom.discoverLanguage?.value || ""),
     regionCode: String(dom.discoverRegion?.value || "FR"),
-    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90))))
+    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90)))),
+    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
+    excludeSeen: String(Boolean(dom.discoverExcludeSeen?.checked))
   });
 
   setDiscoverControlsDisabled(true);
@@ -377,7 +381,15 @@ async function discoverYoutubeSources(autoRunBatch = false) {
       return;
     }
 
-    setDiscoverStatus(`${state.discoverResults.length} lien(s) trouvés automatiquement.`, false);
+    const droppedByHistory = Number(payload?.stats?.droppedByHistory || 0);
+    const droppedByChannel = Number(payload?.stats?.droppedByChannel || 0);
+    const droppedByDuration = Number(payload?.stats?.droppedByDuration || 0);
+    const skippedSummary = [];
+    if (droppedByHistory > 0) skippedSummary.push(`${droppedByHistory} doublons historiques`);
+    if (droppedByChannel > 0) skippedSummary.push(`${droppedByChannel} chaînes exclues`);
+    if (droppedByDuration > 0) skippedSummary.push(`${droppedByDuration} trop courtes`);
+    const skippedText = skippedSummary.length ? ` · filtrés: ${skippedSummary.join(", ")}` : "";
+    setDiscoverStatus(`${state.discoverResults.length} lien(s) trouvés automatiquement${skippedText}.`, false);
 
     if (autoRunBatch) {
       pushSelectedDiscoverUrlsToBatch();

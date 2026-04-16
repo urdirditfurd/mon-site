@@ -225,6 +225,53 @@ function isLikelyYouTubeUrl(value) {
   }
 }
 
+function extractYouTubeVideoIdFromUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("youtu.be")) {
+      return parsed.pathname.replace(/^\/+/, "").split("/")[0] || "";
+    }
+    if (host.includes("youtube.com")) {
+      if (parsed.pathname === "/watch") {
+        return String(parsed.searchParams.get("v") || "").trim();
+      }
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      if (segments[0] === "shorts" && segments[1]) return segments[1];
+      if (segments[0] === "embed" && segments[1]) return segments[1];
+    }
+    return "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function normalizeScoringToken(rawToken) {
+  return String(rawToken || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function parseCsvTokens(raw) {
+  return String(raw || "")
+    .split(/[,\n;]+/)
+    .map((token) => normalizeScoringToken(token))
+    .filter(Boolean);
+}
+
+function getProcessedYouTubeVideoIdsFromJobs() {
+  const out = new Set();
+  for (const job of jobs.values()) {
+    const sourceUrl = String(job?.sourceUrl || "");
+    const videoId = extractYouTubeVideoIdFromUrl(sourceUrl);
+    if (videoId) out.add(videoId);
+  }
+  return out;
+}
+
 function normalizeDiscoverOrder(orderRaw) {
   const allowed = new Set(["relevance", "date", "viewCount"]);
   const candidate = String(orderRaw || "").trim();
@@ -250,23 +297,45 @@ function parseIso8601DurationSeconds(isoDuration) {
   return Number.isFinite(total) ? total : 0;
 }
 
+const YOUTUBE_DISCOVERY_VIRAL_KEYWORDS = new Set([
+  "funny",
+  "animals",
+  "fails",
+  "moments",
+  "crazy",
+  "wild",
+  "hilarious",
+  "laugh",
+  "viral",
+  "insane",
+  "cute",
+  "reaction",
+  "compilation"
+]);
+
 function computeYouTubeCandidateScore(candidate, queryTokens, nowMs) {
   const views = Number(candidate.viewCount || 0);
-  const viewsScore = Math.min(45, Math.log10(views + 1) * 8);
+  const viewsScore = Math.min(36, Math.log10(views + 1) * 7);
   const durationSec = Number(candidate.durationSec || 0);
   const durationScore =
-    durationSec >= 360
-      ? Math.min(25, durationSec / 120)
+    durationSec >= 420
+      ? Math.min(20, durationSec / 140)
       : durationSec >= 180
-        ? 8
-        : -20;
+        ? 7
+        : -18;
   const title = String(candidate.title || "").toLowerCase();
-  const tokenMatches = queryTokens.filter((token) => token.length >= 3 && title.includes(token)).length;
-  const keywordScore = Math.min(18, tokenMatches * 4.5);
+  const description = String(candidate.description || "").toLowerCase();
+  const merged = `${title} ${description}`.trim();
+  const tokenMatches = queryTokens.filter((token) => token.length >= 3 && merged.includes(token)).length;
+  const keywordScore = Math.min(20, tokenMatches * 4.8);
+  const viralHits = Array.from(YOUTUBE_DISCOVERY_VIRAL_KEYWORDS).filter((token) => merged.includes(token)).length;
+  const viralScore = Math.min(14, viralHits * 2.4);
   const publishedMs = Date.parse(candidate.publishedAt || "");
   const daysOld = Number.isFinite(publishedMs) ? Math.max(0, (nowMs - publishedMs) / 86400000) : 9999;
-  const recencyScore = Math.max(0, 22 - daysOld * 0.12);
-  return Number((viewsScore + durationScore + keywordScore + recencyScore).toFixed(2));
+  const recencyScore = Math.max(0, 20 - daysOld * 0.1);
+  const viewsPerDay = daysOld > 0 ? views / Math.max(1, daysOld) : views;
+  const momentumScore = Math.min(14, Math.log10(viewsPerDay + 1) * 4.2);
+  return Number((viewsScore + durationScore + keywordScore + viralScore + recencyScore + momentumScore).toFixed(2));
 }
 
 async function fetchYouTubeDiscoverRaw({
@@ -344,6 +413,7 @@ async function fetchYouTubeDiscoverRaw({
       return {
         videoId,
         url: `https://www.youtube.com/watch?v=${videoId}`,
+        channelId: String(item?.snippet?.channelId || details?.snippet?.channelId || ""),
         title: String(item?.snippet?.title || details?.snippet?.title || "").trim(),
         description: String(item?.snippet?.description || "").trim(),
         channelTitle: String(item?.snippet?.channelTitle || details?.snippet?.channelTitle || "").trim(),
@@ -809,15 +879,6 @@ const INTRO_OUTRO_PROMO_KEYWORDS = new Set([
   "youtube",
   "snapchat"
 ]);
-
-function normalizeScoringToken(rawToken) {
-  return String(rawToken || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "")
-    .trim();
-}
 
 function tokenizeForScoring(text) {
   return String(text || "")
@@ -1962,6 +2023,14 @@ app.get("/api/youtube/discover", async (req, res) => {
   const relevanceLanguageRaw = String(req.query.relevanceLanguage || "").trim().toLowerCase();
   const relevanceLanguage = /^[a-z]{2}$/.test(relevanceLanguageRaw) ? relevanceLanguageRaw : "";
   const publishedWithinDays = Math.max(0, Math.min(3650, Math.floor(toNumber(req.query.publishedWithinDays, 365))));
+  const excludeSeen = boolFrom(req.query.excludeSeen, true);
+  const blockedChannelKeywords = parseCsvTokens(req.query.blockedChannelKeywords);
+  const blockedChannelIds = new Set(
+    String(req.query.blockedChannelIds || "")
+      .split(/[,\n;]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
 
   try {
     const rawCandidates = await fetchYouTubeDiscoverRaw({
@@ -1979,9 +2048,37 @@ app.get("/api/youtube/discover", async (req, res) => {
       .split(/\s+/)
       .map((token) => token.trim())
       .filter(Boolean);
+    const seenVideoIds = excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
+
+    let droppedByDuration = 0;
+    let droppedByHistory = 0;
+    let droppedByChannel = 0;
 
     const candidates = rawCandidates
-      .filter((item) => Number(item.durationSec || 0) >= minDurationSec)
+      .filter((item) => {
+        if (Number(item.durationSec || 0) < minDurationSec) {
+          droppedByDuration += 1;
+          return false;
+        }
+        if (excludeSeen && seenVideoIds.has(String(item.videoId || ""))) {
+          droppedByHistory += 1;
+          return false;
+        }
+        const channelId = String(item.channelId || "").trim();
+        const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
+        if (channelId && blockedChannelIds.has(channelId)) {
+          droppedByChannel += 1;
+          return false;
+        }
+        if (blockedChannelKeywords.length > 0) {
+          const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
+          if (blockedMatch) {
+            droppedByChannel += 1;
+            return false;
+          }
+        }
+        return true;
+      })
       .map((item) => ({
         ...item,
         score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
@@ -2000,7 +2097,16 @@ app.get("/api/youtube/discover", async (req, res) => {
         regionCode,
         relevanceLanguage: relevanceLanguage || null,
         safeSearch,
-        publishedWithinDays
+        publishedWithinDays,
+        excludeSeen,
+        blockedChannelKeywords,
+        blockedChannelIds: Array.from(blockedChannelIds)
+      },
+      stats: {
+        rawCount: rawCandidates.length,
+        droppedByDuration,
+        droppedByHistory,
+        droppedByChannel
       },
       candidates
     });

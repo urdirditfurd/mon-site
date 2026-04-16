@@ -112,14 +112,17 @@ La V2 ajoute une découverte automatique de liens YouTube depuis l'app (sans col
 
 1. Ouvre le bloc **Version V2 — découverte auto YouTube**.
 2. Saisis une niche (ex: `funny animals`) + langue/région + quantité.
-3. Clique **Trouver des vidéos (V2)**.
-4. Clique **Injecter vers Batch V1** pour remplir automatiquement la zone batch.
+3. Option V2.1:
+   - **Exclure chaînes** (mots-clés blacklist)
+   - **Anti-doublon historique** (évite les vidéos déjà traitées)
+4. Clique **Trouver des vidéos (V2)**.
+5. Clique **Injecter vers Batch V1** pour remplir automatiquement la zone batch.
 5. Lance ensuite le traitement via **Lancer batch V1**.
 
 API V2 utilisée:
-- `POST /api/youtube/discover`
-- Entrée: `query`, `maxResults`, `regionCode`, `relevanceLanguage`, `publishedAfterDays`, `order`
-- Sortie: `candidates[]` triés avec score (vues, fraîcheur, durée, contenu short-friendly)
+- `GET /api/youtube/discover`
+- Entrée: `q`, `maxResults`, `regionCode`, `relevanceLanguage`, `publishedWithinDays`, `order`, `excludeSeen`, `blockedChannelKeywords`
+- Sortie: `candidates[]` triés avec score (vues, fraîcheur, durée, momentum, contenu short-friendly) + `stats` de filtrage
 
 ### Mode avancé
 

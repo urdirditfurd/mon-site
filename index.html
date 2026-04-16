@@ -121,6 +121,19 @@
             <option value="0">Sans limite</option>
           </select>
         </label>
+        <label class="field">
+          <span>Exclure chaînes (mots-clés, séparés par virgule)</span>
+          <input
+            type="text"
+            id="discoverExcludeChannels"
+            placeholder="compilation, shorts, replay..."
+            autocomplete="off"
+          >
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="discoverExcludeSeen" checked>
+          <span>Anti-doublon historique (éviter les vidéos déjà traitées)</span>
+        </label>
         <div class="buttons-row">
           <button id="discoverYoutubeBtn" class="btn btn-primary" type="button">Trouver des liens (V2)</button>
           <button id="useDiscoverResultsBtn" class="btn btn-ghost" type="button">Envoyer la sélection vers batch V1</button>
