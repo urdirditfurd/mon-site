@@ -180,6 +180,32 @@
           <button id="clearTikTokConfigBtn" class="btn btn-ghost" type="button">Supprimer config TikTok</button>
         </div>
         <p id="tiktokConfigStatus" class="hint small">Configuration TikTok: vérification…</p>
+        <hr class="separator">
+        <div class="grid-2">
+          <label class="field">
+            <span>Auto-run toutes les X minutes</span>
+            <select id="automationIntervalMinutes">
+              <option value="30">30 minutes</option>
+              <option value="60">60 minutes</option>
+              <option value="120" selected>120 minutes</option>
+              <option value="180">180 minutes</option>
+              <option value="240">240 minutes</option>
+              <option value="360">360 minutes</option>
+              <option value="720">720 minutes</option>
+              <option value="1440">1440 minutes (1 jour)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Base URL publique (optionnel)</span>
+            <input type="text" id="automationBaseUrl" placeholder="https://ton-domaine.com">
+          </label>
+        </div>
+        <div class="buttons-row">
+          <button id="saveAutomationScheduleBtn" class="btn btn-primary" type="button">Activer / mettre à jour auto-run</button>
+          <button id="runAutomationNowBtn" class="btn btn-ghost" type="button">Lancer maintenant</button>
+          <button id="disableAutomationScheduleBtn" class="btn btn-ghost" type="button">Désactiver auto-run</button>
+        </div>
+        <p id="automationScheduleStatus" class="hint small">Planification: inactive.</p>
       </details>
 
       <details class="details-box">

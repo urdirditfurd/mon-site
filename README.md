@@ -124,6 +124,23 @@ API V2 utilisée:
 - Entrée: `q`, `maxResults`, `regionCode`, `relevanceLanguage`, `publishedWithinDays`, `order`, `excludeSeen`, `blockedChannelKeywords`
 - Sortie: `candidates[]` triés avec score (vues, fraîcheur, durée, momentum, contenu short-friendly) + `stats` de filtrage
 
+### Version V2.3 — planification auto-run (découverte → génération → publication)
+
+La V2.3 ajoute un mode planifié:
+
+1. Configure TikTok dans **Connexion TikTok (auto-publication)** (token + open_id).
+2. Choisis l’intervalle (**Auto-run toutes les X minutes**).
+3. (Optionnel) renseigne une **Base URL publique** si tu ne veux pas utiliser l’URL actuelle.
+4. Clique **Activer / mettre à jour auto-run**.
+5. Tu peux:
+   - lancer un run immédiat avec **Lancer maintenant**
+   - arrêter la planification avec **Désactiver auto-run**
+
+Notes:
+- Le scheduler réutilise la niche et les filtres V2 courants.
+- Le nombre de clips est calculé automatiquement en 2 min par segment (`floor(durée/120)`).
+- Les runs planifiés passent par la même logique que le bouton manuel “Trouver + générer + publier TikTok”.
+
 ### Version V2.2 — Auto-Publish TikTok (découverte -> génération -> publication)
 
 La V2.2 ajoute un flux complet en un clic:
@@ -207,6 +224,14 @@ Render crée:
 - `GET /api/youtube-cookies/status`
 - `POST /api/youtube-cookies` (JSON: `{ "youtubeCookies": "..." }`)
 - `DELETE /api/youtube-cookies`
+- `GET /api/tiktok/config/status`
+- `POST /api/tiktok/config`
+- `DELETE /api/tiktok/config`
+- `POST /api/automation/discover-generate-publish`
+- `GET /api/automation/schedule/status`
+- `POST /api/automation/schedule`
+- `POST /api/automation/schedule/run-now`
+- `DELETE /api/automation/schedule`
 - `POST /api/jobs` (multipart/form-data avec `video` **ou** JSON avec `videoUrl`)
 - `GET /api/jobs/:jobId`
 - `GET /api/jobs/:jobId/plan`

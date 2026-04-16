@@ -18,6 +18,7 @@ const SECRETS_DIR = path.join(STORAGE_DIR, "secrets");
 const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
 const YOUTUBE_COOKIES_STORE_PATH = path.join(SECRETS_DIR, "youtube-cookies.txt");
 const TIKTOK_CONFIG_STORE_PATH = path.join(SECRETS_DIR, "tiktok-config.json");
+const AUTOMATION_SCHEDULE_STORE_PATH = path.join(SECRETS_DIR, "automation-schedule.json");
 const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
@@ -27,6 +28,10 @@ const YOUTUBE_DATA_API_BASE = "https://www.googleapis.com/youtube/v3";
 const TIKTOK_API_BASE = "https://open.tiktokapis.com/v2";
 const TIKTOK_STATUS_POLL_INTERVAL_MS = Math.max(1200, Number(process.env.TIKTOK_STATUS_POLL_INTERVAL_MS) || 3000);
 const TIKTOK_STATUS_POLL_TIMEOUT_MS = Math.max(10000, Number(process.env.TIKTOK_STATUS_POLL_TIMEOUT_MS) || 180000);
+const AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES = Math.max(
+  5,
+  Number(process.env.AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES) || 30
+);
 
 const app = express();
 app.use(cors());
@@ -55,6 +60,19 @@ let ffmpegReady = true;
 let whisperAvailable = false;
 let ytDlpAvailable = false;
 let edgeTtsAvailable = false;
+let automationScheduleTimer = null;
+let automationScheduleRunning = false;
+let automationPipelineRunning = false;
+const automationScheduleRuntime = {
+  enabled: false,
+  intervalMinutes: 0,
+  updatedAt: null,
+  nextRunAt: null,
+  lastRunAt: null,
+  lastRunId: "",
+  lastRunStatus: "",
+  lastError: ""
+};
 
 const DEFAULTS = {
   clipDuration: 30,
@@ -978,6 +996,352 @@ function sanitizeAutomationRun(run) {
     error: run.error || null,
     items: run.items || []
   };
+}
+
+function createHttpError(statusCode, message) {
+  const error = new Error(String(message || "Erreur"));
+  error.statusCode = Math.max(400, Number(statusCode) || 500);
+  return error;
+}
+
+function sanitizeAutomationSchedulePayload(rawInput = {}, fallbackPrivacy = "SELF_ONLY") {
+  return {
+    q: String(rawInput.q || rawInput.query || "").trim(),
+    maxResults: Math.max(1, Math.min(25, Math.floor(toNumber(rawInput.maxResults, 8)))),
+    minDurationSec: Math.max(0, Math.min(7200, Math.floor(toNumber(rawInput.minDurationSec, 300)))),
+    order: normalizeDiscoverOrder(rawInput.order),
+    safeSearch: normalizeSafeSearch(rawInput.safeSearch),
+    regionCode: /^[A-Z]{2}$/.test(String(rawInput.regionCode || "FR").trim().toUpperCase())
+      ? String(rawInput.regionCode || "FR").trim().toUpperCase()
+      : "FR",
+    relevanceLanguage: /^[a-z]{2}$/.test(String(rawInput.relevanceLanguage || "").trim().toLowerCase())
+      ? String(rawInput.relevanceLanguage || "").trim().toLowerCase()
+      : "",
+    publishedWithinDays: Math.max(0, Math.min(3650, Math.floor(toNumber(rawInput.publishedWithinDays, 365)))),
+    excludeSeen: boolFrom(rawInput.excludeSeen, true),
+    blockedChannelKeywords: String(rawInput.blockedChannelKeywords || "").trim(),
+    blockedChannelIds: String(rawInput.blockedChannelIds || "").trim(),
+    clipDurationSec: Math.max(30, Math.min(600, Math.floor(toNumber(rawInput.clipDurationSec, 120)))),
+    ignoreIntroSec: Math.max(0, Math.min(600, Math.floor(toNumber(rawInput.ignoreIntroSec, 20)))),
+    minGapSecBetweenClips: Math.max(0, Math.min(60, toNumber(rawInput.minGapSecBetweenClips, 6))),
+    defaultPrivacyLevel: normalizeTikTokPrivacyLevel(rawInput.defaultPrivacyLevel || fallbackPrivacy || "SELF_ONLY"),
+    hashtags: String(rawInput.hashtags || "").trim(),
+    baseUrl: String(rawInput.baseUrl || "").trim()
+  };
+}
+
+function defaultAutomationScheduleConfig() {
+  return {
+    enabled: false,
+    intervalMinutes: 180,
+    payload: sanitizeAutomationSchedulePayload({
+      q: "",
+      maxResults: 8,
+      minDurationSec: 300,
+      order: "relevance",
+      regionCode: "FR",
+      relevanceLanguage: "",
+      publishedWithinDays: 90,
+      excludeSeen: true,
+      blockedChannelKeywords: "",
+      blockedChannelIds: "",
+      clipDurationSec: 120,
+      ignoreIntroSec: 20,
+      minGapSecBetweenClips: 6,
+      defaultPrivacyLevel: "SELF_ONLY",
+      hashtags: "#funny #fyp",
+      baseUrl: ""
+    }),
+    updatedAt: null
+  };
+}
+
+function readAutomationScheduleConfig() {
+  const fallback = defaultAutomationScheduleConfig();
+  if (!fs.existsSync(AUTOMATION_SCHEDULE_STORE_PATH)) {
+    return fallback;
+  }
+  try {
+    const raw = fs.readFileSync(AUTOMATION_SCHEDULE_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      enabled: boolFrom(parsed.enabled, false),
+      intervalMinutes: Math.max(
+        AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+        Math.min(1440, Math.floor(toNumber(parsed.intervalMinutes, fallback.intervalMinutes)))
+      ),
+      payload: sanitizeAutomationSchedulePayload(parsed.payload || {}, parsed?.payload?.defaultPrivacyLevel || "SELF_ONLY"),
+      updatedAt: parsed.updatedAt || null
+    };
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+async function writeAutomationScheduleConfig(input) {
+  const current = readAutomationScheduleConfig();
+  const mergedPayload = {
+    ...(current.payload || {}),
+    ...(input.payload || {})
+  };
+  const next = {
+    enabled: boolFrom(input.enabled, current.enabled),
+    intervalMinutes: Math.max(
+      AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+      Math.min(1440, Math.floor(toNumber(input.intervalMinutes, current.intervalMinutes)))
+    ),
+    payload: sanitizeAutomationSchedulePayload(mergedPayload, mergedPayload.defaultPrivacyLevel || "SELF_ONLY"),
+    updatedAt: new Date().toISOString()
+  };
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
+  await fsp.writeFile(AUTOMATION_SCHEDULE_STORE_PATH, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+  return readAutomationScheduleConfig();
+}
+
+async function clearAutomationScheduleConfig() {
+  if (fs.existsSync(AUTOMATION_SCHEDULE_STORE_PATH)) {
+    await fsp.unlink(AUTOMATION_SCHEDULE_STORE_PATH);
+  }
+  return readAutomationScheduleConfig();
+}
+
+function sanitizeAutomationScheduleStatus(config = readAutomationScheduleConfig()) {
+  return {
+    enabled: Boolean(config.enabled),
+    intervalMinutes: Number(config.intervalMinutes || 0),
+    minIntervalMinutes: AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+    payload: config.payload || defaultAutomationScheduleConfig().payload,
+    updatedAt: config.updatedAt || null,
+    running: automationScheduleRunning || automationPipelineRunning,
+    nextRunAt: automationScheduleRuntime.nextRunAt || null,
+    lastRunAt: automationScheduleRuntime.lastRunAt || null,
+    lastRunId: automationScheduleRuntime.lastRunId || "",
+    lastRunStatus: automationScheduleRuntime.lastRunStatus || "",
+    lastError: automationScheduleRuntime.lastError || ""
+  };
+}
+
+function clearAutomationScheduleTimer() {
+  if (automationScheduleTimer) {
+    clearTimeout(automationScheduleTimer);
+    automationScheduleTimer = null;
+  }
+  automationScheduleRuntime.nextRunAt = null;
+}
+
+function scheduleNextAutomationTick(config = readAutomationScheduleConfig()) {
+  clearAutomationScheduleTimer();
+  if (!config.enabled) {
+    automationScheduleRuntime.enabled = false;
+    return;
+  }
+  const intervalMs = Math.max(
+    AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES * 60000,
+    Number(config.intervalMinutes || AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES) * 60000
+  );
+  automationScheduleRuntime.enabled = true;
+  automationScheduleRuntime.intervalMinutes = Number(config.intervalMinutes || AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES);
+  automationScheduleRuntime.updatedAt = config.updatedAt || null;
+  automationScheduleRuntime.nextRunAt = new Date(Date.now() + intervalMs).toISOString();
+  automationScheduleTimer = setTimeout(() => {
+    void runScheduledAutomationTick();
+  }, intervalMs);
+}
+
+async function runAutomationWorkflow(rawInput = {}, context = {}) {
+  if (!YOUTUBE_API_KEY) {
+    throw createHttpError(503, "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre.");
+  }
+  if (automationPipelineRunning) {
+    throw createHttpError(409, "Une automatisation est déjà en cours. Réessaie après la fin du run actif.");
+  }
+  const tiktokConfig = await getTikTokConfig();
+  if (!hasTikTokConfig(tiktokConfig)) {
+    throw createHttpError(400, "Config TikTok manquante: accessToken + openId requis.");
+  }
+
+  const normalizedInput = sanitizeAutomationSchedulePayload(rawInput, tiktokConfig.defaultPrivacyLevel || "SELF_ONLY");
+  const query = String(normalizedInput.q || "").trim();
+  if (!query) {
+    throw createHttpError(400, "Le champ q (niche) est requis.");
+  }
+
+  const blockedChannelKeywords = parseCsvTokens(normalizedInput.blockedChannelKeywords);
+  const blockedChannelIds = new Set(
+    String(normalizedInput.blockedChannelIds || "")
+      .split(/[,\n;]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+
+  automationPipelineRunning = true;
+  try {
+    const rawCandidates = await fetchYouTubeDiscoverRaw({
+      query,
+      maxResults: Math.max(10, normalizedInput.maxResults),
+      order: normalizedInput.order,
+      regionCode: normalizedInput.regionCode,
+      relevanceLanguage: normalizedInput.relevanceLanguage,
+      safeSearch: normalizedInput.safeSearch,
+      publishedWithinDays: normalizedInput.publishedWithinDays
+    });
+
+    const nowMs = Date.now();
+    const queryTokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const seenVideoIds = normalizedInput.excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
+
+    const selectedSources = rawCandidates
+      .filter((item) => {
+        if (Number(item.durationSec || 0) < normalizedInput.minDurationSec) return false;
+        if (normalizedInput.excludeSeen && seenVideoIds.has(String(item.videoId || ""))) return false;
+        const channelId = String(item.channelId || "").trim();
+        const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
+        if (channelId && blockedChannelIds.has(channelId)) return false;
+        if (blockedChannelKeywords.length > 0) {
+          const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
+          if (blockedMatch) return false;
+        }
+        return true;
+      })
+      .map((item) => ({
+        ...item,
+        score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, normalizedInput.maxResults);
+
+    if (!selectedSources.length) {
+      throw createHttpError(409, "Aucune source exploitable après filtrage (durée, blacklist, anti-doublon).");
+    }
+
+    const runId = uuidv4();
+    const run = {
+      id: runId,
+      status: "processing",
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      query,
+      sourceCount: selectedSources.length,
+      jobsCreated: 0,
+      jobsCompleted: 0,
+      jobsFailed: 0,
+      clipsPublished: 0,
+      publishFailed: 0,
+      error: null,
+      items: []
+    };
+    automationRuns.set(runId, run);
+
+    const baseUrlHint = String(normalizedInput.baseUrl || context.baseUrl || "").trim();
+    const runReq = context.req || null;
+
+    try {
+      for (let index = 0; index < selectedSources.length; index += 1) {
+        const source = selectedSources[index];
+        const clipsCount = computeDurationBasedClipCount(source.durationSec || 0, normalizedInput.clipDurationSec);
+        const queuedJob = await createQueuedUrlJob({
+          videoUrl: source.url,
+          clipDuration: normalizedInput.clipDurationSec,
+          clipsCount,
+          ignoreIntroSec: normalizedInput.ignoreIntroSec,
+          minGapSecBetweenClips: normalizedInput.minGapSecBetweenClips
+        });
+        run.jobsCreated += 1;
+        run.items.push({
+          sourceUrl: source.url,
+          score: source.score,
+          jobId: queuedJob.id,
+          clipsCountRequested: clipsCount,
+          status: "queued",
+          published: []
+        });
+        run.progress = Math.min(30, Math.round(((index + 1) / selectedSources.length) * 30));
+        run.updatedAt = new Date().toISOString();
+      }
+
+      for (const item of run.items) {
+        const terminal = await waitForJobTerminalState(item.jobId, 90 * 60 * 1000);
+        if (terminal.status !== "completed") {
+          run.jobsFailed += 1;
+          item.status = "failed";
+          item.error = terminal.error || "Échec génération";
+          continue;
+        }
+        run.jobsCompleted += 1;
+        item.status = "completed";
+        item.generatedClips = (terminal.clips || []).length;
+
+        try {
+          const published = await publishJobClipsToTikTok(terminal, {
+            req: runReq,
+            baseUrl: baseUrlHint,
+            privacyLevel: normalizedInput.defaultPrivacyLevel,
+            hashtags: normalizedInput.hashtags
+          });
+          item.published = published;
+          for (const pub of published) {
+            if (pub.publishStatus === "published") {
+              run.clipsPublished += 1;
+            } else {
+              run.publishFailed += 1;
+            }
+          }
+        } catch (publishError) {
+          run.publishFailed += Math.max(1, Number(item.generatedClips || 0));
+          item.publishError = publishError instanceof Error ? publishError.message : "Échec publication TikTok";
+        }
+        run.progress = Math.min(99, run.progress + 5);
+        run.updatedAt = new Date().toISOString();
+      }
+
+      run.status = "completed";
+      run.progress = 100;
+      run.updatedAt = new Date().toISOString();
+      return run;
+    } catch (error) {
+      run.status = "failed";
+      run.progress = 100;
+      run.error = error instanceof Error ? error.message : "Erreur automation";
+      run.updatedAt = new Date().toISOString();
+      return run;
+    }
+  } finally {
+    automationPipelineRunning = false;
+  }
+}
+
+async function runScheduledAutomationTick() {
+  const config = readAutomationScheduleConfig();
+  if (!config.enabled) {
+    clearAutomationScheduleTimer();
+    automationScheduleRuntime.enabled = false;
+    return;
+  }
+  if (automationScheduleRunning || automationPipelineRunning) {
+    scheduleNextAutomationTick(config);
+    return;
+  }
+  automationScheduleRunning = true;
+  automationScheduleRuntime.lastRunAt = new Date().toISOString();
+  automationScheduleRuntime.nextRunAt = null;
+  try {
+    const run = await runAutomationWorkflow(config.payload || {}, { baseUrl: config?.payload?.baseUrl || "" });
+    automationScheduleRuntime.lastRunId = String(run.id || "");
+    automationScheduleRuntime.lastRunStatus = String(run.status || "");
+    automationScheduleRuntime.lastError = String(run.error || "");
+  } catch (error) {
+    automationScheduleRuntime.lastRunId = "";
+    automationScheduleRuntime.lastRunStatus = "failed";
+    automationScheduleRuntime.lastError = error instanceof Error ? error.message : "Erreur planification automation";
+  } finally {
+    automationScheduleRunning = false;
+    scheduleNextAutomationTick(readAutomationScheduleConfig());
+  }
 }
 
 function parseSubtitleTimestamp(raw) {
@@ -2264,6 +2628,7 @@ async function processJob(job) {
 app.get("/api/health", async (_req, res) => {
   const q = await readQueueStats();
   const cookiesMeta = getStoredYoutubeCookiesMeta();
+  const scheduleConfig = readAutomationScheduleConfig();
   res.json({
     ok: true,
     ffmpeg: ffmpegReady,
@@ -2272,6 +2637,8 @@ app.get("/api/health", async (_req, res) => {
     edgeTtsAvailable,
     youtubeApiAvailable: Boolean(YOUTUBE_API_KEY),
     youtubeCookiesConfigured: cookiesMeta.configured,
+    automationScheduleEnabled: Boolean(scheduleConfig.enabled),
+    automationPipelineRunning,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
     queueSize: q.waiting,
@@ -2282,6 +2649,7 @@ app.get("/api/health", async (_req, res) => {
 
 app.get("/api/config", (_req, res) => {
   const cookiesMeta = getStoredYoutubeCookiesMeta();
+  const scheduleConfig = readAutomationScheduleConfig();
   res.json({
     defaults: DEFAULTS,
     queue: {
@@ -2297,12 +2665,15 @@ app.get("/api/config", (_req, res) => {
       urlIngestion: true,
       youtubeIngestion: ytDlpAvailable,
       youtubeCookiesPersistence: true,
+      automationDiscoverGeneratePublish: true,
+      automationSchedule: true,
       dubFrenchAudio: edgeTtsAvailable,
       srt: true,
       zip: true,
       burnSubtitles: true
     },
-    youtubeCookies: cookiesMeta
+    youtubeCookies: cookiesMeta,
+    automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
   });
 });
 
@@ -2515,181 +2886,109 @@ app.get("/api/youtube/discover", async (req, res) => {
 });
 
 app.post("/api/automation/discover-generate-publish", async (req, res) => {
-  if (!YOUTUBE_API_KEY) {
-    return res.status(503).json({
-      error: "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre."
-    });
-  }
-
-  const tiktokConfig = await getTikTokConfig();
-  if (!hasTikTokConfig(tiktokConfig)) {
-    return res.status(400).json({
-      error: "Config TikTok manquante: accessToken + openId requis."
-    });
-  }
-
-  const query = String(req.body.q || req.body.query || "").trim();
-  if (!query) {
-    return res.status(400).json({ error: "Le champ q (niche) est requis." });
-  }
-
-  const maxResults = Math.max(1, Math.min(25, Math.floor(toNumber(req.body.maxResults, 8))));
-  const minDurationSec = Math.max(0, Math.min(7200, Math.floor(toNumber(req.body.minDurationSec, 300))));
-  const order = normalizeDiscoverOrder(req.body.order);
-  const safeSearch = normalizeSafeSearch(req.body.safeSearch);
-  const regionCodeRaw = String(req.body.regionCode || "FR").trim().toUpperCase();
-  const regionCode = /^[A-Z]{2}$/.test(regionCodeRaw) ? regionCodeRaw : "FR";
-  const relevanceLanguageRaw = String(req.body.relevanceLanguage || "").trim().toLowerCase();
-  const relevanceLanguage = /^[a-z]{2}$/.test(relevanceLanguageRaw) ? relevanceLanguageRaw : "";
-  const publishedWithinDays = Math.max(0, Math.min(3650, Math.floor(toNumber(req.body.publishedWithinDays, 365))));
-  const excludeSeen = boolFrom(req.body.excludeSeen, true);
-  const blockedChannelKeywords = parseCsvTokens(req.body.blockedChannelKeywords);
-  const blockedChannelIds = new Set(
-    String(req.body.blockedChannelIds || "")
-      .split(/[,\n;]+/)
-      .map((token) => token.trim())
-      .filter(Boolean)
-  );
-
-  const clipDurationSec = Math.max(30, Math.min(600, Math.floor(toNumber(req.body.clipDurationSec, 120))));
-  const ignoreIntroSec = Math.max(0, Math.min(600, Math.floor(toNumber(req.body.ignoreIntroSec, 20))));
-  const minGapSecBetweenClips = Math.max(0, Math.min(60, toNumber(req.body.minGapSecBetweenClips, 6)));
-  const privacyLevel = normalizeTikTokPrivacyLevel(req.body.defaultPrivacyLevel || tiktokConfig.defaultPrivacyLevel || "SELF_ONLY");
-  const hashtags = String(req.body.hashtags || "").trim();
-  const baseUrlHint = String(req.body.baseUrl || "").trim();
-
-  const rawCandidates = await fetchYouTubeDiscoverRaw({
-    query,
-    maxResults: Math.max(10, maxResults),
-    order,
-    regionCode,
-    relevanceLanguage,
-    safeSearch,
-    publishedWithinDays
-  });
-
-  const nowMs = Date.now();
-  const queryTokens = query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean);
-  const seenVideoIds = excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
-
-  const selectedSources = rawCandidates
-    .filter((item) => {
-      if (Number(item.durationSec || 0) < minDurationSec) return false;
-      if (excludeSeen && seenVideoIds.has(String(item.videoId || ""))) return false;
-      const channelId = String(item.channelId || "").trim();
-      const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
-      if (channelId && blockedChannelIds.has(channelId)) return false;
-      if (blockedChannelKeywords.length > 0) {
-        const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
-        if (blockedMatch) return false;
-      }
-      return true;
-    })
-    .map((item) => ({
-      ...item,
-      score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxResults);
-
-  if (!selectedSources.length) {
-    return res.status(409).json({
-      error: "Aucune source exploitable après filtrage (durée, blacklist, anti-doublon)."
-    });
-  }
-
-  const runId = uuidv4();
-  const run = {
-    id: runId,
-    status: "processing",
-    progress: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    query,
-    sourceCount: selectedSources.length,
-    jobsCreated: 0,
-    jobsCompleted: 0,
-    jobsFailed: 0,
-    clipsPublished: 0,
-    publishFailed: 0,
-    error: null,
-    items: []
-  };
-  automationRuns.set(runId, run);
-
   try {
-    for (let index = 0; index < selectedSources.length; index += 1) {
-      const source = selectedSources[index];
-      const clipsCount = computeDurationBasedClipCount(source.durationSec || 0, clipDurationSec);
-      const queuedJob = await createQueuedUrlJob({
-        videoUrl: source.url,
-        clipDuration: clipDurationSec,
-        clipsCount,
-        ignoreIntroSec,
-        minGapSecBetweenClips
-      });
-      run.jobsCreated += 1;
-      run.items.push({
-        sourceUrl: source.url,
-        score: source.score,
-        jobId: queuedJob.id,
-        clipsCountRequested: clipsCount,
-        status: "queued",
-        published: []
-      });
-      run.progress = Math.min(30, Math.round(((index + 1) / selectedSources.length) * 30));
-      run.updatedAt = new Date().toISOString();
+    const input = {
+      ...(req.query || {}),
+      ...(req.body || {})
+    };
+    if (!input.baseUrl) {
+      input.baseUrl = resolvePublicBaseUrl("", req);
     }
-
-    for (const item of run.items) {
-      const terminal = await waitForJobTerminalState(item.jobId, 90 * 60 * 1000);
-      if (terminal.status !== "completed") {
-        run.jobsFailed += 1;
-        item.status = "failed";
-        item.error = terminal.error || "Échec génération";
-        continue;
-      }
-      run.jobsCompleted += 1;
-      item.status = "completed";
-      item.generatedClips = (terminal.clips || []).length;
-
-      try {
-        const published = await publishJobClipsToTikTok(terminal, {
-          req,
-          baseUrl: baseUrlHint,
-          privacyLevel,
-          hashtags
-        });
-        item.published = published;
-        for (const pub of published) {
-          if (pub.publishStatus === "published") {
-            run.clipsPublished += 1;
-          } else {
-            run.publishFailed += 1;
-          }
-        }
-      } catch (publishError) {
-        run.publishFailed += Math.max(1, Number(item.generatedClips || 0));
-        item.publishError = publishError instanceof Error ? publishError.message : "Échec publication TikTok";
-      }
-      run.progress = Math.min(99, run.progress + 5);
-      run.updatedAt = new Date().toISOString();
+    const run = await runAutomationWorkflow(input, { req });
+    if (run.status === "failed") {
+      return res.status(500).json(sanitizeAutomationRun(run));
     }
-
-    run.status = "completed";
-    run.progress = 100;
-    run.updatedAt = new Date().toISOString();
     return res.json(sanitizeAutomationRun(run));
   } catch (error) {
-    run.status = "failed";
-    run.progress = 100;
-    run.error = error instanceof Error ? error.message : "Erreur automation";
-    run.updatedAt = new Date().toISOString();
-    return res.status(500).json(sanitizeAutomationRun(run));
+    const statusCode = Number(error?.statusCode || 500);
+    return res.status(statusCode).json({
+      error: error instanceof Error ? error.message : "Erreur automation"
+    });
+  }
+});
+
+app.get("/api/automation/schedule/status", (_req, res) => {
+  const config = readAutomationScheduleConfig();
+  return res.json(sanitizeAutomationScheduleStatus(config));
+});
+
+app.post("/api/automation/schedule", async (req, res) => {
+  try {
+    const payload = {
+      enabled: boolFrom(req.body.enabled, true),
+      intervalMinutes: toNumber(req.body.intervalMinutes, 180),
+      payload: {
+        ...(req.body.payload || {}),
+        ...(req.body.q || req.body.query ? { q: String(req.body.q || req.body.query || "") } : {}),
+        ...(req.body.baseUrl ? { baseUrl: String(req.body.baseUrl || "") } : {})
+      }
+    };
+    const saved = await writeAutomationScheduleConfig(payload);
+    if (saved.enabled) {
+      scheduleNextAutomationTick(saved);
+    } else {
+      clearAutomationScheduleTimer();
+      automationScheduleRuntime.enabled = false;
+    }
+    return res.status(201).json({
+      ok: true,
+      schedule: sanitizeAutomationScheduleStatus(saved)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de sauvegarder la planification automation."
+    });
+  }
+});
+
+app.post("/api/automation/schedule/run-now", async (_req, res) => {
+  const config = readAutomationScheduleConfig();
+  if (!config.enabled) {
+    return res.status(400).json({
+      error: "Planification inactive. Active-la avant un run immédiat."
+    });
+  }
+  if (automationScheduleRunning || automationPipelineRunning) {
+    return res.status(409).json({
+      error: "Une automatisation est déjà en cours."
+    });
+  }
+  automationScheduleRuntime.lastRunAt = new Date().toISOString();
+  try {
+    const run = await runAutomationWorkflow(config.payload || {}, { baseUrl: config?.payload?.baseUrl || "" });
+    automationScheduleRuntime.lastRunId = String(run.id || "");
+    automationScheduleRuntime.lastRunStatus = String(run.status || "");
+    automationScheduleRuntime.lastError = String(run.error || "");
+    return res.json({
+      ok: run.status === "completed",
+      run: sanitizeAutomationRun(run),
+      schedule: sanitizeAutomationScheduleStatus(config)
+    });
+  } catch (error) {
+    automationScheduleRuntime.lastRunId = "";
+    automationScheduleRuntime.lastRunStatus = "failed";
+    automationScheduleRuntime.lastError = error instanceof Error ? error.message : "Erreur run immédiat";
+    const statusCode = Number(error?.statusCode || 500);
+    return res.status(statusCode).json({
+      error: error instanceof Error ? error.message : "Impossible de lancer l'automatisation.",
+      schedule: sanitizeAutomationScheduleStatus(config)
+    });
+  }
+});
+
+app.delete("/api/automation/schedule", async (_req, res) => {
+  try {
+    const cleared = await clearAutomationScheduleConfig();
+    clearAutomationScheduleTimer();
+    automationScheduleRuntime.enabled = false;
+    return res.json({
+      ok: true,
+      schedule: sanitizeAutomationScheduleStatus(cleared)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de supprimer la planification automation."
+    });
   }
 });
 
@@ -2886,6 +3185,13 @@ ensureDirs()
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
     await restoreJobsDb();
     await initBullQueue();
+    const scheduleConfig = readAutomationScheduleConfig();
+    automationScheduleRuntime.enabled = Boolean(scheduleConfig.enabled);
+    automationScheduleRuntime.intervalMinutes = Number(scheduleConfig.intervalMinutes || 0);
+    automationScheduleRuntime.updatedAt = scheduleConfig.updatedAt || null;
+    if (scheduleConfig.enabled) {
+      scheduleNextAutomationTick(scheduleConfig);
+    }
     app.listen(PORT, () => {
       console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);
     });

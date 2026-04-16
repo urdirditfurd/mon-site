@@ -46,7 +46,8 @@ const state = {
   automationRunning: false,
   automationRunId: "",
   automationPollTimer: null,
-  automationItems: []
+  automationItems: [],
+  automationScheduleEnabled: false
 };
 
 const dom = {
@@ -100,6 +101,12 @@ const dom = {
   saveTikTokConfigBtn: document.getElementById("saveTikTokConfigBtn"),
   clearTikTokConfigBtn: document.getElementById("clearTikTokConfigBtn"),
   tiktokConfigStatus: document.getElementById("tiktokConfigStatus"),
+  automationIntervalMinutes: document.getElementById("automationIntervalMinutes"),
+  automationBaseUrl: document.getElementById("automationBaseUrl"),
+  saveAutomationScheduleBtn: document.getElementById("saveAutomationScheduleBtn"),
+  disableAutomationScheduleBtn: document.getElementById("disableAutomationScheduleBtn"),
+  runAutomationNowBtn: document.getElementById("runAutomationNowBtn"),
+  automationScheduleStatus: document.getElementById("automationScheduleStatus"),
   batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
   batchClipsCount: document.getElementById("batchClipsCount"),
   batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
@@ -304,6 +311,13 @@ function setDiscoverControlsDisabled(disabled) {
 function setAutomationControlsDisabled(disabled) {
   if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
   if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.disableAutomationScheduleBtn) {
+    dom.disableAutomationScheduleBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
+  }
+  if (dom.runAutomationNowBtn) {
+    dom.runAutomationNowBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
+  }
 }
 
 function renderDiscoverResults() {
@@ -437,6 +451,61 @@ function setAutomationStatus(message, isError = false) {
   dom.automationStatus.classList.toggle("note-error", isError);
 }
 
+function renderAutomationItems(items = []) {
+  state.automationItems = Array.isArray(items) ? items : [];
+  if (!dom.automationItemsList) return;
+  if (!state.automationItems.length) {
+    dom.automationItemsList.innerHTML = `<li class="empty">Aucune automatisation lancée.</li>`;
+    return;
+  }
+  dom.automationItemsList.innerHTML = state.automationItems
+    .map((item, idx) => {
+      const status = escapeHtml(item.status || "inconnu");
+      const sourceUrl = escapeHtml(item.sourceUrl || "");
+      const jobId = escapeHtml(item.jobId || "");
+      const publishedCount = Array.isArray(item.published)
+        ? item.published.filter((pub) => pub.publishStatus === "published").length
+        : 0;
+      const generated = Number(item.generatedClips || 0);
+      const err = escapeHtml(item.error || item.publishError || "");
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">Source auto #${idx + 1}</h3>
+            <span class="chip">${status}</span>
+          </div>
+          <p class="clip-snippet">${sourceUrl}</p>
+          <p class="clip-times">Job: ${jobId || "—"} · clips: ${generated} · publiés: ${publishedCount}</p>
+          ${err ? `<p class="hint small note-error no-margin">${err}</p>` : ""}
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function renderAutomationScheduleStatus(payload) {
+  const enabled = Boolean(payload?.enabled);
+  state.automationScheduleEnabled = enabled;
+  if (dom.automationIntervalMinutes && payload?.intervalMinutes) {
+    dom.automationIntervalMinutes.value = String(payload.intervalMinutes);
+  }
+  if (dom.automationBaseUrl && typeof payload?.payload?.baseUrl === "string") {
+    dom.automationBaseUrl.value = String(payload.payload.baseUrl || "");
+  }
+  if (dom.automationScheduleStatus) {
+    const pieces = [];
+    pieces.push(enabled ? "Planification active" : "Planification inactive");
+    if (payload?.intervalMinutes) pieces.push(`intervalle ${payload.intervalMinutes} min`);
+    if (payload?.nextRunAt) pieces.push(`prochain run: ${new Date(payload.nextRunAt).toLocaleString()}`);
+    if (payload?.lastRunAt) pieces.push(`dernier run: ${new Date(payload.lastRunAt).toLocaleString()}`);
+    if (payload?.lastRunStatus) pieces.push(`statut dernier run: ${payload.lastRunStatus}`);
+    if (payload?.lastError) pieces.push(`erreur: ${payload.lastError}`);
+    dom.automationScheduleStatus.textContent = pieces.join(" · ");
+    dom.automationScheduleStatus.classList.toggle("note-error", Boolean(payload?.lastError));
+  }
+  setAutomationControlsDisabled(false);
+}
+
 async function refreshTikTokConfigStatus() {
   if (!state.backendAvailable) {
     setAutomationStatus("Backend indisponible.", true);
@@ -448,9 +517,18 @@ async function refreshTikTokConfigStatus() {
     if (!response.ok) {
       throw new Error(payload.error || "Impossible de lire la config TikTok.");
     }
+    state.tiktokConfigured = Boolean(payload.configured);
     const configured = Boolean(payload.configured);
     const privacy = payload.defaultPrivacyLevel || "SELF_ONLY";
     const tags = String(payload.defaultHashtags || "");
+    if (dom.tiktokPrivacy) dom.tiktokPrivacy.value = privacy;
+    if (dom.tiktokHashtags) dom.tiktokHashtags.value = tags;
+    if (dom.tiktokConfigStatus) {
+      dom.tiktokConfigStatus.textContent = configured
+        ? `Configuration TikTok active · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`
+        : "Configuration TikTok inactive.";
+      dom.tiktokConfigStatus.classList.toggle("note-error", !configured);
+    }
     if (configured) {
       setAutomationStatus(`TikTok configuré · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`, false);
     } else {
@@ -468,7 +546,7 @@ async function saveTikTokConfigFromUi() {
   }
   const accessToken = String(dom.tiktokAccessToken?.value || "").trim();
   const openId = String(dom.tiktokOpenId?.value || "").trim();
-  const defaultPrivacyLevel = String(dom.tiktokPrivacyLevel?.value || "SELF_ONLY").trim();
+  const defaultPrivacyLevel = String(dom.tiktokPrivacy?.value || "SELF_ONLY").trim();
   const defaultHashtags = String(dom.tiktokHashtags?.value || "").trim();
   if (!accessToken || !openId) {
     setAutomationStatus("Access token TikTok + OpenID requis.", true);
@@ -489,6 +567,7 @@ async function saveTikTokConfigFromUi() {
     if (dom.tiktokOpenId) dom.tiktokOpenId.value = "";
     setAutomationStatus("Config TikTok enregistrée.", false);
     await refreshTikTokConfigStatus();
+    await refreshAutomationScheduleStatus();
   } catch (error) {
     setAutomationStatus(error instanceof Error ? error.message : "Erreur sauvegarde TikTok.", true);
   } finally {
@@ -510,10 +589,141 @@ async function clearTikTokConfigFromUi() {
     }
     setAutomationStatus("Config TikTok supprimée.", false);
     await refreshTikTokConfigStatus();
+    await refreshAutomationScheduleStatus();
   } catch (error) {
     setAutomationStatus(error instanceof Error ? error.message : "Erreur suppression TikTok.", true);
   } finally {
     if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = false;
+  }
+}
+
+function buildAutomationRequestPayload() {
+  return {
+    q: String(dom.discoverQuery?.value || "").trim(),
+    maxResults: Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12))),
+    order: String(dom.discoverOrder?.value || "relevance"),
+    minDurationSec: Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300))),
+    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
+    regionCode: String(dom.discoverRegion?.value || "FR"),
+    publishedWithinDays: Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90))),
+    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
+    excludeSeen: Boolean(dom.discoverExcludeSeen?.checked),
+    clipDurationSec: 120,
+    ignoreIntroSec: Math.max(0, Math.min(600, Number(dom.batchIgnoreIntroSec?.value || 20))),
+    minGapSecBetweenClips: 6,
+    hashtags: String(dom.tiktokHashtags?.value || "").trim(),
+    defaultPrivacyLevel: String(dom.tiktokPrivacy?.value || "SELF_ONLY"),
+    baseUrl: String(dom.automationBaseUrl?.value || "").trim() || window.location.origin
+  };
+}
+
+async function refreshAutomationScheduleStatus() {
+  if (!state.backendAvailable) {
+    renderAutomationScheduleStatus({ enabled: false, lastError: "Backend indisponible." });
+    return;
+  }
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule/status"));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lire le statut de planification.");
+    }
+    renderAutomationScheduleStatus(payload);
+  } catch (error) {
+    renderAutomationScheduleStatus({
+      enabled: false,
+      lastError: error instanceof Error ? error.message : "Erreur statut planification."
+    });
+  }
+}
+
+async function saveAutomationScheduleFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  const payload = buildAutomationRequestPayload();
+  if (!payload.q) {
+    setAutomationStatus("Ajoute une niche (champ découverte V2) avant d'activer l'auto-run.", true);
+    return;
+  }
+  const intervalMinutes = Math.max(5, Math.min(1440, Number(dom.automationIntervalMinutes?.value || 120)));
+  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: true,
+        intervalMinutes,
+        payload
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.error || "Impossible d'activer la planification.");
+    }
+    setAutomationStatus(`Auto-run activé toutes les ${intervalMinutes} min.`, false);
+    renderAutomationScheduleStatus(result.schedule || {});
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur activation auto-run.", true);
+  } finally {
+    if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = false;
+  }
+}
+
+async function disableAutomationScheduleFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule"), { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.error || "Impossible de désactiver la planification.");
+    }
+    setAutomationStatus("Auto-run désactivé.", false);
+    renderAutomationScheduleStatus(result.schedule || {});
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur désactivation auto-run.", true);
+  } finally {
+    if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = false;
+  }
+}
+
+async function runAutomationNowFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (!state.automationScheduleEnabled) {
+    setAutomationStatus("Active d'abord la planification pour utiliser “Lancer maintenant”.", true);
+    return;
+  }
+  if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = true;
+  setAutomationStatus("Run immédiat déclenché…", false);
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule/run-now"), { method: "POST" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lancer le run immédiat.");
+    }
+    const run = payload.run || {};
+    renderAutomationItems(run.items || []);
+    const published = Number(run.clipsPublished || 0);
+    const failed = Number(run.publishFailed || 0);
+    setAutomationStatus(`Run immédiat terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
+    if (payload.schedule) {
+      renderAutomationScheduleStatus(payload.schedule);
+    } else {
+      await refreshAutomationScheduleStatus();
+    }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur run immédiat.", true);
+  } finally {
+    if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = false;
   }
 }
 
@@ -532,35 +742,25 @@ async function runFullAutomation() {
     setAutomationStatus("Ajoute une niche dans le champ découverte V2.", true);
     return;
   }
-  const params = new URLSearchParams({
-    q: query,
-    maxResults: String(Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12)))),
-    order: String(dom.discoverOrder?.value || "relevance"),
-    minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
-    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
-    regionCode: String(dom.discoverRegion?.value || "FR"),
-    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90)))),
-    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
-    excludeSeen: String(Boolean(dom.discoverExcludeSeen?.checked)),
-    ignoreIntroSec: String(Math.max(0, Math.min(600, Number(dom.batchIgnoreIntroSec?.value || 20)))),
-    hashtags: String(dom.tiktokHashtags?.value || "").trim(),
-    privacyLevel: String(dom.tiktokPrivacyLevel?.value || "SELF_ONLY"),
-    baseUrl: window.location.origin
-  });
+  const requestPayload = buildAutomationRequestPayload();
   setDiscoverControlsDisabled(true);
+  setAutomationControlsDisabled(true);
   setAutomationStatus("Automatisation complète en cours (découverte → génération → publication)…", false);
   try {
-    const response = await fetch(apiUrl(`/api/automation/discover-generate-publish?${params.toString()}`), {
-      method: "POST"
+    const response = await fetch(apiUrl("/api/automation/discover-generate-publish"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestPayload)
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload.error || "Automatisation complète échouée.");
     }
-    const run = payload.run || {};
+    const run = payload?.id ? payload : payload.run || {};
     const published = Number(run.clipsPublished || 0);
     const failed = Number(run.publishFailed || 0);
     setAutomationStatus(`Auto-publish terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
+    renderAutomationItems(run.items || []);
     if (Array.isArray(run.items) && run.items.length > 0) {
       const lastDone = run.items
         .slice()
@@ -574,6 +774,8 @@ async function runFullAutomation() {
     setAutomationStatus(error instanceof Error ? error.message : "Erreur auto-publish.", true);
   } finally {
     setDiscoverControlsDisabled(false);
+    setAutomationControlsDisabled(false);
+    await refreshAutomationScheduleStatus();
   }
 }
 
@@ -986,6 +1188,7 @@ async function checkBackendHealth() {
     );
     setBatchControlsDisabled(state.batchRunning);
     setDiscoverControlsDisabled(state.discoverRunning);
+    setAutomationControlsDisabled(false);
     updateStatus("Backend prêt", true);
     if (serverConfig?.defaults) {
       const defaultsCfg = serverConfig.defaults;
@@ -1027,6 +1230,7 @@ async function checkBackendHealth() {
     state.youtubeApiAvailable = false;
     setBatchControlsDisabled(false);
     setDiscoverControlsDisabled(false);
+    setAutomationControlsDisabled(true);
     updateStatus("Backend indisponible — lance: npm start", false);
     dom.backendMeta.textContent = "Aucune connexion backend";
     renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
@@ -1396,6 +1600,21 @@ function initEvents() {
       void clearTikTokConfigFromUi();
     });
   }
+  if (dom.saveAutomationScheduleBtn) {
+    dom.saveAutomationScheduleBtn.addEventListener("click", () => {
+      void saveAutomationScheduleFromUi();
+    });
+  }
+  if (dom.disableAutomationScheduleBtn) {
+    dom.disableAutomationScheduleBtn.addEventListener("click", () => {
+      void disableAutomationScheduleFromUi();
+    });
+  }
+  if (dom.runAutomationNowBtn) {
+    dom.runAutomationNowBtn.addEventListener("click", () => {
+      void runAutomationNowFromUi();
+    });
+  }
 
   dom.playClipBtn.addEventListener("click", () => {
     if (state.selectedClipIndex < 0) return;
@@ -1450,6 +1669,8 @@ function initDefaults() {
   renderDiscoverResults();
   setDiscoverStatus("Découverte V2 inactive.", false);
   setAutomationStatus("TikTok auto-publish inactif.", false);
+  renderAutomationItems([]);
+  renderAutomationScheduleStatus({ enabled: false });
   setAutomationControlsDisabled(false);
   setDiscoverControlsDisabled(false);
   renderBatchJobs();
@@ -1486,6 +1707,11 @@ async function init() {
       await refreshTikTokConfigStatus();
     } catch (_error) {
       // ignore: UI will stay in "inactif" state on failure
+    }
+    try {
+      await refreshAutomationScheduleStatus();
+    } catch (_error) {
+      // ignore
     }
   }
 }
