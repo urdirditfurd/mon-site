@@ -124,6 +124,29 @@ API V2 utilisée:
 - Entrée: `q`, `maxResults`, `regionCode`, `relevanceLanguage`, `publishedWithinDays`, `order`, `excludeSeen`, `blockedChannelKeywords`
 - Sortie: `candidates[]` triés avec score (vues, fraîcheur, durée, momentum, contenu short-friendly) + `stats` de filtrage
 
+### Version V2.2 — Auto-Publish TikTok (découverte -> génération -> publication)
+
+La V2.2 ajoute un flux complet en un clic:
+
+1. Renseigner la niche dans **Version V2 — découverte auto YouTube**.
+2. Ouvrir **Auto-Publish TikTok (V2.2)**.
+3. Coller `access_token` + `open_id`, choisir la confidentialité, et des hashtags par défaut.
+4. Cliquer **Enregistrer config TikTok**.
+5. Cliquer **Trouver + générer + publier TikTok**.
+
+Le backend effectue automatiquement:
+- découverte YouTube (avec filtres V2.1),
+- génération de clips (durée par défaut 120s),
+- nombre de clips calculé par source selon la durée de la vidéo,
+- stockage des clips dans le job,
+- publication TikTok via API `PULL_FROM_URL`,
+- hashtags auto (`#funny`, `#fyp`, + tags pertinents animaux/cat/dog).
+
+Notes importantes:
+- La publication auto nécessite une app TikTok Developer avec scopes de publication valides.
+- L'action "cliquer sur publier" n'est pas faite par navigateur/UI robot, mais par API officielle TikTok côté serveur.
+- En cas de scope/audit non validé TikTok, la génération reste faite et les erreurs de publication sont renvoyées dans le statut.
+
 ### Mode avancé
 
 1. Fournir une source vidéo:

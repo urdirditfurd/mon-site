@@ -14,6 +14,7 @@ const config = {
 const state = {
   backendAvailable: false,
   youtubeApiAvailable: false,
+  tiktokConfigured: false,
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
   quickMode: true,
@@ -41,7 +42,11 @@ const state = {
   batchStopRequested: false,
   batchJobs: [],
   discoverRunning: false,
-  discoverResults: []
+  discoverResults: [],
+  automationRunning: false,
+  automationRunId: "",
+  automationPollTimer: null,
+  automationItems: []
 };
 
 const dom = {
@@ -83,8 +88,18 @@ const dom = {
   discoverYoutubeBtn: document.getElementById("discoverYoutubeBtn"),
   useDiscoverResultsBtn: document.getElementById("useDiscoverResultsBtn"),
   discoverAndRunBatchBtn: document.getElementById("discoverAndRunBatchBtn"),
+  discoverGeneratePublishBtn: document.getElementById("discoverGeneratePublishBtn"),
   discoverStatus: document.getElementById("discoverStatus"),
   discoverResultsList: document.getElementById("discoverResultsList"),
+  automationStatus: document.getElementById("automationStatus"),
+  automationItemsList: document.getElementById("automationItemsList"),
+  tiktokAccessToken: document.getElementById("tiktokAccessToken"),
+  tiktokOpenId: document.getElementById("tiktokOpenId"),
+  tiktokPrivacy: document.getElementById("tiktokPrivacy"),
+  tiktokHashtags: document.getElementById("tiktokHashtags"),
+  saveTikTokConfigBtn: document.getElementById("saveTikTokConfigBtn"),
+  clearTikTokConfigBtn: document.getElementById("clearTikTokConfigBtn"),
+  tiktokConfigStatus: document.getElementById("tiktokConfigStatus"),
   batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
   batchClipsCount: document.getElementById("batchClipsCount"),
   batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
@@ -278,7 +293,17 @@ function setDiscoverControlsDisabled(disabled) {
   const isEnabled = state.backendAvailable && state.youtubeApiAvailable;
   if (dom.discoverYoutubeBtn) dom.discoverYoutubeBtn.disabled = disabled || !isEnabled;
   if (dom.useDiscoverResultsBtn) dom.useDiscoverResultsBtn.disabled = disabled || !state.discoverResults.length;
-  if (dom.discoverAndRunBatchBtn) dom.discoverAndRunBatchBtn.disabled = disabled || !isEnabled || state.batchRunning;
+  if (dom.discoverAndRunBatchBtn) {
+    dom.discoverAndRunBatchBtn.disabled = disabled || !isEnabled || state.batchRunning;
+  }
+  if (dom.discoverGeneratePublishBtn) {
+    dom.discoverGeneratePublishBtn.disabled = disabled || !isEnabled || state.batchRunning;
+  }
+}
+
+function setAutomationControlsDisabled(disabled) {
+  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
 }
 
 function renderDiscoverResults() {
@@ -401,6 +426,152 @@ async function discoverYoutubeSources(autoRunBatch = false) {
     }
   } catch (error) {
     setDiscoverStatus(error instanceof Error ? error.message : "Erreur découverte V2.", true);
+  } finally {
+    setDiscoverControlsDisabled(false);
+  }
+}
+
+function setAutomationStatus(message, isError = false) {
+  if (!dom.automationStatus) return;
+  dom.automationStatus.textContent = message;
+  dom.automationStatus.classList.toggle("note-error", isError);
+}
+
+async function refreshTikTokConfigStatus() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config/status"));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lire la config TikTok.");
+    }
+    const configured = Boolean(payload.configured);
+    const privacy = payload.defaultPrivacyLevel || "SELF_ONLY";
+    const tags = String(payload.defaultHashtags || "");
+    if (configured) {
+      setAutomationStatus(`TikTok configuré · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`, false);
+    } else {
+      setAutomationStatus("TikTok non configuré: ajoute accessToken + openId.", true);
+    }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur config TikTok.", true);
+  }
+}
+
+async function saveTikTokConfigFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  const accessToken = String(dom.tiktokAccessToken?.value || "").trim();
+  const openId = String(dom.tiktokOpenId?.value || "").trim();
+  const defaultPrivacyLevel = String(dom.tiktokPrivacyLevel?.value || "SELF_ONLY").trim();
+  const defaultHashtags = String(dom.tiktokHashtags?.value || "").trim();
+  if (!accessToken || !openId) {
+    setAutomationStatus("Access token TikTok + OpenID requis.", true);
+    return;
+  }
+  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken, openId, defaultPrivacyLevel, defaultHashtags })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de sauvegarder la config TikTok.");
+    }
+    if (dom.tiktokAccessToken) dom.tiktokAccessToken.value = "";
+    if (dom.tiktokOpenId) dom.tiktokOpenId.value = "";
+    setAutomationStatus("Config TikTok enregistrée.", false);
+    await refreshTikTokConfigStatus();
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur sauvegarde TikTok.", true);
+  } finally {
+    if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = false;
+  }
+}
+
+async function clearTikTokConfigFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config"), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de supprimer la config TikTok.");
+    }
+    setAutomationStatus("Config TikTok supprimée.", false);
+    await refreshTikTokConfigStatus();
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur suppression TikTok.", true);
+  } finally {
+    if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = false;
+  }
+}
+
+async function runFullAutomation() {
+  if (state.discoverRunning || state.batchRunning) return;
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (!state.youtubeApiAvailable) {
+    setAutomationStatus("YOUTUBE_API_KEY absente côté serveur.", true);
+    return;
+  }
+  const query = String(dom.discoverQuery?.value || "").trim();
+  if (!query) {
+    setAutomationStatus("Ajoute une niche dans le champ découverte V2.", true);
+    return;
+  }
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12)))),
+    order: String(dom.discoverOrder?.value || "relevance"),
+    minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
+    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
+    regionCode: String(dom.discoverRegion?.value || "FR"),
+    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90)))),
+    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
+    excludeSeen: String(Boolean(dom.discoverExcludeSeen?.checked)),
+    ignoreIntroSec: String(Math.max(0, Math.min(600, Number(dom.batchIgnoreIntroSec?.value || 20)))),
+    hashtags: String(dom.tiktokHashtags?.value || "").trim(),
+    privacyLevel: String(dom.tiktokPrivacyLevel?.value || "SELF_ONLY"),
+    baseUrl: window.location.origin
+  });
+  setDiscoverControlsDisabled(true);
+  setAutomationStatus("Automatisation complète en cours (découverte → génération → publication)…", false);
+  try {
+    const response = await fetch(apiUrl(`/api/automation/discover-generate-publish?${params.toString()}`), {
+      method: "POST"
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Automatisation complète échouée.");
+    }
+    const run = payload.run || {};
+    const published = Number(run.clipsPublished || 0);
+    const failed = Number(run.publishFailed || 0);
+    setAutomationStatus(`Auto-publish terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
+    if (Array.isArray(run.items) && run.items.length > 0) {
+      const lastDone = run.items
+        .slice()
+        .reverse()
+        .find((item) => item.jobId && item.status === "published");
+      if (lastDone?.jobId) {
+        await loadJobIntoWorkspace(lastDone.jobId);
+      }
+    }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur auto-publish.", true);
   } finally {
     setDiscoverControlsDisabled(false);
   }
@@ -535,6 +706,10 @@ async function startBatchGeneration() {
   if (state.batchRunning) return;
   if (!state.backendAvailable) {
     updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  if (state.batchRunning) {
+    updateStatus("Le batch est en cours. Attends la fin avant une génération unitaire.", false);
     return;
   }
 
@@ -1154,6 +1329,11 @@ function initEvents() {
       void discoverYoutubeSources(true);
     });
   }
+  if (dom.discoverGeneratePublishBtn) {
+    dom.discoverGeneratePublishBtn.addEventListener("click", () => {
+      void runFullAutomation();
+    });
+  }
   if (dom.discoverResultsList) {
     dom.discoverResultsList.addEventListener("change", (event) => {
       const target = event.target instanceof HTMLInputElement ? event.target : null;
@@ -1204,6 +1384,16 @@ function initEvents() {
   if (dom.clearYoutubeCookiesBtn) {
     dom.clearYoutubeCookiesBtn.addEventListener("click", () => {
       void clearYoutubeCookies();
+    });
+  }
+  if (dom.saveTikTokConfigBtn) {
+    dom.saveTikTokConfigBtn.addEventListener("click", () => {
+      void saveTikTokConfigFromUi();
+    });
+  }
+  if (dom.clearTikTokConfigBtn) {
+    dom.clearTikTokConfigBtn.addEventListener("click", () => {
+      void clearTikTokConfigFromUi();
     });
   }
 
@@ -1259,6 +1449,8 @@ function initDefaults() {
   applyPreviewAspectRatio(state.currentAspectRatio);
   renderDiscoverResults();
   setDiscoverStatus("Découverte V2 inactive.", false);
+  setAutomationStatus("TikTok auto-publish inactif.", false);
+  setAutomationControlsDisabled(false);
   setDiscoverControlsDisabled(false);
   renderBatchJobs();
   setBatchStatus("Batch inactif.", false);
@@ -1273,10 +1465,12 @@ async function init() {
   setButtonsEnabled(false);
   renderDiscoverResults();
   setDiscoverControlsDisabled(false);
+  setAutomationControlsDisabled(false);
   renderBatchJobs();
   setBatchControlsDisabled(false);
   await checkBackendHealth();
   setDiscoverControlsDisabled(false);
+  setAutomationControlsDisabled(false);
   setBatchControlsDisabled(false);
   if (!state.backendAvailable) {
     setDiscoverStatus("Découverte V2 inactive (backend indisponible).", true);
@@ -1287,6 +1481,11 @@ async function init() {
       await refreshYoutubeCookiesStatus();
     } catch (_error) {
       // ignore: status already derived from /api/config or /api/health
+    }
+    try {
+      await refreshTikTokConfigStatus();
+    } catch (_error) {
+      // ignore: UI will stay in "inactif" state on failure
     }
   }
 }

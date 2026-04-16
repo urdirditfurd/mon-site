@@ -138,11 +138,48 @@
           <button id="discoverYoutubeBtn" class="btn btn-primary" type="button">Trouver des liens (V2)</button>
           <button id="useDiscoverResultsBtn" class="btn btn-ghost" type="button">Envoyer la sélection vers batch V1</button>
           <button id="discoverAndRunBatchBtn" class="btn btn-ghost" type="button">Trouver + lancer batch</button>
+          <button id="discoverGeneratePublishBtn" class="btn btn-primary" type="button">Trouver + générer + publier TikTok</button>
         </div>
         <p id="discoverStatus" class="hint small">Découverte V2 inactive.</p>
         <ul id="discoverResultsList" class="discover-results-list">
           <li class="empty">Aucune découverte pour le moment.</li>
         </ul>
+        <p id="automationStatus" class="hint small">Auto-publish TikTok inactif.</p>
+        <ul id="automationItemsList" class="discover-results-list">
+          <li class="empty">Aucune automatisation lancée.</li>
+        </ul>
+      </details>
+
+      <details class="details-box">
+        <summary>Connexion TikTok (auto-publication)</summary>
+        <label class="field">
+          <span>Access Token TikTok</span>
+          <input type="password" id="tiktokAccessToken" placeholder="act....">
+        </label>
+        <label class="field">
+          <span>Open ID TikTok</span>
+          <input type="text" id="tiktokOpenId" placeholder="open_id utilisateur">
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Confidentialité par défaut</span>
+            <select id="tiktokPrivacy">
+              <option value="SELF_ONLY" selected>Privé (SELF_ONLY)</option>
+              <option value="PUBLIC_TO_EVERYONE">Public</option>
+              <option value="FOLLOWER_OF_CREATOR">Abonnés</option>
+              <option value="MUTUAL_FOLLOW_FRIENDS">Amis mutuels</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Hashtags par défaut</span>
+            <input type="text" id="tiktokHashtags" placeholder="#funny #animals #fyp">
+          </label>
+        </div>
+        <div class="buttons-row">
+          <button id="saveTikTokConfigBtn" class="btn btn-primary" type="button">Enregistrer config TikTok</button>
+          <button id="clearTikTokConfigBtn" class="btn btn-ghost" type="button">Supprimer config TikTok</button>
+        </div>
+        <p id="tiktokConfigStatus" class="hint small">Configuration TikTok: vérification…</p>
       </details>
 
       <details class="details-box">

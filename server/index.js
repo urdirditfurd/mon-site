@@ -17,12 +17,16 @@ const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
 const SECRETS_DIR = path.join(STORAGE_DIR, "secrets");
 const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
 const YOUTUBE_COOKIES_STORE_PATH = path.join(SECRETS_DIR, "youtube-cookies.txt");
+const TIKTOK_CONFIG_STORE_PATH = path.join(SECRETS_DIR, "tiktok-config.json");
 const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
 const REDIS_URL = process.env.REDIS_URL || "";
 const YOUTUBE_API_KEY = String(process.env.YOUTUBE_API_KEY || "").trim();
 const YOUTUBE_DATA_API_BASE = "https://www.googleapis.com/youtube/v3";
+const TIKTOK_API_BASE = "https://open.tiktokapis.com/v2";
+const TIKTOK_STATUS_POLL_INTERVAL_MS = Math.max(1200, Number(process.env.TIKTOK_STATUS_POLL_INTERVAL_MS) || 3000);
+const TIKTOK_STATUS_POLL_TIMEOUT_MS = Math.max(10000, Number(process.env.TIKTOK_STATUS_POLL_TIMEOUT_MS) || 180000);
 
 const app = express();
 app.use(cors());
@@ -40,6 +44,7 @@ const upload = multer({
 });
 
 const jobs = new Map();
+const automationRuns = new Map();
 const pendingJobIds = [];
 let activeMemoryJobs = 0;
 let queueModeRuntime = "memory";
@@ -632,6 +637,347 @@ function getStoredYoutubeCookiesMeta() {
 
 function hasStoredYoutubeCookies() {
   return fs.existsSync(YOUTUBE_COOKIES_STORE_PATH);
+}
+
+function normalizeTikTokPrivacyLevel(value) {
+  const allowed = new Set(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]);
+  const candidate = String(value || "").trim().toUpperCase();
+  return allowed.has(candidate) ? candidate : "SELF_ONLY";
+}
+
+function parseHashtagsInput(rawInput) {
+  const seen = new Set();
+  const tags = String(rawInput || "")
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => (token.startsWith("#") ? token : `#${token}`))
+    .map((token) => token.replace(/[^#\w-]/g, "").slice(0, 80))
+    .filter((token) => token.length > 1)
+    .filter((token) => {
+      const key = token.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return tags.slice(0, 15);
+}
+
+function sanitizeTiktokCaption(caption, hashtags) {
+  const cleanCaption = String(caption || "").replace(/\s+/g, " ").trim();
+  const hashPart = (hashtags || []).join(" ").trim();
+  const merged = `${cleanCaption} ${hashPart}`.trim();
+  const maxLen = 2200;
+  if (!merged) return hashPart.slice(0, maxLen);
+  if (merged.length <= maxLen) return merged;
+  return `${merged.slice(0, maxLen - 3)}...`;
+}
+
+function guessHashtagsFromText(text) {
+  const normalized = String(text || "").toLowerCase();
+  const tags = ["#fyp", "#viral", "#pourtoi"];
+  if (/(animal|dog|cat|pet|chien|chat|funny|dr[oô]le|fail|meme)/i.test(normalized)) {
+    tags.push("#funny", "#animals", "#funnyanimals");
+  }
+  if (/(tiktok|short|clip|reel)/i.test(normalized)) {
+    tags.push("#shortvideo");
+  }
+  return Array.from(new Set(tags));
+}
+
+function readRawTikTokConfig() {
+  if (!fs.existsSync(TIKTOK_CONFIG_STORE_PATH)) {
+    return {
+      accessToken: "",
+      openId: "",
+      defaultPrivacyLevel: "SELF_ONLY",
+      defaultHashtags: "",
+      updatedAt: null
+    };
+  }
+  try {
+    const raw = fs.readFileSync(TIKTOK_CONFIG_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      accessToken: String(parsed.accessToken || "").trim(),
+      openId: String(parsed.openId || "").trim(),
+      defaultPrivacyLevel: normalizeTikTokPrivacyLevel(parsed.defaultPrivacyLevel || "SELF_ONLY"),
+      defaultHashtags: String(parsed.defaultHashtags || "").trim(),
+      updatedAt: parsed.updatedAt || null
+    };
+  } catch (_error) {
+    return {
+      accessToken: "",
+      openId: "",
+      defaultPrivacyLevel: "SELF_ONLY",
+      defaultHashtags: "",
+      updatedAt: null
+    };
+  }
+}
+
+async function getTikTokConfig() {
+  const raw = readRawTikTokConfig();
+  const token = raw.accessToken;
+  const masked = token ? `${token.slice(0, 6)}...${token.slice(-4)}` : "";
+  return {
+    ...raw,
+    configured: Boolean(raw.accessToken && raw.openId),
+    accessTokenMasked: masked
+  };
+}
+
+function hasTikTokConfig(config) {
+  return Boolean(config && config.accessToken && config.openId);
+}
+
+async function saveTikTokConfig(input) {
+  const payload = {
+    accessToken: String(input.accessToken || "").trim(),
+    openId: String(input.openId || "").trim(),
+    defaultPrivacyLevel: normalizeTikTokPrivacyLevel(input.defaultPrivacyLevel || "SELF_ONLY"),
+    defaultHashtags: String(input.defaultHashtags || "").trim(),
+    updatedAt: new Date().toISOString()
+  };
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
+  await fsp.writeFile(TIKTOK_CONFIG_STORE_PATH, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+  return getTikTokConfig();
+}
+
+async function clearTikTokConfig() {
+  if (fs.existsSync(TIKTOK_CONFIG_STORE_PATH)) {
+    await fsp.unlink(TIKTOK_CONFIG_STORE_PATH);
+  }
+  return getTikTokConfig();
+}
+
+function getPublicBaseUrlFromRequest(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "http";
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+  if (!host) {
+    throw new Error("Host HTTP introuvable pour générer les URLs publiques TikTok.");
+  }
+  return `${protocol}://${host}`;
+}
+
+function resolvePublicBaseUrl(baseUrlHint, req) {
+  const explicit = String(baseUrlHint || "").trim();
+  const envBase = String(process.env.PUBLIC_BASE_URL || "").trim();
+  const fromReq = req ? getPublicBaseUrlFromRequest(req) : "";
+  const candidate = explicit || envBase || fromReq;
+  if (!candidate) {
+    throw new Error("URL publique requise pour publication TikTok. Configure PUBLIC_BASE_URL.");
+  }
+  return candidate.replace(/\/+$/, "");
+}
+
+function buildTikTokHashtagsForClip(job, clip, defaultHashtagsRaw = "", extraHashtagsRaw = "") {
+  const tags = new Set(parseHashtagsInput(defaultHashtagsRaw));
+  for (const tag of parseHashtagsInput(extraHashtagsRaw)) tags.add(tag);
+  for (const guessed of guessHashtagsFromText(`${job.sourceUrl || ""} ${clip.title || ""}`)) {
+    tags.add(guessed.startsWith("#") ? guessed : `#${guessed}`);
+  }
+  tags.add("#funny");
+  tags.add("#fyp");
+  return Array.from(tags).slice(0, 15);
+}
+
+function buildTikTokCaptionForClip(job, clip, defaultHashtagsRaw = "", extraHashtagsRaw = "") {
+  const hashtags = buildTikTokHashtagsForClip(job, clip, defaultHashtagsRaw, extraHashtagsRaw);
+  const baseText = String(clip.title || "Funny short")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return sanitizeTiktokCaption(baseText, hashtags);
+}
+
+async function tiktokApiRequest(endpoint, accessToken, bodyPayload) {
+  const response = await fetch(`${TIKTOK_API_BASE}${endpoint}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    body: JSON.stringify(bodyPayload || {})
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || (payload?.error?.code && payload.error.code !== "ok")) {
+    const message =
+      payload?.error?.message ||
+      payload?.message ||
+      `TikTok API error ${response.status}`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+async function waitForTiktokPublishCompletion(accessToken, publishId, timeoutMs = TIKTOK_STATUS_POLL_TIMEOUT_MS) {
+  const deadline = Date.now() + Math.max(10000, timeoutMs);
+  while (Date.now() < deadline) {
+    const statusPayload = await tiktokApiRequest("/post/publish/status/fetch/", accessToken, { publish_id: publishId });
+    const status = String(
+      statusPayload?.data?.status ||
+      statusPayload?.data?.publish_status ||
+      statusPayload?.data?.post_status ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+    if (["PROCESSING_DOWNLOAD", "PROCESSING_UPLOAD", "PROCESSING", ""].includes(status)) {
+      await new Promise((resolve) => setTimeout(resolve, TIKTOK_STATUS_POLL_INTERVAL_MS));
+      continue;
+    }
+    if (["PUBLISH_COMPLETE", "PUBLISHED", "SUCCESS"].includes(status)) {
+      return { status: "published", rawStatus: status, statusPayload };
+    }
+    if (["FAILED", "PUBLISH_FAILED", "REJECTED", "CANCELLED"].includes(status)) {
+      return { status: "failed", rawStatus: status, statusPayload };
+    }
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_STATUS_POLL_INTERVAL_MS));
+  }
+  return { status: "timeout", rawStatus: "TIMEOUT", statusPayload: null };
+}
+
+function computeDurationBasedClipCount(durationSec, clipDuration = 120) {
+  const duration = Math.max(1, Number(durationSec || 0));
+  const segment = Math.max(30, Number(clipDuration || 120));
+  return Math.max(1, Math.min(12, Math.floor(duration / segment)));
+}
+
+async function createQueuedUrlJob({
+  videoUrl,
+  clipDuration = 120,
+  clipsCount = 1,
+  ignoreIntroSec = 20,
+  minGapSecBetweenClips = 6
+}) {
+  const id = uuidv4();
+  let youtubeCookiesFilePath = "";
+  if (isLikelyYouTubeUrl(videoUrl) && hasStoredYoutubeCookies()) {
+    youtubeCookiesFilePath = YOUTUBE_COOKIES_STORE_PATH;
+  }
+  const job = {
+    id,
+    status: "queued",
+    progress: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    sourceType: "url",
+    sourceUrl: videoUrl,
+    youtubeCookiesFilePath,
+    inputPath: "",
+    originalFilename: "",
+    duration: 0,
+    autoTranscriptUsed: false,
+    params: {
+      clipDuration: Math.min(600, Math.max(30, Math.floor(clipDuration))),
+      clipsCount: Math.min(12, Math.max(1, Math.floor(clipsCount))),
+      aspectRatio: "9:16",
+      frameMode: "full-video",
+      transcript: "",
+      minGapSecBetweenClips: Math.max(0, Number(minGapSecBetweenClips) || 6),
+      ignoreIntroSec: Math.max(0, Number(ignoreIntroSec) || 20),
+      subtitleTheme: "classic",
+      highlightMode: "viral",
+      languageMode: "no-added-audio",
+      includeAutoTranscript: false,
+      dubFrenchAudio: false,
+      autoDubVoiceBySpeaker: false,
+      includeSrtInZip: false,
+      burnSubtitles: false,
+      hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
+    },
+    clips: [],
+    error: null
+  };
+  jobs.set(id, job);
+  await persistJobsDb();
+  await enqueueJob(id);
+  return job;
+}
+
+async function waitForJobTerminalState(jobId, timeoutMs = 90 * 60 * 1000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const current = jobs.get(jobId);
+    if (!current) throw new Error(`Job introuvable (${jobId})`);
+    if (current.status === "completed" || current.status === "failed") {
+      return current;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  throw new Error(`Timeout job (${jobId})`);
+}
+
+async function publishJobClipsToTikTok(job, options = {}) {
+  const cfg = await getTikTokConfig();
+  if (!hasTikTokConfig(cfg)) {
+    throw new Error("Config TikTok incomplète: accessToken + openId requis.");
+  }
+  if (!Array.isArray(job.clips) || !job.clips.length) {
+    throw new Error("Aucun clip à publier pour ce job.");
+  }
+  const baseUrl = resolvePublicBaseUrl(options.baseUrl || "", options.req || null);
+  const privacyLevel = normalizeTikTokPrivacyLevel(options.privacyLevel || cfg.defaultPrivacyLevel || "SELF_ONLY");
+  const disableComment = boolFrom(options.disableComment, false);
+  const disableDuet = boolFrom(options.disableDuet, false);
+  const disableStitch = boolFrom(options.disableStitch, false);
+  const extraHashtags = String(options.hashtags || "").trim();
+  const out = [];
+
+  for (const clip of job.clips) {
+    const videoUrl = `${baseUrl}/api/jobs/${job.id}/clips/${clip.id}/download`;
+    const title = buildTikTokCaptionForClip(job, clip, cfg.defaultHashtags || "", extraHashtags);
+    const initPayload = {
+      post_info: {
+        title,
+        privacy_level: privacyLevel,
+        disable_comment: disableComment,
+        disable_duet: disableDuet,
+        disable_stitch: disableStitch
+      },
+      source_info: {
+        source: "PULL_FROM_URL",
+        video_url: videoUrl
+      }
+    };
+    const initRes = await tiktokApiRequest("/post/publish/video/init/", cfg.accessToken, initPayload);
+    const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
+    if (!publishId) {
+      throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
+    }
+    const publishState = await waitForTiktokPublishCompletion(cfg.accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
+    out.push({
+      clipId: clip.id,
+      caption: title,
+      videoUrl,
+      publishId,
+      publishStatus: publishState.status,
+      publishRawStatus: publishState.rawStatus
+    });
+  }
+
+  return out;
+}
+
+function sanitizeAutomationRun(run) {
+  return {
+    id: run.id,
+    status: run.status,
+    progress: run.progress,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    query: run.query,
+    sourceCount: run.sourceCount,
+    jobsCreated: run.jobsCreated,
+    jobsCompleted: run.jobsCompleted,
+    jobsFailed: run.jobsFailed,
+    clipsPublished: run.clipsPublished,
+    publishFailed: run.publishFailed,
+    error: run.error || null,
+    items: run.items || []
+  };
 }
 
 function parseSubtitleTimestamp(raw) {
@@ -2002,6 +2348,57 @@ app.delete("/api/youtube-cookies", async (_req, res) => {
   }
 });
 
+app.get("/api/tiktok/config/status", async (_req, res) => {
+  const config = await getTikTokConfig();
+  return res.json({
+    configured: hasTikTokConfig(config),
+    hasAccessToken: Boolean(config.accessToken),
+    hasOpenId: Boolean(config.openId),
+    defaultPrivacyLevel: config.defaultPrivacyLevel || "SELF_ONLY",
+    defaultHashtags: String(config.defaultHashtags || "")
+  });
+});
+
+app.post("/api/tiktok/config", async (req, res) => {
+  try {
+    const accessToken = String(req.body.accessToken || "").trim();
+    const openId = String(req.body.openId || "").trim();
+    const defaultPrivacyLevelRaw = String(req.body.defaultPrivacyLevel || "SELF_ONLY").trim().toUpperCase();
+    const allowedPrivacy = new Set(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]);
+    const defaultPrivacyLevel = allowedPrivacy.has(defaultPrivacyLevelRaw) ? defaultPrivacyLevelRaw : "SELF_ONLY";
+    const defaultHashtags = String(req.body.defaultHashtags || "").trim();
+
+    if (!accessToken || !openId) {
+      return res.status(400).json({ error: "accessToken et openId sont requis." });
+    }
+
+    const toPersist = {
+      accessToken,
+      openId,
+      defaultPrivacyLevel,
+      defaultHashtags
+    };
+    await saveTikTokConfig(toPersist);
+    return res.status(201).json({
+      ok: true,
+      configured: true,
+      defaultPrivacyLevel,
+      defaultHashtags
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Impossible de sauvegarder la config TikTok." });
+  }
+});
+
+app.delete("/api/tiktok/config", async (_req, res) => {
+  try {
+    await clearTikTokConfig();
+    return res.json({ ok: true, configured: false });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Impossible de supprimer la config TikTok." });
+  }
+});
+
 app.get("/api/youtube/discover", async (req, res) => {
   if (!YOUTUBE_API_KEY) {
     return res.status(503).json({
@@ -2114,6 +2511,185 @@ app.get("/api/youtube/discover", async (req, res) => {
     return res.status(502).json({
       error: error instanceof Error ? error.message : "Erreur lors de la découverte YouTube."
     });
+  }
+});
+
+app.post("/api/automation/discover-generate-publish", async (req, res) => {
+  if (!YOUTUBE_API_KEY) {
+    return res.status(503).json({
+      error: "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre."
+    });
+  }
+
+  const tiktokConfig = await getTikTokConfig();
+  if (!hasTikTokConfig(tiktokConfig)) {
+    return res.status(400).json({
+      error: "Config TikTok manquante: accessToken + openId requis."
+    });
+  }
+
+  const query = String(req.body.q || req.body.query || "").trim();
+  if (!query) {
+    return res.status(400).json({ error: "Le champ q (niche) est requis." });
+  }
+
+  const maxResults = Math.max(1, Math.min(25, Math.floor(toNumber(req.body.maxResults, 8))));
+  const minDurationSec = Math.max(0, Math.min(7200, Math.floor(toNumber(req.body.minDurationSec, 300))));
+  const order = normalizeDiscoverOrder(req.body.order);
+  const safeSearch = normalizeSafeSearch(req.body.safeSearch);
+  const regionCodeRaw = String(req.body.regionCode || "FR").trim().toUpperCase();
+  const regionCode = /^[A-Z]{2}$/.test(regionCodeRaw) ? regionCodeRaw : "FR";
+  const relevanceLanguageRaw = String(req.body.relevanceLanguage || "").trim().toLowerCase();
+  const relevanceLanguage = /^[a-z]{2}$/.test(relevanceLanguageRaw) ? relevanceLanguageRaw : "";
+  const publishedWithinDays = Math.max(0, Math.min(3650, Math.floor(toNumber(req.body.publishedWithinDays, 365))));
+  const excludeSeen = boolFrom(req.body.excludeSeen, true);
+  const blockedChannelKeywords = parseCsvTokens(req.body.blockedChannelKeywords);
+  const blockedChannelIds = new Set(
+    String(req.body.blockedChannelIds || "")
+      .split(/[,\n;]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+
+  const clipDurationSec = Math.max(30, Math.min(600, Math.floor(toNumber(req.body.clipDurationSec, 120))));
+  const ignoreIntroSec = Math.max(0, Math.min(600, Math.floor(toNumber(req.body.ignoreIntroSec, 20))));
+  const minGapSecBetweenClips = Math.max(0, Math.min(60, toNumber(req.body.minGapSecBetweenClips, 6)));
+  const privacyLevel = normalizeTikTokPrivacyLevel(req.body.defaultPrivacyLevel || tiktokConfig.defaultPrivacyLevel || "SELF_ONLY");
+  const hashtags = String(req.body.hashtags || "").trim();
+  const baseUrlHint = String(req.body.baseUrl || "").trim();
+
+  const rawCandidates = await fetchYouTubeDiscoverRaw({
+    query,
+    maxResults: Math.max(10, maxResults),
+    order,
+    regionCode,
+    relevanceLanguage,
+    safeSearch,
+    publishedWithinDays
+  });
+
+  const nowMs = Date.now();
+  const queryTokens = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const seenVideoIds = excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
+
+  const selectedSources = rawCandidates
+    .filter((item) => {
+      if (Number(item.durationSec || 0) < minDurationSec) return false;
+      if (excludeSeen && seenVideoIds.has(String(item.videoId || ""))) return false;
+      const channelId = String(item.channelId || "").trim();
+      const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
+      if (channelId && blockedChannelIds.has(channelId)) return false;
+      if (blockedChannelKeywords.length > 0) {
+        const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
+        if (blockedMatch) return false;
+      }
+      return true;
+    })
+    .map((item) => ({
+      ...item,
+      score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults);
+
+  if (!selectedSources.length) {
+    return res.status(409).json({
+      error: "Aucune source exploitable après filtrage (durée, blacklist, anti-doublon)."
+    });
+  }
+
+  const runId = uuidv4();
+  const run = {
+    id: runId,
+    status: "processing",
+    progress: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    query,
+    sourceCount: selectedSources.length,
+    jobsCreated: 0,
+    jobsCompleted: 0,
+    jobsFailed: 0,
+    clipsPublished: 0,
+    publishFailed: 0,
+    error: null,
+    items: []
+  };
+  automationRuns.set(runId, run);
+
+  try {
+    for (let index = 0; index < selectedSources.length; index += 1) {
+      const source = selectedSources[index];
+      const clipsCount = computeDurationBasedClipCount(source.durationSec || 0, clipDurationSec);
+      const queuedJob = await createQueuedUrlJob({
+        videoUrl: source.url,
+        clipDuration: clipDurationSec,
+        clipsCount,
+        ignoreIntroSec,
+        minGapSecBetweenClips
+      });
+      run.jobsCreated += 1;
+      run.items.push({
+        sourceUrl: source.url,
+        score: source.score,
+        jobId: queuedJob.id,
+        clipsCountRequested: clipsCount,
+        status: "queued",
+        published: []
+      });
+      run.progress = Math.min(30, Math.round(((index + 1) / selectedSources.length) * 30));
+      run.updatedAt = new Date().toISOString();
+    }
+
+    for (const item of run.items) {
+      const terminal = await waitForJobTerminalState(item.jobId, 90 * 60 * 1000);
+      if (terminal.status !== "completed") {
+        run.jobsFailed += 1;
+        item.status = "failed";
+        item.error = terminal.error || "Échec génération";
+        continue;
+      }
+      run.jobsCompleted += 1;
+      item.status = "completed";
+      item.generatedClips = (terminal.clips || []).length;
+
+      try {
+        const published = await publishJobClipsToTikTok(terminal, {
+          req,
+          baseUrl: baseUrlHint,
+          privacyLevel,
+          hashtags
+        });
+        item.published = published;
+        for (const pub of published) {
+          if (pub.publishStatus === "published") {
+            run.clipsPublished += 1;
+          } else {
+            run.publishFailed += 1;
+          }
+        }
+      } catch (publishError) {
+        run.publishFailed += Math.max(1, Number(item.generatedClips || 0));
+        item.publishError = publishError instanceof Error ? publishError.message : "Échec publication TikTok";
+      }
+      run.progress = Math.min(99, run.progress + 5);
+      run.updatedAt = new Date().toISOString();
+    }
+
+    run.status = "completed";
+    run.progress = 100;
+    run.updatedAt = new Date().toISOString();
+    return res.json(sanitizeAutomationRun(run));
+  } catch (error) {
+    run.status = "failed";
+    run.progress = 100;
+    run.error = error instanceof Error ? error.message : "Erreur automation";
+    run.updatedAt = new Date().toISOString();
+    return res.status(500).json(sanitizeAutomationRun(run));
   }
 });
 
