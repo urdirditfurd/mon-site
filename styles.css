@@ -229,6 +229,23 @@ input[type="range"] {
   gap: 8px;
 }
 
+.discover-results-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.discover-checkbox {
+  margin: 4px 0;
+  align-items: flex-start;
+}
+
+.discover-checkbox span {
+  line-height: 1.35;
+}
+
 .cookies-status,
 #youtubeCookiesStatus {
   margin-top: 6px;

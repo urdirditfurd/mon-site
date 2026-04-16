@@ -106,6 +106,21 @@ Pour traiter plusieurs vidéos rapidement avec un preset prêt à publier:
    - **Ouvrir** charge le résultat dans la prévisualisation
    - **ZIP** télécharge le pack complet de cette source
 
+### Version V2 — découverte auto YouTube
+
+La V2 ajoute une découverte automatique de liens YouTube depuis l'app (sans collage manuel):
+
+1. Ouvre le bloc **Version V2 — découverte auto YouTube**.
+2. Saisis une niche (ex: `funny animals`) + langue/région + quantité.
+3. Clique **Trouver des vidéos (V2)**.
+4. Clique **Injecter vers Batch V1** pour remplir automatiquement la zone batch.
+5. Lance ensuite le traitement via **Lancer batch V1**.
+
+API V2 utilisée:
+- `POST /api/youtube/discover`
+- Entrée: `query`, `maxResults`, `regionCode`, `relevanceLanguage`, `publishedAfterDays`, `order`
+- Sortie: `candidates[]` triés avec score (vues, fraîcheur, durée, contenu short-friendly)
+
 ### Mode avancé
 
 1. Fournir une source vidéo:

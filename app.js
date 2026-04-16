@@ -13,6 +13,7 @@ const config = {
 
 const state = {
   backendAvailable: false,
+  youtubeApiAvailable: false,
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
   quickMode: true,
@@ -38,7 +39,9 @@ const state = {
   currentAspectRatio: "9:16",
   batchRunning: false,
   batchStopRequested: false,
-  batchJobs: []
+  batchJobs: [],
+  discoverRunning: false,
+  discoverResults: []
 };
 
 const dom = {
@@ -68,6 +71,18 @@ const dom = {
   minGapValue: document.getElementById("minGapValue"),
   generateScriptBtn: document.getElementById("generateScriptBtn"),
   analyzeBtn: document.getElementById("analyzeBtn"),
+  discoverQuery: document.getElementById("discoverQuery"),
+  discoverMaxResults: document.getElementById("discoverMaxResults"),
+  discoverOrder: document.getElementById("discoverOrder"),
+  discoverMinDurationSec: document.getElementById("discoverMinDurationSec"),
+  discoverLanguage: document.getElementById("discoverLanguage"),
+  discoverRegion: document.getElementById("discoverRegion"),
+  discoverPublishedWithinDays: document.getElementById("discoverPublishedWithinDays"),
+  discoverYoutubeBtn: document.getElementById("discoverYoutubeBtn"),
+  useDiscoverResultsBtn: document.getElementById("useDiscoverResultsBtn"),
+  discoverAndRunBatchBtn: document.getElementById("discoverAndRunBatchBtn"),
+  discoverStatus: document.getElementById("discoverStatus"),
+  discoverResultsList: document.getElementById("discoverResultsList"),
   batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
   batchClipsCount: document.getElementById("batchClipsCount"),
   batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
@@ -229,6 +244,154 @@ function setBatchControlsDisabled(isRunning) {
   state.batchRunning = isRunning;
   if (dom.startBatchBtn) dom.startBatchBtn.disabled = isRunning || !state.backendAvailable;
   if (dom.stopBatchBtn) dom.stopBatchBtn.disabled = !isRunning;
+  setDiscoverControlsDisabled(state.discoverRunning);
+}
+
+function formatCompactNumber(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0";
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
+  return String(Math.round(num));
+}
+
+function formatSecondsShort(totalSeconds) {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const seconds = sec % 60;
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}`;
+  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, "0")}`;
+  return `${seconds}s`;
+}
+
+function setDiscoverStatus(message, isError = false) {
+  if (!dom.discoverStatus) return;
+  dom.discoverStatus.textContent = message;
+  dom.discoverStatus.classList.toggle("note-error", isError);
+}
+
+function setDiscoverControlsDisabled(disabled) {
+  state.discoverRunning = disabled;
+  const isEnabled = state.backendAvailable && state.youtubeApiAvailable;
+  if (dom.discoverYoutubeBtn) dom.discoverYoutubeBtn.disabled = disabled || !isEnabled;
+  if (dom.useDiscoverResultsBtn) dom.useDiscoverResultsBtn.disabled = disabled || !state.discoverResults.length;
+  if (dom.discoverAndRunBatchBtn) dom.discoverAndRunBatchBtn.disabled = disabled || !isEnabled || state.batchRunning;
+}
+
+function renderDiscoverResults() {
+  if (!dom.discoverResultsList) return;
+  if (!state.discoverResults.length) {
+    dom.discoverResultsList.innerHTML = `<li class="empty">Aucune découverte pour le moment.</li>`;
+    setDiscoverControlsDisabled(state.discoverRunning);
+    return;
+  }
+
+  dom.discoverResultsList.innerHTML = state.discoverResults
+    .map((item, idx) => {
+      const duration = formatSecondsShort(item.durationSec);
+      const views = formatCompactNumber(item.viewCount);
+      const score = Math.round(Number(item.score || 0));
+      const checked = item.selected ? "checked" : "";
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">#${idx + 1} · ${escapeHtml(item.channelTitle || "Chaîne inconnue")}</h3>
+            <span class="chip">Score ${score}</span>
+          </div>
+          <label class="toggle-row compact discover-checkbox">
+            <input type="checkbox" data-discover-id="${escapeHtml(item.videoId)}" ${checked}>
+            <span>${escapeHtml(item.title || item.url)}</span>
+          </label>
+          <p class="clip-times">${duration} · ${views} vues · ${escapeHtml(item.publishedAt || "")}</p>
+          <p class="clip-snippet">${escapeHtml(item.url)}</p>
+        </li>
+      `;
+    })
+    .join("");
+  setDiscoverControlsDisabled(state.discoverRunning);
+}
+
+function getSelectedDiscoverUrls() {
+  return state.discoverResults.filter((item) => item.selected).map((item) => item.url);
+}
+
+function pushSelectedDiscoverUrlsToBatch() {
+  const selectedUrls = getSelectedDiscoverUrls();
+  if (!selectedUrls.length) {
+    setDiscoverStatus("Sélection vide: coche au moins un résultat V2.", true);
+    return [];
+  }
+  if (dom.batchVideoUrlsInput) {
+    dom.batchVideoUrlsInput.value = selectedUrls.join("\n");
+  }
+  setBatchStatus(`${selectedUrls.length} lien(s) injecté(s) depuis la découverte V2.`, false);
+  setDiscoverStatus(`${selectedUrls.length} lien(s) envoyés vers le batch V1.`, false);
+  return selectedUrls;
+}
+
+async function discoverYoutubeSources(autoRunBatch = false) {
+  if (state.discoverRunning) return;
+  if (!state.backendAvailable) {
+    setDiscoverStatus("Backend indisponible — lance: npm start", true);
+    return;
+  }
+  if (!state.youtubeApiAvailable) {
+    setDiscoverStatus("YOUTUBE_API_KEY absente côté serveur. Configure la clé puis redémarre.", true);
+    return;
+  }
+
+  const query = (dom.discoverQuery?.value || "").trim();
+  if (!query) {
+    setDiscoverStatus("Ajoute un mot-clé de niche pour la découverte V2.", true);
+    return;
+  }
+
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12)))),
+    order: String(dom.discoverOrder?.value || "relevance"),
+    minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
+    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
+    regionCode: String(dom.discoverRegion?.value || "FR"),
+    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90))))
+  });
+
+  setDiscoverControlsDisabled(true);
+  setDiscoverStatus("Recherche YouTube V2 en cours…", false);
+
+  try {
+    const response = await fetch(apiUrl(`/api/youtube/discover?${params.toString()}`));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Échec de la découverte YouTube V2.");
+    }
+
+    state.discoverResults = Array.isArray(payload.candidates)
+      ? payload.candidates.map((candidate) => ({ ...candidate, selected: true }))
+      : [];
+    renderDiscoverResults();
+
+    if (!state.discoverResults.length) {
+      setDiscoverStatus("Aucun résultat trouvé. Ajuste la niche ou les filtres V2.", true);
+      return;
+    }
+
+    setDiscoverStatus(`${state.discoverResults.length} lien(s) trouvés automatiquement.`, false);
+
+    if (autoRunBatch) {
+      pushSelectedDiscoverUrlsToBatch();
+      if (state.batchRunning) {
+        setDiscoverStatus("Batch déjà en cours: relance après la fin du batch actuel.", true);
+        return;
+      }
+      await startBatchGeneration();
+    }
+  } catch (error) {
+    setDiscoverStatus(error instanceof Error ? error.message : "Erreur découverte V2.", true);
+  } finally {
+    setDiscoverControlsDisabled(false);
+  }
 }
 
 function parseBatchUrls(rawText) {
@@ -631,7 +794,11 @@ async function checkBackendHealth() {
     const payload = await healthRes.json();
     const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
+    state.youtubeApiAvailable = Boolean(
+      serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
+    );
     setBatchControlsDisabled(state.batchRunning);
+    setDiscoverControlsDisabled(state.discoverRunning);
     updateStatus("Backend prêt", true);
     if (serverConfig?.defaults) {
       const defaultsCfg = serverConfig.defaults;
@@ -666,11 +833,13 @@ async function checkBackendHealth() {
     dom.backendMeta.textContent =
       `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
       `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · ` +
-      `TTS FR: ${payload.edgeTtsAvailable ? "oui" : "non"} · Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+      `TTS FR: ${payload.edgeTtsAvailable ? "oui" : "non"} · Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"} · API YouTube: ${state.youtubeApiAvailable ? "oui" : "non"}`;
     return;
   } catch (_error) {
     state.backendAvailable = false;
+    state.youtubeApiAvailable = false;
     setBatchControlsDisabled(false);
+    setDiscoverControlsDisabled(false);
     updateStatus("Backend indisponible — lance: npm start", false);
     dom.backendMeta.textContent = "Aucune connexion backend";
     renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
@@ -958,6 +1127,33 @@ function initEvents() {
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
   });
+  if (dom.discoverYoutubeBtn) {
+    dom.discoverYoutubeBtn.addEventListener("click", () => {
+      void discoverYoutubeSources(false);
+    });
+  }
+  if (dom.useDiscoverResultsBtn) {
+    dom.useDiscoverResultsBtn.addEventListener("click", () => {
+      pushSelectedDiscoverUrlsToBatch();
+    });
+  }
+  if (dom.discoverAndRunBatchBtn) {
+    dom.discoverAndRunBatchBtn.addEventListener("click", () => {
+      void discoverYoutubeSources(true);
+    });
+  }
+  if (dom.discoverResultsList) {
+    dom.discoverResultsList.addEventListener("change", (event) => {
+      const target = event.target instanceof HTMLInputElement ? event.target : null;
+      if (!target || target.type !== "checkbox") return;
+      const videoId = target.getAttribute("data-discover-id");
+      if (!videoId) return;
+      const item = state.discoverResults.find((entry) => entry.videoId === videoId);
+      if (!item) return;
+      item.selected = target.checked;
+      setDiscoverControlsDisabled(state.discoverRunning);
+    });
+  }
   if (dom.startBatchBtn) {
     dom.startBatchBtn.addEventListener("click", () => {
       void startBatchGeneration();
@@ -1049,6 +1245,9 @@ function initDefaults() {
   if (dom.languageMode) dom.languageMode.value = state.languageMode;
   applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
+  renderDiscoverResults();
+  setDiscoverStatus("Découverte V2 inactive.", false);
+  setDiscoverControlsDisabled(false);
   renderBatchJobs();
   setBatchStatus("Batch inactif.", false);
   setBatchControlsDisabled(false);
@@ -1060,11 +1259,15 @@ async function init() {
   initEvents();
   initFileInput();
   setButtonsEnabled(false);
+  renderDiscoverResults();
+  setDiscoverControlsDisabled(false);
   renderBatchJobs();
   setBatchControlsDisabled(false);
   await checkBackendHealth();
+  setDiscoverControlsDisabled(false);
   setBatchControlsDisabled(false);
   if (!state.backendAvailable) {
+    setDiscoverStatus("Découverte V2 inactive (backend indisponible).", true);
     setBatchStatus("Batch inactif (backend indisponible).", true);
   }
   if (state.backendAvailable) {

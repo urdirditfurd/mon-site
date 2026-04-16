@@ -46,6 +46,93 @@
       </div>
 
       <details class="details-box">
+        <summary>Version V2 — découverte auto YouTube</summary>
+        <p class="hint small no-margin">
+          L’agent recherche automatiquement des liens YouTube selon ta niche, puis prépare le batch en un clic.
+        </p>
+        <div class="grid-2">
+          <label class="field">
+            <span>Niche / mots-clés</span>
+            <input
+              type="text"
+              id="discoverQuery"
+              placeholder="funny animals, animaux drôles, fails animaux..."
+              autocomplete="off"
+            >
+          </label>
+          <label class="field">
+            <span>Nombre de liens à trouver</span>
+            <select id="discoverMaxResults">
+              <option value="5">5</option>
+              <option value="8">8</option>
+              <option value="12" selected>12</option>
+              <option value="16">16</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Ordre de recherche</span>
+            <select id="discoverOrder">
+              <option value="relevance" selected>Pertinence</option>
+              <option value="date">Plus récent</option>
+              <option value="viewCount">Plus de vues</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Durée min des vidéos source</span>
+            <select id="discoverMinDurationSec">
+              <option value="180">3 min</option>
+              <option value="300" selected>5 min</option>
+              <option value="480">8 min</option>
+              <option value="600">10 min</option>
+              <option value="900">15 min</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Langue dominante</span>
+            <select id="discoverLanguage">
+              <option value="">Toutes</option>
+              <option value="fr">Français</option>
+              <option value="en" selected>Anglais</option>
+              <option value="es">Espagnol</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Région</span>
+            <select id="discoverRegion">
+              <option value="FR" selected>France (FR)</option>
+              <option value="US">États-Unis (US)</option>
+              <option value="CA">Canada (CA)</option>
+              <option value="GB">Royaume-Uni (GB)</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">
+          <span>Période max (jours récents)</span>
+          <select id="discoverPublishedWithinDays">
+            <option value="30">30 jours</option>
+            <option value="90" selected>90 jours</option>
+            <option value="180">180 jours</option>
+            <option value="365">365 jours</option>
+            <option value="0">Sans limite</option>
+          </select>
+        </label>
+        <div class="buttons-row">
+          <button id="discoverYoutubeBtn" class="btn btn-primary" type="button">Trouver des liens (V2)</button>
+          <button id="useDiscoverResultsBtn" class="btn btn-ghost" type="button">Envoyer la sélection vers batch V1</button>
+          <button id="discoverAndRunBatchBtn" class="btn btn-ghost" type="button">Trouver + lancer batch</button>
+        </div>
+        <p id="discoverStatus" class="hint small">Découverte V2 inactive.</p>
+        <ul id="discoverResultsList" class="discover-results-list">
+          <li class="empty">Aucune découverte pour le moment.</li>
+        </ul>
+      </details>
+
+      <details class="details-box">
         <summary>Auto-Pipeline V1 (batch aujourd'hui)</summary>
         <p class="hint small no-margin">
           Preset automatique: 2 min, sans audio ajouté, sans sous-titres brûlés, format TikTok 9:16.

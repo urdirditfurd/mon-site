@@ -21,6 +21,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
 const REDIS_URL = process.env.REDIS_URL || "";
+const YOUTUBE_API_KEY = String(process.env.YOUTUBE_API_KEY || "").trim();
+const YOUTUBE_DATA_API_BASE = "https://www.googleapis.com/youtube/v3";
 
 const app = express();
 app.use(cors());
@@ -221,6 +223,142 @@ function isLikelyYouTubeUrl(value) {
   } catch (_error) {
     return false;
   }
+}
+
+function normalizeDiscoverOrder(orderRaw) {
+  const allowed = new Set(["relevance", "date", "viewCount"]);
+  const candidate = String(orderRaw || "").trim();
+  return allowed.has(candidate) ? candidate : "relevance";
+}
+
+function normalizeSafeSearch(value) {
+  const allowed = new Set(["none", "moderate", "strict"]);
+  const candidate = String(value || "").trim();
+  return allowed.has(candidate) ? candidate : "moderate";
+}
+
+function parseIso8601DurationSeconds(isoDuration) {
+  const raw = String(isoDuration || "").trim();
+  if (!raw) return 0;
+  const match = raw.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
+  if (!match) return 0;
+  const days = Number(match[1] || 0);
+  const hours = Number(match[2] || 0);
+  const minutes = Number(match[3] || 0);
+  const seconds = Number(match[4] || 0);
+  const total = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+  return Number.isFinite(total) ? total : 0;
+}
+
+function computeYouTubeCandidateScore(candidate, queryTokens, nowMs) {
+  const views = Number(candidate.viewCount || 0);
+  const viewsScore = Math.min(45, Math.log10(views + 1) * 8);
+  const durationSec = Number(candidate.durationSec || 0);
+  const durationScore =
+    durationSec >= 360
+      ? Math.min(25, durationSec / 120)
+      : durationSec >= 180
+        ? 8
+        : -20;
+  const title = String(candidate.title || "").toLowerCase();
+  const tokenMatches = queryTokens.filter((token) => token.length >= 3 && title.includes(token)).length;
+  const keywordScore = Math.min(18, tokenMatches * 4.5);
+  const publishedMs = Date.parse(candidate.publishedAt || "");
+  const daysOld = Number.isFinite(publishedMs) ? Math.max(0, (nowMs - publishedMs) / 86400000) : 9999;
+  const recencyScore = Math.max(0, 22 - daysOld * 0.12);
+  return Number((viewsScore + durationScore + keywordScore + recencyScore).toFixed(2));
+}
+
+async function fetchYouTubeDiscoverRaw({
+  query,
+  maxResults,
+  order,
+  regionCode,
+  relevanceLanguage,
+  safeSearch,
+  publishedWithinDays
+}) {
+  if (!YOUTUBE_API_KEY) {
+    throw new Error("YOUTUBE_API_KEY manquante sur le serveur.");
+  }
+
+  const searchParams = new URLSearchParams({
+    key: YOUTUBE_API_KEY,
+    part: "snippet",
+    type: "video",
+    maxResults: String(Math.max(1, Math.min(50, maxResults))),
+    q: query,
+    order,
+    safeSearch,
+    videoEmbeddable: "true",
+    regionCode
+  });
+  if (relevanceLanguage) {
+    searchParams.set("relevanceLanguage", relevanceLanguage);
+  }
+  if (publishedWithinDays > 0) {
+    const publishedAfter = new Date(Date.now() - publishedWithinDays * 86400000).toISOString();
+    searchParams.set("publishedAfter", publishedAfter);
+  }
+
+  const searchResponse = await fetch(`${YOUTUBE_DATA_API_BASE}/search?${searchParams.toString()}`);
+  const searchJson = await searchResponse.json().catch(() => ({}));
+  if (!searchResponse.ok) {
+    const apiMessage = searchJson?.error?.message || "Impossible de rechercher des vidéos YouTube.";
+    throw new Error(apiMessage);
+  }
+
+  const searchItems = Array.isArray(searchJson.items) ? searchJson.items : [];
+  const videoIds = searchItems
+    .map((item) => item?.id?.videoId)
+    .filter(Boolean)
+    .slice(0, 50);
+  if (!videoIds.length) return [];
+
+  const videosParams = new URLSearchParams({
+    key: YOUTUBE_API_KEY,
+    part: "contentDetails,statistics,snippet",
+    id: videoIds.join(","),
+    maxResults: String(videoIds.length)
+  });
+  const videosResponse = await fetch(`${YOUTUBE_DATA_API_BASE}/videos?${videosParams.toString()}`);
+  const videosJson = await videosResponse.json().catch(() => ({}));
+  if (!videosResponse.ok) {
+    const apiMessage = videosJson?.error?.message || "Impossible de récupérer les métadonnées vidéo YouTube.";
+    throw new Error(apiMessage);
+  }
+
+  const detailsMap = new Map();
+  for (const item of Array.isArray(videosJson.items) ? videosJson.items : []) {
+    if (item?.id) detailsMap.set(item.id, item);
+  }
+
+  return searchItems
+    .map((item) => {
+      const videoId = item?.id?.videoId;
+      const details = detailsMap.get(videoId || "");
+      if (!videoId || !details) return null;
+      const durationIso = String(details?.contentDetails?.duration || "PT0S");
+      const durationSec = parseIso8601DurationSeconds(durationIso);
+      const viewCount = Number(details?.statistics?.viewCount || 0);
+      return {
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        title: String(item?.snippet?.title || details?.snippet?.title || "").trim(),
+        description: String(item?.snippet?.description || "").trim(),
+        channelTitle: String(item?.snippet?.channelTitle || details?.snippet?.channelTitle || "").trim(),
+        publishedAt: String(item?.snippet?.publishedAt || details?.snippet?.publishedAt || ""),
+        thumbnailUrl:
+          item?.snippet?.thumbnails?.high?.url ||
+          item?.snippet?.thumbnails?.medium?.url ||
+          item?.snippet?.thumbnails?.default?.url ||
+          "",
+        durationIso,
+        durationSec,
+        viewCount
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeCookieBoolean(value, fallback = "FALSE") {
@@ -1725,6 +1863,7 @@ app.get("/api/health", async (_req, res) => {
     whisperAvailable,
     ytDlpAvailable,
     edgeTtsAvailable,
+    youtubeApiAvailable: Boolean(YOUTUBE_API_KEY),
     youtubeCookiesConfigured: cookiesMeta.configured,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
@@ -1747,6 +1886,7 @@ app.get("/api/config", (_req, res) => {
       whisperAvailable,
       ytDlpAvailable,
       edgeTtsAvailable,
+      youtubeDiscovery: Boolean(YOUTUBE_API_KEY),
       urlIngestion: true,
       youtubeIngestion: ytDlpAvailable,
       youtubeCookiesPersistence: true,
@@ -1797,6 +1937,76 @@ app.delete("/api/youtube-cookies", async (_req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: error instanceof Error ? error.message : "Impossible de supprimer les cookies YouTube."
+    });
+  }
+});
+
+app.get("/api/youtube/discover", async (req, res) => {
+  if (!YOUTUBE_API_KEY) {
+    return res.status(503).json({
+      error: "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre."
+    });
+  }
+
+  const query = String(req.query.q || "").trim();
+  if (!query) {
+    return res.status(400).json({ error: "Le paramètre q (requête) est requis." });
+  }
+
+  const maxResults = Math.max(1, Math.min(25, Math.floor(toNumber(req.query.maxResults, 12))));
+  const minDurationSec = Math.max(0, Math.min(7200, Math.floor(toNumber(req.query.minDurationSec, 300))));
+  const order = normalizeDiscoverOrder(req.query.order);
+  const safeSearch = normalizeSafeSearch(req.query.safeSearch);
+  const regionCodeRaw = String(req.query.regionCode || "FR").trim().toUpperCase();
+  const regionCode = /^[A-Z]{2}$/.test(regionCodeRaw) ? regionCodeRaw : "FR";
+  const relevanceLanguageRaw = String(req.query.relevanceLanguage || "").trim().toLowerCase();
+  const relevanceLanguage = /^[a-z]{2}$/.test(relevanceLanguageRaw) ? relevanceLanguageRaw : "";
+  const publishedWithinDays = Math.max(0, Math.min(3650, Math.floor(toNumber(req.query.publishedWithinDays, 365))));
+
+  try {
+    const rawCandidates = await fetchYouTubeDiscoverRaw({
+      query,
+      maxResults: Math.max(10, maxResults),
+      order,
+      regionCode,
+      relevanceLanguage,
+      safeSearch,
+      publishedWithinDays
+    });
+    const nowMs = Date.now();
+    const queryTokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+
+    const candidates = rawCandidates
+      .filter((item) => Number(item.durationSec || 0) >= minDurationSec)
+      .map((item) => ({
+        ...item,
+        score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
+
+    return res.json({
+      ok: true,
+      query,
+      count: candidates.length,
+      filters: {
+        maxResults,
+        minDurationSec,
+        order,
+        regionCode,
+        relevanceLanguage: relevanceLanguage || null,
+        safeSearch,
+        publishedWithinDays
+      },
+      candidates
+    });
+  } catch (error) {
+    return res.status(502).json({
+      error: error instanceof Error ? error.message : "Erreur lors de la découverte YouTube."
     });
   }
 });
