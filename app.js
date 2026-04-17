@@ -1,1896 +1,1719 @@
-// =============================================
-// AgentVerse — Marketplace d'Agents IA
-// Application Logic
-// =============================================
+const runtimeConfig = typeof window.CLIPFORGE_CONFIG !== "undefined" ? window.CLIPFORGE_CONFIG : {};
+const defaults = runtimeConfig.defaults || {};
 
-// =============================================
-// DATA — Agents IA
-// =============================================
-
-const agents = [
-    {
-        id: 1,
-        name: "ChatGenius Pro",
-        category: "chatbot",
-        categoryLabel: "Chatbot & Assistant",
-        description: "Agent conversationnel avancé pour le support client avec compréhension contextuelle et réponses multilingues.",
-        longDescription: "ChatGenius Pro est un agent conversationnel de nouvelle génération qui comprend le contexte des conversations, gère les demandes complexes et répond en plus de 30 langues. Idéal pour le support client, il réduit le temps de réponse de 80% et améliore la satisfaction client.",
-        price: 49,
-        pricePeriod: "/mois",
-        rating: 4.9,
-        reviews: 234,
-        sales: 1200,
-        seller: "NeuralChat",
-        sellerInitials: "NC",
-        sellerColor: "#6366f1",
-        badge: "popular",
-        icon: "🤖",
-        bgColor: "linear-gradient(135deg, #e0e7ff, #c7d2fe)",
-        features: [
-            "Support multilingue (30+ langues)",
-            "Compréhension contextuelle avancée",
-            "Intégration API en 5 minutes",
-            "Dashboard analytique inclus",
-            "Personnalisation complète du ton",
-            "Escalade automatique vers un humain"
-        ]
-    },
-    {
-        id: 2,
-        name: "DataMiner AI",
-        category: "analyse",
-        categoryLabel: "Analyse de Données",
-        description: "Agent d'analyse de données qui transforme vos datasets en insights actionnables avec visualisations automatiques.",
-        longDescription: "DataMiner AI analyse vos données brutes et génère automatiquement des rapports complets avec visualisations, tendances et recommandations. Compatible avec CSV, Excel, SQL et APIs. Parfait pour les équipes data qui veulent gagner du temps.",
-        price: 79,
-        pricePeriod: "/mois",
-        rating: 4.8,
-        reviews: 189,
-        sales: 890,
-        seller: "DataWiz",
-        sellerInitials: "DW",
-        sellerColor: "#10b981",
-        badge: "popular",
-        icon: "📊",
-        bgColor: "linear-gradient(135deg, #d1fae5, #a7f3d0)",
-        features: [
-            "Analyse automatique de datasets",
-            "Visualisations interactives",
-            "Export PDF et PowerPoint",
-            "Détection d'anomalies",
-            "Prédictions et tendances",
-            "Compatible SQL, CSV, Excel"
-        ]
-    },
-    {
-        id: 3,
-        name: "ContentForge",
-        category: "rédaction",
-        categoryLabel: "Rédaction & Contenu",
-        description: "Agent de rédaction IA qui génère du contenu SEO-optimisé pour blogs, réseaux sociaux et emails marketing.",
-        longDescription: "ContentForge génère du contenu professionnel optimisé pour le SEO. Articles de blog, posts réseaux sociaux, emails marketing, descriptions produits — tout est possible. L'agent apprend votre ton de marque et s'améliore avec le temps.",
-        price: 39,
-        pricePeriod: "/mois",
-        rating: 4.7,
-        reviews: 312,
-        sales: 1540,
-        seller: "WriteBot",
-        sellerInitials: "WB",
-        sellerColor: "#ec4899",
-        badge: "hot",
-        icon: "✍️",
-        bgColor: "linear-gradient(135deg, #fce7f3, #fbcfe8)",
-        features: [
-            "Contenu SEO-optimisé",
-            "Ton de marque personnalisable",
-            "Multi-format (blog, social, email)",
-            "Suggestions de mots-clés",
-            "Vérification anti-plagiat",
-            "Planificateur éditorial IA"
-        ]
-    },
-    {
-        id: 4,
-        name: "FlowBot Automate",
-        category: "automatisation",
-        categoryLabel: "Automatisation",
-        description: "Agent d'automatisation no-code qui connecte vos apps et automatise vos workflows complexes sans écrire une ligne de code.",
-        longDescription: "FlowBot Automate est un agent d'automatisation puissant qui connecte plus de 200 applications. Créez des workflows complexes en langage naturel, sans aucune compétence technique. De la gestion d'emails à la synchronisation CRM, tout devient automatique.",
-        price: 59,
-        pricePeriod: "/mois",
-        rating: 4.9,
-        reviews: 276,
-        sales: 980,
-        seller: "AutoFlow",
-        sellerInitials: "AF",
-        sellerColor: "#f59e0b",
-        badge: "popular",
-        icon: "⚡",
-        bgColor: "linear-gradient(135deg, #fef3c7, #fde68a)",
-        features: [
-            "200+ intégrations d'apps",
-            "Création en langage naturel",
-            "Workflows conditionnels",
-            "Planification temporelle",
-            "Logs et monitoring",
-            "Templates prêts à l'emploi"
-        ]
-    },
-    {
-        id: 5,
-        name: "CodePilot X",
-        category: "code",
-        categoryLabel: "Code & Développement",
-        description: "Agent développeur qui génère, review et corrige du code dans plus de 20 langages de programmation.",
-        longDescription: "CodePilot X est votre pair-programmeur IA. Il génère du code propre, effectue des code reviews détaillées, corrige les bugs et écrit des tests unitaires. Supporte Python, JavaScript, TypeScript, Go, Rust et 15+ autres langages.",
-        price: 69,
-        pricePeriod: "/mois",
-        rating: 4.8,
-        reviews: 198,
-        sales: 750,
-        seller: "DevForge",
-        sellerInitials: "DF",
-        sellerColor: "#8b5cf6",
-        badge: "new",
-        icon: "💻",
-        bgColor: "linear-gradient(135deg, #ede9fe, #ddd6fe)",
-        features: [
-            "20+ langages supportés",
-            "Code review automatique",
-            "Génération de tests unitaires",
-            "Détection et correction de bugs",
-            "Documentation auto-générée",
-            "Intégration IDE (VS Code, JetBrains)"
-        ]
-    },
-    {
-        id: 6,
-        name: "LeadHunter Pro",
-        category: "marketing",
-        categoryLabel: "Marketing & Ventes",
-        description: "Agent de génération de leads qui identifie et qualifie vos prospects idéaux grâce à l'IA prédictive.",
-        longDescription: "LeadHunter Pro utilise l'IA prédictive pour identifier les prospects les plus qualifiés pour votre entreprise. Il scrape les données publiques, enrichit les profils et score les leads automatiquement. Intégration directe avec Salesforce, HubSpot et Pipedrive.",
-        price: 99,
-        pricePeriod: "/mois",
-        rating: 4.6,
-        reviews: 145,
-        sales: 620,
-        seller: "GrowthAI",
-        sellerInitials: "GA",
-        sellerColor: "#f97316",
-        badge: "hot",
-        icon: "🎯",
-        bgColor: "linear-gradient(135deg, #ffedd5, #fed7aa)",
-        features: [
-            "IA prédictive de scoring",
-            "Enrichissement de données",
-            "Intégration CRM native",
-            "Campagnes email automatisées",
-            "Rapports de conversion",
-            "A/B testing intégré"
-        ]
-    },
-    {
-        id: 7,
-        name: "TranslateBot Ultra",
-        category: "rédaction",
-        categoryLabel: "Rédaction & Contenu",
-        description: "Agent de traduction IA qui localise vos contenus dans 50+ langues avec une précision contextuelle inégalée.",
-        longDescription: "TranslateBot Ultra va bien au-delà de la traduction mot-à-mot. Il comprend le contexte, adapte le ton culturel et préserve le sens original. Idéal pour les sites web, apps, documents marketing et contenus juridiques.",
-        price: 29,
-        pricePeriod: "/mois",
-        rating: 4.7,
-        reviews: 267,
-        sales: 1100,
-        seller: "LinguaAI",
-        sellerInitials: "LA",
-        sellerColor: "#06b6d4",
-        badge: "popular",
-        icon: "🌍",
-        bgColor: "linear-gradient(135deg, #cffafe, #a5f3fc)",
-        features: [
-            "50+ langues supportées",
-            "Adaptation culturelle",
-            "Mémoire de traduction",
-            "Glossaire personnalisé",
-            "API batch disponible",
-            "Validation humaine optionnelle"
-        ]
-    },
-    {
-        id: 8,
-        name: "VisionAnalyze",
-        category: "analyse",
-        categoryLabel: "Analyse de Données",
-        description: "Agent de vision par ordinateur qui analyse images et vidéos pour en extraire des données structurées.",
-        longDescription: "VisionAnalyze utilise la vision par ordinateur pour analyser vos images et vidéos. Reconnaissance d'objets, OCR, détection de défauts, comptage automatique — transformez le visuel en données exploitables pour votre business.",
-        price: 89,
-        pricePeriod: "/mois",
-        rating: 4.5,
-        reviews: 98,
-        sales: 340,
-        seller: "SightAI",
-        sellerInitials: "SA",
-        sellerColor: "#10b981",
-        badge: "new",
-        icon: "👁️",
-        bgColor: "linear-gradient(135deg, #d1fae5, #6ee7b7)",
-        features: [
-            "Reconnaissance d'objets",
-            "OCR haute précision",
-            "Analyse vidéo en temps réel",
-            "Détection de défauts",
-            "Classification d'images",
-            "API REST documentée"
-        ]
-    },
-    {
-        id: 9,
-        name: "MailMaster AI",
-        category: "automatisation",
-        categoryLabel: "Automatisation",
-        description: "Agent qui gère votre boîte email : tri intelligent, réponses automatiques et résumés quotidiens.",
-        longDescription: "MailMaster AI transforme la gestion de vos emails. Il trie automatiquement par priorité, rédige des réponses contextuelles, et vous envoie un résumé quotidien des emails importants. Réduisez le temps passé sur vos emails de 60%.",
-        price: 19,
-        pricePeriod: "/mois",
-        rating: 4.8,
-        reviews: 456,
-        sales: 2100,
-        seller: "InboxZero",
-        sellerInitials: "IZ",
-        sellerColor: "#6366f1",
-        badge: "hot",
-        icon: "📧",
-        bgColor: "linear-gradient(135deg, #e0e7ff, #c7d2fe)",
-        features: [
-            "Tri intelligent par priorité",
-            "Réponses automatiques contextuelles",
-            "Résumé quotidien",
-            "Détection de spam avancée",
-            "Compatible Gmail & Outlook",
-            "Respect de la confidentialité"
-        ]
-    },
-    {
-        id: 10,
-        name: "SocialPulse",
-        category: "marketing",
-        categoryLabel: "Marketing & Ventes",
-        description: "Agent de gestion des réseaux sociaux avec planification, création de contenu et analytics unifiés.",
-        longDescription: "SocialPulse gère l'ensemble de votre présence sur les réseaux sociaux. Il crée du contenu adapté à chaque plateforme, planifie les publications aux heures optimales et analyse les performances. Un community manager IA 24/7.",
-        price: 45,
-        pricePeriod: "/mois",
-        rating: 4.6,
-        reviews: 178,
-        sales: 830,
-        seller: "SocialGenius",
-        sellerInitials: "SG",
-        sellerColor: "#ec4899",
-        badge: "popular",
-        icon: "📱",
-        bgColor: "linear-gradient(135deg, #fce7f3, #f9a8d4)",
-        features: [
-            "Multi-plateforme (IG, TW, LI, TT)",
-            "Création de contenu IA",
-            "Planification optimale",
-            "Analytics unifiés",
-            "Réponses automatiques",
-            "Veille concurrentielle"
-        ]
-    },
-    {
-        id: 11,
-        name: "LegalBot Assistant",
-        category: "chatbot",
-        categoryLabel: "Chatbot & Assistant",
-        description: "Agent juridique IA qui analyse vos contrats, identifie les risques et génère des documents légaux.",
-        longDescription: "LegalBot Assistant est votre conseiller juridique IA. Il analyse les contrats en quelques secondes, identifie les clauses à risque, et génère des documents légaux conformes. Idéal pour les PME qui n'ont pas de service juridique dédié.",
-        price: 129,
-        pricePeriod: "/mois",
-        rating: 4.7,
-        reviews: 89,
-        sales: 410,
-        seller: "LexAI",
-        sellerInitials: "LX",
-        sellerColor: "#334155",
-        badge: "new",
-        icon: "⚖️",
-        bgColor: "linear-gradient(135deg, #e2e8f0, #cbd5e1)",
-        features: [
-            "Analyse de contrats automatique",
-            "Détection de clauses à risque",
-            "Génération de documents légaux",
-            "Base de données juridique",
-            "Conformité RGPD intégrée",
-            "Veille réglementaire"
-        ]
-    },
-    {
-        id: 12,
-        name: "RecruiterAI",
-        category: "automatisation",
-        categoryLabel: "Automatisation",
-        description: "Agent de recrutement qui trie les CV, planifie les entretiens et évalue les candidats automatiquement.",
-        longDescription: "RecruiterAI révolutionne votre processus de recrutement. Il analyse les CV en masse, matche les profils avec vos offres, planifie les entretiens et génère des évaluations objectives. Réduisez votre temps de recrutement de 70%.",
-        price: 79,
-        pricePeriod: "/mois",
-        rating: 4.5,
-        reviews: 134,
-        sales: 560,
-        seller: "HireWise",
-        sellerInitials: "HW",
-        sellerColor: "#f59e0b",
-        badge: "popular",
-        icon: "👔",
-        bgColor: "linear-gradient(135deg, #fef3c7, #fcd34d)",
-        features: [
-            "Tri automatique de CV",
-            "Matching IA poste/candidat",
-            "Planification d'entretiens",
-            "Évaluations objectives",
-            "Intégration ATS",
-            "Rapports diversité"
-        ]
-    }
-];
-
-// =============================================
-// STATE
-// =============================================
-
-let currentFilter = 'all';
-let visibleCount = 6;
-const ITEMS_PER_LOAD = 6;
-
-// User / Auth state
-let isLoggedIn = false;
-let currentUser = null;
-
-// Sell flow state
-let sellStep = 1;
-let selectedEmoji = '🤖';
-let selectedPricingModel = 'monthly';
-let iconMode = 'emoji'; // 'emoji' or 'upload'
-let uploadedImageDataUrl = null; // base64 data url of uploaded image
-
-// Cart state
-let cart = [];
-
-// Category label map
-const categoryLabels = {
-    'chatbot': 'Chatbot & Assistant',
-    'automatisation': 'Automatisation',
-    'analyse': 'Analyse de Données',
-    'rédaction': 'Rédaction & Contenu',
-    'code': 'Code & Développement',
-    'marketing': 'Marketing & Ventes'
+const config = {
+  apiBase: runtimeConfig.apiBase || "",
+  pollIntervalMs: Number(runtimeConfig.pollIntervalMs) || 1200,
+  sampleTranscript: runtimeConfig.sampleTranscript || "",
+  defaultClipDuration: Number(defaults.clipDurationSec) || 30,
+  defaultClipsCount: Number(defaults.clipsCount) || 4,
+  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 0,
+  defaultIgnoreIntroSec: Number(defaults.ignoreIntroSec) || 0
 };
 
-// Random colors for seller avatars
-const avatarColors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#f97316', '#06b6d4', '#ef4444'];
-
-// BG colors per category
-const categoryBgColors = {
-    'chatbot': 'linear-gradient(135deg, #e0e7ff, #c7d2fe)',
-    'automatisation': 'linear-gradient(135deg, #fef3c7, #fde68a)',
-    'analyse': 'linear-gradient(135deg, #d1fae5, #a7f3d0)',
-    'rédaction': 'linear-gradient(135deg, #fce7f3, #fbcfe8)',
-    'code': 'linear-gradient(135deg, #ede9fe, #ddd6fe)',
-    'marketing': 'linear-gradient(135deg, #ffedd5, #fed7aa)'
+const state = {
+  backendAvailable: false,
+  youtubeApiAvailable: false,
+  tiktokConfigured: false,
+  youtubeCookiesConfigured: false,
+  youtubeCookiesUpdatedAt: "",
+  quickMode: true,
+  languageMode: "translate-to-french",
+  noAddedAudio: false,
+  localVideoFile: null,
+  localVideoObjectUrl: "",
+  localVideoDuration: 0,
+  sourceVideoUrl: "",
+  activeJobId: "",
+  pollTimer: null,
+  clips: [],
+  selectedClipIndex: -1,
+  subtitleTheme: "classic",
+  highlightMode: "balanced",
+  frameMode: "full-video",
+  includeAutoTranscript: false,
+  dubFrenchAudio: true,
+  autoDubVoiceBySpeaker: true,
+  includeSrtInZip: true,
+  burnSubtitles: false,
+  ignoreIntroSec: config.defaultIgnoreIntroSec,
+  currentAspectRatio: "9:16",
+  batchRunning: false,
+  batchStopRequested: false,
+  batchJobs: [],
+  discoverRunning: false,
+  discoverResults: [],
+  automationRunning: false,
+  automationRunId: "",
+  automationPollTimer: null,
+  automationItems: [],
+  automationScheduleEnabled: false
 };
 
-// =============================================
-// DOM ELEMENTS
-// =============================================
+const dom = {
+  videoUrlInput: document.getElementById("videoUrlInput"),
+  quickMode: document.getElementById("quickMode"),
+  languageMode: document.getElementById("languageMode"),
+  youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
+  saveYoutubeCookiesBtn: document.getElementById("saveYoutubeCookiesBtn"),
+  clearYoutubeCookiesBtn: document.getElementById("clearYoutubeCookiesBtn"),
+  youtubeCookiesStatus: document.getElementById("youtubeCookiesStatus"),
+  videoInput: document.getElementById("videoInput"),
+  clipDuration: document.getElementById("clipDuration"),
+  clipsCount: document.getElementById("clipsCount"),
+  clipsCountValue: document.getElementById("clipsCountValue"),
+  aspectRatio: document.getElementById("aspectRatio"),
+  frameMode: document.getElementById("frameMode"),
+  transcriptInput: document.getElementById("transcriptInput"),
+  subtitleTheme: document.getElementById("subtitleTheme"),
+  highlightMode: document.getElementById("highlightMode"),
+  ignoreIntroSec: document.getElementById("ignoreIntroSec"),
+  includeAutoTranscript: document.getElementById("includeAutoTranscript"),
+  dubFrenchAudio: document.getElementById("dubFrenchAudio"),
+  autoDubVoiceBySpeaker: document.getElementById("autoDubVoiceBySpeaker"),
+  includeSrtInZip: document.getElementById("includeSrtInZip"),
+  burnSubtitles: document.getElementById("burnSubtitles"),
+  minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
+  minGapValue: document.getElementById("minGapValue"),
+  generateScriptBtn: document.getElementById("generateScriptBtn"),
+  analyzeBtn: document.getElementById("analyzeBtn"),
+  discoverQuery: document.getElementById("discoverQuery"),
+  discoverMaxResults: document.getElementById("discoverMaxResults"),
+  discoverOrder: document.getElementById("discoverOrder"),
+  discoverMinDurationSec: document.getElementById("discoverMinDurationSec"),
+  discoverLanguage: document.getElementById("discoverLanguage"),
+  discoverRegion: document.getElementById("discoverRegion"),
+  discoverPublishedWithinDays: document.getElementById("discoverPublishedWithinDays"),
+  discoverExcludeChannels: document.getElementById("discoverExcludeChannels"),
+  discoverExcludeSeen: document.getElementById("discoverExcludeSeen"),
+  discoverYoutubeBtn: document.getElementById("discoverYoutubeBtn"),
+  useDiscoverResultsBtn: document.getElementById("useDiscoverResultsBtn"),
+  discoverAndRunBatchBtn: document.getElementById("discoverAndRunBatchBtn"),
+  discoverGeneratePublishBtn: document.getElementById("discoverGeneratePublishBtn"),
+  discoverStatus: document.getElementById("discoverStatus"),
+  discoverResultsList: document.getElementById("discoverResultsList"),
+  automationStatus: document.getElementById("automationStatus"),
+  automationItemsList: document.getElementById("automationItemsList"),
+  tiktokAccessToken: document.getElementById("tiktokAccessToken"),
+  tiktokOpenId: document.getElementById("tiktokOpenId"),
+  tiktokPrivacy: document.getElementById("tiktokPrivacy"),
+  tiktokHashtags: document.getElementById("tiktokHashtags"),
+  saveTikTokConfigBtn: document.getElementById("saveTikTokConfigBtn"),
+  clearTikTokConfigBtn: document.getElementById("clearTikTokConfigBtn"),
+  tiktokConfigStatus: document.getElementById("tiktokConfigStatus"),
+  automationIntervalMinutes: document.getElementById("automationIntervalMinutes"),
+  automationBaseUrl: document.getElementById("automationBaseUrl"),
+  saveAutomationScheduleBtn: document.getElementById("saveAutomationScheduleBtn"),
+  disableAutomationScheduleBtn: document.getElementById("disableAutomationScheduleBtn"),
+  runAutomationNowBtn: document.getElementById("runAutomationNowBtn"),
+  automationScheduleStatus: document.getElementById("automationScheduleStatus"),
+  batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
+  batchClipsCount: document.getElementById("batchClipsCount"),
+  batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
+  startBatchBtn: document.getElementById("startBatchBtn"),
+  stopBatchBtn: document.getElementById("stopBatchBtn"),
+  batchStatus: document.getElementById("batchStatus"),
+  batchJobsList: document.getElementById("batchJobsList"),
+  generationProgress: document.getElementById("generationProgress"),
+  generationProgressText: document.getElementById("generationProgressText"),
+  player: document.getElementById("player"),
+  videoShell: document.querySelector(".video-shell"),
+  subtitleOverlay: document.getElementById("subtitleOverlay"),
+  clipsList: document.getElementById("clipsList"),
+  statusBadge: document.getElementById("statusBadge"),
+  playClipBtn: document.getElementById("playClipBtn"),
+  exportClipBtn: document.getElementById("exportClipBtn"),
+  downloadJsonBtn: document.getElementById("downloadJsonBtn"),
+  downloadZipBtn: document.getElementById("downloadZipBtn"),
+  downloadSrtBtn: document.getElementById("downloadSrtBtn"),
+  backendMeta: document.getElementById("backendMeta"),
+  selectedClipTitle: document.getElementById("selectedClipTitle"),
+  selectedClipScore: document.getElementById("selectedClipScore"),
+  selectedClipSummary: document.getElementById("selectedClipSummary")
+};
 
-const agentsGrid = document.getElementById('agentsGrid');
-const loadMoreBtn = document.getElementById('loadMore');
-const heroSearch = document.getElementById('heroSearch');
-const filterTabs = document.querySelectorAll('.filter-tab');
-const sortSelect = document.getElementById('sortSelect');
-const agentModal = document.getElementById('agentModal');
-const modalBody = document.getElementById('modalBody');
-const modalClose = document.getElementById('modalClose');
-const authModal = document.getElementById('authModal');
-const authModalClose = document.getElementById('authModalClose');
-const btnLogin = document.getElementById('btnLogin');
-const btnSignup = document.getElementById('btnSignup');
-const hamburger = document.getElementById('hamburger');
-const navLinks = document.getElementById('navLinks');
-const navbar = document.getElementById('navbar');
-const toastContainer = document.getElementById('toastContainer');
-const categoryCards = document.querySelectorAll('.category-card');
-const searchTags = document.querySelectorAll('.tag');
-
-// Sell modal elements
-const sellModal = document.getElementById('sellModal');
-const sellModalClose = document.getElementById('sellModalClose');
-
-// Cart elements
-const navCartBtn = document.getElementById('navCart');
-const cartBadge = document.getElementById('cartBadge');
-const cartDropdown = document.getElementById('cartDropdown');
-const cartItemsEl = document.getElementById('cartItems');
-const cartFooter = document.getElementById('cartFooter');
-const cartTotalEl = document.getElementById('cartTotal');
-const cartClearAll = document.getElementById('cartClearAll');
-const cartCheckout = document.getElementById('cartCheckout');
-
-// Nav auth sections
-const navAuthLoggedOut = document.getElementById('navAuthLoggedOut');
-const navAuthLoggedIn = document.getElementById('navAuthLoggedIn');
-const navUserInitials = document.getElementById('navUserInitials');
-
-// =============================================
-// RENDER AGENTS
-// =============================================
-
-function getFilteredAgents() {
-    let filtered = [...agents];
-
-    if (currentFilter !== 'all') {
-        filtered = filtered.filter(a => a.category === currentFilter);
-    }
-
-    // Search
-    const query = heroSearch.value.toLowerCase().trim();
-    if (query) {
-        filtered = filtered.filter(a =>
-            a.name.toLowerCase().includes(query) ||
-            a.category.toLowerCase().includes(query) ||
-            a.categoryLabel.toLowerCase().includes(query) ||
-            a.description.toLowerCase().includes(query)
-        );
-    }
-
-    // Sort
-    const sort = sortSelect.value;
-    switch (sort) {
-        case 'popular':
-            filtered.sort((a, b) => b.sales - a.sales);
-            break;
-        case 'recent':
-            filtered.sort((a, b) => b.id - a.id);
-            break;
-        case 'price-asc':
-            filtered.sort((a, b) => a.price - b.price);
-            break;
-        case 'price-desc':
-            filtered.sort((a, b) => b.price - a.price);
-            break;
-        case 'rating':
-            filtered.sort((a, b) => b.rating - a.rating);
-            break;
-    }
-
-    return filtered;
+function apiUrl(path) {
+  return `${config.apiBase.trim()}${path}`;
 }
 
-function renderAgents() {
-    const filtered = getFilteredAgents();
-    const toShow = filtered.slice(0, visibleCount);
-
-    agentsGrid.innerHTML = toShow.map(agent => {
-        const visualContent = agent.imageUrl
-            ? `<img src="${agent.imageUrl}" alt="${agent.name}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 12px;">`
-            : agent.icon;
-        return `
-        <div class="agent-card" data-id="${agent.id}">
-            <div class="agent-card-header" style="background: ${agent.bgColor}">
-                <div class="agent-visual">${visualContent}</div>
-                <span class="agent-card-badge badge-${agent.badge}">
-                    ${agent.badge === 'popular' ? '★ Populaire' : agent.badge === 'new' ? '✦ Nouveau' : '🔥 Tendance'}
-                </span>
-            </div>
-            <div class="agent-card-body">
-                <div class="agent-card-category">${agent.categoryLabel}</div>
-                <div class="agent-seller">
-                    <div class="seller-avatar" style="background: ${agent.sellerColor}">${agent.sellerInitials}</div>
-                    <span class="seller-name">par <strong>${agent.seller}</strong></span>
-                </div>
-                <h3 class="agent-card-title">${agent.name}</h3>
-                <p class="agent-card-desc">${agent.description}</p>
-                <div class="agent-card-meta">
-                    <div class="agent-rating">
-                        <i class="fas fa-star"></i>
-                        ${agent.rating}
-                        <span>(${agent.reviews})</span>
-                    </div>
-                    <div class="agent-price">
-                        €${agent.price}<span class="price-period">${agent.pricePeriod}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `}).join('');
-
-    // Show/hide load more
-    if (filtered.length <= visibleCount) {
-        loadMoreBtn.style.display = 'none';
-    } else {
-        loadMoreBtn.style.display = 'inline-flex';
-    }
-
-    // Animate cards in
-    requestAnimationFrame(() => {
-        document.querySelectorAll('.agent-card').forEach((card, i) => {
-            card.style.opacity = '0';
-            card.style.transform = 'translateY(20px)';
-            card.style.transition = `all 0.4s ease ${i * 0.06}s`;
-            requestAnimationFrame(() => {
-                card.style.opacity = '1';
-                card.style.transform = 'translateY(0)';
-            });
-        });
-    });
-
-    // Attach click
-    document.querySelectorAll('.agent-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const id = parseInt(card.dataset.id);
-            openAgentModal(id);
-        });
-    });
+function secondsToClock(value) {
+  const sec = Math.max(0, Math.floor(value));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// =============================================
-// AGENT MODAL
-// =============================================
+function updateStatus(text, ready = false) {
+  dom.statusBadge.textContent = text;
+  dom.statusBadge.classList.toggle("ready", ready);
+}
 
-function openAgentModal(id) {
-    const agent = agents.find(a => a.id === id);
-    if (!agent) return;
+function setButtonsEnabled(enabled) {
+  dom.playClipBtn.disabled = !enabled;
+  dom.exportClipBtn.disabled = !enabled;
+  dom.downloadJsonBtn.disabled = !enabled;
+  dom.downloadZipBtn.disabled = !enabled;
+  dom.downloadSrtBtn.disabled = !enabled;
+}
 
-    const modalIconContent = agent.imageUrl
-        ? `<img src="${agent.imageUrl}" alt="${agent.name}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 12px;">`
-        : agent.icon;
+function setGenerationProgress(value) {
+  const progress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  if (dom.generationProgress) {
+    dom.generationProgress.style.width = `${progress}%`;
+  }
+  if (dom.generationProgressText) {
+    dom.generationProgressText.textContent = `Progression: ${progress}%`;
+  }
+}
 
-    modalBody.innerHTML = `
-        <div class="modal-agent-header">
-            <div class="modal-agent-icon" style="background: ${agent.bgColor}; font-size: 36px; display: flex; align-items: center; justify-content: center;">
-                ${modalIconContent}
-            </div>
-            <div class="modal-agent-info">
-                <div class="modal-category">${agent.categoryLabel}</div>
-                <h2>${agent.name}</h2>
-                <p class="modal-seller">par <strong>${agent.seller}</strong> · <i class="fas fa-star" style="color: #f59e0b;"></i> ${agent.rating} (${agent.reviews} avis)</p>
-            </div>
-        </div>
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-        <div class="modal-stats">
-            <div class="modal-stat">
-                <div class="modal-stat-value">€${agent.price}</div>
-                <div class="modal-stat-label">par mois</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${agent.sales.toLocaleString()}</div>
-                <div class="modal-stat-label">ventes</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${agent.rating}</div>
-                <div class="modal-stat-label">note moyenne</div>
-            </div>
-        </div>
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-        <div class="modal-description">
-            <h3>Description</h3>
-            <p>${agent.longDescription}</p>
-        </div>
+function clearPolling() {
+  if (state.pollTimer) {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+}
 
-        <div class="modal-description">
-            <h3>Fonctionnalités incluses</h3>
-        </div>
-        <ul class="modal-features">
-            ${agent.features.map(f => `<li><i class="fas fa-check-circle"></i> ${f}</li>`).join('')}
-        </ul>
+function resetClipState() {
+  clearPolling();
+  state.clips = [];
+  state.selectedClipIndex = -1;
+  setButtonsEnabled(false);
+  renderClips();
+  dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
+  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = "Aucun clip sélectionné";
+  if (dom.selectedClipScore) dom.selectedClipScore.textContent = "Virality score: --";
+  if (dom.selectedClipSummary) dom.selectedClipSummary.textContent = "Le résumé transcript du clip apparaîtra ici.";
+  setGenerationProgress(0);
+}
 
-        <div class="modal-actions">
-            <button class="btn btn-primary btn-lg" onclick="handleBuy(${agent.id})">
-                <i class="fas fa-cart-plus"></i> Ajouter au panier — €${agent.price}${agent.pricePeriod}
-            </button>
-            <button class="btn btn-outline btn-lg" onclick="handleDemo(${agent.id})">
-                <i class="fas fa-play"></i> Démo gratuite
-            </button>
-        </div>
+function isNoAddedAudioSelected() {
+  return state.noAddedAudio || state.languageMode === "no-added-audio";
+}
+
+function applySubtitleTheme(theme) {
+  dom.subtitleOverlay.classList.remove("theme-classic", "theme-bold", "theme-cinema", "theme-neon");
+  dom.subtitleOverlay.classList.add(`theme-${theme}`);
+}
+
+function applyPreviewAspectRatio(aspectRatio) {
+  if (!dom.videoShell) return;
+  const ratio = aspectRatio === "1:1" ? "1 / 1" : aspectRatio === "16:9" ? "16 / 9" : "9 / 16";
+  dom.videoShell.style.aspectRatio = ratio;
+}
+
+function renderClips() {
+  dom.clipsList.innerHTML = "";
+  if (!state.clips.length) {
+    dom.clipsList.innerHTML = `<li class="empty">Aucun clip généré pour le moment.</li>`;
+    return;
+  }
+
+  state.clips.forEach((clip, idx) => {
+    const li = document.createElement("li");
+    li.className = "clip-item";
+    if (idx === state.selectedClipIndex) li.classList.add("active");
+
+    const wordsCount = (clip.captions || []).map((c) => c.text).join(" ").split(/\s+/).filter(Boolean).length;
+    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
+    const snippet = (clip.captions || [])
+      .map((c) => c.text)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 140);
+    li.innerHTML = `
+      <div class="clip-top">
+        <h3 class="clip-title">${clip.title}</h3>
+        <span class="chip">Virality ${viralityScore}/100</span>
+      </div>
+      <p class="clip-times">
+        ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)}
+        (${Math.round(clip.duration)}s) · ${wordsCount} mots · ${clip.aspectRatio || "9:16"}
+      </p>
+      <p class="clip-snippet">${snippet || "Résumé transcript indisponible."}</p>
+      <div class="clip-actions">
+        <button class="mini-btn" data-action="select">Sélectionner</button>
+        <button class="mini-btn" data-action="play">Lire</button>
+      </div>
     `;
 
-    agentModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
+    li.querySelector('[data-action="select"]').addEventListener("click", () => selectClip(idx, false));
+    li.querySelector('[data-action="play"]').addEventListener("click", () => selectClip(idx, true));
+    dom.clipsList.appendChild(li);
+  });
 }
 
-function closeModal(modal) {
-    modal.classList.remove('active');
-    document.body.style.overflow = '';
+function setBatchStatus(message, isError = false) {
+  if (!dom.batchStatus) return;
+  dom.batchStatus.textContent = message;
+  dom.batchStatus.classList.toggle("note-error", isError);
 }
 
-// =============================================
-// TOAST NOTIFICATIONS
-// =============================================
-
-function showToast(message, type = 'info') {
-    const icons = {
-        success: 'fas fa-check-circle',
-        error: 'fas fa-exclamation-circle',
-        info: 'fas fa-info-circle'
-    };
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.innerHTML = `<i class="${icons[type]}"></i> ${message}`;
-    toastContainer.appendChild(toast);
-
-    setTimeout(() => {
-        toast.remove();
-    }, 3000);
+function setBatchControlsDisabled(isRunning) {
+  state.batchRunning = isRunning;
+  if (dom.startBatchBtn) dom.startBatchBtn.disabled = isRunning || !state.backendAvailable;
+  if (dom.stopBatchBtn) dom.stopBatchBtn.disabled = !isRunning;
+  setDiscoverControlsDisabled(state.discoverRunning);
 }
 
-// =============================================
-// AUTH / LOGIN SYSTEM
-// =============================================
-
-function loginUser(name, email, brand) {
-    isLoggedIn = true;
-    const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-    currentUser = {
-        name: name,
-        email: email,
-        brand: brand || name.split(' ')[0] + 'AI',
-        initials: initials,
-        color: avatarColors[Math.floor(Math.random() * avatarColors.length)]
-    };
-
-    // Update navbar
-    navAuthLoggedOut.classList.add('hidden');
-    navAuthLoggedIn.classList.remove('hidden');
-    navUserInitials.textContent = currentUser.initials;
-
-    showToast(`Bienvenue ${currentUser.name} ! Vous êtes connecté.`, 'success');
+function formatCompactNumber(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0";
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
+  return String(Math.round(num));
 }
 
-function logoutUser() {
-    isLoggedIn = false;
-    currentUser = null;
-    navAuthLoggedOut.classList.remove('hidden');
-    navAuthLoggedIn.classList.add('hidden');
-    showToast('Vous avez été déconnecté.', 'info');
+function formatSecondsShort(totalSeconds) {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const seconds = sec % 60;
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}`;
+  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, "0")}`;
+  return `${seconds}s`;
 }
 
-// =============================================
-// SELL FLOW — Multi-Step
-// =============================================
-
-function openSellModal() {
-    sellStep = 1;
-    // If already logged in, skip to step 2
-    if (isLoggedIn) {
-        sellStep = 2;
-    }
-    resetSellForm();
-    updateSellStep();
-    sellModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
+function setDiscoverStatus(message, isError = false) {
+  if (!dom.discoverStatus) return;
+  dom.discoverStatus.textContent = message;
+  dom.discoverStatus.classList.toggle("note-error", isError);
 }
 
-function resetSellForm() {
-    // Reset form fields (only if they exist)
-    const fields = ['sellerName', 'sellerEmail', 'sellerPassword', 'sellerBrand',
-                     'agentName', 'agentCategory', 'agentShortDesc', 'agentLongDesc',
-                     'agentFeatures', 'agentPrice', 'agentDiscount', 'agentDemoUrl', 'agentDocsUrl',
-                     'customCategoryName'];
-    fields.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    selectedEmoji = '🤖';
-    selectedPricingModel = 'monthly';
-    iconMode = 'emoji';
-    uploadedImageDataUrl = null;
-
-    const countEl = document.getElementById('shortDescCount');
-    if (countEl) countEl.textContent = '0';
-
-    // Reset custom category
-    const customWrapper = document.getElementById('customCategoryWrapper');
-    if (customWrapper) customWrapper.classList.add('hidden');
-
-    // Reset icon mode tabs
-    document.querySelectorAll('.icon-mode-tab').forEach(t => t.classList.remove('active'));
-    const emojiTab = document.querySelector('.icon-mode-tab[data-mode="emoji"]');
-    if (emojiTab) emojiTab.classList.add('active');
-    const emojiContent = document.getElementById('iconModeEmoji');
-    const uploadContent = document.getElementById('iconModeUpload');
-    if (emojiContent) emojiContent.classList.remove('hidden');
-    if (uploadContent) uploadContent.classList.add('hidden');
-
-    // Reset emoji selection
-    document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('selected'));
-    const firstEmoji = document.querySelector('.emoji-btn[data-emoji="🤖"]');
-    if (firstEmoji) firstEmoji.classList.add('selected');
-
-    // Reset upload preview
-    const placeholder = document.getElementById('uploadPlaceholder');
-    const preview = document.getElementById('uploadPreview');
-    const imgInput = document.getElementById('agentImageInput');
-    if (placeholder) placeholder.classList.remove('hidden');
-    if (preview) preview.classList.add('hidden');
-    if (imgInput) imgInput.value = '';
+function setDiscoverControlsDisabled(disabled) {
+  state.discoverRunning = disabled;
+  const isEnabled = state.backendAvailable && state.youtubeApiAvailable;
+  if (dom.discoverYoutubeBtn) dom.discoverYoutubeBtn.disabled = disabled || !isEnabled;
+  if (dom.useDiscoverResultsBtn) dom.useDiscoverResultsBtn.disabled = disabled || !state.discoverResults.length;
+  if (dom.discoverAndRunBatchBtn) {
+    dom.discoverAndRunBatchBtn.disabled = disabled || !isEnabled || state.batchRunning;
+  }
+  if (dom.discoverGeneratePublishBtn) {
+    dom.discoverGeneratePublishBtn.disabled = disabled || !isEnabled || state.batchRunning;
+  }
 }
 
-function updateSellStep() {
-    // Update step dots
-    document.querySelectorAll('.sell-step-dot').forEach(dot => {
-        const step = parseInt(dot.dataset.step);
-        dot.classList.remove('active', 'done');
-        if (step === sellStep) dot.classList.add('active');
-        else if (step < sellStep) dot.classList.add('done');
-    });
-
-    // Update step lines
-    const lines = document.querySelectorAll('.sell-step-line');
-    lines.forEach((line, i) => {
-        if (i + 1 < sellStep) {
-            line.classList.add('active');
-        } else {
-            line.classList.remove('active');
-        }
-    });
-
-    // Show/hide steps
-    for (let i = 1; i <= 4; i++) {
-        const stepEl = document.getElementById(`sellStep${i}`);
-        if (stepEl) {
-            if (i === sellStep) {
-                stepEl.classList.remove('hidden');
-                stepEl.style.animation = 'none';
-                stepEl.offsetHeight; // trigger reflow
-                stepEl.style.animation = 'fadeInUp 0.4s ease';
-            } else {
-                stepEl.classList.add('hidden');
-            }
-        }
-    }
-
-    // If step 4 (preview), render the preview
-    if (sellStep === 4) {
-        renderSellPreview();
-    }
+function setAutomationControlsDisabled(disabled) {
+  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = disabled || !state.backendAvailable;
+  if (dom.disableAutomationScheduleBtn) {
+    dom.disableAutomationScheduleBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
+  }
+  if (dom.runAutomationNowBtn) {
+    dom.runAutomationNowBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
+  }
 }
 
-function validateSellStep1() {
-    const name = document.getElementById('sellerName').value.trim();
-    const email = document.getElementById('sellerEmail').value.trim();
-    const password = document.getElementById('sellerPassword').value.trim();
-    const brand = document.getElementById('sellerBrand').value.trim();
+function renderDiscoverResults() {
+  if (!dom.discoverResultsList) return;
+  if (!state.discoverResults.length) {
+    dom.discoverResultsList.innerHTML = `<li class="empty">Aucune découverte pour le moment.</li>`;
+    setDiscoverControlsDisabled(state.discoverRunning);
+    return;
+  }
 
-    if (!name) {
-        showToast('Veuillez entrer votre nom complet.', 'error');
-        document.getElementById('sellerName').focus();
-        return false;
-    }
-    if (!email || !email.includes('@')) {
-        showToast('Veuillez entrer une adresse email valide.', 'error');
-        document.getElementById('sellerEmail').focus();
-        return false;
-    }
-    if (!password || password.length < 8) {
-        showToast('Le mot de passe doit contenir au moins 8 caractères.', 'error');
-        document.getElementById('sellerPassword').focus();
-        return false;
-    }
-    if (!brand) {
-        showToast('Veuillez entrer un nom de vendeur / marque.', 'error');
-        document.getElementById('sellerBrand').focus();
-        return false;
-    }
-
-    // Simulate login
-    loginUser(name, email, brand);
-    return true;
+  dom.discoverResultsList.innerHTML = state.discoverResults
+    .map((item, idx) => {
+      const duration = formatSecondsShort(item.durationSec);
+      const views = formatCompactNumber(item.viewCount);
+      const score = Math.round(Number(item.score || 0));
+      const checked = item.selected ? "checked" : "";
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">#${idx + 1} · ${escapeHtml(item.channelTitle || "Chaîne inconnue")}</h3>
+            <span class="chip">Score ${score}</span>
+          </div>
+          <label class="toggle-row compact discover-checkbox">
+            <input type="checkbox" data-discover-id="${escapeHtml(item.videoId)}" ${checked}>
+            <span>${escapeHtml(item.title || item.url)}</span>
+          </label>
+          <p class="clip-times">${duration} · ${views} vues · ${escapeHtml(item.publishedAt || "")}</p>
+          <p class="clip-snippet">${escapeHtml(item.url)}</p>
+        </li>
+      `;
+    })
+    .join("");
+  setDiscoverControlsDisabled(state.discoverRunning);
 }
 
-function getSelectedCategory() {
-    const select = document.getElementById('agentCategory');
-    const val = select.value;
-    if (val === '__custom__') {
-        const customName = document.getElementById('customCategoryName').value.trim();
-        if (!customName) return { key: '', label: '' };
-        // Create a slug-like key
-        const key = customName.toLowerCase().replace(/[^a-zà-ÿ0-9]/gi, '-').replace(/-+/g, '-');
-        return { key: key, label: customName };
-    }
-    return { key: val, label: categoryLabels[val] || val };
+function getSelectedDiscoverUrls() {
+  return state.discoverResults.filter((item) => item.selected).map((item) => item.url);
 }
 
-function validateSellStep2() {
-    const name = document.getElementById('agentName').value.trim();
-    const catSelect = document.getElementById('agentCategory').value;
-    const shortDesc = document.getElementById('agentShortDesc').value.trim();
-    const longDesc = document.getElementById('agentLongDesc').value.trim();
-    const features = document.getElementById('agentFeatures').value.trim();
-
-    if (!name) {
-        showToast('Veuillez entrer le nom de votre agent.', 'error');
-        document.getElementById('agentName').focus();
-        return false;
-    }
-    if (!catSelect) {
-        showToast('Veuillez choisir une catégorie.', 'error');
-        document.getElementById('agentCategory').focus();
-        return false;
-    }
-    if (catSelect === '__custom__') {
-        const customName = document.getElementById('customCategoryName').value.trim();
-        if (!customName) {
-            showToast('Veuillez entrer le nom de votre nouvelle catégorie.', 'error');
-            document.getElementById('customCategoryName').focus();
-            return false;
-        }
-    }
-    if (!shortDesc) {
-        showToast('Veuillez entrer une description courte.', 'error');
-        document.getElementById('agentShortDesc').focus();
-        return false;
-    }
-    if (!longDesc) {
-        showToast('Veuillez entrer une description complète.', 'error');
-        document.getElementById('agentLongDesc').focus();
-        return false;
-    }
-    if (!features) {
-        showToast('Veuillez lister au moins une fonctionnalité.', 'error');
-        document.getElementById('agentFeatures').focus();
-        return false;
-    }
-
-    return true;
+function pushSelectedDiscoverUrlsToBatch() {
+  const selectedUrls = getSelectedDiscoverUrls();
+  if (!selectedUrls.length) {
+    setDiscoverStatus("Sélection vide: coche au moins un résultat V2.", true);
+    return [];
+  }
+  if (dom.batchVideoUrlsInput) {
+    dom.batchVideoUrlsInput.value = selectedUrls.join("\n");
+  }
+  setBatchStatus(`${selectedUrls.length} lien(s) injecté(s) depuis la découverte V2.`, false);
+  setDiscoverStatus(`${selectedUrls.length} lien(s) envoyés vers le batch V1.`, false);
+  return selectedUrls;
 }
 
-function validateSellStep3() {
-    const price = document.getElementById('agentPrice').value;
-    if (!price || parseFloat(price) <= 0) {
-        showToast('Veuillez entrer un prix valide supérieur à 0€.', 'error');
-        document.getElementById('agentPrice').focus();
-        return false;
-    }
-    return true;
-}
+async function discoverYoutubeSources(autoRunBatch = false) {
+  if (state.discoverRunning) return;
+  if (!state.backendAvailable) {
+    setDiscoverStatus("Backend indisponible — lance: npm start", true);
+    return;
+  }
+  if (!state.youtubeApiAvailable) {
+    setDiscoverStatus("YOUTUBE_API_KEY absente côté serveur. Configure la clé puis redémarre.", true);
+    return;
+  }
 
-function getPricePeriod() {
-    if (selectedPricingModel === 'monthly') return '/mois';
-    if (selectedPricingModel === 'onetime') return '';
-    return '/mois'; // freemium
-}
+  const query = (dom.discoverQuery?.value || "").trim();
+  if (!query) {
+    setDiscoverStatus("Ajoute un mot-clé de niche pour la découverte V2.", true);
+    return;
+  }
 
-function getAgentIconHtml(size = 56) {
-    if (iconMode === 'upload' && uploadedImageDataUrl) {
-        return `<img src="${uploadedImageDataUrl}" alt="Agent" style="width: ${size}px; height: ${size}px; object-fit: cover; border-radius: 12px;">`;
-    }
-    return `<span style="font-size: ${size}px; line-height: 1;">${selectedEmoji}</span>`;
-}
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12)))),
+    order: String(dom.discoverOrder?.value || "relevance"),
+    minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
+    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
+    regionCode: String(dom.discoverRegion?.value || "FR"),
+    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90)))),
+    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
+    excludeSeen: String(Boolean(dom.discoverExcludeSeen?.checked))
+  });
 
-function renderSellPreview() {
-    const name = document.getElementById('agentName').value.trim();
-    const { key: category, label: catLabel } = getSelectedCategory();
-    const shortDesc = document.getElementById('agentShortDesc').value.trim();
-    const longDesc = document.getElementById('agentLongDesc').value.trim();
-    const features = document.getElementById('agentFeatures').value.trim().split('\n').filter(f => f.trim());
-    const price = parseFloat(document.getElementById('agentPrice').value) || 0;
-    const discount = parseFloat(document.getElementById('agentDiscount').value) || 0;
-    const demoUrl = document.getElementById('agentDemoUrl').value.trim();
-    const docsUrl = document.getElementById('agentDocsUrl').value.trim();
-    const pricePeriod = getPricePeriod();
-    const bgColor = categoryBgColors[category] || 'linear-gradient(135deg, #e0e7ff, #c7d2fe)';
+  setDiscoverControlsDisabled(true);
+  setDiscoverStatus("Recherche YouTube V2 en cours…", false);
 
-    const finalPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
-
-    const previewCard = document.getElementById('previewCard');
-    previewCard.innerHTML = `
-        <div class="agent-card-header" style="background: ${bgColor}">
-            <div class="agent-visual">${getAgentIconHtml(56)}</div>
-            <span class="agent-card-badge badge-new">✦ Nouveau</span>
-        </div>
-        <div class="agent-card-body">
-            <div class="agent-card-category">${catLabel}</div>
-            <div class="agent-seller">
-                <div class="seller-avatar" style="background: ${currentUser.color}">${currentUser.initials}</div>
-                <span class="seller-name">par <strong>${currentUser.brand}</strong></span>
-            </div>
-            <h3 class="agent-card-title">${name}</h3>
-            <p class="agent-card-desc">${shortDesc}</p>
-            <div class="agent-card-meta">
-                <div class="agent-rating">
-                    <i class="fas fa-star"></i> Nouveau
-                </div>
-                <div class="agent-price">
-                    €${finalPrice}<span class="price-period">${pricePeriod}</span>
-                </div>
-            </div>
-        </div>
-    `;
-
-    const pricingModelLabel = selectedPricingModel === 'monthly' ? 'Abonnement mensuel' :
-                               selectedPricingModel === 'onetime' ? 'Achat unique' : 'Freemium';
-
-    const previewDetails = document.getElementById('previewDetails');
-    previewDetails.innerHTML = `
-        <h3 class="preview-label"><i class="fas fa-clipboard-list"></i> Récapitulatif complet</h3>
-        <div class="preview-details-grid">
-            <div class="preview-detail-item">
-                <div class="detail-label">Nom de l'agent</div>
-                <div class="detail-value">${name}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Catégorie</div>
-                <div class="detail-value">${catLabel}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Modèle tarifaire</div>
-                <div class="detail-value">${pricingModelLabel}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Prix</div>
-                <div class="detail-value">€${finalPrice}${pricePeriod}${discount > 0 ? ' <span style="color:#10b981; font-size:12px;">(-' + discount + '%)</span>' : ''}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Vendeur</div>
-                <div class="detail-value">${currentUser.brand}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Vos revenus / vente</div>
-                <div class="detail-value" style="color: #10b981;">€${Math.round(finalPrice * 0.85 * 100) / 100}</div>
-            </div>
-        </div>
-        <div style="margin-top: 20px;">
-            <div class="preview-detail-item" style="margin-bottom: 12px;">
-                <div class="detail-label">Description</div>
-                <div class="detail-value" style="font-weight: 400; font-size: 14px; line-height: 1.6; color: #475569;">${longDesc}</div>
-            </div>
-            <div class="preview-detail-item">
-                <div class="detail-label">Fonctionnalités (${features.length})</div>
-                <div class="detail-value" style="font-weight: 400; font-size: 14px;">
-                    ${features.map(f => `<div style="padding: 4px 0; color: #475569;"><i class="fas fa-check-circle" style="color: #10b981; margin-right: 8px;"></i>${f.trim()}</div>`).join('')}
-                </div>
-            </div>
-            ${demoUrl ? `<div class="preview-detail-item" style="margin-top: 12px;"><div class="detail-label">Lien de démo</div><div class="detail-value" style="font-size: 14px; color: #6366f1;">${demoUrl}</div></div>` : ''}
-            ${docsUrl ? `<div class="preview-detail-item" style="margin-top: 12px;"><div class="detail-label">Documentation</div><div class="detail-value" style="font-size: 14px; color: #6366f1;">${docsUrl}</div></div>` : ''}
-        </div>
-    `;
-}
-
-function publishAgent() {
-    const name = document.getElementById('agentName').value.trim();
-    const { key: category, label: catLabel } = getSelectedCategory();
-    const shortDesc = document.getElementById('agentShortDesc').value.trim();
-    const longDesc = document.getElementById('agentLongDesc').value.trim();
-    const features = document.getElementById('agentFeatures').value.trim().split('\n').filter(f => f.trim()).map(f => f.trim());
-    const price = parseFloat(document.getElementById('agentPrice').value) || 0;
-    const discount = parseFloat(document.getElementById('agentDiscount').value) || 0;
-    const pricePeriod = getPricePeriod();
-    const bgColor = categoryBgColors[category] || 'linear-gradient(135deg, #e0e7ff, #c7d2fe)';
-    const finalPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
-
-    // If custom category, register it
-    if (!categoryLabels[category] && catLabel) {
-        categoryLabels[category] = catLabel;
-        categoryBgColors[category] = 'linear-gradient(135deg, #e0e7ff, #c7d2fe)';
+  try {
+    const response = await fetch(apiUrl(`/api/youtube/discover?${params.toString()}`));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Échec de la découverte YouTube V2.");
     }
 
-    // Determine icon: emoji or uploaded image
-    let agentIcon = selectedEmoji;
-    let agentImageUrl = null;
-    if (iconMode === 'upload' && uploadedImageDataUrl) {
-        agentIcon = ''; // no emoji
-        agentImageUrl = uploadedImageDataUrl;
+    state.discoverResults = Array.isArray(payload.candidates)
+      ? payload.candidates.map((candidate) => ({ ...candidate, selected: true }))
+      : [];
+    renderDiscoverResults();
+
+    if (!state.discoverResults.length) {
+      setDiscoverStatus("Aucun résultat trouvé. Ajuste la niche ou les filtres V2.", true);
+      return;
     }
 
-    // Create new agent object
-    const newAgent = {
-        id: agents.length + 1,
-        name: name,
-        category: category,
-        categoryLabel: catLabel,
-        description: shortDesc,
-        longDescription: longDesc,
-        price: finalPrice,
-        pricePeriod: pricePeriod,
-        rating: 0,
-        reviews: 0,
-        sales: 0,
-        seller: currentUser.brand,
-        sellerInitials: currentUser.initials,
-        sellerColor: currentUser.color,
-        badge: 'new',
-        icon: agentIcon,
-        imageUrl: agentImageUrl,
-        bgColor: bgColor,
-        features: features.slice(0, 6)
-    };
+    const droppedByHistory = Number(payload?.stats?.droppedByHistory || 0);
+    const droppedByChannel = Number(payload?.stats?.droppedByChannel || 0);
+    const droppedByDuration = Number(payload?.stats?.droppedByDuration || 0);
+    const skippedSummary = [];
+    if (droppedByHistory > 0) skippedSummary.push(`${droppedByHistory} doublons historiques`);
+    if (droppedByChannel > 0) skippedSummary.push(`${droppedByChannel} chaînes exclues`);
+    if (droppedByDuration > 0) skippedSummary.push(`${droppedByDuration} trop courtes`);
+    const skippedText = skippedSummary.length ? ` · filtrés: ${skippedSummary.join(", ")}` : "";
+    setDiscoverStatus(`${state.discoverResults.length} lien(s) trouvés automatiquement${skippedText}.`, false);
 
-    // Add to agents array
-    agents.unshift(newAgent);
-
-    // Close modal
-    closeModal(sellModal);
-
-    // Show success
-    showToast(`"${name}" a été publié avec succès ! Il sera visible après validation.`, 'success');
-
-    // Re-render
-    currentFilter = 'all';
-    filterTabs.forEach(t => {
-        t.classList.remove('active');
-        if (t.dataset.filter === 'all') t.classList.add('active');
-    });
-    visibleCount = 6;
-    renderAgents();
-
-    // Scroll to marketplace
-    setTimeout(() => {
-        document.getElementById('marketplace').scrollIntoView({ behavior: 'smooth' });
-    }, 500);
-}
-
-function updatePricingSummary() {
-    const price = parseFloat(document.getElementById('agentPrice').value) || 0;
-    const discount = parseFloat(document.getElementById('agentDiscount').value) || 0;
-    const pricePeriod = getPricePeriod();
-
-    const finalPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
-    const commission = Math.round(finalPrice * 0.15 * 100) / 100;
-    const earnings = Math.round(finalPrice * 0.85 * 100) / 100;
-
-    const displayPriceEl = document.getElementById('displayPrice');
-    const commissionEl = document.getElementById('commissionAmount');
-    const earningsEl = document.getElementById('sellerEarnings');
-
-    if (displayPriceEl) {
-        displayPriceEl.textContent = `€${finalPrice}${pricePeriod}`;
-        if (discount > 0) {
-            displayPriceEl.innerHTML = `<span style="text-decoration: line-through; color: #94a3b8; margin-right: 8px;">€${price}</span> €${finalPrice}${pricePeriod}`;
-        }
-    }
-    if (commissionEl) commissionEl.textContent = `-€${commission}`;
-    if (earningsEl) earningsEl.textContent = `€${earnings}`;
-}
-
-// =============================================
-// CART SYSTEM
-// =============================================
-
-function addToCart(id) {
-    const agent = agents.find(a => a.id === id);
-    if (!agent) return;
-
-    // Check if already in cart
-    if (cart.find(item => item.id === id)) {
-        showToast(`${agent.name} est déjà dans votre panier.`, 'info');
+    if (autoRunBatch) {
+      pushSelectedDiscoverUrlsToBatch();
+      if (state.batchRunning) {
+        setDiscoverStatus("Batch déjà en cours: relance après la fin du batch actuel.", true);
         return;
+      }
+      await startBatchGeneration();
     }
-
-    cart.push({
-        id: agent.id,
-        name: agent.name,
-        price: agent.price,
-        pricePeriod: agent.pricePeriod,
-        icon: agent.icon,
-        imageUrl: agent.imageUrl || null,
-        bgColor: agent.bgColor,
-        seller: agent.seller
-    });
-
-    updateCartUI();
-    showToast(`${agent.name} ajouté au panier !`, 'success');
+  } catch (error) {
+    setDiscoverStatus(error instanceof Error ? error.message : "Erreur découverte V2.", true);
+  } finally {
+    setDiscoverControlsDisabled(false);
+  }
 }
 
-function removeFromCart(id) {
-    cart = cart.filter(item => item.id !== id);
-    updateCartUI();
+function setAutomationStatus(message, isError = false) {
+  if (!dom.automationStatus) return;
+  dom.automationStatus.textContent = message;
+  dom.automationStatus.classList.toggle("note-error", isError);
 }
 
-function clearCart() {
-    cart = [];
-    updateCartUI();
-    showToast('Panier vidé.', 'info');
+function renderAutomationItems(items = []) {
+  state.automationItems = Array.isArray(items) ? items : [];
+  if (!dom.automationItemsList) return;
+  if (!state.automationItems.length) {
+    dom.automationItemsList.innerHTML = `<li class="empty">Aucune automatisation lancée.</li>`;
+    return;
+  }
+  dom.automationItemsList.innerHTML = state.automationItems
+    .map((item, idx) => {
+      const status = escapeHtml(item.status || "inconnu");
+      const sourceUrl = escapeHtml(item.sourceUrl || "");
+      const jobId = escapeHtml(item.jobId || "");
+      const publishedCount = Array.isArray(item.published)
+        ? item.published.filter((pub) => pub.publishStatus === "published").length
+        : 0;
+      const generated = Number(item.generatedClips || 0);
+      const err = escapeHtml(item.error || item.publishError || "");
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">Source auto #${idx + 1}</h3>
+            <span class="chip">${status}</span>
+          </div>
+          <p class="clip-snippet">${sourceUrl}</p>
+          <p class="clip-times">Job: ${jobId || "—"} · clips: ${generated} · publiés: ${publishedCount}</p>
+          ${err ? `<p class="hint small note-error no-margin">${err}</p>` : ""}
+        </li>
+      `;
+    })
+    .join("");
 }
 
-function updateCartUI() {
-    const count = cart.length;
+function renderAutomationScheduleStatus(payload) {
+  const enabled = Boolean(payload?.enabled);
+  state.automationScheduleEnabled = enabled;
+  if (dom.automationIntervalMinutes && payload?.intervalMinutes) {
+    dom.automationIntervalMinutes.value = String(payload.intervalMinutes);
+  }
+  if (dom.automationBaseUrl && typeof payload?.payload?.baseUrl === "string") {
+    dom.automationBaseUrl.value = String(payload.payload.baseUrl || "");
+  }
+  if (dom.automationScheduleStatus) {
+    const pieces = [];
+    pieces.push(enabled ? "Planification active" : "Planification inactive");
+    if (payload?.intervalMinutes) pieces.push(`intervalle ${payload.intervalMinutes} min`);
+    if (payload?.nextRunAt) pieces.push(`prochain run: ${new Date(payload.nextRunAt).toLocaleString()}`);
+    if (payload?.lastRunAt) pieces.push(`dernier run: ${new Date(payload.lastRunAt).toLocaleString()}`);
+    if (payload?.lastRunStatus) pieces.push(`statut dernier run: ${payload.lastRunStatus}`);
+    if (payload?.lastError) pieces.push(`erreur: ${payload.lastError}`);
+    dom.automationScheduleStatus.textContent = pieces.join(" · ");
+    dom.automationScheduleStatus.classList.toggle("note-error", Boolean(payload?.lastError));
+  }
+  setAutomationControlsDisabled(false);
+}
 
-    // Badge
-    cartBadge.textContent = count;
-    if (count === 0) {
-        cartBadge.classList.add('empty');
+async function refreshTikTokConfigStatus() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config/status"));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lire la config TikTok.");
+    }
+    state.tiktokConfigured = Boolean(payload.configured);
+    const configured = Boolean(payload.configured);
+    const privacy = payload.defaultPrivacyLevel || "SELF_ONLY";
+    const tags = String(payload.defaultHashtags || "");
+    if (dom.tiktokPrivacy) dom.tiktokPrivacy.value = privacy;
+    if (dom.tiktokHashtags) dom.tiktokHashtags.value = tags;
+    if (dom.tiktokConfigStatus) {
+      dom.tiktokConfigStatus.textContent = configured
+        ? `Configuration TikTok active · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`
+        : "Configuration TikTok inactive.";
+      dom.tiktokConfigStatus.classList.toggle("note-error", !configured);
+    }
+    if (configured) {
+      setAutomationStatus(`TikTok configuré · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`, false);
     } else {
-        cartBadge.classList.remove('empty');
+      setAutomationStatus("TikTok non configuré: ajoute accessToken + openId.", true);
     }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur config TikTok.", true);
+  }
+}
 
-    // Pulse animation
-    cartBadge.classList.remove('pulse');
-    void cartBadge.offsetWidth; // reflow
-    cartBadge.classList.add('pulse');
+async function saveTikTokConfigFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  const accessToken = String(dom.tiktokAccessToken?.value || "").trim();
+  const openId = String(dom.tiktokOpenId?.value || "").trim();
+  const defaultPrivacyLevel = String(dom.tiktokPrivacy?.value || "SELF_ONLY").trim();
+  const defaultHashtags = String(dom.tiktokHashtags?.value || "").trim();
+  if (!accessToken || !openId) {
+    setAutomationStatus("Access token TikTok + OpenID requis.", true);
+    return;
+  }
+  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken, openId, defaultPrivacyLevel, defaultHashtags })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de sauvegarder la config TikTok.");
+    }
+    if (dom.tiktokAccessToken) dom.tiktokAccessToken.value = "";
+    if (dom.tiktokOpenId) dom.tiktokOpenId.value = "";
+    setAutomationStatus("Config TikTok enregistrée.", false);
+    await refreshTikTokConfigStatus();
+    await refreshAutomationScheduleStatus();
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur sauvegarde TikTok.", true);
+  } finally {
+    if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = false;
+  }
+}
 
-    // Cart items
-    if (count === 0) {
-        cartItemsEl.innerHTML = `
-            <div class="cart-empty">
-                <i class="fas fa-shopping-basket"></i>
-                <p>Votre panier est vide</p>
-            </div>
-        `;
-        cartFooter.style.display = 'none';
+async function clearTikTokConfigFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/tiktok/config"), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de supprimer la config TikTok.");
+    }
+    setAutomationStatus("Config TikTok supprimée.", false);
+    await refreshTikTokConfigStatus();
+    await refreshAutomationScheduleStatus();
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur suppression TikTok.", true);
+  } finally {
+    if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = false;
+  }
+}
+
+function buildAutomationRequestPayload() {
+  return {
+    q: String(dom.discoverQuery?.value || "").trim(),
+    maxResults: Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12))),
+    order: String(dom.discoverOrder?.value || "relevance"),
+    minDurationSec: Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300))),
+    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
+    regionCode: String(dom.discoverRegion?.value || "FR"),
+    publishedWithinDays: Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90))),
+    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
+    excludeSeen: Boolean(dom.discoverExcludeSeen?.checked),
+    clipDurationSec: 120,
+    ignoreIntroSec: Math.max(0, Math.min(600, Number(dom.batchIgnoreIntroSec?.value || 20))),
+    minGapSecBetweenClips: 6,
+    hashtags: String(dom.tiktokHashtags?.value || "").trim(),
+    defaultPrivacyLevel: String(dom.tiktokPrivacy?.value || "SELF_ONLY"),
+    baseUrl: String(dom.automationBaseUrl?.value || "").trim() || window.location.origin
+  };
+}
+
+async function refreshAutomationScheduleStatus() {
+  if (!state.backendAvailable) {
+    renderAutomationScheduleStatus({ enabled: false, lastError: "Backend indisponible." });
+    return;
+  }
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule/status"));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lire le statut de planification.");
+    }
+    renderAutomationScheduleStatus(payload);
+  } catch (error) {
+    renderAutomationScheduleStatus({
+      enabled: false,
+      lastError: error instanceof Error ? error.message : "Erreur statut planification."
+    });
+  }
+}
+
+async function saveAutomationScheduleFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  const payload = buildAutomationRequestPayload();
+  if (!payload.q) {
+    setAutomationStatus("Ajoute une niche (champ découverte V2) avant d'activer l'auto-run.", true);
+    return;
+  }
+  const intervalMinutes = Math.max(5, Math.min(1440, Number(dom.automationIntervalMinutes?.value || 120)));
+  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: true,
+        intervalMinutes,
+        payload
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.error || "Impossible d'activer la planification.");
+    }
+    setAutomationStatus(`Auto-run activé toutes les ${intervalMinutes} min.`, false);
+    renderAutomationScheduleStatus(result.schedule || {});
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur activation auto-run.", true);
+  } finally {
+    if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = false;
+  }
+}
+
+async function disableAutomationScheduleFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule"), { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.error || "Impossible de désactiver la planification.");
+    }
+    setAutomationStatus("Auto-run désactivé.", false);
+    renderAutomationScheduleStatus(result.schedule || {});
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur désactivation auto-run.", true);
+  } finally {
+    if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = false;
+  }
+}
+
+async function runAutomationNowFromUi() {
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (!state.automationScheduleEnabled) {
+    setAutomationStatus("Active d'abord la planification pour utiliser “Lancer maintenant”.", true);
+    return;
+  }
+  if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = true;
+  setAutomationStatus("Run immédiat déclenché…", false);
+  try {
+    const response = await fetch(apiUrl("/api/automation/schedule/run-now"), { method: "POST" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de lancer le run immédiat.");
+    }
+    const run = payload.run || {};
+    renderAutomationItems(run.items || []);
+    const published = Number(run.clipsPublished || 0);
+    const failed = Number(run.publishFailed || 0);
+    setAutomationStatus(`Run immédiat terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
+    if (payload.schedule) {
+      renderAutomationScheduleStatus(payload.schedule);
     } else {
-        cartItemsEl.innerHTML = cart.map(item => {
-            const iconContent = item.imageUrl
-                ? `<img src="${item.imageUrl}" alt="${item.name}">`
-                : item.icon;
-            return `
-            <div class="cart-item">
-                <div class="cart-item-icon" style="background: ${item.bgColor}">${iconContent}</div>
-                <div class="cart-item-info">
-                    <div class="cart-item-name">${item.name}</div>
-                    <div class="cart-item-seller">par ${item.seller}</div>
-                </div>
-                <div class="cart-item-price">€${item.price}<span style="font-size:11px;font-weight:400;color:#94a3b8;">${item.pricePeriod}</span></div>
-                <button class="cart-item-remove" onclick="removeFromCart(${item.id})"><i class="fas fa-times"></i></button>
-            </div>
-        `}).join('');
-
-        const total = cart.reduce((sum, item) => sum + item.price, 0);
-        cartTotalEl.textContent = `€${total}`;
-        cartFooter.style.display = 'block';
+      await refreshAutomationScheduleStatus();
     }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur run immédiat.", true);
+  } finally {
+    if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = false;
+  }
 }
 
-function toggleCartDropdown() {
-    cartDropdown.classList.toggle('hidden');
+async function runFullAutomation() {
+  if (state.discoverRunning || state.batchRunning) return;
+  if (!state.backendAvailable) {
+    setAutomationStatus("Backend indisponible.", true);
+    return;
+  }
+  if (!state.youtubeApiAvailable) {
+    setAutomationStatus("YOUTUBE_API_KEY absente côté serveur.", true);
+    return;
+  }
+  const query = String(dom.discoverQuery?.value || "").trim();
+  if (!query) {
+    setAutomationStatus("Ajoute une niche dans le champ découverte V2.", true);
+    return;
+  }
+  const requestPayload = buildAutomationRequestPayload();
+  setDiscoverControlsDisabled(true);
+  setAutomationControlsDisabled(true);
+  setAutomationStatus("Automatisation complète en cours (découverte → génération → publication)…", false);
+  try {
+    const response = await fetch(apiUrl("/api/automation/discover-generate-publish"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestPayload)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Automatisation complète échouée.");
+    }
+    const run = payload?.id ? payload : payload.run || {};
+    const published = Number(run.clipsPublished || 0);
+    const failed = Number(run.publishFailed || 0);
+    setAutomationStatus(`Auto-publish terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
+    renderAutomationItems(run.items || []);
+    if (Array.isArray(run.items) && run.items.length > 0) {
+      const lastDone = run.items
+        .slice()
+        .reverse()
+        .find((item) => item.jobId && item.status === "published");
+      if (lastDone?.jobId) {
+        await loadJobIntoWorkspace(lastDone.jobId);
+      }
+    }
+  } catch (error) {
+    setAutomationStatus(error instanceof Error ? error.message : "Erreur auto-publish.", true);
+  } finally {
+    setDiscoverControlsDisabled(false);
+    setAutomationControlsDisabled(false);
+    await refreshAutomationScheduleStatus();
+  }
 }
 
-// =============================================
-// ACTIONS
-// =============================================
-
-function handleBuy(id) {
-    closeModal(agentModal);
-    if (!isLoggedIn) {
-        showToast('Connectez-vous pour ajouter au panier.', 'error');
-        btnLogin.click();
-        return;
-    }
-    addToCart(id);
-}
-
-function handleDemo(id) {
-    const agent = agents.find(a => a.id === id);
-    closeModal(agentModal);
-    showToast(`Démo de ${agent.name} lancée !`, 'info');
-}
-
-// =============================================
-// EVENT LISTENERS
-// =============================================
-
-// Filter tabs
-filterTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        filterTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        currentFilter = tab.dataset.filter;
-        visibleCount = 6;
-        renderAgents();
-    });
-});
-
-// Sort
-sortSelect.addEventListener('change', renderAgents);
-
-// Search
-let searchTimeout;
-heroSearch.addEventListener('input', () => {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
-        visibleCount = 12;
-        renderAgents();
-    }, 300);
-});
-
-// Search button
-document.querySelector('.btn-search').addEventListener('click', () => {
-    visibleCount = 12;
-    renderAgents();
-    document.getElementById('marketplace').scrollIntoView({ behavior: 'smooth' });
-});
-
-// Search tags
-searchTags.forEach(tag => {
-    tag.addEventListener('click', () => {
-        heroSearch.value = tag.dataset.search;
-        visibleCount = 12;
-        renderAgents();
-        document.getElementById('marketplace').scrollIntoView({ behavior: 'smooth' });
-    });
-});
-
-// Category cards
-categoryCards.forEach(card => {
-    card.addEventListener('click', () => {
-        const cat = card.dataset.category;
-        heroSearch.value = '';
-        currentFilter = cat;
-        visibleCount = 12;
-
-        filterTabs.forEach(t => {
-            t.classList.remove('active');
-            if (t.dataset.filter === cat) t.classList.add('active');
-        });
-
-        renderAgents();
-        document.getElementById('marketplace').scrollIntoView({ behavior: 'smooth' });
-    });
-});
-
-// Load more
-loadMoreBtn.addEventListener('click', () => {
-    visibleCount += ITEMS_PER_LOAD;
-    renderAgents();
-});
-
-// Modal close
-modalClose.addEventListener('click', () => closeModal(agentModal));
-agentModal.addEventListener('click', (e) => {
-    if (e.target === agentModal) closeModal(agentModal);
-});
-
-authModalClose.addEventListener('click', () => closeModal(authModal));
-authModal.addEventListener('click', (e) => {
-    if (e.target === authModal) closeModal(authModal);
-});
-
-sellModalClose.addEventListener('click', () => closeModal(sellModal));
-sellModal.addEventListener('click', (e) => {
-    if (e.target === sellModal) closeModal(sellModal);
-});
-
-// Auth buttons — simple login/signup (for buyers or generic)
-btnLogin.addEventListener('click', () => {
-    document.getElementById('authTitle').textContent = 'Connexion';
-    document.getElementById('authSubtitle').textContent = 'Connectez-vous pour accéder à votre compte';
-    document.getElementById('authSwitch').innerHTML = 'Pas encore de compte ? <a href="#">S\'inscrire</a>';
-    authModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
-});
-
-btnSignup.addEventListener('click', () => {
-    document.getElementById('authTitle').textContent = 'Créer un compte';
-    document.getElementById('authSubtitle').textContent = 'Rejoignez la communauté AgentVerse';
-    document.getElementById('authSwitch').innerHTML = 'Déjà un compte ? <a href="#">Se connecter</a>';
-    authModal.classList.add('active');
-    document.body.style.overflow = 'hidden';
-});
-
-// Auth form submit (generic login)
-document.getElementById('authSubmitBtn').addEventListener('click', (e) => {
-    e.preventDefault();
-    const emailInput = authModal.querySelector('input[type="email"]');
-    const email = emailInput ? emailInput.value.trim() : '';
-    closeModal(authModal);
-    loginUser(email.split('@')[0] || 'Utilisateur', email || 'user@email.com', '');
-});
-
-// Google auth buttons — wired via initGoogleSignIn() below
-
-// Hamburger menu
-hamburger.addEventListener('click', () => {
-    navLinks.classList.toggle('active');
-});
-
-// Scroll navbar effect
-window.addEventListener('scroll', () => {
-    if (window.scrollY > 20) {
-        navbar.classList.add('scrolled');
-    } else {
-        navbar.classList.remove('scrolled');
-    }
-});
-
-// Close nav on link click (mobile)
-navLinks.querySelectorAll('a').forEach(link => {
-    link.addEventListener('click', () => {
-        navLinks.classList.remove('active');
-    });
-});
-
-// Newsletter
-document.getElementById('btnNewsletter').addEventListener('click', () => {
-    const email = document.getElementById('emailInput').value;
-    if (email && email.includes('@')) {
-        showToast('Inscription réussie ! Bienvenue dans la communauté.', 'success');
-        document.getElementById('emailInput').value = '';
-    } else {
-        showToast('Veuillez entrer une adresse email valide.', 'error');
-    }
-});
-
-// =============================================
-// SELL FLOW — Button triggers
-// =============================================
-
-// "Commencer à vendre" button (CTA section)
-document.getElementById('btnStartSelling').addEventListener('click', () => {
-    openSellModal();
-});
-
-// "Vendre un agent" button (navbar, logged in)
-document.getElementById('btnNavSell').addEventListener('click', () => {
-    openSellModal();
-});
-
-// Nav user avatar -> logout on click
-document.getElementById('navUserAvatar').addEventListener('click', () => {
-    if (confirm('Voulez-vous vous déconnecter ?')) {
-        logoutUser();
-    }
-});
-
-// "Vendre" link in nav
-document.querySelectorAll('.nav-links a').forEach(link => {
-    if (link.getAttribute('href') === '#sell') {
-        link.addEventListener('click', (e) => {
-            // If user clicks "Vendre" in nav, also allow opening sell modal
-            // We let the default scroll behavior happen, no extra action needed here
-        });
-    }
-});
-
-// =============================================
-// SELL FLOW — Step Navigation
-// =============================================
-
-// Step 1 -> Step 2
-document.getElementById('sellNext1').addEventListener('click', () => {
-    if (validateSellStep1()) {
-        sellStep = 2;
-        updateSellStep();
-    }
-});
-
-// Step 2 -> Step 1
-document.getElementById('sellBack2').addEventListener('click', () => {
-    // If was already logged in, can't go back to step 1
-    if (!isLoggedIn) {
-        sellStep = 1;
-    }
-    updateSellStep();
-});
-
-// Step 2 -> Step 3
-document.getElementById('sellNext2').addEventListener('click', () => {
-    if (validateSellStep2()) {
-        sellStep = 3;
-        updateSellStep();
-        updatePricingSummary();
-    }
-});
-
-// Step 3 -> Step 2
-document.getElementById('sellBack3').addEventListener('click', () => {
-    sellStep = 2;
-    updateSellStep();
-});
-
-// Step 3 -> Step 4
-document.getElementById('sellNext3').addEventListener('click', () => {
-    if (validateSellStep3()) {
-        sellStep = 4;
-        updateSellStep();
-    }
-});
-
-// Step 4 -> Step 3
-document.getElementById('sellBack4').addEventListener('click', () => {
-    sellStep = 3;
-    updateSellStep();
-});
-
-// Publish!
-document.getElementById('sellPublish').addEventListener('click', () => {
-    publishAgent();
-});
-
-// =============================================
-// SELL FORM — Interactive elements
-// =============================================
-
-// Emoji picker
-document.querySelectorAll('.emoji-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        selectedEmoji = btn.dataset.emoji;
-    });
-});
-
-// Pricing model radio buttons
-document.querySelectorAll('.pricing-option').forEach(option => {
-    option.addEventListener('click', () => {
-        document.querySelectorAll('.pricing-option').forEach(o => o.classList.remove('selected'));
-        option.classList.add('selected');
-        selectedPricingModel = option.dataset.pricing;
-        updatePricingSummary();
-    });
-});
-
-// Short description character counter
-const shortDescInput = document.getElementById('agentShortDesc');
-if (shortDescInput) {
-    shortDescInput.addEventListener('input', () => {
-        const count = shortDescInput.value.length;
-        document.getElementById('shortDescCount').textContent = count;
-    });
-}
-
-// Price and discount -> update summary
-const priceInput = document.getElementById('agentPrice');
-const discountInput = document.getElementById('agentDiscount');
-if (priceInput) priceInput.addEventListener('input', updatePricingSummary);
-if (discountInput) discountInput.addEventListener('input', updatePricingSummary);
-
-// =============================================
-// CUSTOM CATEGORY — Show/hide input
-// =============================================
-
-const agentCategorySelect = document.getElementById('agentCategory');
-const customCategoryWrapper = document.getElementById('customCategoryWrapper');
-const cancelCustomCategory = document.getElementById('cancelCustomCategory');
-
-agentCategorySelect.addEventListener('change', () => {
-    if (agentCategorySelect.value === '__custom__') {
-        customCategoryWrapper.classList.remove('hidden');
-        document.getElementById('customCategoryName').focus();
-    } else {
-        customCategoryWrapper.classList.add('hidden');
-        document.getElementById('customCategoryName').value = '';
-    }
-});
-
-cancelCustomCategory.addEventListener('click', () => {
-    agentCategorySelect.value = '';
-    customCategoryWrapper.classList.add('hidden');
-    document.getElementById('customCategoryName').value = '';
-});
-
-// =============================================
-// ICON MODE — Emoji / Upload toggle
-// =============================================
-
-document.querySelectorAll('.icon-mode-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.icon-mode-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const mode = tab.dataset.mode;
-        iconMode = mode;
-
-        const emojiContent = document.getElementById('iconModeEmoji');
-        const uploadContent = document.getElementById('iconModeUpload');
-
-        if (mode === 'emoji') {
-            emojiContent.classList.remove('hidden');
-            uploadContent.classList.add('hidden');
-        } else {
-            emojiContent.classList.add('hidden');
-            uploadContent.classList.remove('hidden');
-        }
-    });
-});
-
-// =============================================
-// IMAGE UPLOAD — Click, drag & drop, preview
-// =============================================
-
-const uploadZone = document.getElementById('uploadZone');
-const agentImageInput = document.getElementById('agentImageInput');
-const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-const uploadPreview = document.getElementById('uploadPreview');
-const uploadPreviewImg = document.getElementById('uploadPreviewImg');
-const uploadRemove = document.getElementById('uploadRemove');
-
-// Click to open file picker
-uploadZone.addEventListener('click', (e) => {
-    // Don't trigger if clicking the remove button
-    if (e.target.closest('.upload-remove')) return;
-    agentImageInput.click();
-});
-
-// File selected
-agentImageInput.addEventListener('change', () => {
-    const file = agentImageInput.files[0];
-    if (file) handleImageFile(file);
-});
-
-// Drag & drop
-uploadZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadZone.classList.add('dragover');
-});
-
-uploadZone.addEventListener('dragleave', () => {
-    uploadZone.classList.remove('dragover');
-});
-
-uploadZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-        handleImageFile(file);
-    } else {
-        showToast('Veuillez déposer un fichier image (PNG, JPG, SVG).', 'error');
-    }
-});
-
-function handleImageFile(file) {
-    // Max 2 Mo
-    if (file.size > 2 * 1024 * 1024) {
-        showToast('L\'image est trop volumineuse (max 2 Mo).', 'error');
-        return;
-    }
-    if (!file.type.startsWith('image/')) {
-        showToast('Le fichier doit être une image (PNG, JPG, SVG).', 'error');
-        return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        uploadedImageDataUrl = e.target.result;
-        uploadPreviewImg.src = uploadedImageDataUrl;
-        uploadPlaceholder.classList.add('hidden');
-        uploadPreview.classList.remove('hidden');
-        showToast('Image chargée avec succès !', 'success');
-    };
-    reader.readAsDataURL(file);
-}
-
-// Remove uploaded image
-uploadRemove.addEventListener('click', (e) => {
-    e.stopPropagation();
-    uploadedImageDataUrl = null;
-    agentImageInput.value = '';
-    uploadPlaceholder.classList.remove('hidden');
-    uploadPreview.classList.add('hidden');
-    uploadPreviewImg.src = '';
-});
-
-// =============================================
-// CART — Event listeners
-// =============================================
-
-navCartBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleCartDropdown();
-});
-
-// Close cart dropdown when clicking outside
-document.addEventListener('click', (e) => {
-    if (!cartDropdown.classList.contains('hidden') &&
-        !cartDropdown.contains(e.target) &&
-        !navCartBtn.contains(e.target)) {
-        cartDropdown.classList.add('hidden');
-    }
-});
-
-cartClearAll.addEventListener('click', () => {
-    clearCart();
-});
-
-cartCheckout.addEventListener('click', () => {
-    cartDropdown.classList.add('hidden');
-    openCheckoutModal();
-});
-
-// Keyboard shortcuts
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeModal(agentModal);
-        closeModal(authModal);
-        closeModal(sellModal);
-        closeModal(checkoutModalEl);
-        cartDropdown.classList.add('hidden');
-    }
-});
-
-// =============================================
-// SCROLL REVEAL (Intersection Observer)
-// =============================================
-
-const revealElements = document.querySelectorAll(
-    '.category-card, .step, .testimonial-card, .sell-cta-content, .section-header'
-);
-
-const revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if (entry.isIntersecting) {
-            entry.target.style.opacity = '1';
-            entry.target.style.transform = 'translateY(0)';
-            revealObserver.unobserve(entry.target);
-        }
-    });
-}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
-
-revealElements.forEach(el => {
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(30px)';
-    el.style.transition = 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
-    revealObserver.observe(el);
-});
-
-// =============================================
-// GOOGLE SIGN-IN (Identity Services)
-// =============================================
-
-// Decode JWT payload (base64url) without external lib
-function decodeJwtPayload(token) {
+function parseBatchUrls(rawText) {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const urls = [];
+  for (const line of lines) {
+    let parsed;
     try {
-        const base64Url = token.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(
-            atob(base64).split('').map(c =>
-                '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-            ).join('')
-        );
-        return JSON.parse(jsonPayload);
-    } catch (e) {
-        console.error('Erreur décodage JWT:', e);
-        return null;
+      parsed = new URL(line);
+    } catch (_error) {
+      throw new Error(`Lien invalide dans le batch: ${line}`);
     }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error(`Lien non supporté (http/https requis): ${line}`);
+    }
+    const normalized = parsed.toString();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    urls.push(normalized);
+  }
+  return urls;
 }
 
-function isGoogleConfigured() {
-    return typeof CONFIG !== 'undefined' &&
-           CONFIG.GOOGLE_CLIENT_ID &&
-           CONFIG.GOOGLE_CLIENT_ID !== 'VOTRE_GOOGLE_CLIENT_ID_ICI';
-}
+function renderBatchJobs() {
+  if (!dom.batchJobsList) return;
+  if (!state.batchJobs.length) {
+    dom.batchJobsList.innerHTML = `<li class="empty">Aucun batch lancé.</li>`;
+    return;
+  }
 
-function handleGoogleSignIn(response) {
-    const payload = decodeJwtPayload(response.credential);
-    if (!payload) {
-        showToast('Erreur lors de la connexion Google.', 'error');
-        return;
-    }
-
-    const fullName = payload.name || 'Utilisateur Google';
-    const email = payload.email || '';
-    const picture = payload.picture || '';
-
-    // Close any open modal
-    closeModal(authModal);
-    closeModal(sellModal);
-
-    // Login
-    loginUser(fullName, email, '');
-
-    // Store picture if available
-    if (picture && currentUser) {
-        currentUser.picture = picture;
-    }
-}
-
-function triggerGoogleSignIn() {
-    if (!isGoogleConfigured()) {
-        showToast('Google Sign-In : configurez votre Client ID dans config.js (voir instructions).', 'error');
-        return;
-    }
-
-    // Use the Google One Tap / popup
-    if (typeof google !== 'undefined' && google.accounts) {
-        google.accounts.id.prompt((notification) => {
-            if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-                // Fallback: try popup mode
-                showToast('Popup Google bloquée. Autorisez les popups pour ce site.', 'info');
+  dom.batchJobsList.innerHTML = state.batchJobs
+    .map((item, idx) => {
+      const progress =
+        item.status === "processing" || item.status === "queued"
+          ? ` · ${Math.max(0, Math.min(100, Number(item.progress) || 0))}%`
+          : "";
+      const clipsLabel = item.clipsCount ? ` · clips: ${item.clipsCount}` : "";
+      const errorLabel = item.error ? `<p class="hint small note-error no-margin">${escapeHtml(item.error)}</p>` : "";
+      const actions = item.jobId
+        ? `
+          <div class="clip-actions">
+            <button class="mini-btn" data-action="open-job" data-job-id="${item.jobId}">Ouvrir</button>
+            ${
+              item.status === "completed"
+                ? `<button class="mini-btn" data-action="download-bundle" data-job-id="${item.jobId}">ZIP</button>`
+                : ""
             }
-        });
-    } else {
-        showToast('Google Identity Services non chargé. Vérifiez votre connexion internet.', 'error');
-    }
+          </div>
+        `
+        : "";
+      return `
+        <li class="clip-item">
+          <div class="clip-top">
+            <h3 class="clip-title">Source ${idx + 1}</h3>
+            <span class="chip">${escapeHtml(item.status)}${progress}${clipsLabel}</span>
+          </div>
+          <p class="clip-snippet">${escapeHtml(item.sourceUrl)}</p>
+          ${actions}
+          ${errorLabel}
+        </li>
+      `;
+    })
+    .join("");
 }
 
-function initGoogleSignIn() {
-    if (!isGoogleConfigured()) {
-        console.log('ℹ️ Google Sign-In non configuré. Remplacez GOOGLE_CLIENT_ID dans config.js.');
-        return;
+async function createBatchJobFromUrl(sourceUrl, clipsCount, ignoreIntroSec) {
+  const body = new FormData();
+  body.append("videoUrl", sourceUrl);
+  body.append("clipDuration", "120");
+  body.append("clipsCount", String(clipsCount));
+  body.append("aspectRatio", "9:16");
+  body.append("frameMode", "full-video");
+  body.append("languageMode", "no-added-audio");
+  body.append("transcript", "");
+  body.append("subtitleTheme", "classic");
+  body.append("highlightMode", "viral");
+  body.append("includeAutoTranscript", "false");
+  body.append("dubFrenchAudio", "false");
+  body.append("autoDubVoiceBySpeaker", "false");
+  body.append("includeSrtInZip", "false");
+  body.append("burnSubtitles", "false");
+  body.append("minGapSecBetweenClips", "6");
+  body.append("ignoreIntroSec", String(ignoreIntroSec));
+
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (youtubeCookies) {
+    body.append("youtubeCookies", youtubeCookies);
+  }
+
+  const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Impossible de créer le job batch");
+  }
+  return payload;
+}
+
+async function pollJobUntilDone(jobId, onUpdate) {
+  while (true) {
+    const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+    if (!response.ok) {
+      throw new Error(`Job ${jobId.slice(0, 8)} introuvable`);
+    }
+    const job = await response.json();
+    if (typeof onUpdate === "function") onUpdate(job);
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+    await sleep(config.pollIntervalMs);
+  }
+}
+
+async function loadJobIntoWorkspace(jobId) {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+  if (!response.ok) throw new Error("Impossible de charger ce job");
+  const job = await response.json();
+  if (job.status !== "completed") {
+    throw new Error("Le job n'est pas encore terminé");
+  }
+  state.activeJobId = job.id;
+  applyCompletedJob(job, `Job ${job.id.slice(0, 8)} chargé`);
+}
+
+async function startBatchGeneration() {
+  if (state.batchRunning) return;
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  if (state.batchRunning) {
+    updateStatus("Le batch est en cours. Attends la fin avant une génération unitaire.", false);
+    return;
+  }
+
+  let sources = [];
+  try {
+    sources = parseBatchUrls(dom.batchVideoUrlsInput?.value || "");
+  } catch (error) {
+    setBatchStatus(error instanceof Error ? error.message : "Batch invalide.", true);
+    return;
+  }
+  if (!sources.length) {
+    setBatchStatus("Ajoute au moins un lien vidéo dans la zone batch.", true);
+    return;
+  }
+
+  const clipsCount = Math.max(1, Math.min(8, Number(dom.batchClipsCount?.value || 4)));
+  const ignoreIntroSec = Math.max(0, Math.min(120, Number(dom.batchIgnoreIntroSec?.value || 20)));
+
+  state.batchStopRequested = false;
+  state.batchJobs = sources.map((sourceUrl) => ({
+    sourceUrl,
+    status: "queued",
+    progress: 0,
+    clipsCount: 0,
+    jobId: "",
+    error: ""
+  }));
+  renderBatchJobs();
+  setBatchControlsDisabled(true);
+  updateStatus("Batch V1 lancé…", false);
+  setBatchStatus(`Batch démarré (${sources.length} sources).`, false);
+
+  let completedCount = 0;
+  let failedCount = 0;
+  let stoppedCount = 0;
+  let lastCompletedJob = null;
+
+  for (let index = 0; index < state.batchJobs.length; index += 1) {
+    if (state.batchStopRequested) break;
+
+    const item = state.batchJobs[index];
+    item.status = "creating";
+    item.progress = 0;
+    renderBatchJobs();
+    setBatchStatus(`Création du job ${index + 1}/${state.batchJobs.length}…`, false);
+
+    try {
+      const created = await createBatchJobFromUrl(item.sourceUrl, clipsCount, ignoreIntroSec);
+      item.jobId = created.id;
+      item.status = "queued";
+      renderBatchJobs();
+
+      const finalJob = await pollJobUntilDone(created.id, (job) => {
+        item.status = job.status;
+        item.progress = Number(job.progress) || 0;
+        renderBatchJobs();
+      });
+
+      if (finalJob.status === "completed") {
+        item.status = "completed";
+        item.progress = 100;
+        item.clipsCount = (finalJob.clips || []).length;
+        completedCount += 1;
+        lastCompletedJob = finalJob;
+      } else {
+        item.status = "failed";
+        item.error = finalJob.error || "Traitement échoué";
+        failedCount += 1;
+      }
+    } catch (error) {
+      item.status = "failed";
+      item.error = error instanceof Error ? error.message : "Erreur batch";
+      failedCount += 1;
     }
 
-    if (typeof google === 'undefined' || !google.accounts) {
-        // GIS not loaded yet, retry
-        setTimeout(initGoogleSignIn, 500);
-        return;
-    }
+    renderBatchJobs();
+    if (state.batchStopRequested) break;
+  }
 
-    google.accounts.id.initialize({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        callback: handleGoogleSignIn,
-        auto_select: false,
-        cancel_on_tap_outside: true,
+  if (state.batchStopRequested) {
+    for (const item of state.batchJobs) {
+      if (item.status === "queued") {
+        item.status = "stopped";
+        stoppedCount += 1;
+      }
+    }
+  }
+
+  renderBatchJobs();
+  setBatchControlsDisabled(false);
+  state.batchStopRequested = false;
+  const summary = `Batch terminé · OK: ${completedCount} · Erreurs: ${failedCount} · Arrêtés: ${stoppedCount}`;
+  setBatchStatus(summary, failedCount > 0);
+  updateStatus(summary, failedCount === 0);
+
+  if (lastCompletedJob) {
+    state.activeJobId = lastCompletedJob.id;
+    applyCompletedJob(lastCompletedJob, `${summary} · dernier job chargé`);
+  }
+}
+
+function updateSubtitleOverlay() {
+  if (state.selectedClipIndex < 0) {
+    dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
+    return;
+  }
+  const clip = state.clips[state.selectedClipIndex];
+  if (!clip) return;
+  if (clip.hasBurnedSubtitles) {
+    dom.subtitleOverlay.innerHTML = "";
+    dom.subtitleOverlay.style.display = "none";
+    return;
+  }
+  dom.subtitleOverlay.style.display = "block";
+  const t = dom.player.currentTime || 0;
+  const cue = (clip.captions || []).find((item) => t >= item.start && t <= item.end);
+  if (!cue) {
+    dom.subtitleOverlay.innerHTML = "";
+    return;
+  }
+  dom.subtitleOverlay.innerHTML = `<span>${cue.text}</span>`;
+}
+
+function selectClip(index, autoplay = false) {
+  if (index < 0 || index >= state.clips.length) return;
+  state.selectedClipIndex = index;
+  renderClips();
+
+  const clip = state.clips[index];
+  state.currentAspectRatio = clip.aspectRatio || state.currentAspectRatio;
+  applyPreviewAspectRatio(state.currentAspectRatio);
+  dom.player.pause();
+  dom.player.src = apiUrl(clip.streamUrl);
+  dom.player.currentTime = 0;
+  dom.player.load();
+  dom.subtitleOverlay.innerHTML = "";
+  dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
+  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = clip.title;
+  if (dom.selectedClipScore) {
+    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
+    dom.selectedClipScore.textContent = `Virality score: ${viralityScore}/100 · ${clip.aspectRatio || state.currentAspectRatio}`;
+  }
+  if (dom.selectedClipSummary) {
+    const summary =
+      (clip.captions || [])
+        .map((c) => c.text)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 220) || "Résumé transcript indisponible.";
+    dom.selectedClipSummary.textContent = summary;
+  }
+  updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
+
+  if (autoplay) dom.player.play().catch(() => {});
+}
+
+function triggerDownload(url, filenameHint = "") {
+  const link = document.createElement("a");
+  link.href = apiUrl(url);
+  if (filenameHint) link.download = filenameHint;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function formatFrenchDate(isoDate) {
+  if (!isoDate) return "";
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function setYoutubeCookiesButtonsDisabled(disabled) {
+  if (dom.saveYoutubeCookiesBtn) dom.saveYoutubeCookiesBtn.disabled = disabled;
+  if (dom.clearYoutubeCookiesBtn) dom.clearYoutubeCookiesBtn.disabled = disabled;
+}
+
+function renderYoutubeCookiesStatus(meta = {}) {
+  if (!dom.youtubeCookiesStatus) return;
+  const configured = Boolean(meta.configured);
+  const sizeBytes = Number(meta.sizeBytes || 0);
+  const updatedAt = formatFrenchDate(meta.updatedAt || "");
+  state.youtubeCookiesConfigured = configured;
+  state.youtubeCookiesUpdatedAt = meta.updatedAt || "";
+
+  if (configured) {
+    const details = updatedAt ? ` · MAJ ${updatedAt}` : "";
+    dom.youtubeCookiesStatus.textContent = `Cookies serveur: configurés (${sizeBytes} octets${details})`;
+    dom.youtubeCookiesStatus.classList.remove("note-error");
+    return;
+  }
+
+  dom.youtubeCookiesStatus.textContent = "Cookies serveur: non configurés";
+  dom.youtubeCookiesStatus.classList.add("note-error");
+}
+
+async function refreshYoutubeCookiesStatus() {
+  if (!state.backendAvailable) return;
+  const response = await fetch(apiUrl("/api/youtube-cookies/status"));
+  if (!response.ok) throw new Error("Impossible de lire le statut des cookies serveur");
+  const meta = await response.json();
+  renderYoutubeCookiesStatus(meta);
+}
+
+async function saveYoutubeCookies() {
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (!youtubeCookies) {
+    updateStatus("Colle d'abord tes cookies YouTube avant de les enregistrer.", false);
+    return;
+  }
+
+  setYoutubeCookiesButtonsDisabled(true);
+  try {
+    const response = await fetch(apiUrl("/api/youtube-cookies"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ youtubeCookies })
     });
-
-    console.log('✅ Google Sign-In initialisé.');
-}
-
-// Google buttons event listeners
-document.getElementById('googleAuthBtn').addEventListener('click', (e) => {
-    e.preventDefault();
-    triggerGoogleSignIn();
-});
-
-document.getElementById('googleSellBtn').addEventListener('click', (e) => {
-    e.preventDefault();
-    triggerGoogleSignIn();
-});
-
-// =============================================
-// STRIPE CHECKOUT
-// =============================================
-
-const checkoutModalEl = document.getElementById('checkoutModal');
-const checkoutModalClose = document.getElementById('checkoutModalClose');
-const stripePayBtn = document.getElementById('stripePayBtn');
-
-// Close checkout modal
-checkoutModalClose.addEventListener('click', () => closeModal(checkoutModalEl));
-checkoutModalEl.addEventListener('click', (e) => {
-    if (e.target === checkoutModalEl) closeModal(checkoutModalEl);
-});
-
-function isStripeConfigured() {
-    return typeof CONFIG !== 'undefined' &&
-           CONFIG.STRIPE_PUBLISHABLE_KEY &&
-           CONFIG.STRIPE_PUBLISHABLE_KEY !== 'VOTRE_STRIPE_PUBLISHABLE_KEY_ICI';
-}
-
-function openCheckoutModal() {
-    if (cart.length === 0) {
-        showToast('Votre panier est vide.', 'error');
-        return;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible d'enregistrer les cookies YouTube");
     }
-
-    const checkoutItemsEl = document.getElementById('checkoutItems');
-    const checkoutSubtotal = document.getElementById('checkoutSubtotal');
-    const checkoutTva = document.getElementById('checkoutTva');
-    const checkoutTotalEl = document.getElementById('checkoutTotal');
-    const stripePayAmount = document.getElementById('stripePayAmount');
-
-    // Render items
-    checkoutItemsEl.innerHTML = cart.map(item => {
-        const iconContent = item.imageUrl
-            ? `<img src="${item.imageUrl}" alt="${item.name}">`
-            : item.icon;
-        return `
-            <div class="checkout-item">
-                <div class="checkout-item-icon" style="background: ${item.bgColor}">${iconContent}</div>
-                <div class="checkout-item-info">
-                    <div class="checkout-item-name">${item.name}</div>
-                    <div class="checkout-item-seller">par ${item.seller}</div>
-                </div>
-                <div class="checkout-item-price">€${item.price}${item.pricePeriod}</div>
-            </div>
-        `;
-    }).join('');
-
-    // Calculate totals
-    const subtotal = cart.reduce((sum, item) => sum + item.price, 0);
-    const tva = Math.round(subtotal * 0.20 * 100) / 100;
-    const total = Math.round((subtotal + tva) * 100) / 100;
-
-    checkoutSubtotal.textContent = `€${subtotal.toFixed(2)}`;
-    checkoutTva.textContent = `€${tva.toFixed(2)}`;
-    checkoutTotalEl.textContent = `€${total.toFixed(2)}`;
-    stripePayAmount.textContent = `€${total.toFixed(2)}`;
-
-    checkoutModalEl.classList.add('active');
-    document.body.style.overflow = 'hidden';
+    renderYoutubeCookiesStatus(payload);
+    if (dom.youtubeCookiesInput) dom.youtubeCookiesInput.value = "";
+    updateStatus("Cookies YouTube enregistrés. Ils seront réutilisés automatiquement.", true);
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur lors de la sauvegarde des cookies", false);
+  } finally {
+    setYoutubeCookiesButtonsDisabled(false);
+  }
 }
 
-stripePayBtn.addEventListener('click', () => {
-    if (cart.length === 0) return;
+async function clearYoutubeCookies() {
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  setYoutubeCookiesButtonsDisabled(true);
+  try {
+    const response = await fetch(apiUrl("/api/youtube-cookies"), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Impossible de supprimer les cookies YouTube");
+    }
+    renderYoutubeCookiesStatus(payload);
+    updateStatus("Cookies YouTube supprimés du serveur.", true);
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur lors de la suppression des cookies", false);
+  } finally {
+    setYoutubeCookiesButtonsDisabled(false);
+  }
+}
 
-    const subtotal = cart.reduce((sum, item) => sum + item.price, 0);
-    const tva = Math.round(subtotal * 0.20 * 100) / 100;
-    const total = Math.round((subtotal + tva) * 100) / 100;
-
-    // Visual loading state
-    stripePayBtn.classList.add('loading');
-    stripePayBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Traitement en cours...</span>';
-
-    if (isStripeConfigured()) {
-        // --- REAL STRIPE CHECKOUT ---
-        try {
-            const stripe = Stripe(CONFIG.STRIPE_PUBLISHABLE_KEY);
-
-            // Build line items for Stripe Checkout
-            // Note: In production, the checkout session should be created
-            // server-side. Client-only mode uses price IDs from Stripe Dashboard.
-            // Here we use client-only redirect with dynamic amounts.
-
-            const lineItems = cart.map(item => ({
-                price_data: {
-                    currency: 'eur',
-                    product_data: {
-                        name: item.name,
-                        description: `Agent IA par ${item.seller}`,
-                    },
-                    unit_amount: Math.round((item.price * 1.20) * 100), // TTC in cents
-                    recurring: item.pricePeriod === '/mois' ? { interval: 'month' } : undefined,
-                },
-                quantity: 1,
-            }));
-
-            // For client-only mode, we redirect to Stripe Checkout.
-            // This requires pre-created Price IDs in Stripe Dashboard.
-            // As a fallback for demo, we'll try redirectToCheckout:
-            stripe.redirectToCheckout({
-                lineItems: cart.map(item => ({
-                    price: item.stripePriceId || 'price_demo', // needs real price IDs
-                    quantity: 1,
-                })),
-                mode: cart.some(i => i.pricePeriod === '/mois') ? 'subscription' : 'payment',
-                successUrl: window.location.href + '?payment=success',
-                cancelUrl: window.location.href + '?payment=cancel',
-            }).then(result => {
-                if (result.error) {
-                    // If redirect fails (e.g. no valid price IDs), use fallback
-                    console.warn('Stripe redirect error:', result.error.message);
-                    stripePaymentFallback(total);
-                }
-            });
-        } catch (err) {
-            console.error('Stripe error:', err);
-            stripePaymentFallback(total);
-        }
+async function checkBackendHealth() {
+  try {
+    const [healthRes, cfgRes] = await Promise.all([
+      fetch(apiUrl("/api/health")),
+      fetch(apiUrl("/api/config"))
+    ]);
+    if (!healthRes.ok) throw new Error("health check failed");
+    const payload = await healthRes.json();
+    const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
+    state.backendAvailable = true;
+    state.youtubeApiAvailable = Boolean(
+      serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
+    );
+    setBatchControlsDisabled(state.batchRunning);
+    setDiscoverControlsDisabled(state.discoverRunning);
+    setAutomationControlsDisabled(false);
+    updateStatus("Backend prêt", true);
+    if (serverConfig?.defaults) {
+      const defaultsCfg = serverConfig.defaults;
+      if (typeof defaultsCfg.clipDuration === "number") dom.clipDuration.value = String(defaultsCfg.clipDuration);
+      if (typeof defaultsCfg.clipsCount === "number") {
+        dom.clipsCount.value = String(defaultsCfg.clipsCount);
+        dom.clipsCountValue.textContent = String(defaultsCfg.clipsCount);
+      }
+      if (typeof defaultsCfg.minGap === "number") {
+        dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
+        dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
+      }
+      if (typeof defaultsCfg.frameMode === "string" && dom.frameMode) {
+        state.frameMode = defaultsCfg.frameMode;
+        dom.frameMode.value = defaultsCfg.frameMode;
+      }
+      if (typeof defaultsCfg.ignoreIntroSec === "number" && dom.ignoreIntroSec) {
+        state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
+        dom.ignoreIntroSec.value = String(defaultsCfg.ignoreIntroSec);
+      }
+    }
+    if (serverConfig?.youtubeCookies) {
+      renderYoutubeCookiesStatus(serverConfig.youtubeCookies);
     } else {
-        // --- DEMO MODE (no Stripe key configured) ---
-        console.log('ℹ️ Stripe non configuré — mode démo activé.');
-        stripePaymentFallback(total);
+      renderYoutubeCookiesStatus({
+        configured: Boolean(payload.youtubeCookiesConfigured),
+        sizeBytes: 0,
+        updatedAt: null
+      });
     }
-});
 
-function stripePaymentFallback(total) {
-    // Simulated payment for demo mode
-    setTimeout(() => {
-        stripePayBtn.classList.remove('loading');
-        stripePayBtn.innerHTML = '<i class="fas fa-credit-card"></i> <span>Payer <strong>€' + total.toFixed(2) + '</strong></span>';
-
-        closeModal(checkoutModalEl);
-        showToast('Paiement de €' + total.toFixed(2) + ' effectué avec succès !', 'success');
-
-        if (!isStripeConfigured()) {
-            setTimeout(() => {
-                showToast('Mode démo : configurez Stripe dans config.js pour les vrais paiements.', 'info');
-            }, 1500);
-        }
-
-        clearCart();
-    }, 2000);
+    dom.backendMeta.textContent =
+      `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
+      `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · ` +
+      `TTS FR: ${payload.edgeTtsAvailable ? "oui" : "non"} · Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"} · API YouTube: ${state.youtubeApiAvailable ? "oui" : "non"}`;
+    return;
+  } catch (_error) {
+    state.backendAvailable = false;
+    state.youtubeApiAvailable = false;
+    setBatchControlsDisabled(false);
+    setDiscoverControlsDisabled(false);
+    setAutomationControlsDisabled(true);
+    updateStatus("Backend indisponible — lance: npm start", false);
+    dom.backendMeta.textContent = "Aucune connexion backend";
+    renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
+  }
 }
 
-// Handle Stripe return URLs
-(function checkPaymentReturn() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success') {
-        showToast('Paiement confirmé ! Merci pour votre achat.', 'success');
-        clearCart();
-        // Clean URL
-        window.history.replaceState({}, '', window.location.pathname);
-    } else if (params.get('payment') === 'cancel') {
-        showToast('Paiement annulé.', 'info');
-        window.history.replaceState({}, '', window.location.pathname);
+async function createJob() {
+  const rawVideoUrl = (dom.videoUrlInput.value || "").trim();
+  const hasFile = Boolean(state.localVideoFile);
+  const hasUrl = rawVideoUrl.length > 0;
+  if (!hasFile && !hasUrl) {
+    updateStatus("Ajoute un lien vidéo ou un fichier avant de générer.", false);
+    return;
+  }
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+
+  const useQuickMode = Boolean(state.quickMode);
+  const clipDuration = Number(dom.clipDuration.value);
+  const clipsCount = Number(dom.clipsCount.value);
+  const aspectRatio = dom.aspectRatio.value;
+  const frameMode = dom.frameMode?.value || state.frameMode;
+  state.frameMode = frameMode;
+  const languageMode = dom.languageMode?.value || state.languageMode;
+  state.languageMode = languageMode;
+  state.noAddedAudio = languageMode === "no-added-audio";
+  let includeAutoTranscript = state.includeAutoTranscript;
+  let dubFrenchAudio = state.dubFrenchAudio;
+  let autoDubVoiceBySpeaker = state.autoDubVoiceBySpeaker;
+  let burnSubtitles = state.burnSubtitles;
+
+  if (isNoAddedAudioSelected() || languageMode === "already-french") {
+    dubFrenchAudio = false;
+    autoDubVoiceBySpeaker = false;
+  } else if (useQuickMode) {
+    // Quick mode applies recommended defaults without overriding chosen duration.
+    includeAutoTranscript = true;
+    dubFrenchAudio = true;
+    autoDubVoiceBySpeaker = true;
+    burnSubtitles = false;
+  }
+
+  const body = new FormData();
+  if (hasUrl) {
+    body.append("videoUrl", rawVideoUrl);
+  } else if (hasFile) {
+    body.append("video", state.localVideoFile);
+  }
+  body.append("clipDuration", String(clipDuration));
+  body.append("clipsCount", String(clipsCount));
+  body.append("aspectRatio", aspectRatio);
+  body.append("frameMode", frameMode);
+  body.append("languageMode", languageMode);
+  body.append("transcript", dom.transcriptInput.value.trim());
+  body.append("subtitleTheme", state.subtitleTheme);
+  body.append("highlightMode", state.highlightMode);
+  body.append("includeAutoTranscript", String(includeAutoTranscript));
+  body.append("dubFrenchAudio", String(dubFrenchAudio));
+  body.append("autoDubVoiceBySpeaker", String(autoDubVoiceBySpeaker));
+  body.append("includeSrtInZip", String(state.includeSrtInZip));
+  body.append("burnSubtitles", String(burnSubtitles));
+  body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
+  body.append("ignoreIntroSec", String(Number(dom.ignoreIntroSec?.value || state.ignoreIntroSec || 0)));
+  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
+  if (youtubeCookies) {
+    body.append("youtubeCookies", youtubeCookies);
+  }
+
+  dom.analyzeBtn.disabled = true;
+  resetClipState();
+  setGenerationProgress(5);
+  updateStatus(hasUrl ? "Analyse du lien et création du job…" : "Upload et création du job…", false);
+
+  try {
+    const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
+    if (!response.ok) {
+      const details = await response.json().catch(() => ({}));
+      throw new Error(details.error || "Impossible de créer le job");
     }
-})();
+    const payload = await response.json();
+    state.activeJobId = payload.id;
+    updateStatus(`Job créé (${payload.id.slice(0, 8)}...), démarrage…`, false);
+    scheduleJobPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
 
-// =============================================
-// INIT
-// =============================================
+function applyCompletedJob(job, readyStatusText = "") {
+  setGenerationProgress(100);
+  state.clips = job.clips || [];
+  state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
+  state.burnSubtitles = Boolean(job.params?.burnSubtitles);
+  state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
+  state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
+  state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
+  state.languageMode = job.params?.languageMode || state.languageMode;
+  state.frameMode = job.params?.frameMode || state.frameMode;
+  state.noAddedAudio = state.languageMode === "no-added-audio";
+  state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
+  dom.subtitleTheme.value = state.subtitleTheme;
+  if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
+  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
+  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
+  if (dom.languageMode) dom.languageMode.value = state.languageMode;
+  if (dom.frameMode) dom.frameMode.value = state.frameMode;
+  applySubtitleTheme(state.subtitleTheme);
+  applyPreviewAspectRatio(state.currentAspectRatio);
 
-renderAgents();
+  renderClips();
+  if (state.clips.length > 0) {
+    setButtonsEnabled(true);
+    selectClip(0, false);
+  }
+  dom.analyzeBtn.disabled = false;
+  updateStatus(readyStatusText || `${state.clips.length} shorts générés`, true);
+  if (job.autoTranscriptUsed && dom.backendMeta && !dom.backendMeta.textContent.includes("transcription auto utilisée")) {
+    dom.backendMeta.textContent = `${dom.backendMeta.textContent} · transcription auto utilisée`;
+  }
+}
 
-// Initialize Google Sign-In (with delay to let GIS script load)
-setTimeout(initGoogleSignIn, 300);
+function scheduleJobPolling() {
+  clearPolling();
+  state.pollTimer = setTimeout(() => {
+    void pollJob();
+  }, config.pollIntervalMs);
+}
 
-console.log('🚀 AgentVerse — Marketplace d\'Agents IA chargée avec succès !');
+async function pollJob() {
+  if (!state.activeJobId) return;
+  try {
+    const response = await fetch(apiUrl(`/api/jobs/${state.activeJobId}`));
+    if (!response.ok) throw new Error("Job introuvable");
+    const job = await response.json();
+
+    if (job.status === "queued") {
+      setGenerationProgress(Math.max(8, Number(job.progress) || 0));
+      updateStatus("Job en file d'attente…", false);
+      scheduleJobPolling();
+      return;
+    }
+    if (job.status === "processing") {
+      setGenerationProgress(job.progress || 0);
+      updateStatus(`Traitement en cours… ${job.progress || 0}%`, false);
+      scheduleJobPolling();
+      return;
+    }
+    if (job.status === "failed") {
+      setGenerationProgress(100);
+      updateStatus(job.error || "Traitement échoué", false);
+      dom.analyzeBtn.disabled = false;
+      return;
+    }
+    if (job.status === "completed") {
+      applyCompletedJob(job);
+      return;
+    }
+    scheduleJobPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur polling", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
+
+function useSampleTranscript() {
+  dom.transcriptInput.value = config.sampleTranscript;
+}
+
+function initFileInput() {
+  dom.videoInput.addEventListener("change", () => {
+    const file = dom.videoInput.files && dom.videoInput.files[0];
+    if (!file) return;
+
+    state.localVideoFile = file;
+    state.activeJobId = "";
+    resetClipState();
+
+    if (state.localVideoObjectUrl) {
+      URL.revokeObjectURL(state.localVideoObjectUrl);
+    }
+    state.localVideoObjectUrl = URL.createObjectURL(file);
+    dom.player.src = state.localVideoObjectUrl;
+    dom.player.load();
+
+    dom.player.onloadedmetadata = () => {
+      state.localVideoDuration = dom.player.duration || 0;
+      updateStatus(`Vidéo locale prête (${secondsToClock(state.localVideoDuration)})`, true);
+    };
+  });
+
+  dom.videoUrlInput.addEventListener("input", () => {
+    state.sourceVideoUrl = dom.videoUrlInput.value.trim();
+  });
+
+  if (dom.youtubeCookiesInput) {
+    dom.youtubeCookiesInput.addEventListener("input", () => {
+      // keep latest value via DOM read in createJob
+    });
+  }
+}
+
+function initEvents() {
+  dom.clipsCount.addEventListener("input", () => {
+    dom.clipsCountValue.textContent = dom.clipsCount.value;
+  });
+
+  dom.minGapSecBetweenClips.addEventListener("input", () => {
+    dom.minGapValue.textContent = `${dom.minGapSecBetweenClips.value}s`;
+  });
+
+  dom.subtitleTheme.addEventListener("change", () => {
+    state.subtitleTheme = dom.subtitleTheme.value;
+    applySubtitleTheme(state.subtitleTheme);
+  });
+
+  dom.highlightMode.addEventListener("change", () => {
+    state.highlightMode = dom.highlightMode.value;
+  });
+
+  dom.aspectRatio.addEventListener("change", () => {
+    state.currentAspectRatio = dom.aspectRatio.value;
+    applyPreviewAspectRatio(state.currentAspectRatio);
+  });
+
+  if (dom.frameMode) {
+    dom.frameMode.addEventListener("change", () => {
+      state.frameMode = dom.frameMode.value;
+    });
+  }
+
+  if (dom.ignoreIntroSec) {
+    dom.ignoreIntroSec.addEventListener("change", () => {
+      state.ignoreIntroSec = Number(dom.ignoreIntroSec.value || 0);
+    });
+  }
+
+  if (dom.quickMode) {
+    dom.quickMode.addEventListener("change", () => {
+      state.quickMode = dom.quickMode.checked;
+    });
+  }
+
+  if (dom.languageMode) {
+    dom.languageMode.addEventListener("change", () => {
+      state.languageMode = dom.languageMode.value;
+      state.noAddedAudio = state.languageMode === "no-added-audio";
+      if (state.languageMode === "already-french" || isNoAddedAudioSelected()) {
+        state.dubFrenchAudio = false;
+        state.autoDubVoiceBySpeaker = false;
+        if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = false;
+        if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = false;
+      }
+    });
+  }
+
+  dom.includeAutoTranscript.addEventListener("change", () => {
+    state.includeAutoTranscript = dom.includeAutoTranscript.checked;
+  });
+
+  if (dom.dubFrenchAudio) {
+    dom.dubFrenchAudio.addEventListener("change", () => {
+      state.dubFrenchAudio = dom.dubFrenchAudio.checked;
+    });
+  }
+
+  if (dom.autoDubVoiceBySpeaker) {
+    dom.autoDubVoiceBySpeaker.addEventListener("change", () => {
+      state.autoDubVoiceBySpeaker = dom.autoDubVoiceBySpeaker.checked;
+    });
+  }
+
+  dom.includeSrtInZip.addEventListener("change", () => {
+    state.includeSrtInZip = dom.includeSrtInZip.checked;
+  });
+
+  dom.burnSubtitles.addEventListener("change", () => {
+    state.burnSubtitles = dom.burnSubtitles.checked;
+  });
+
+  dom.generateScriptBtn.addEventListener("click", useSampleTranscript);
+  dom.analyzeBtn.addEventListener("click", () => {
+    void createJob();
+  });
+  if (dom.discoverYoutubeBtn) {
+    dom.discoverYoutubeBtn.addEventListener("click", () => {
+      void discoverYoutubeSources(false);
+    });
+  }
+  if (dom.useDiscoverResultsBtn) {
+    dom.useDiscoverResultsBtn.addEventListener("click", () => {
+      pushSelectedDiscoverUrlsToBatch();
+    });
+  }
+  if (dom.discoverAndRunBatchBtn) {
+    dom.discoverAndRunBatchBtn.addEventListener("click", () => {
+      void discoverYoutubeSources(true);
+    });
+  }
+  if (dom.discoverGeneratePublishBtn) {
+    dom.discoverGeneratePublishBtn.addEventListener("click", () => {
+      void runFullAutomation();
+    });
+  }
+  if (dom.discoverResultsList) {
+    dom.discoverResultsList.addEventListener("change", (event) => {
+      const target = event.target instanceof HTMLInputElement ? event.target : null;
+      if (!target || target.type !== "checkbox") return;
+      const videoId = target.getAttribute("data-discover-id");
+      if (!videoId) return;
+      const item = state.discoverResults.find((entry) => entry.videoId === videoId);
+      if (!item) return;
+      item.selected = target.checked;
+      setDiscoverControlsDisabled(state.discoverRunning);
+    });
+  }
+  if (dom.startBatchBtn) {
+    dom.startBatchBtn.addEventListener("click", () => {
+      void startBatchGeneration();
+    });
+  }
+  if (dom.stopBatchBtn) {
+    dom.stopBatchBtn.addEventListener("click", () => {
+      state.batchStopRequested = true;
+      setBatchStatus("Arrêt demandé: fin de la vidéo en cours puis stop.", false);
+    });
+  }
+  if (dom.batchJobsList) {
+    dom.batchJobsList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      const button = target.closest("button[data-action]");
+      if (!button) return;
+      const action = button.getAttribute("data-action");
+      const jobId = button.getAttribute("data-job-id");
+      if (!jobId) return;
+      if (action === "open-job") {
+        void loadJobIntoWorkspace(jobId).catch((error) => {
+          updateStatus(error instanceof Error ? error.message : "Impossible de charger ce job", false);
+        });
+      }
+      if (action === "download-bundle") {
+        triggerDownload(`/api/jobs/${jobId}/bundle`, `clipforge-bundle-${jobId}.zip`);
+      }
+    });
+  }
+  if (dom.saveYoutubeCookiesBtn) {
+    dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
+      void saveYoutubeCookies();
+    });
+  }
+  if (dom.clearYoutubeCookiesBtn) {
+    dom.clearYoutubeCookiesBtn.addEventListener("click", () => {
+      void clearYoutubeCookies();
+    });
+  }
+  if (dom.saveTikTokConfigBtn) {
+    dom.saveTikTokConfigBtn.addEventListener("click", () => {
+      void saveTikTokConfigFromUi();
+    });
+  }
+  if (dom.clearTikTokConfigBtn) {
+    dom.clearTikTokConfigBtn.addEventListener("click", () => {
+      void clearTikTokConfigFromUi();
+    });
+  }
+  if (dom.saveAutomationScheduleBtn) {
+    dom.saveAutomationScheduleBtn.addEventListener("click", () => {
+      void saveAutomationScheduleFromUi();
+    });
+  }
+  if (dom.disableAutomationScheduleBtn) {
+    dom.disableAutomationScheduleBtn.addEventListener("click", () => {
+      void disableAutomationScheduleFromUi();
+    });
+  }
+  if (dom.runAutomationNowBtn) {
+    dom.runAutomationNowBtn.addEventListener("click", () => {
+      void runAutomationNowFromUi();
+    });
+  }
+
+  dom.playClipBtn.addEventListener("click", () => {
+    if (state.selectedClipIndex < 0) return;
+    dom.player.currentTime = 0;
+    dom.player.play().catch(() => {});
+  });
+
+  dom.exportClipBtn.addEventListener("click", () => {
+    if (state.selectedClipIndex < 0) return;
+    const clip = state.clips[state.selectedClipIndex];
+    if (!clip) return;
+    triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
+  });
+
+  dom.downloadJsonBtn.addEventListener("click", () => {
+    if (!state.activeJobId) return;
+    triggerDownload(`/api/jobs/${state.activeJobId}/plan`, `clipforge-plan-${state.activeJobId}.json`);
+  });
+
+  dom.downloadZipBtn.addEventListener("click", () => {
+    if (!state.activeJobId) return;
+    triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-bundle-${state.activeJobId}.zip`);
+  });
+
+  dom.downloadSrtBtn.addEventListener("click", () => {
+    if (state.selectedClipIndex < 0 || !state.activeJobId) return;
+    const clip = state.clips[state.selectedClipIndex];
+    if (!clip) return;
+    triggerDownload(`/api/jobs/${state.activeJobId}/clips/${clip.id}/srt`, `${clip.id}.srt`);
+  });
+
+  dom.player.addEventListener("timeupdate", updateSubtitleOverlay);
+}
+
+function initDefaults() {
+  dom.clipDuration.value = String(config.defaultClipDuration);
+  dom.clipsCount.value = String(config.defaultClipsCount);
+  dom.clipsCountValue.textContent = String(config.defaultClipsCount);
+  dom.minGapSecBetweenClips.value = String(config.defaultMinGapSec);
+  dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
+  state.ignoreIntroSec = config.defaultIgnoreIntroSec;
+  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
+  dom.subtitleTheme.value = state.subtitleTheme;
+  dom.highlightMode.value = state.highlightMode;
+  if (dom.frameMode) dom.frameMode.value = state.frameMode;
+  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
+  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
+  if (dom.quickMode) dom.quickMode.checked = state.quickMode;
+  if (dom.languageMode) dom.languageMode.value = state.languageMode;
+  applySubtitleTheme(state.subtitleTheme);
+  applyPreviewAspectRatio(state.currentAspectRatio);
+  renderDiscoverResults();
+  setDiscoverStatus("Découverte V2 inactive.", false);
+  setAutomationStatus("TikTok auto-publish inactif.", false);
+  renderAutomationItems([]);
+  renderAutomationScheduleStatus({ enabled: false });
+  setAutomationControlsDisabled(false);
+  setDiscoverControlsDisabled(false);
+  renderBatchJobs();
+  setBatchStatus("Batch inactif.", false);
+  setBatchControlsDisabled(false);
+  setGenerationProgress(0);
+}
+
+async function init() {
+  initDefaults();
+  initEvents();
+  initFileInput();
+  setButtonsEnabled(false);
+  renderDiscoverResults();
+  setDiscoverControlsDisabled(false);
+  setAutomationControlsDisabled(false);
+  renderBatchJobs();
+  setBatchControlsDisabled(false);
+  await checkBackendHealth();
+  setDiscoverControlsDisabled(false);
+  setAutomationControlsDisabled(false);
+  setBatchControlsDisabled(false);
+  if (!state.backendAvailable) {
+    setDiscoverStatus("Découverte V2 inactive (backend indisponible).", true);
+    setBatchStatus("Batch inactif (backend indisponible).", true);
+  }
+  if (state.backendAvailable) {
+    try {
+      await refreshYoutubeCookiesStatus();
+    } catch (_error) {
+      // ignore: status already derived from /api/config or /api/health
+    }
+    try {
+      await refreshTikTokConfigStatus();
+    } catch (_error) {
+      // ignore: UI will stay in "inactif" state on failure
+    }
+    try {
+      await refreshAutomationScheduleStatus();
+    } catch (_error) {
+      // ignore
+    }
+  }
+}
+
+void init();

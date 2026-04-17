@@ -1,0 +1,3367 @@
+const cors = require("cors");
+const express = require("express");
+const archiver = require("archiver");
+const { Queue, Worker } = require("bullmq");
+const IORedis = require("ioredis");
+const fs = require("fs");
+const fsp = require("fs/promises");
+const multer = require("multer");
+const path = require("path");
+const { spawn, spawnSync, execSync } = require("child_process");
+const { v4: uuidv4 } = require("uuid");
+
+const ROOT_DIR = path.resolve(__dirname, "..");
+const STORAGE_DIR = path.join(ROOT_DIR, "storage");
+const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
+const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
+const SECRETS_DIR = path.join(STORAGE_DIR, "secrets");
+const JOBS_DB_FILE = path.join(STORAGE_DIR, "jobs-db.json");
+const YOUTUBE_COOKIES_STORE_PATH = path.join(SECRETS_DIR, "youtube-cookies.txt");
+const TIKTOK_CONFIG_STORE_PATH = path.join(SECRETS_DIR, "tiktok-config.json");
+const AUTOMATION_SCHEDULE_STORE_PATH = path.join(SECRETS_DIR, "automation-schedule.json");
+const PORT = Number(process.env.PORT) || 3000;
+const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
+const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
+const REDIS_URL = process.env.REDIS_URL || "";
+const YOUTUBE_API_KEY = String(process.env.YOUTUBE_API_KEY || "").trim();
+const YOUTUBE_DATA_API_BASE = "https://www.googleapis.com/youtube/v3";
+const TIKTOK_API_BASE = "https://open.tiktokapis.com/v2";
+const TIKTOK_STATUS_POLL_INTERVAL_MS = Math.max(1200, Number(process.env.TIKTOK_STATUS_POLL_INTERVAL_MS) || 3000);
+const TIKTOK_STATUS_POLL_TIMEOUT_MS = Math.max(10000, Number(process.env.TIKTOK_STATUS_POLL_TIMEOUT_MS) || 180000);
+const AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES = Math.max(
+  5,
+  Number(process.env.AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES) || 30
+);
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase() || ".mp4";
+      cb(null, `${Date.now()}-${uuidv4()}${ext}`);
+    }
+  }),
+  limits: { fileSize: 900 * 1024 * 1024 }
+});
+
+const jobs = new Map();
+const automationRuns = new Map();
+const pendingJobIds = [];
+let activeMemoryJobs = 0;
+let queueModeRuntime = "memory";
+let redisConnection = null;
+let bullQueue = null;
+let bullWorker = null;
+let ffmpegReady = true;
+let whisperAvailable = false;
+let ytDlpAvailable = false;
+let edgeTtsAvailable = false;
+let automationScheduleTimer = null;
+let automationScheduleRunning = false;
+let automationPipelineRunning = false;
+const automationScheduleRuntime = {
+  enabled: false,
+  intervalMinutes: 0,
+  updatedAt: null,
+  nextRunAt: null,
+  lastRunAt: null,
+  lastRunId: "",
+  lastRunStatus: "",
+  lastError: ""
+};
+
+const DEFAULTS = {
+  clipDuration: 30,
+  clipsCount: 4,
+  minGap: 3,
+  ignoreIntroSec: 20,
+  aspectRatio: "9:16",
+  frameMode: "full-video",
+  languageMode: "translate-to-french",
+  subtitleTheme: "classic",
+  highlightMode: "balanced",
+  includeAutoTranscript: false,
+  dubFrenchAudio: true,
+  autoDubVoiceBySpeaker: true,
+  includeSrtInZip: true,
+  burnSubtitles: false
+};
+
+function normalizeYouTubeErrorMessage(rawMessage) {
+  const message = String(rawMessage || "");
+  if (message.includes("Sign in to confirm you") && message.includes("not a bot")) {
+    return "YouTube a demandé une vérification anti-bot. Ajoute les cookies YouTube dans le champ dédié (format Netscape) puis relance.";
+  }
+  if (message.includes("Video unavailable")) {
+    return "La vidéo YouTube est indisponible (privée, supprimée, géo-restreinte, ou inaccessible anonymement).";
+  }
+  return message;
+}
+
+async function ensureDirs() {
+  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+  await fsp.mkdir(JOBS_DIR, { recursive: true });
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
+}
+
+function boolFrom(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  const str = String(value).toLowerCase();
+  return str === "1" || str === "true" || str === "yes" || str === "on";
+}
+
+function toNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function getJobDir(jobId) {
+  return path.join(JOBS_DIR, jobId);
+}
+
+function getJobPlanPath(jobId) {
+  return path.join(getJobDir(jobId), "plan.json");
+}
+
+function getJobSrtPath(jobId, clipId) {
+  return path.join(getJobDir(jobId), `${clipId}.srt`);
+}
+
+function getJobCaptionsBurnPath(jobId, clipId) {
+  return path.join(getJobDir(jobId), `${clipId}-captions.mp4`);
+}
+
+function asPublicJobSnapshot(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    originalFilename: job.originalFilename,
+    sourceType: job.sourceType || "upload",
+    sourceUrl: job.sourceUrl || "",
+    youtubeCookiesFilePath: job.youtubeCookiesFilePath || "",
+    inputPath: job.inputPath,
+    duration: job.duration || 0,
+    params: job.params || {},
+    error: job.error || null,
+    autoTranscriptUsed: !!job.autoTranscriptUsed,
+    clips: (job.clips || []).map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: clip.score,
+      filePath: clip.filePath,
+      dubbedAudioPath: clip.dubbedAudioPath || null,
+      dubVoice: clip.dubVoice || null,
+      burnedFilePath: clip.burnedFilePath || null,
+      aspectRatio: clip.aspectRatio || null,
+      captions: clip.captions || []
+    }))
+  };
+}
+
+async function persistJobsDb() {
+  const list = Array.from(jobs.values()).map(asPublicJobSnapshot);
+  await fsp.writeFile(JOBS_DB_FILE, JSON.stringify(list, null, 2), "utf8");
+}
+
+async function restoreJobsDb() {
+  if (!fs.existsSync(JOBS_DB_FILE)) return;
+  try {
+    const raw = await fsp.readFile(JOBS_DB_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    parsed.forEach((job) => {
+      if (!job || !job.id) return;
+      const normalized = {
+        ...job,
+        status: ["queued", "processing", "completed", "failed"].includes(job.status) ? job.status : "failed",
+        progress: Number.isFinite(job.progress) ? job.progress : 0,
+        clips: Array.isArray(job.clips) ? job.clips : [],
+        params: job.params || {},
+        duration: Number.isFinite(job.duration) ? job.duration : 0
+      };
+      if (normalized.status === "processing" || normalized.status === "queued") {
+        normalized.status = "failed";
+        normalized.error = normalized.error || "Interruption serveur pendant traitement";
+        normalized.progress = 100;
+      }
+      jobs.set(normalized.id, normalized);
+    });
+  } catch (_error) {
+    // ignore invalid persisted file
+  }
+}
+
+function checkBinary(binaryName, testArg = "-version") {
+  const result = spawnSync(binaryName, [testArg], { stdio: "ignore" });
+  return result.status === 0;
+}
+
+function resolveYtDlpBinary() {
+  if (checkBinary("yt-dlp", "--version")) return "yt-dlp";
+  try {
+    const candidate = execSync("python3 -m site --user-base", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    if (candidate) {
+      const localBin = path.join(candidate, "bin", "yt-dlp");
+      if (fs.existsSync(localBin)) return localBin;
+    }
+  } catch (_error) {
+    // ignore
+  }
+  const fallback = path.join(process.env.HOME || "", ".local", "bin", "yt-dlp");
+  if (fallback && fs.existsSync(fallback)) return fallback;
+  return "yt-dlp";
+}
+
+function checkPythonModule(moduleName, testArgs = ["--version"]) {
+  const result = spawnSync("python3", ["-m", moduleName, ...testArgs], { stdio: "ignore" });
+  return result.status === 0;
+}
+
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isLikelyYouTubeUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.includes("youtube.com") || host.includes("youtu.be");
+  } catch (_error) {
+    return false;
+  }
+}
+
+function extractYouTubeVideoIdFromUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("youtu.be")) {
+      return parsed.pathname.replace(/^\/+/, "").split("/")[0] || "";
+    }
+    if (host.includes("youtube.com")) {
+      if (parsed.pathname === "/watch") {
+        return String(parsed.searchParams.get("v") || "").trim();
+      }
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      if (segments[0] === "shorts" && segments[1]) return segments[1];
+      if (segments[0] === "embed" && segments[1]) return segments[1];
+    }
+    return "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function normalizeScoringToken(rawToken) {
+  return String(rawToken || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function parseCsvTokens(raw) {
+  return String(raw || "")
+    .split(/[,\n;]+/)
+    .map((token) => normalizeScoringToken(token))
+    .filter(Boolean);
+}
+
+function getProcessedYouTubeVideoIdsFromJobs() {
+  const out = new Set();
+  for (const job of jobs.values()) {
+    const sourceUrl = String(job?.sourceUrl || "");
+    const videoId = extractYouTubeVideoIdFromUrl(sourceUrl);
+    if (videoId) out.add(videoId);
+  }
+  return out;
+}
+
+function normalizeDiscoverOrder(orderRaw) {
+  const allowed = new Set(["relevance", "date", "viewCount"]);
+  const candidate = String(orderRaw || "").trim();
+  return allowed.has(candidate) ? candidate : "relevance";
+}
+
+function normalizeSafeSearch(value) {
+  const allowed = new Set(["none", "moderate", "strict"]);
+  const candidate = String(value || "").trim();
+  return allowed.has(candidate) ? candidate : "moderate";
+}
+
+function parseIso8601DurationSeconds(isoDuration) {
+  const raw = String(isoDuration || "").trim();
+  if (!raw) return 0;
+  const match = raw.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
+  if (!match) return 0;
+  const days = Number(match[1] || 0);
+  const hours = Number(match[2] || 0);
+  const minutes = Number(match[3] || 0);
+  const seconds = Number(match[4] || 0);
+  const total = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+  return Number.isFinite(total) ? total : 0;
+}
+
+const YOUTUBE_DISCOVERY_VIRAL_KEYWORDS = new Set([
+  "funny",
+  "animals",
+  "fails",
+  "moments",
+  "crazy",
+  "wild",
+  "hilarious",
+  "laugh",
+  "viral",
+  "insane",
+  "cute",
+  "reaction",
+  "compilation"
+]);
+
+function computeYouTubeCandidateScore(candidate, queryTokens, nowMs) {
+  const views = Number(candidate.viewCount || 0);
+  const viewsScore = Math.min(36, Math.log10(views + 1) * 7);
+  const durationSec = Number(candidate.durationSec || 0);
+  const durationScore =
+    durationSec >= 420
+      ? Math.min(20, durationSec / 140)
+      : durationSec >= 180
+        ? 7
+        : -18;
+  const title = String(candidate.title || "").toLowerCase();
+  const description = String(candidate.description || "").toLowerCase();
+  const merged = `${title} ${description}`.trim();
+  const tokenMatches = queryTokens.filter((token) => token.length >= 3 && merged.includes(token)).length;
+  const keywordScore = Math.min(20, tokenMatches * 4.8);
+  const viralHits = Array.from(YOUTUBE_DISCOVERY_VIRAL_KEYWORDS).filter((token) => merged.includes(token)).length;
+  const viralScore = Math.min(14, viralHits * 2.4);
+  const publishedMs = Date.parse(candidate.publishedAt || "");
+  const daysOld = Number.isFinite(publishedMs) ? Math.max(0, (nowMs - publishedMs) / 86400000) : 9999;
+  const recencyScore = Math.max(0, 20 - daysOld * 0.1);
+  const viewsPerDay = daysOld > 0 ? views / Math.max(1, daysOld) : views;
+  const momentumScore = Math.min(14, Math.log10(viewsPerDay + 1) * 4.2);
+  return Number((viewsScore + durationScore + keywordScore + viralScore + recencyScore + momentumScore).toFixed(2));
+}
+
+async function fetchYouTubeDiscoverRaw({
+  query,
+  maxResults,
+  order,
+  regionCode,
+  relevanceLanguage,
+  safeSearch,
+  publishedWithinDays
+}) {
+  if (!YOUTUBE_API_KEY) {
+    throw new Error("YOUTUBE_API_KEY manquante sur le serveur.");
+  }
+
+  const searchParams = new URLSearchParams({
+    key: YOUTUBE_API_KEY,
+    part: "snippet",
+    type: "video",
+    maxResults: String(Math.max(1, Math.min(50, maxResults))),
+    q: query,
+    order,
+    safeSearch,
+    videoEmbeddable: "true",
+    regionCode
+  });
+  if (relevanceLanguage) {
+    searchParams.set("relevanceLanguage", relevanceLanguage);
+  }
+  if (publishedWithinDays > 0) {
+    const publishedAfter = new Date(Date.now() - publishedWithinDays * 86400000).toISOString();
+    searchParams.set("publishedAfter", publishedAfter);
+  }
+
+  const searchResponse = await fetch(`${YOUTUBE_DATA_API_BASE}/search?${searchParams.toString()}`);
+  const searchJson = await searchResponse.json().catch(() => ({}));
+  if (!searchResponse.ok) {
+    const apiMessage = searchJson?.error?.message || "Impossible de rechercher des vidéos YouTube.";
+    throw new Error(apiMessage);
+  }
+
+  const searchItems = Array.isArray(searchJson.items) ? searchJson.items : [];
+  const videoIds = searchItems
+    .map((item) => item?.id?.videoId)
+    .filter(Boolean)
+    .slice(0, 50);
+  if (!videoIds.length) return [];
+
+  const videosParams = new URLSearchParams({
+    key: YOUTUBE_API_KEY,
+    part: "contentDetails,statistics,snippet",
+    id: videoIds.join(","),
+    maxResults: String(videoIds.length)
+  });
+  const videosResponse = await fetch(`${YOUTUBE_DATA_API_BASE}/videos?${videosParams.toString()}`);
+  const videosJson = await videosResponse.json().catch(() => ({}));
+  if (!videosResponse.ok) {
+    const apiMessage = videosJson?.error?.message || "Impossible de récupérer les métadonnées vidéo YouTube.";
+    throw new Error(apiMessage);
+  }
+
+  const detailsMap = new Map();
+  for (const item of Array.isArray(videosJson.items) ? videosJson.items : []) {
+    if (item?.id) detailsMap.set(item.id, item);
+  }
+
+  return searchItems
+    .map((item) => {
+      const videoId = item?.id?.videoId;
+      const details = detailsMap.get(videoId || "");
+      if (!videoId || !details) return null;
+      const durationIso = String(details?.contentDetails?.duration || "PT0S");
+      const durationSec = parseIso8601DurationSeconds(durationIso);
+      const viewCount = Number(details?.statistics?.viewCount || 0);
+      return {
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        channelId: String(item?.snippet?.channelId || details?.snippet?.channelId || ""),
+        title: String(item?.snippet?.title || details?.snippet?.title || "").trim(),
+        description: String(item?.snippet?.description || "").trim(),
+        channelTitle: String(item?.snippet?.channelTitle || details?.snippet?.channelTitle || "").trim(),
+        publishedAt: String(item?.snippet?.publishedAt || details?.snippet?.publishedAt || ""),
+        thumbnailUrl:
+          item?.snippet?.thumbnails?.high?.url ||
+          item?.snippet?.thumbnails?.medium?.url ||
+          item?.snippet?.thumbnails?.default?.url ||
+          "",
+        durationIso,
+        durationSec,
+        viewCount
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeCookieBoolean(value, fallback = "FALSE") {
+  const upper = String(value || "").trim().toUpperCase();
+  if (upper === "TRUE" || upper === "1" || upper === "YES") return "TRUE";
+  if (upper === "FALSE" || upper === "0" || upper === "NO") return "FALSE";
+  return fallback;
+}
+
+function normalizeCookieExpiry(value) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num >= 0) return String(Math.floor(num));
+  return "2147483647";
+}
+
+function toNetscapeCookieLineFromObject(cookie) {
+  const name = String(cookie?.name || "").trim();
+  if (!name) return "";
+  const value = cookie?.value == null ? "" : String(cookie.value);
+  const rawDomain = String(cookie?.domain || ".youtube.com").trim();
+  const domain = rawDomain
+    ? rawDomain.startsWith(".")
+      ? rawDomain
+      : `.${rawDomain}`
+    : ".youtube.com";
+  const includeSubdomains = cookie?.hostOnly === true ? "FALSE" : "TRUE";
+  const pathValue = String(cookie?.path || "/").trim() || "/";
+  const secure = cookie?.secure ? "TRUE" : "FALSE";
+  const expiry = normalizeCookieExpiry(
+    cookie?.expirationDate ?? cookie?.expires ?? cookie?.expiry ?? cookie?.expire ?? 2147483647
+  );
+  return `${domain}\t${includeSubdomains}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`;
+}
+
+function parseCookiesJson(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed) return "";
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return "";
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (_error) {
+    return "";
+  }
+
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.cookies)
+      ? parsed.cookies
+      : Array.isArray(parsed?.data)
+        ? parsed.data
+        : null;
+
+  if (!Array.isArray(list)) {
+    return "";
+  }
+
+  const lines = list
+    .map((cookie) => toNetscapeCookieLineFromObject(cookie))
+    .filter(Boolean);
+
+  if (!lines.length) {
+    throw new Error("Le JSON de cookies est valide, mais aucun cookie exploitable n'a été trouvé.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseCookiesHeaderString(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed || trimmed.includes("\n")) return "";
+  if (!trimmed.includes("=") || trimmed.includes("\t")) return "";
+
+  const parts = trimmed
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return "";
+
+  const lines = [];
+  for (const part of parts) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const name = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1).trim();
+    if (!name) continue;
+    lines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+  }
+
+  if (!lines.length) {
+    throw new Error("Format de cookies invalide.");
+  }
+
+  return `# Netscape HTTP Cookie File\n${lines.join("\n")}\n`;
+}
+
+function parseNetscapeCookies(rawText) {
+  const input = String(rawText || "").trim();
+  if (!input) {
+    throw new Error("Cookies YouTube vides.");
+  }
+
+  const outLines = ["# Netscape HTTP Cookie File"];
+  const lines = input.split(/\r?\n/);
+  let hasCookieLine = false;
+
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#HttpOnly_")) {
+      line = line.replace(/^#HttpOnly_/, "");
+    } else if (line.startsWith("#")) {
+      continue;
+    }
+
+    let parts = line.split("\t").filter((p) => p !== "");
+    if (parts.length < 7) {
+      parts = line.split(/\s+/).filter(Boolean);
+    }
+
+    if (parts.length < 7) {
+      // Fallback tolérant: accepte une ligne "name=value" ou "name=value; other=x"
+      // pour aider quand l'export n'est pas strictement au format Netscape.
+      const cookiePairs = line
+        .split(";")
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+      let foundLoosePair = false;
+      for (const pair of cookiePairs) {
+        const eqIndex = pair.indexOf("=");
+        if (eqIndex <= 0) continue;
+        const name = pair.slice(0, eqIndex).trim();
+        const value = pair.slice(eqIndex + 1).trim();
+        if (!name) continue;
+        outLines.push(`.youtube.com\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`);
+        hasCookieLine = true;
+        foundLoosePair = true;
+      }
+
+      if (foundLoosePair) {
+        continue;
+      }
+      // Ignore les lignes non interprétables (au lieu d'échouer tout le fichier).
+      continue;
+    }
+
+    const [domainRaw, includeRaw, pathRaw, secureRaw, expiryRaw, nameRaw, ...valueParts] = parts;
+    const domain = String(domainRaw || "").trim();
+    const name = String(nameRaw || "").trim();
+    if (!domain || !name) {
+      throw new Error("Une ligne de cookie est incomplète (domain ou name manquant).");
+    }
+    const value = valueParts.join(" ");
+    const include = normalizeCookieBoolean(includeRaw, domain.startsWith(".") ? "TRUE" : "FALSE");
+    const pathValue = String(pathRaw || "/").trim() || "/";
+    const secure = normalizeCookieBoolean(secureRaw, "FALSE");
+    const expiry = normalizeCookieExpiry(expiryRaw);
+    outLines.push(`${domain}\t${include}\t${pathValue}\t${secure}\t${expiry}\t${name}\t${value}`);
+    hasCookieLine = true;
+  }
+
+  if (!hasCookieLine) {
+    throw new Error(
+      "Aucune ligne de cookie valide détectée. Utilise de préférence un export Netscape (cookies.txt) ou une chaîne du type NAME=VALUE; NAME2=VALUE2."
+    );
+  }
+
+  return `${outLines.join("\n")}\n`;
+}
+
+function normalizeYouTubeCookies(rawCookies) {
+  const rawText = String(rawCookies || "").trim();
+  if (!rawText) {
+    throw new Error("Cookies YouTube vides.");
+  }
+  const asJson = parseCookiesJson(rawText);
+  if (asJson) return asJson;
+  const asHeader = parseCookiesHeaderString(rawText);
+  if (asHeader) return asHeader;
+  return parseNetscapeCookies(rawText);
+}
+
+function getStoredYoutubeCookiesMeta() {
+  if (!fs.existsSync(YOUTUBE_COOKIES_STORE_PATH)) {
+    return {
+      configured: false,
+      sizeBytes: 0,
+      updatedAt: null
+    };
+  }
+  const stats = fs.statSync(YOUTUBE_COOKIES_STORE_PATH);
+  return {
+    configured: true,
+    sizeBytes: stats.size,
+    updatedAt: stats.mtime.toISOString()
+  };
+}
+
+function hasStoredYoutubeCookies() {
+  return fs.existsSync(YOUTUBE_COOKIES_STORE_PATH);
+}
+
+function normalizeTikTokPrivacyLevel(value) {
+  const allowed = new Set(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]);
+  const candidate = String(value || "").trim().toUpperCase();
+  return allowed.has(candidate) ? candidate : "SELF_ONLY";
+}
+
+function normalizeTikTokPublishSource(value) {
+  const allowed = new Set(["auto", "pull_from_url", "file_upload"]);
+  const candidate = String(value || "").trim().toLowerCase();
+  return allowed.has(candidate) ? candidate : "auto";
+}
+
+function parseHashtagsInput(rawInput) {
+  const seen = new Set();
+  const tags = String(rawInput || "")
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => (token.startsWith("#") ? token : `#${token}`))
+    .map((token) => token.replace(/[^#\w-]/g, "").slice(0, 80))
+    .filter((token) => token.length > 1)
+    .filter((token) => {
+      const key = token.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return tags.slice(0, 15);
+}
+
+function sanitizeTiktokCaption(caption, hashtags) {
+  const cleanCaption = String(caption || "").replace(/\s+/g, " ").trim();
+  const hashPart = (hashtags || []).join(" ").trim();
+  const merged = `${cleanCaption} ${hashPart}`.trim();
+  const maxLen = 2200;
+  if (!merged) return hashPart.slice(0, maxLen);
+  if (merged.length <= maxLen) return merged;
+  return `${merged.slice(0, maxLen - 3)}...`;
+}
+
+function guessHashtagsFromText(text) {
+  const normalized = String(text || "").toLowerCase();
+  const tags = ["#fyp", "#viral", "#pourtoi"];
+  if (/(animal|dog|cat|pet|chien|chat|funny|dr[oô]le|fail|meme)/i.test(normalized)) {
+    tags.push("#funny", "#animals", "#funnyanimals");
+  }
+  if (/(tiktok|short|clip|reel)/i.test(normalized)) {
+    tags.push("#shortvideo");
+  }
+  return Array.from(new Set(tags));
+}
+
+function readRawTikTokConfig() {
+  if (!fs.existsSync(TIKTOK_CONFIG_STORE_PATH)) {
+    return {
+      accessToken: "",
+      openId: "",
+      defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
+      defaultHashtags: "",
+      updatedAt: null
+    };
+  }
+  try {
+    const raw = fs.readFileSync(TIKTOK_CONFIG_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      accessToken: String(parsed.accessToken || "").trim(),
+      openId: String(parsed.openId || "").trim(),
+      defaultPrivacyLevel: normalizeTikTokPrivacyLevel(parsed.defaultPrivacyLevel || "SELF_ONLY"),
+      publishSource: normalizeTikTokPublishSource(parsed.publishSource || "auto"),
+      defaultHashtags: String(parsed.defaultHashtags || "").trim(),
+      updatedAt: parsed.updatedAt || null
+    };
+  } catch (_error) {
+    return {
+      accessToken: "",
+      openId: "",
+      defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
+      defaultHashtags: "",
+      updatedAt: null
+    };
+  }
+}
+
+async function getTikTokConfig() {
+  const raw = readRawTikTokConfig();
+  const token = raw.accessToken;
+  const masked = token ? `${token.slice(0, 6)}...${token.slice(-4)}` : "";
+  return {
+    ...raw,
+    configured: Boolean(raw.accessToken && raw.openId),
+    accessTokenMasked: masked
+  };
+}
+
+function hasTikTokConfig(config) {
+  return Boolean(config && config.accessToken && config.openId);
+}
+
+async function saveTikTokConfig(input) {
+  const payload = {
+    accessToken: String(input.accessToken || "").trim(),
+    openId: String(input.openId || "").trim(),
+    defaultPrivacyLevel: normalizeTikTokPrivacyLevel(input.defaultPrivacyLevel || "SELF_ONLY"),
+    publishSource: normalizeTikTokPublishSource(input.publishSource || "auto"),
+    defaultHashtags: String(input.defaultHashtags || "").trim(),
+    updatedAt: new Date().toISOString()
+  };
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
+  await fsp.writeFile(TIKTOK_CONFIG_STORE_PATH, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+  return getTikTokConfig();
+}
+
+async function clearTikTokConfig() {
+  if (fs.existsSync(TIKTOK_CONFIG_STORE_PATH)) {
+    await fsp.unlink(TIKTOK_CONFIG_STORE_PATH);
+  }
+  return getTikTokConfig();
+}
+
+function getPublicBaseUrlFromRequest(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "http";
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+  if (!host) {
+    throw new Error("Host HTTP introuvable pour générer les URLs publiques TikTok.");
+  }
+  return `${protocol}://${host}`;
+}
+
+function resolvePublicBaseUrl(baseUrlHint, req) {
+  const explicit = String(baseUrlHint || "").trim();
+  const envBase = String(process.env.PUBLIC_BASE_URL || "").trim();
+  const fromReq = req ? getPublicBaseUrlFromRequest(req) : "";
+  const candidate = explicit || envBase || fromReq;
+  if (!candidate) {
+    throw new Error("URL publique requise pour publication TikTok. Configure PUBLIC_BASE_URL.");
+  }
+  return candidate.replace(/\/+$/, "");
+}
+
+function buildTikTokHashtagsForClip(job, clip, defaultHashtagsRaw = "", extraHashtagsRaw = "") {
+  const tags = new Set(parseHashtagsInput(defaultHashtagsRaw));
+  for (const tag of parseHashtagsInput(extraHashtagsRaw)) tags.add(tag);
+  for (const guessed of guessHashtagsFromText(`${job.sourceUrl || ""} ${clip.title || ""}`)) {
+    tags.add(guessed.startsWith("#") ? guessed : `#${guessed}`);
+  }
+  tags.add("#funny");
+  tags.add("#fyp");
+  return Array.from(tags).slice(0, 15);
+}
+
+function buildTikTokCaptionForClip(job, clip, defaultHashtagsRaw = "", extraHashtagsRaw = "") {
+  const hashtags = buildTikTokHashtagsForClip(job, clip, defaultHashtagsRaw, extraHashtagsRaw);
+  const baseText = String(clip.title || "Funny short")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return sanitizeTiktokCaption(baseText, hashtags);
+}
+
+async function tiktokApiRequest(endpoint, accessToken, bodyPayload) {
+  const response = await fetch(`${TIKTOK_API_BASE}${endpoint}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    body: JSON.stringify(bodyPayload || {})
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || (payload?.error?.code && payload.error.code !== "ok")) {
+    const message =
+      payload?.error?.message ||
+      payload?.message ||
+      `TikTok API error ${response.status}`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+function isTikTokPullFromUrlVerificationError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  if (!message) return false;
+  const hints = [
+    "verify",
+    "verified domain",
+    "verification signature",
+    "url prefix",
+    "pull_from_url",
+    "property could not be verified",
+    "url publique requise"
+  ];
+  return hints.some((hint) => message.includes(hint));
+}
+
+async function uploadTikTokFileToUploadUrl(uploadUrl, filePath, fileSize) {
+  const safeUrl = String(uploadUrl || "").trim();
+  if (!safeUrl) {
+    throw new Error("TikTok upload_url manquant.");
+  }
+  const size = Math.max(0, Number(fileSize) || 0);
+  if (!size) {
+    throw new Error("Clip vide: impossible d'uploader vers TikTok.");
+  }
+  const buffer = await fsp.readFile(filePath);
+  const response = await fetch(safeUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "video/mp4",
+      "Content-Length": String(size),
+      "Content-Range": `bytes 0-${size - 1}/${size}`
+    },
+    body: buffer
+  });
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    throw new Error(
+      `Upload TikTok échoué (${response.status})${responseText ? `: ${responseText.slice(0, 200)}` : ""}`
+    );
+  }
+}
+
+function buildTikTokPostInfo(title, privacyLevel, disableComment, disableDuet, disableStitch) {
+  return {
+    title,
+    privacy_level: privacyLevel,
+    disable_comment: disableComment,
+    disable_duet: disableDuet,
+    disable_stitch: disableStitch
+  };
+}
+
+async function publishClipToTikTokFromUrl({
+  accessToken,
+  jobId,
+  clip,
+  title,
+  postInfo,
+  baseUrl
+}) {
+  const videoUrl = `${String(baseUrl).replace(/\/+$/, "")}/api/jobs/${jobId}/clips/${clip.id}/download`;
+  const initPayload = {
+    post_info: postInfo,
+    source_info: {
+      source: "PULL_FROM_URL",
+      video_url: videoUrl
+    }
+  };
+  const initRes = await tiktokApiRequest("/post/publish/video/init/", accessToken, initPayload);
+  const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
+  if (!publishId) {
+    throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
+  }
+  const publishState = await waitForTiktokPublishCompletion(accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
+  return {
+    clipId: clip.id,
+    caption: title,
+    videoUrl,
+    publishId,
+    publishStatus: publishState.status,
+    publishRawStatus: publishState.rawStatus,
+    publishSourceUsed: "pull_from_url"
+  };
+}
+
+async function publishClipToTikTokFromFileUpload({
+  accessToken,
+  clip,
+  title,
+  postInfo
+}) {
+  const selectedPath = String(clip.burnedFilePath || clip.filePath || "").trim();
+  if (!selectedPath) {
+    throw new Error(`Chemin clip introuvable pour le clip ${clip.id}`);
+  }
+  const stats = await fsp.stat(selectedPath).catch(() => null);
+  if (!stats || !stats.isFile()) {
+    throw new Error(`Fichier clip introuvable pour le clip ${clip.id}`);
+  }
+  if (stats.size <= 0) {
+    throw new Error(`Fichier clip vide pour le clip ${clip.id}`);
+  }
+  const initPayload = {
+    post_info: postInfo,
+    source_info: {
+      source: "FILE_UPLOAD",
+      video_size: stats.size,
+      chunk_size: stats.size,
+      total_chunk_count: 1
+    }
+  };
+  const initRes = await tiktokApiRequest("/post/publish/video/init/", accessToken, initPayload);
+  const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
+  if (!publishId) {
+    throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
+  }
+  const uploadUrl = String(initRes?.data?.upload_url || initRes?.data?.uploadUrl || "").trim();
+  if (!uploadUrl) {
+    throw new Error(`TikTok upload_url manquant pour le clip ${clip.id}`);
+  }
+  await uploadTikTokFileToUploadUrl(uploadUrl, selectedPath, stats.size);
+  const publishState = await waitForTiktokPublishCompletion(accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
+  return {
+    clipId: clip.id,
+    caption: title,
+    filePath: selectedPath,
+    fileSizeBytes: stats.size,
+    publishId,
+    publishStatus: publishState.status,
+    publishRawStatus: publishState.rawStatus,
+    publishSourceUsed: "file_upload"
+  };
+}
+
+async function waitForTiktokPublishCompletion(accessToken, publishId, timeoutMs = TIKTOK_STATUS_POLL_TIMEOUT_MS) {
+  const deadline = Date.now() + Math.max(10000, timeoutMs);
+  while (Date.now() < deadline) {
+    const statusPayload = await tiktokApiRequest("/post/publish/status/fetch/", accessToken, { publish_id: publishId });
+    const status = String(
+      statusPayload?.data?.status ||
+      statusPayload?.data?.publish_status ||
+      statusPayload?.data?.post_status ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+    if (["PROCESSING_DOWNLOAD", "PROCESSING_UPLOAD", "PROCESSING", ""].includes(status)) {
+      await new Promise((resolve) => setTimeout(resolve, TIKTOK_STATUS_POLL_INTERVAL_MS));
+      continue;
+    }
+    if (["PUBLISH_COMPLETE", "PUBLISHED", "SUCCESS"].includes(status)) {
+      return { status: "published", rawStatus: status, statusPayload };
+    }
+    if (["FAILED", "PUBLISH_FAILED", "REJECTED", "CANCELLED"].includes(status)) {
+      return { status: "failed", rawStatus: status, statusPayload };
+    }
+    await new Promise((resolve) => setTimeout(resolve, TIKTOK_STATUS_POLL_INTERVAL_MS));
+  }
+  return { status: "timeout", rawStatus: "TIMEOUT", statusPayload: null };
+}
+
+function computeDurationBasedClipCount(durationSec, clipDuration = 120) {
+  const duration = Math.max(1, Number(durationSec || 0));
+  const segment = Math.max(30, Number(clipDuration || 120));
+  return Math.max(1, Math.min(12, Math.floor(duration / segment)));
+}
+
+async function createQueuedUrlJob({
+  videoUrl,
+  clipDuration = 120,
+  clipsCount = 1,
+  ignoreIntroSec = 20,
+  minGapSecBetweenClips = 6
+}) {
+  const id = uuidv4();
+  let youtubeCookiesFilePath = "";
+  if (isLikelyYouTubeUrl(videoUrl) && hasStoredYoutubeCookies()) {
+    youtubeCookiesFilePath = YOUTUBE_COOKIES_STORE_PATH;
+  }
+  const job = {
+    id,
+    status: "queued",
+    progress: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    sourceType: "url",
+    sourceUrl: videoUrl,
+    youtubeCookiesFilePath,
+    inputPath: "",
+    originalFilename: "",
+    duration: 0,
+    autoTranscriptUsed: false,
+    params: {
+      clipDuration: Math.min(600, Math.max(30, Math.floor(clipDuration))),
+      clipsCount: Math.min(12, Math.max(1, Math.floor(clipsCount))),
+      aspectRatio: "9:16",
+      frameMode: "full-video",
+      transcript: "",
+      minGapSecBetweenClips: Math.max(0, Number(minGapSecBetweenClips) || 6),
+      ignoreIntroSec: Math.max(0, Number(ignoreIntroSec) || 20),
+      subtitleTheme: "classic",
+      highlightMode: "viral",
+      languageMode: "no-added-audio",
+      includeAutoTranscript: false,
+      dubFrenchAudio: false,
+      autoDubVoiceBySpeaker: false,
+      includeSrtInZip: false,
+      burnSubtitles: false,
+      hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
+    },
+    clips: [],
+    error: null
+  };
+  jobs.set(id, job);
+  await persistJobsDb();
+  await enqueueJob(id);
+  return job;
+}
+
+async function waitForJobTerminalState(jobId, timeoutMs = 90 * 60 * 1000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const current = jobs.get(jobId);
+    if (!current) throw new Error(`Job introuvable (${jobId})`);
+    if (current.status === "completed" || current.status === "failed") {
+      return current;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  throw new Error(`Timeout job (${jobId})`);
+}
+
+async function publishJobClipsToTikTok(job, options = {}) {
+  const cfg = await getTikTokConfig();
+  if (!hasTikTokConfig(cfg)) {
+    throw new Error("Config TikTok incomplète: accessToken + openId requis.");
+  }
+  if (!Array.isArray(job.clips) || !job.clips.length) {
+    throw new Error("Aucun clip à publier pour ce job.");
+  }
+  const publishSource = normalizeTikTokPublishSource(options.publishSource || cfg.publishSource || "auto");
+  const privacyLevel = normalizeTikTokPrivacyLevel(options.privacyLevel || cfg.defaultPrivacyLevel || "SELF_ONLY");
+  const disableComment = boolFrom(options.disableComment, false);
+  const disableDuet = boolFrom(options.disableDuet, false);
+  const disableStitch = boolFrom(options.disableStitch, false);
+  const extraHashtags = String(options.hashtags || "").trim();
+  const out = [];
+
+  for (const clip of job.clips) {
+    const title = buildTikTokCaptionForClip(job, clip, cfg.defaultHashtags || "", extraHashtags);
+    const postInfo = buildTikTokPostInfo(title, privacyLevel, disableComment, disableDuet, disableStitch);
+    let pullFromUrlError = null;
+
+    if (publishSource === "pull_from_url" || publishSource === "auto") {
+      try {
+        const baseUrl = resolvePublicBaseUrl(options.baseUrl || "", options.req || null);
+        const publishedFromUrl = await publishClipToTikTokFromUrl({
+          accessToken: cfg.accessToken,
+          jobId: job.id,
+          clip,
+          title,
+          postInfo,
+          baseUrl
+        });
+        out.push(publishedFromUrl);
+        continue;
+      } catch (error) {
+        if (publishSource === "pull_from_url") {
+          throw error;
+        }
+        if (!isTikTokPullFromUrlVerificationError(error)) {
+          throw error;
+        }
+        pullFromUrlError = error;
+      }
+    }
+
+    if (publishSource === "file_upload" || publishSource === "auto") {
+      const publishedFromFile = await publishClipToTikTokFromFileUpload({
+        accessToken: cfg.accessToken,
+        clip,
+        title,
+        postInfo
+      });
+      if (pullFromUrlError) {
+        publishedFromFile.fallbackReason = pullFromUrlError instanceof Error ? pullFromUrlError.message : String(pullFromUrlError);
+      }
+      out.push(publishedFromFile);
+      continue;
+    }
+
+    throw new Error(`Mode de publication TikTok invalide: ${publishSource}`);
+  }
+
+  return out;
+}
+
+function sanitizeAutomationRun(run) {
+  return {
+    id: run.id,
+    status: run.status,
+    progress: run.progress,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    query: run.query,
+    sourceCount: run.sourceCount,
+    jobsCreated: run.jobsCreated,
+    jobsCompleted: run.jobsCompleted,
+    jobsFailed: run.jobsFailed,
+    clipsPublished: run.clipsPublished,
+    publishFailed: run.publishFailed,
+    error: run.error || null,
+    items: run.items || []
+  };
+}
+
+function createHttpError(statusCode, message) {
+  const error = new Error(String(message || "Erreur"));
+  error.statusCode = Math.max(400, Number(statusCode) || 500);
+  return error;
+}
+
+function sanitizeAutomationSchedulePayload(rawInput = {}, fallbackPrivacy = "SELF_ONLY") {
+  return {
+    q: String(rawInput.q || rawInput.query || "").trim(),
+    maxResults: Math.max(1, Math.min(25, Math.floor(toNumber(rawInput.maxResults, 8)))),
+    minDurationSec: Math.max(0, Math.min(7200, Math.floor(toNumber(rawInput.minDurationSec, 300)))),
+    order: normalizeDiscoverOrder(rawInput.order),
+    safeSearch: normalizeSafeSearch(rawInput.safeSearch),
+    regionCode: /^[A-Z]{2}$/.test(String(rawInput.regionCode || "FR").trim().toUpperCase())
+      ? String(rawInput.regionCode || "FR").trim().toUpperCase()
+      : "FR",
+    relevanceLanguage: /^[a-z]{2}$/.test(String(rawInput.relevanceLanguage || "").trim().toLowerCase())
+      ? String(rawInput.relevanceLanguage || "").trim().toLowerCase()
+      : "",
+    publishedWithinDays: Math.max(0, Math.min(3650, Math.floor(toNumber(rawInput.publishedWithinDays, 365)))),
+    excludeSeen: boolFrom(rawInput.excludeSeen, true),
+    blockedChannelKeywords: String(rawInput.blockedChannelKeywords || "").trim(),
+    blockedChannelIds: String(rawInput.blockedChannelIds || "").trim(),
+    clipDurationSec: Math.max(30, Math.min(600, Math.floor(toNumber(rawInput.clipDurationSec, 120)))),
+    ignoreIntroSec: Math.max(0, Math.min(600, Math.floor(toNumber(rawInput.ignoreIntroSec, 20)))),
+    minGapSecBetweenClips: Math.max(0, Math.min(60, toNumber(rawInput.minGapSecBetweenClips, 6))),
+    defaultPrivacyLevel: normalizeTikTokPrivacyLevel(rawInput.defaultPrivacyLevel || fallbackPrivacy || "SELF_ONLY"),
+    publishSource: normalizeTikTokPublishSource(rawInput.publishSource || "auto"),
+    hashtags: String(rawInput.hashtags || "").trim(),
+    baseUrl: String(rawInput.baseUrl || "").trim()
+  };
+}
+
+function defaultAutomationScheduleConfig() {
+  return {
+    enabled: false,
+    intervalMinutes: 180,
+    payload: sanitizeAutomationSchedulePayload({
+      q: "",
+      maxResults: 8,
+      minDurationSec: 300,
+      order: "relevance",
+      regionCode: "FR",
+      relevanceLanguage: "",
+      publishedWithinDays: 90,
+      excludeSeen: true,
+      blockedChannelKeywords: "",
+      blockedChannelIds: "",
+      clipDurationSec: 120,
+      ignoreIntroSec: 20,
+      minGapSecBetweenClips: 6,
+      defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
+      hashtags: "#funny #fyp",
+      baseUrl: ""
+    }),
+    updatedAt: null
+  };
+}
+
+function readAutomationScheduleConfig() {
+  const fallback = defaultAutomationScheduleConfig();
+  if (!fs.existsSync(AUTOMATION_SCHEDULE_STORE_PATH)) {
+    return fallback;
+  }
+  try {
+    const raw = fs.readFileSync(AUTOMATION_SCHEDULE_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      enabled: boolFrom(parsed.enabled, false),
+      intervalMinutes: Math.max(
+        AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+        Math.min(1440, Math.floor(toNumber(parsed.intervalMinutes, fallback.intervalMinutes)))
+      ),
+      payload: sanitizeAutomationSchedulePayload(parsed.payload || {}, parsed?.payload?.defaultPrivacyLevel || "SELF_ONLY"),
+      updatedAt: parsed.updatedAt || null
+    };
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+async function writeAutomationScheduleConfig(input) {
+  const current = readAutomationScheduleConfig();
+  const mergedPayload = {
+    ...(current.payload || {}),
+    ...(input.payload || {})
+  };
+  const next = {
+    enabled: boolFrom(input.enabled, current.enabled),
+    intervalMinutes: Math.max(
+      AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+      Math.min(1440, Math.floor(toNumber(input.intervalMinutes, current.intervalMinutes)))
+    ),
+    payload: sanitizeAutomationSchedulePayload(mergedPayload, mergedPayload.defaultPrivacyLevel || "SELF_ONLY"),
+    updatedAt: new Date().toISOString()
+  };
+  await fsp.mkdir(SECRETS_DIR, { recursive: true });
+  await fsp.writeFile(AUTOMATION_SCHEDULE_STORE_PATH, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+  return readAutomationScheduleConfig();
+}
+
+async function clearAutomationScheduleConfig() {
+  if (fs.existsSync(AUTOMATION_SCHEDULE_STORE_PATH)) {
+    await fsp.unlink(AUTOMATION_SCHEDULE_STORE_PATH);
+  }
+  return readAutomationScheduleConfig();
+}
+
+function sanitizeAutomationScheduleStatus(config = readAutomationScheduleConfig()) {
+  return {
+    enabled: Boolean(config.enabled),
+    intervalMinutes: Number(config.intervalMinutes || 0),
+    minIntervalMinutes: AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES,
+    payload: config.payload || defaultAutomationScheduleConfig().payload,
+    updatedAt: config.updatedAt || null,
+    running: automationScheduleRunning || automationPipelineRunning,
+    nextRunAt: automationScheduleRuntime.nextRunAt || null,
+    lastRunAt: automationScheduleRuntime.lastRunAt || null,
+    lastRunId: automationScheduleRuntime.lastRunId || "",
+    lastRunStatus: automationScheduleRuntime.lastRunStatus || "",
+    lastError: automationScheduleRuntime.lastError || ""
+  };
+}
+
+function clearAutomationScheduleTimer() {
+  if (automationScheduleTimer) {
+    clearTimeout(automationScheduleTimer);
+    automationScheduleTimer = null;
+  }
+  automationScheduleRuntime.nextRunAt = null;
+}
+
+function scheduleNextAutomationTick(config = readAutomationScheduleConfig()) {
+  clearAutomationScheduleTimer();
+  if (!config.enabled) {
+    automationScheduleRuntime.enabled = false;
+    return;
+  }
+  const intervalMs = Math.max(
+    AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES * 60000,
+    Number(config.intervalMinutes || AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES) * 60000
+  );
+  automationScheduleRuntime.enabled = true;
+  automationScheduleRuntime.intervalMinutes = Number(config.intervalMinutes || AUTOMATION_SCHEDULE_MIN_INTERVAL_MINUTES);
+  automationScheduleRuntime.updatedAt = config.updatedAt || null;
+  automationScheduleRuntime.nextRunAt = new Date(Date.now() + intervalMs).toISOString();
+  automationScheduleTimer = setTimeout(() => {
+    void runScheduledAutomationTick();
+  }, intervalMs);
+}
+
+async function runAutomationWorkflow(rawInput = {}, context = {}) {
+  if (!YOUTUBE_API_KEY) {
+    throw createHttpError(503, "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre.");
+  }
+  if (automationPipelineRunning) {
+    throw createHttpError(409, "Une automatisation est déjà en cours. Réessaie après la fin du run actif.");
+  }
+  const tiktokConfig = await getTikTokConfig();
+  if (!hasTikTokConfig(tiktokConfig)) {
+    throw createHttpError(400, "Config TikTok manquante: accessToken + openId requis.");
+  }
+
+  const normalizedInput = sanitizeAutomationSchedulePayload(rawInput, tiktokConfig.defaultPrivacyLevel || "SELF_ONLY");
+  const query = String(normalizedInput.q || "").trim();
+  if (!query) {
+    throw createHttpError(400, "Le champ q (niche) est requis.");
+  }
+
+  const blockedChannelKeywords = parseCsvTokens(normalizedInput.blockedChannelKeywords);
+  const blockedChannelIds = new Set(
+    String(normalizedInput.blockedChannelIds || "")
+      .split(/[,\n;]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+
+  automationPipelineRunning = true;
+  try {
+    const rawCandidates = await fetchYouTubeDiscoverRaw({
+      query,
+      maxResults: Math.max(10, normalizedInput.maxResults),
+      order: normalizedInput.order,
+      regionCode: normalizedInput.regionCode,
+      relevanceLanguage: normalizedInput.relevanceLanguage,
+      safeSearch: normalizedInput.safeSearch,
+      publishedWithinDays: normalizedInput.publishedWithinDays
+    });
+
+    const nowMs = Date.now();
+    const queryTokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const seenVideoIds = normalizedInput.excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
+
+    const selectedSources = rawCandidates
+      .filter((item) => {
+        if (Number(item.durationSec || 0) < normalizedInput.minDurationSec) return false;
+        if (normalizedInput.excludeSeen && seenVideoIds.has(String(item.videoId || ""))) return false;
+        const channelId = String(item.channelId || "").trim();
+        const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
+        if (channelId && blockedChannelIds.has(channelId)) return false;
+        if (blockedChannelKeywords.length > 0) {
+          const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
+          if (blockedMatch) return false;
+        }
+        return true;
+      })
+      .map((item) => ({
+        ...item,
+        score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, normalizedInput.maxResults);
+
+    if (!selectedSources.length) {
+      throw createHttpError(409, "Aucune source exploitable après filtrage (durée, blacklist, anti-doublon).");
+    }
+
+    const runId = uuidv4();
+    const run = {
+      id: runId,
+      status: "processing",
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      query,
+      sourceCount: selectedSources.length,
+      jobsCreated: 0,
+      jobsCompleted: 0,
+      jobsFailed: 0,
+      clipsPublished: 0,
+      publishFailed: 0,
+      error: null,
+      items: []
+    };
+    automationRuns.set(runId, run);
+
+    const baseUrlHint = String(normalizedInput.baseUrl || context.baseUrl || "").trim();
+    const runReq = context.req || null;
+
+    try {
+      for (let index = 0; index < selectedSources.length; index += 1) {
+        const source = selectedSources[index];
+        const clipsCount = computeDurationBasedClipCount(source.durationSec || 0, normalizedInput.clipDurationSec);
+        const queuedJob = await createQueuedUrlJob({
+          videoUrl: source.url,
+          clipDuration: normalizedInput.clipDurationSec,
+          clipsCount,
+          ignoreIntroSec: normalizedInput.ignoreIntroSec,
+          minGapSecBetweenClips: normalizedInput.minGapSecBetweenClips
+        });
+        run.jobsCreated += 1;
+        run.items.push({
+          sourceUrl: source.url,
+          score: source.score,
+          jobId: queuedJob.id,
+          clipsCountRequested: clipsCount,
+          status: "queued",
+          published: []
+        });
+        run.progress = Math.min(30, Math.round(((index + 1) / selectedSources.length) * 30));
+        run.updatedAt = new Date().toISOString();
+      }
+
+      for (const item of run.items) {
+        const terminal = await waitForJobTerminalState(item.jobId, 90 * 60 * 1000);
+        if (terminal.status !== "completed") {
+          run.jobsFailed += 1;
+          item.status = "failed";
+          item.error = terminal.error || "Échec génération";
+          continue;
+        }
+        run.jobsCompleted += 1;
+        item.status = "completed";
+        item.generatedClips = (terminal.clips || []).length;
+
+        try {
+          const published = await publishJobClipsToTikTok(terminal, {
+            req: runReq,
+            baseUrl: baseUrlHint,
+            privacyLevel: normalizedInput.defaultPrivacyLevel,
+            publishSource: normalizedInput.publishSource || tiktokConfig.publishSource || "auto",
+            hashtags: normalizedInput.hashtags
+          });
+          item.published = published;
+          for (const pub of published) {
+            if (pub.publishStatus === "published") {
+              run.clipsPublished += 1;
+            } else {
+              run.publishFailed += 1;
+            }
+          }
+        } catch (publishError) {
+          run.publishFailed += Math.max(1, Number(item.generatedClips || 0));
+          item.publishError = publishError instanceof Error ? publishError.message : "Échec publication TikTok";
+        }
+        run.progress = Math.min(99, run.progress + 5);
+        run.updatedAt = new Date().toISOString();
+      }
+
+      run.status = "completed";
+      run.progress = 100;
+      run.updatedAt = new Date().toISOString();
+      return run;
+    } catch (error) {
+      run.status = "failed";
+      run.progress = 100;
+      run.error = error instanceof Error ? error.message : "Erreur automation";
+      run.updatedAt = new Date().toISOString();
+      return run;
+    }
+  } finally {
+    automationPipelineRunning = false;
+  }
+}
+
+async function runScheduledAutomationTick() {
+  const config = readAutomationScheduleConfig();
+  if (!config.enabled) {
+    clearAutomationScheduleTimer();
+    automationScheduleRuntime.enabled = false;
+    return;
+  }
+  if (automationScheduleRunning || automationPipelineRunning) {
+    scheduleNextAutomationTick(config);
+    return;
+  }
+  automationScheduleRunning = true;
+  automationScheduleRuntime.lastRunAt = new Date().toISOString();
+  automationScheduleRuntime.nextRunAt = null;
+  try {
+    const run = await runAutomationWorkflow(config.payload || {}, { baseUrl: config?.payload?.baseUrl || "" });
+    automationScheduleRuntime.lastRunId = String(run.id || "");
+    automationScheduleRuntime.lastRunStatus = String(run.status || "");
+    automationScheduleRuntime.lastError = String(run.error || "");
+  } catch (error) {
+    automationScheduleRuntime.lastRunId = "";
+    automationScheduleRuntime.lastRunStatus = "failed";
+    automationScheduleRuntime.lastError = error instanceof Error ? error.message : "Erreur planification automation";
+  } finally {
+    automationScheduleRunning = false;
+    scheduleNextAutomationTick(readAutomationScheduleConfig());
+  }
+}
+
+function parseSubtitleTimestamp(raw) {
+  const cleaned = String(raw || "").trim().replace(",", ".");
+  const parts = cleaned.split(":").map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  const [hoursRaw, minutesRaw, secondsRaw] =
+    parts.length === 3 ? parts : ["0", parts[0], parts[1]];
+  const hours = Number(hoursRaw);
+  const minutes = Number(minutesRaw);
+  const seconds = Number(secondsRaw);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function stripSubtitleMarkup(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\{\\[^}]+\}/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseSrtCaptions(content) {
+  const blocks = String(content || "")
+    .replace(/\r/g, "")
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const out = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const timeLine = lines.find((line) => line.includes("-->"));
+    if (!timeLine) continue;
+    const [startRaw, endRaw] = timeLine.split("-->").map((x) => x.trim());
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const textLines = lines.slice(lines.indexOf(timeLine) + 1);
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (!text) continue;
+    out.push({ start, end, text });
+  }
+  return out;
+}
+
+function parseVttCaptions(content) {
+  const lines = String(content || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx].trim();
+    if (!line || line.startsWith("WEBVTT") || line.startsWith("NOTE")) {
+      idx += 1;
+      continue;
+    }
+    if (!line.includes("-->")) {
+      idx += 1;
+      continue;
+    }
+    const [startRaw, endRaw] = line.split("-->").map((part) => part.trim().split(" ")[0]);
+    const start = parseSubtitleTimestamp(startRaw);
+    const end = parseSubtitleTimestamp(endRaw);
+    idx += 1;
+    const textLines = [];
+    while (idx < lines.length && lines[idx].trim()) {
+      textLines.push(lines[idx].trim());
+      idx += 1;
+    }
+    const text = stripSubtitleMarkup(textLines.join(" "));
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && text) {
+      out.push({ start, end, text });
+    }
+  }
+  return out;
+}
+
+async function parseSubtitleFileToTimedCaptions(subtitlePath) {
+  if (!subtitlePath || !fs.existsSync(subtitlePath)) return [];
+  const raw = await fsp.readFile(subtitlePath, "utf8");
+  const ext = path.extname(subtitlePath).toLowerCase();
+  if (ext === ".srt") return parseSrtCaptions(raw);
+  if (ext === ".vtt") return parseVttCaptions(raw);
+  return parseSrtCaptions(raw);
+}
+
+function buildCaptionsFromSourceTimedCaptions(clipStart, clipEnd, timedCaptions) {
+  const localCaptions = [];
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(clipStart, cue.start);
+    const overlapEnd = Math.min(clipEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    const text = stripSubtitleMarkup(cue.text);
+    if (!text) continue;
+    localCaptions.push({
+      start: Number((overlapStart - clipStart).toFixed(3)),
+      end: Number((overlapEnd - clipStart).toFixed(3)),
+      text
+    });
+  }
+  return localCaptions;
+}
+
+function buildDubTextFromCaptions(captions) {
+  return (captions || [])
+    .map((cue) => stripSubtitleMarkup(cue.text))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function detectLikelyFrenchVoiceForClip(inputClipPath) {
+  const maleVoice = process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+  const femaleVoice = process.env.EDGE_TTS_DEFAULT_FEMALE_VOICE || "fr-FR-DeniseNeural";
+  const threshold = Number(process.env.EDGE_TTS_GENDER_ZCR_THRESHOLD) || 0.095;
+  if (!inputClipPath || !fs.existsSync(inputClipPath)) return maleVoice;
+
+  try {
+    const { stderr } = await runCommandCapture("ffmpeg", [
+      "-hide_banner",
+      "-i",
+      inputClipPath,
+      "-af",
+      "astats=metadata=1:reset=1",
+      "-f",
+      "null",
+      "-"
+    ]);
+
+    const matches = Array.from(String(stderr || "").matchAll(/Zero crossings rate:\s*([0-9.]+)/gi));
+    const values = matches
+      .map((match) => Number(match[1]))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (!values.length) return maleVoice;
+    const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return avg >= threshold ? femaleVoice : maleVoice;
+  } catch (_error) {
+    return maleVoice;
+  }
+}
+
+async function synthesizeFrenchSpeech(text, outputAudioPath, preferredVoice = "") {
+  const spokenText = String(text || "").replace(/\s+/g, " ").trim();
+  if (!spokenText) return false;
+  const trimmed = spokenText.length > 1500 ? spokenText.slice(0, 1500) : spokenText;
+  const selectedVoice =
+    preferredVoice || process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+  await runCommand("python3", [
+    "-m",
+    "edge_tts",
+    "--voice",
+    selectedVoice,
+    "--text",
+    trimmed,
+    "--write-media",
+    outputAudioPath
+  ]);
+  return fs.existsSync(outputAudioPath);
+}
+
+async function replaceClipAudioWithFrenchDub(inputClipPath, dubAudioPath, outputClipPath) {
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    dubAudioPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
+function tokenizeTranscript(transcript) {
+  return String(transcript || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
+const VIRAL_KEYWORDS = new Set([
+  "choc",
+  "incroyable",
+  "secret",
+  "erreur",
+  "danger",
+  "risque",
+  "urgent",
+  "revele",
+  "explose",
+  "cash",
+  "million",
+  "milliard",
+  "guerre",
+  "attaque",
+  "strategie",
+  "preuve",
+  "comment",
+  "pourquoi",
+  "top",
+  "viral",
+  "buzz",
+  "impact",
+  "grave",
+  "impossible"
+]);
+
+const INTRO_OUTRO_PROMO_KEYWORDS = new Set([
+  "subscribe",
+  "sub",
+  "abonne",
+  "abonnezvous",
+  "abonnement",
+  "follow",
+  "suivez",
+  "like",
+  "partage",
+  "partagez",
+  "creator",
+  "createur",
+  "createurs",
+  "credits",
+  "credit",
+  "sponsor",
+  "sponsoris",
+  "sponsored",
+  "instagram",
+  "insta",
+  "tiktok",
+  "youtube",
+  "snapchat"
+]);
+
+function tokenizeForScoring(text) {
+  return String(text || "")
+    .split(/\s+/)
+    .map((token) => normalizeScoringToken(token))
+    .filter(Boolean);
+}
+
+function jaccardSetSimilarity(setA, setB) {
+  if (!setA.size && !setB.size) return 0;
+  if (!setA.size || !setB.size) return 0;
+  let inter = 0;
+  for (const token of setA) {
+    if (setB.has(token)) inter += 1;
+  }
+  const union = setA.size + setB.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function buildClipTitleFromText(text, index) {
+  const clean = stripSubtitleMarkup(text);
+  if (!clean) return `Clip ${index + 1}`;
+  const words = clean.split(/\s+/).filter(Boolean).slice(0, 11);
+  const short = words.join(" ");
+  if (!short) return `Clip ${index + 1}`;
+  return short.length > 80 ? `${short.slice(0, 77)}...` : short;
+}
+
+function scoreWindowFromTimedCaptions(windowStart, windowEnd, timedCaptions, clipDuration, mode, duration) {
+  const texts = [];
+  let coveredSeconds = 0;
+  for (const cue of timedCaptions || []) {
+    const overlapStart = Math.max(windowStart, cue.start);
+    const overlapEnd = Math.min(windowEnd, cue.end);
+    if (overlapEnd <= overlapStart) continue;
+    coveredSeconds += overlapEnd - overlapStart;
+    const text = stripSubtitleMarkup(cue.text);
+    if (text) texts.push(text);
+  }
+
+  const mergedText = texts.join(" ").replace(/\s+/g, " ").trim();
+  const tokens = tokenizeForScoring(mergedText);
+  const tokenSet = new Set(tokens);
+  const hookHits = tokens.reduce((sum, token) => sum + (VIRAL_KEYWORDS.has(token) ? 1 : 0), 0);
+  const promoHits = tokens.reduce((sum, token) => sum + (INTRO_OUTRO_PROMO_KEYWORDS.has(token) ? 1 : 0), 0);
+  const punctuationHits = (mergedText.match(/[!?]/g) || []).length;
+  const numericHits = (mergedText.match(/\d+/g) || []).length;
+  const socialTagHits = (mergedText.match(/[@#][\w.-]+/g) || []).length;
+  const density = Math.min(1, tokens.length / Math.max(8, clipDuration * 2.6));
+  const information = Math.min(1, tokenSet.size / Math.max(1, tokens.length || 1));
+  const hook = Math.min(1, (hookHits * 0.22 + punctuationHits * 0.12 + numericHits * 0.1) / 1.2);
+  const coverage = Math.min(1, coveredSeconds / Math.max(1, clipDuration));
+  const centerTime = (windowStart + windowEnd) / 2;
+  const energy = highlightScore(centerTime, duration, mode);
+  const promoPenalty = Math.min(0.34, promoHits * 0.045 + socialTagHits * 0.07);
+
+  let score = density * 0.22 + information * 0.16 + hook * 0.28 + coverage * 0.14 + energy * 0.2 - promoPenalty;
+  const earlyBias = 1 - centerTime / Math.max(duration, 1);
+  if (mode === "hook-first") score += earlyBias * 0.12;
+  if (mode === "viral") score += hook * 0.08 + Math.min(1, density * 1.2) * 0.06;
+  if (mode === "balanced") score += information * 0.06;
+
+  return {
+    score: Number(score.toFixed(4)),
+    tokenSet,
+    text: mergedText
+  };
+}
+
+function mockEnergyAtTime(time, duration) {
+  const x = time / Math.max(duration, 1);
+  const base = 0.45 + 0.2 * Math.sin(x * Math.PI * 8);
+  const randomSpike = (Math.sin(x * 62.3) + Math.sin(x * 22.1)) * 0.08;
+  return Math.max(0, Math.min(1, base + randomSpike));
+}
+
+function highlightScore(momentTime, duration, mode) {
+  const energy = mockEnergyAtTime(momentTime, duration);
+  const earlyBias = 1 - momentTime / Math.max(duration, 1);
+  const lateBias = 1 - earlyBias;
+  if (mode === "hook-first") return energy * 0.7 + earlyBias * 0.3;
+  if (mode === "viral") return energy * 0.85 + Math.abs(0.5 - lateBias) * 0.15;
+  return energy;
+}
+
+function generateCandidateMoments(duration, step, mode) {
+  const out = [];
+  for (let t = 0; t < duration; t += step) {
+    out.push({ t, score: highlightScore(t, duration, mode) });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+function computeBoundaryGuards(duration, clipDuration, ignoreIntroSec = 0) {
+  const maxStart = Math.max(0, duration - clipDuration);
+  if (maxStart <= 0) return { maxStart, introGuardSec: 0, outroGuardSec: 0, preferredMinStart: 0, preferredMaxStart: 0 };
+
+  // Keep clips away from generic intros/outros while preserving room for long clips.
+  const introGuardSec = Math.min(maxStart, Math.max(0, Math.min(60, duration * 0.12, clipDuration * 0.8)));
+  const manualIntroGuardSec = Math.min(maxStart, Math.max(0, ignoreIntroSec));
+  const outroGuardSec = Math.min(maxStart, Math.max(0, Math.min(45, duration * 0.08, clipDuration * 0.65)));
+  const preferredMinStart = Math.max(introGuardSec, manualIntroGuardSec);
+  const preferredMaxStart = Math.max(preferredMinStart, maxStart - outroGuardSec);
+  return { maxStart, introGuardSec, manualIntroGuardSec, outroGuardSec, preferredMinStart, preferredMaxStart };
+}
+
+function selectBestClips(duration, clipDuration, clipsCount, minGapSec, mode, timedCaptions = [], ignoreIntroSec = 0) {
+  const { maxStart, preferredMinStart, preferredMaxStart } = computeBoundaryGuards(duration, clipDuration, ignoreIntroSec);
+  const hardMinStart = Math.min(maxStart, Math.max(0, ignoreIntroSec));
+  const step = Math.max(2, Math.min(7, clipDuration * 0.4));
+  const moments = generateCandidateMoments(duration, step, mode);
+  const candidates = moments.map((moment) => {
+    let start = Math.max(0, moment.t - clipDuration * 0.18);
+    start = Math.min(start, maxStart);
+    const end = Math.min(duration, start + clipDuration);
+    const timed = scoreWindowFromTimedCaptions(start, end, timedCaptions, clipDuration, mode, duration);
+    const fallbackText = "";
+    const title = buildClipTitleFromText(timed.text || fallbackText, 0);
+    const baseScore = timed.tokenSet.size > 0 ? timed.score : Number(moment.score.toFixed(4));
+    const beforePreferred = Math.max(0, preferredMinStart - start);
+    const afterPreferred = Math.max(0, start - preferredMaxStart);
+    const boundaryPenalty = Math.min(0.45, beforePreferred / Math.max(1, clipDuration) * 0.42 + afterPreferred / Math.max(1, clipDuration) * 0.28);
+    const combinedScore = Number(Math.max(0, baseScore - boundaryPenalty).toFixed(4));
+    return {
+      start,
+      end,
+      duration: end - start,
+      score: combinedScore,
+      title,
+      tokenSet: timed.tokenSet
+    };
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+  const chosen = [];
+  const eligibleCandidates = candidates.filter((candidate) => candidate.start >= hardMinStart);
+  const preferredCandidates = eligibleCandidates.filter(
+    (candidate) => candidate.start >= preferredMinStart && candidate.start <= preferredMaxStart
+  );
+
+  const hasConflict = (candidate) =>
+    chosen.some((clip) => {
+      const inter = Math.max(0, Math.min(clip.end, candidate.end) - Math.max(clip.start, candidate.start));
+      if (inter > clipDuration * 0.28) return true;
+      const distance = Math.min(
+        Math.abs(clip.start - candidate.start),
+        Math.abs(clip.end - candidate.end),
+        Math.abs(clip.start - candidate.end),
+        Math.abs(clip.end - candidate.start)
+      );
+      if (distance < minGapSec) return true;
+      const similarity = jaccardSetSimilarity(clip.tokenSet || new Set(), candidate.tokenSet || new Set());
+      if ((clip.tokenSet || new Set()).size === 0 || (candidate.tokenSet || new Set()).size === 0) return false;
+      return similarity > 0.62;
+    });
+
+  for (const candidate of preferredCandidates) {
+    if (!hasConflict(candidate)) {
+      chosen.push(candidate);
+      if (chosen.length >= clipsCount) break;
+    }
+  }
+
+  if (chosen.length < clipsCount) {
+    for (const candidate of eligibleCandidates) {
+      if (!hasConflict(candidate)) {
+        chosen.push(candidate);
+        if (chosen.length >= clipsCount) break;
+      }
+    }
+  }
+
+  if (chosen.length < clipsCount) {
+    for (let i = 0; i < clipsCount; i += 1) {
+      const ratio = clipsCount === 1 ? 0 : i / (clipsCount - 1);
+      const fallbackStart = Math.max(hardMinStart, preferredMinStart);
+      const fallbackSpan = Math.max(0, preferredMaxStart - fallbackStart);
+      const start = Number((fallbackStart + fallbackSpan * ratio).toFixed(3));
+      const end = Math.min(duration, start + clipDuration);
+      const fallback = {
+        start,
+        end,
+        duration: end - start,
+        score: Number(highlightScore(start, duration, mode).toFixed(3)),
+        title: buildClipTitleFromText("", i),
+        tokenSet: new Set()
+      };
+      if (!hasConflict(fallback)) {
+        chosen.push(fallback);
+      }
+      if (chosen.length >= clipsCount) break;
+    }
+  }
+
+  if (!chosen.length) {
+    const safeStart = Math.min(Math.max(hardMinStart, preferredMinStart), maxStart);
+    chosen.push({
+      start: safeStart,
+      end: Math.min(duration, safeStart + clipDuration),
+      duration: Math.min(duration, clipDuration),
+      score: 0.5,
+      title: "Clip 1",
+      tokenSet: new Set()
+    });
+  }
+
+  return chosen
+    .sort((a, b) => a.start - b.start)
+    .slice(0, clipsCount)
+    .map((clip, idx) => ({
+      id: `clip-${idx + 1}`,
+      title: clip.title || `Clip ${idx + 1}`,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: Number(clip.score.toFixed(3))
+    }));
+}
+
+function splitIntoSubtitleChunks(words, minWords = 4, maxWords = 10) {
+  const chunks = [];
+  let cursor = 0;
+  while (cursor < words.length) {
+    const size = minWords + Math.floor(Math.random() * (maxWords - minWords + 1));
+    const part = words.slice(cursor, cursor + size);
+    if (!part.length) break;
+    chunks.push(part.join(" "));
+    cursor += size;
+  }
+  return chunks;
+}
+
+function segmentTranscriptForClips(transcript, clips) {
+  const words = tokenizeTranscript(transcript);
+  if (!words.length) return clips.map(() => "");
+  const durationTotal = clips.reduce((acc, clip) => acc + clip.duration, 0) || 1;
+  const segments = [];
+  let assigned = 0;
+  clips.forEach((clip, idx) => {
+    const ratio = clip.duration / durationTotal;
+    let count = Math.round(words.length * ratio);
+    if (idx === clips.length - 1) count = words.length - assigned;
+    count = Math.max(0, count);
+    segments.push(words.slice(assigned, assigned + count).join(" "));
+    assigned += count;
+  });
+  return segments;
+}
+
+function buildCaptionsForClip(clipDuration, clipText) {
+  const words = tokenizeTranscript(clipText);
+  if (!words.length) return [];
+  const chunks = splitIntoSubtitleChunks(words);
+  const perChunk = clipDuration / chunks.length;
+  return chunks.map((text, idx) => {
+    const start = perChunk * idx;
+    const end = idx === chunks.length - 1 ? clipDuration : perChunk * (idx + 1);
+    return { start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), text };
+  });
+}
+
+function resolveOutputDimensions(aspectRatio) {
+  if (aspectRatio === "1:1") return { width: 1080, height: 1080 };
+  if (aspectRatio === "16:9") return { width: 1280, height: 720 };
+  return { width: 1080, height: 1920 };
+}
+
+function runCommand(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) return resolve();
+      return reject(new Error(stderr || `${cmd} exited with code ${code}`));
+    });
+  });
+}
+
+function runCommandCapture(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (buf) => {
+      stdout += String(buf);
+    });
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) return resolve({ stdout, stderr });
+      return reject(new Error(stderr || `${cmd} exited with code ${code}`));
+    });
+  });
+}
+
+async function isPlayableVideoFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  try {
+    await ffprobeDuration(filePath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function resolveDownloadedVideoByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  const entries = await fsp.readdir(dir);
+  const matches = entries
+    .filter((name) => name === base || name.startsWith(`${base}.`))
+    .map((name) => path.join(dir, name));
+
+  if (!matches.length) {
+    throw new Error("Téléchargement terminé mais fichier introuvable");
+  }
+
+  const ranked = matches.sort((a, b) => {
+    const extA = path.extname(a).toLowerCase();
+    const extB = path.extname(b).toLowerCase();
+    if (extA === ".mp4" && extB !== ".mp4") return -1;
+    if (extB === ".mp4" && extA !== ".mp4") return 1;
+    return 0;
+  });
+
+  return ranked[0];
+}
+
+async function cleanupDownloadedArtifactsByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return;
+  const entries = await fsp.readdir(dir);
+  const matches = entries.filter((name) => name === base || name.startsWith(`${base}.`));
+  await Promise.all(
+    matches.map(async (name) => {
+      try {
+        await fsp.unlink(path.join(dir, name));
+      } catch (_error) {
+        // ignore cleanup failures
+      }
+    })
+  );
+}
+
+async function resolveDownloadedSubtitleByPrefix(prefixPath) {
+  const dir = path.dirname(prefixPath);
+  const base = path.basename(prefixPath);
+  if (!fs.existsSync(dir)) return null;
+  const entries = await fsp.readdir(dir);
+  const candidates = entries
+    .filter((name) => name.startsWith(`${base}.`) && (name.endsWith(".srt") || name.endsWith(".vtt")))
+    .map((name) => path.join(dir, name));
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidatePath) => {
+    const file = path.basename(candidatePath).toLowerCase();
+    let score = 0;
+    if (file.includes(".fr")) score += 100;
+    if (file.includes(".fr-fr")) score += 10;
+    if (file.endsWith(".srt")) score += 5;
+    if (file.includes(".en")) score += 1;
+    return score;
+  };
+
+  const ordered = candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+  return ordered[0];
+}
+
+async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
+  const downloadOptions = arguments[2] || {};
+  const ytCookiesFile = downloadOptions.ytCookiesFile || "";
+  const subtitlesPrefix = downloadOptions.subtitlesPrefix || `${outputPrefix}-subs`;
+  const ytExtractorArgs =
+    process.env.YTDLP_EXTRACTOR_ARGS ||
+    (ytCookiesFile
+      ? "youtube:player_client=web,web_embedded,tv,ios"
+      : "youtube:player_client=web,web_embedded,tv,ios,android");
+  const ytUserAgent =
+    process.env.YTDLP_USER_AGENT ||
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+  const runYtDlpDownloadProfiles = async () => {
+    if (!ytDlpAvailable) return null;
+    const template = `${outputPrefix}.%(ext)s`;
+    const commonArgs = [
+      "-m",
+      "yt_dlp",
+      "--no-playlist",
+      "--no-progress",
+      "--restrict-filenames",
+      "--extractor-retries",
+      "3",
+      "--retries",
+      "3",
+      "--fragment-retries",
+      "3",
+      "--extractor-args",
+      ytExtractorArgs,
+      "--user-agent",
+      ytUserAgent,
+      "--js-runtimes",
+      "node",
+      "--remote-components",
+      "ejs:github",
+      "--merge-output-format",
+      "mp4",
+      "-o",
+      template
+    ];
+    if (ytCookiesFile) commonArgs.push("--cookies", ytCookiesFile);
+
+    const profiles = [
+      // Preferred: explicit mp4-compatible muxing.
+      ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best"],
+      // Wider fallback for difficult videos.
+      ["-f", "bestvideo*+bestaudio/best"],
+      // Last resort without format constraints.
+      []
+    ];
+
+    let lastError = null;
+    for (const profileArgs of profiles) {
+      try {
+        await cleanupDownloadedArtifactsByPrefix(outputPrefix);
+        const args = [...commonArgs, ...profileArgs, sourceUrl];
+        await runCommand("python3", args);
+        const downloaded = await resolveDownloadedVideoByPrefix(outputPrefix);
+        if (await isPlayableVideoFile(downloaded)) return downloaded;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("Impossible de télécharger la vidéo via yt-dlp");
+  };
+
+  const tryYtDlpSubtitleDownload = async () => {
+    if (!ytDlpAvailable || !isLikelyYouTubeUrl(sourceUrl)) return null;
+    const template = `${subtitlesPrefix}.%(ext)s`;
+    await cleanupDownloadedArtifactsByPrefix(subtitlesPrefix);
+    const args = [
+      "-m",
+      "yt_dlp",
+      "--skip-download",
+      "--no-playlist",
+      "--no-progress",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs",
+      process.env.YTDLP_SUB_LANGS || "fr.*,fr,en.*,en",
+      "--sub-format",
+      "srt/vtt/best",
+      "--convert-subs",
+      "srt",
+      "--extractor-args",
+      ytExtractorArgs,
+      "--js-runtimes",
+      "node",
+      "--remote-components",
+      "ejs:github",
+      "--user-agent",
+      ytUserAgent,
+      "-o",
+      template
+    ];
+    if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+    try {
+      await runCommand("python3", args.concat([sourceUrl]));
+    } catch (_error) {
+      return null;
+    }
+    return resolveDownloadedSubtitleByPrefix(subtitlesPrefix);
+  };
+
+  if (isLikelyYouTubeUrl(sourceUrl)) {
+    if (!ytDlpAvailable) {
+      throw new Error("Lien YouTube détecté mais yt-dlp est indisponible sur le serveur");
+    }
+    const ytFile = await runYtDlpDownloadProfiles();
+    if (await isPlayableVideoFile(ytFile)) {
+      const subtitlePath = await tryYtDlpSubtitleDownload();
+      return { videoPath: ytFile, subtitlePath: subtitlePath || "" };
+    }
+    throw new Error("Impossible de télécharger une vidéo YouTube exploitable");
+  }
+
+  // For generic URLs, attempt yt-dlp first when available.
+  if (ytDlpAvailable) {
+    try {
+      const ytFile = await runYtDlpDownloadProfiles();
+      if (await isPlayableVideoFile(ytFile)) return { videoPath: ytFile, subtitlePath: "" };
+    } catch (_ytError) {
+      // Fallback below.
+    }
+  }
+
+  const outputPath = `${outputPrefix}.mp4`;
+
+  try {
+    await runCommand("ffmpeg", [
+      "-y",
+      "-rw_timeout",
+      "15000000",
+      "-reconnect",
+      "1",
+      "-reconnect_streamed",
+      "1",
+      "-reconnect_delay_max",
+      "2",
+      "-i",
+      sourceUrl,
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath
+    ]);
+    if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
+  } catch (_copyErr) {
+    // Fallback below.
+  }
+
+  await runCommand("ffmpeg", [
+    "-y",
+    "-rw_timeout",
+    "15000000",
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_delay_max",
+    "2",
+    "-i",
+    sourceUrl,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ]);
+  if (await isPlayableVideoFile(outputPath)) return { videoPath: outputPath, subtitlePath: "" };
+  throw new Error("Téléchargement URL réussi mais fichier vidéo invalide");
+}
+
+function isManagedDownloadedInput(inputPath) {
+  if (!inputPath) return false;
+  const normalized = path.resolve(inputPath);
+  return normalized.startsWith(path.resolve(UPLOADS_DIR));
+}
+
+function ffprobeDuration(inputPath) {
+  return new Promise((resolve, reject) => {
+    const args = ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", inputPath];
+    const child = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    let stderr = "";
+    child.stdout.on("data", (buf) => {
+      output += String(buf);
+    });
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) return reject(new Error(stderr || "ffprobe failed"));
+      const duration = Number.parseFloat(output.trim());
+      if (!Number.isFinite(duration) || duration <= 0) return reject(new Error("Unable to detect video duration"));
+      return resolve(duration);
+    });
+  });
+}
+
+async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, aspectRatio, frameMode = DEFAULTS.frameMode) {
+  const { width, height } = resolveOutputDimensions(aspectRatio);
+  const useBlackBars = frameMode === "black-bars";
+  const useFullVideo = frameMode === "full-video";
+  const vf = [
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+    "format=yuv420p"
+  ].join(",");
+  const vComplexBlur = [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
+    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+  ].join(";");
+  const vComplexFullVideo = [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
+    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+  ].join(";");
+  const args = [
+    "-y",
+    "-ss",
+    String(clipStart),
+    "-t",
+    String(clipDuration),
+    "-i",
+    inputPath,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k"
+  ];
+  if (useBlackBars) {
+    args.push("-vf", vf);
+  } else {
+    args.push("-filter_complex", useFullVideo ? vComplexFullVideo : vComplexBlur, "-map", "[vout]", "-map", "0:a?");
+  }
+  args.push(outputPath);
+  await runCommand("ffmpeg", args);
+}
+
+function formatSrtTimestamp(seconds) {
+  const ms = Math.max(0, Math.floor(seconds * 1000));
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const milli = ms % 1000;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(milli).padStart(3, "0")}`;
+}
+
+function captionsToSrt(captions) {
+  return captions
+    .map((cue, idx) => `${idx + 1}\n${formatSrtTimestamp(cue.start)} --> ${formatSrtTimestamp(cue.end)}\n${cue.text}\n`)
+    .join("\n");
+}
+
+function subtitleForceStyle(theme) {
+  if (theme === "bold") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1";
+  if (theme === "cinema") return "Fontname=Georgia,Fontsize=24,PrimaryColour=&H00F0F0F0&,BackColour=&H70000000&,Outline=2";
+  if (theme === "neon") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFF00&,OutlineColour=&H00000000&,Outline=3";
+  return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H80000000&";
+}
+
+async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
+  const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+  const args = [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-vf",
+    `subtitles='${escapedSrt}':force_style='${subtitleForceStyle(theme)}'`,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "copy",
+    outputPath
+  ];
+  await runCommand("ffmpeg", args);
+}
+
+async function transcribeVideoMaybe(inputPath, duration, includeAutoTranscript) {
+  if (!includeAutoTranscript) return { transcript: "", autoTranscriptUsed: false };
+  if (whisperAvailable) {
+    const outDir = path.join(STORAGE_DIR, "uploads");
+    const model = process.env.WHISPER_MODEL || "base";
+    const language = process.env.WHISPER_LANGUAGE || "fr";
+    const whisperArgs = [
+      inputPath,
+      "--model",
+      model,
+      "--language",
+      language,
+      "--output_format",
+      "txt",
+      "--output_dir",
+      outDir,
+      "--fp16",
+      "False",
+      "--verbose",
+      "False"
+    ];
+
+    try {
+      await runCommand("whisper", whisperArgs);
+      const transcriptPath = path.join(outDir, `${path.parse(inputPath).name}.txt`);
+      if (fs.existsSync(transcriptPath)) {
+        const raw = await fsp.readFile(transcriptPath, "utf8");
+        const cleaned = raw.replace(/\s+/g, " ").trim();
+        if (cleaned.length > 20) {
+          return { transcript: cleaned, autoTranscriptUsed: true };
+        }
+      }
+    } catch (_error) {
+      // fallback below
+    }
+  }
+  // Avoid fake transcripts that can create nonsensical captions.
+  return { transcript: "", autoTranscriptUsed: false };
+}
+
+function sanitizeJobForClient(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    autoTranscriptUsed: !!job.autoTranscriptUsed,
+    source: {
+      filename: job.originalFilename,
+      duration: job.duration,
+      type: job.sourceType || "upload",
+      url: job.sourceUrl || ""
+    },
+    params: job.params,
+    clips: (job.clips || []).map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: clip.score,
+      aspectRatio: clip.aspectRatio || job.params?.aspectRatio || DEFAULTS.aspectRatio,
+      hasBurnedSubtitles: Boolean(clip.burnedFilePath),
+      hasDubbedAudio: Boolean(clip.dubbedAudioPath),
+      dubVoice: clip.dubVoice || "",
+      streamUrl: `/api/jobs/${job.id}/clips/${clip.id}/stream`,
+      downloadUrl: `/api/jobs/${job.id}/clips/${clip.id}/download`,
+      srtUrl: `/api/jobs/${job.id}/clips/${clip.id}/srt`,
+      captions: clip.captions
+    }))
+  };
+}
+
+async function failJob(job, err) {
+  job.status = "failed";
+  job.progress = 100;
+  job.error = err instanceof Error ? err.message : String(err);
+  job.updatedAt = new Date().toISOString();
+  await persistJobsDb();
+}
+
+async function processJobById(jobId) {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  try {
+    await processJob(job);
+  } catch (err) {
+    await failJob(job, err);
+  }
+}
+
+function pumpMemoryQueue() {
+  while (activeMemoryJobs < WORKER_CONCURRENCY && pendingJobIds.length > 0) {
+    const nextJobId = pendingJobIds.shift();
+    activeMemoryJobs += 1;
+    void processJobById(nextJobId).finally(() => {
+      activeMemoryJobs = Math.max(0, activeMemoryJobs - 1);
+      pumpMemoryQueue();
+    });
+  }
+}
+
+function enqueueMemoryJob(jobId) {
+  pendingJobIds.push(jobId);
+  pumpMemoryQueue();
+}
+
+async function initBullQueue() {
+  const shouldUseBullmq =
+    (QUEUE_MODE === "bullmq" || QUEUE_MODE === "auto") &&
+    Boolean(REDIS_URL);
+
+  if (!shouldUseBullmq) {
+    queueModeRuntime = "memory";
+    return;
+  }
+
+  try {
+    redisConnection = new IORedis(REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true
+    });
+    bullQueue = new Queue("clipforge-jobs", { connection: redisConnection });
+    bullWorker = new Worker(
+      "clipforge-jobs",
+      async (job) => {
+        await processJobById(String(job.data.jobId || ""));
+      },
+      {
+        connection: redisConnection,
+        concurrency: WORKER_CONCURRENCY
+      }
+    );
+    bullWorker.on("failed", async (job, err) => {
+      const candidateId = String(job?.data?.jobId || "");
+      const model = jobs.get(candidateId);
+      if (model && model.status !== "completed") {
+        await failJob(model, err);
+      }
+    });
+    queueModeRuntime = "bullmq";
+  } catch (_error) {
+    queueModeRuntime = "memory";
+    bullQueue = null;
+    bullWorker = null;
+    if (redisConnection) {
+      try {
+        redisConnection.disconnect();
+      } catch (_e) {
+        // ignore
+      }
+      redisConnection = null;
+    }
+  }
+}
+
+async function enqueueJob(jobId) {
+  if (queueModeRuntime === "bullmq" && bullQueue) {
+    await bullQueue.add("process", { jobId }, { removeOnComplete: 200, removeOnFail: 200 });
+    return;
+  }
+  enqueueMemoryJob(jobId);
+}
+
+async function readQueueStats() {
+  if (queueModeRuntime === "bullmq" && bullQueue) {
+    const [waiting, active, delayed] = await Promise.all([
+      bullQueue.getWaitingCount(),
+      bullQueue.getActiveCount(),
+      bullQueue.getDelayedCount()
+    ]);
+    return { waiting, active, delayed };
+  }
+  return { waiting: pendingJobIds.length, active: activeMemoryJobs, delayed: 0 };
+}
+
+async function processJob(job) {
+  job.status = "processing";
+  job.progress = 5;
+  job.updatedAt = new Date().toISOString();
+  if (job.params?.dubFrenchAudio && !edgeTtsAvailable) {
+    job.params.dubFrenchAudio = false;
+  }
+  await persistJobsDb();
+  const jobDir = getJobDir(job.id);
+  await fsp.mkdir(jobDir, { recursive: true });
+
+  if (!job.inputPath && job.sourceUrl) {
+    if (!isValidHttpUrl(job.sourceUrl)) {
+      throw new Error("URL vidéo invalide");
+    }
+    job.progress = 10;
+    job.updatedAt = new Date().toISOString();
+    await persistJobsDb();
+
+    const outputPrefix = path.join(UPLOADS_DIR, `${job.id}-source`);
+    const ytCookiesFile =
+      job.youtubeCookiesFilePath && fs.existsSync(job.youtubeCookiesFilePath)
+        ? job.youtubeCookiesFilePath
+        : "";
+    let downloaded;
+    try {
+      downloaded = await downloadVideoFromUrl(job.sourceUrl, outputPrefix, {
+        ytCookiesFile,
+        subtitlesPrefix: path.join(jobDir, "source-subs")
+      });
+    } catch (downloadErr) {
+      throw new Error(normalizeYouTubeErrorMessage(downloadErr instanceof Error ? downloadErr.message : String(downloadErr)));
+    }
+    job.inputPath = downloaded.videoPath;
+    job.sourceSubtitlePath = downloaded.subtitlePath || "";
+    if (!job.originalFilename) {
+      job.originalFilename = path.basename(downloaded.videoPath);
+    }
+    job.progress = 14;
+    job.updatedAt = new Date().toISOString();
+    await persistJobsDb();
+  }
+
+  if (!job.inputPath) {
+    throw new Error("Aucune source vidéo disponible pour ce job");
+  }
+
+  const duration = await ffprobeDuration(job.inputPath);
+  job.duration = Number(duration.toFixed(3));
+  job.progress = 15;
+  job.updatedAt = new Date().toISOString();
+
+  let sourceTimedCaptions = [];
+  if (job.sourceSubtitlePath) {
+    try {
+      sourceTimedCaptions = await parseSubtitleFileToTimedCaptions(job.sourceSubtitlePath);
+    } catch (_error) {
+      sourceTimedCaptions = [];
+    }
+  }
+
+  if (!job.params.transcript && job.params.includeAutoTranscript) {
+    const generated = await transcribeVideoMaybe(job.inputPath, duration, true);
+    job.params.transcript = generated.transcript;
+    job.autoTranscriptUsed = generated.autoTranscriptUsed;
+  }
+
+  let effectiveClipDuration = job.params.clipDuration;
+  const uniquenessBudget = duration / Math.max(1, job.params.clipsCount);
+  const isLongClipRequest = job.params.clipDuration >= 120;
+  if (!isLongClipRequest && uniquenessBudget < job.params.clipDuration * 0.9) {
+    effectiveClipDuration = Math.max(8, Math.floor(uniquenessBudget * 0.92));
+  }
+  job.params.effectiveClipDuration = effectiveClipDuration;
+
+  const clips = selectBestClips(
+    duration,
+    effectiveClipDuration,
+    job.params.clipsCount,
+    job.params.minGapSecBetweenClips,
+    job.params.highlightMode,
+    sourceTimedCaptions,
+    job.params.ignoreIntroSec
+  );
+  const transcriptParts = segmentTranscriptForClips(job.params.transcript, clips);
+  if (!job.params.transcript && sourceTimedCaptions.length) {
+    job.params.transcript = sourceTimedCaptions.map((cue) => cue.text).join(" ");
+  }
+  job.progress = 25;
+  job.updatedAt = new Date().toISOString();
+  await persistJobsDb();
+
+  const total = clips.length || 1;
+  const rendered = [];
+  for (let i = 0; i < clips.length; i += 1) {
+    const clip = clips[i];
+    const outputPath = path.join(jobDir, `${clip.id}.mp4`);
+    const timedCaptionsForClip = sourceTimedCaptions.length
+      ? buildCaptionsFromSourceTimedCaptions(clip.start, clip.end, sourceTimedCaptions)
+      : [];
+    const captions =
+      timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
+    const srtPath = getJobSrtPath(job.id, clip.id);
+    await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio, job.params.frameMode);
+    await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
+
+    let finalClipPath = outputPath;
+    let dubbedAudioPath = "";
+    if (job.params.dubFrenchAudio && edgeTtsAvailable) {
+      const dubText = buildDubTextFromCaptions(captions);
+      if (dubText) {
+        const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
+        const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
+        try {
+          const detectedVoice = boolFrom(job.params.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker)
+            ? await detectLikelyFrenchVoiceForClip(outputPath)
+            : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
+          if (hasTtsAudio) {
+            await replaceClipAudioWithFrenchDub(outputPath, ttsPath, dubbedPath);
+            finalClipPath = dubbedPath;
+            dubbedAudioPath = ttsPath;
+            clip.dubVoice = detectedVoice;
+          }
+        } catch (_error) {
+          finalClipPath = outputPath;
+          dubbedAudioPath = "";
+        }
+      }
+    }
+
+    let burnedFilePath = null;
+    if (job.params.burnSubtitles) {
+      const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
+      try {
+        await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
+        burnedFilePath = burnPath;
+      } catch (_error) {
+        burnedFilePath = null;
+      }
+    }
+
+    rendered.push({
+      ...clip,
+      filePath: finalClipPath,
+      dubbedAudioPath,
+      dubVoice: clip.dubVoice || "",
+      burnedFilePath,
+      srtPath,
+      captions,
+      aspectRatio: job.params.aspectRatio
+    });
+    job.progress = Math.round(25 + ((i + 1) / total) * 70);
+    job.updatedAt = new Date().toISOString();
+    await persistJobsDb();
+  }
+
+  job.clips = rendered;
+  const plan = {
+    id: job.id,
+    createdAt: job.createdAt,
+    source: { filename: job.originalFilename, duration: job.duration },
+    params: job.params,
+    autoTranscriptUsed: !!job.autoTranscriptUsed,
+    clips: rendered.map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      start: clip.start,
+      end: clip.end,
+      duration: clip.duration,
+      score: clip.score,
+      captions: clip.captions
+    }))
+  };
+  await fsp.writeFile(getJobPlanPath(job.id), JSON.stringify(plan, null, 2), "utf8");
+
+  job.status = "completed";
+  job.progress = 100;
+  job.updatedAt = new Date().toISOString();
+  await persistJobsDb();
+}
+
+app.get("/api/health", async (_req, res) => {
+  const q = await readQueueStats();
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
+  const scheduleConfig = readAutomationScheduleConfig();
+  res.json({
+    ok: true,
+    ffmpeg: ffmpegReady,
+    whisperAvailable,
+    ytDlpAvailable,
+    edgeTtsAvailable,
+    youtubeApiAvailable: Boolean(YOUTUBE_API_KEY),
+    youtubeCookiesConfigured: cookiesMeta.configured,
+    automationScheduleEnabled: Boolean(scheduleConfig.enabled),
+    automationPipelineRunning,
+    queueMode: queueModeRuntime,
+    workerConcurrency: WORKER_CONCURRENCY,
+    queueSize: q.waiting,
+    processing: q.active > 0,
+    queue: q
+  });
+});
+
+app.get("/api/config", (_req, res) => {
+  const cookiesMeta = getStoredYoutubeCookiesMeta();
+  const scheduleConfig = readAutomationScheduleConfig();
+  res.json({
+    defaults: DEFAULTS,
+    queue: {
+      mode: queueModeRuntime,
+      workerConcurrency: WORKER_CONCURRENCY
+    },
+    capabilities: {
+      ffmpeg: ffmpegReady,
+      whisperAvailable,
+      ytDlpAvailable,
+      edgeTtsAvailable,
+      youtubeDiscovery: Boolean(YOUTUBE_API_KEY),
+      urlIngestion: true,
+      youtubeIngestion: ytDlpAvailable,
+      youtubeCookiesPersistence: true,
+      automationDiscoverGeneratePublish: true,
+      automationSchedule: true,
+      dubFrenchAudio: edgeTtsAvailable,
+      srt: true,
+      zip: true,
+      burnSubtitles: true
+    },
+    youtubeCookies: cookiesMeta,
+    automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
+  });
+});
+
+app.get("/api/youtube-cookies/status", (_req, res) => {
+  const meta = getStoredYoutubeCookiesMeta();
+  return res.json(meta);
+});
+
+app.post("/api/youtube-cookies", async (req, res) => {
+  const rawCookies = String(req.body.youtubeCookies || "");
+  if (!rawCookies.trim()) {
+    return res.status(400).json({ error: "Le champ youtubeCookies est requis." });
+  }
+
+  try {
+    const normalizedCookies = normalizeYouTubeCookies(rawCookies);
+    await fsp.mkdir(SECRETS_DIR, { recursive: true });
+    await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.status(201).json({
+      ok: true,
+      message: "Cookies YouTube enregistrés sur le serveur.",
+      ...meta
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Format de cookies invalide."
+    });
+  }
+});
+
+app.delete("/api/youtube-cookies", async (_req, res) => {
+  try {
+    if (hasStoredYoutubeCookies()) {
+      await fsp.unlink(YOUTUBE_COOKIES_STORE_PATH);
+    }
+    const meta = getStoredYoutubeCookiesMeta();
+    return res.json({ ok: true, message: "Cookies YouTube supprimés.", ...meta });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de supprimer les cookies YouTube."
+    });
+  }
+});
+
+app.get("/api/tiktok/config/status", async (_req, res) => {
+  const config = await getTikTokConfig();
+  return res.json({
+    configured: hasTikTokConfig(config),
+    hasAccessToken: Boolean(config.accessToken),
+    hasOpenId: Boolean(config.openId),
+    defaultPrivacyLevel: config.defaultPrivacyLevel || "SELF_ONLY",
+    publishSource: normalizeTikTokPublishSource(config.publishSource || "auto"),
+    defaultHashtags: String(config.defaultHashtags || "")
+  });
+});
+
+app.post("/api/tiktok/config", async (req, res) => {
+  try {
+    const accessToken = String(req.body.accessToken || "").trim();
+    const openId = String(req.body.openId || "").trim();
+    const defaultPrivacyLevelRaw = String(req.body.defaultPrivacyLevel || "SELF_ONLY").trim().toUpperCase();
+    const allowedPrivacy = new Set(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]);
+    const defaultPrivacyLevel = allowedPrivacy.has(defaultPrivacyLevelRaw) ? defaultPrivacyLevelRaw : "SELF_ONLY";
+    const publishSource = normalizeTikTokPublishSource(req.body.publishSource || "auto");
+    const defaultHashtags = String(req.body.defaultHashtags || "").trim();
+
+    if (!accessToken || !openId) {
+      return res.status(400).json({ error: "accessToken et openId sont requis." });
+    }
+
+    const toPersist = {
+      accessToken,
+      openId,
+      defaultPrivacyLevel,
+      publishSource,
+      defaultHashtags
+    };
+    await saveTikTokConfig(toPersist);
+    return res.status(201).json({
+      ok: true,
+      configured: true,
+      defaultPrivacyLevel,
+      publishSource,
+      defaultHashtags
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Impossible de sauvegarder la config TikTok." });
+  }
+});
+
+app.delete("/api/tiktok/config", async (_req, res) => {
+  try {
+    await clearTikTokConfig();
+    return res.json({ ok: true, configured: false });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Impossible de supprimer la config TikTok." });
+  }
+});
+
+app.get("/api/youtube/discover", async (req, res) => {
+  if (!YOUTUBE_API_KEY) {
+    return res.status(503).json({
+      error: "YOUTUBE_API_KEY absente sur le serveur. Ajoute la variable d'environnement puis redémarre."
+    });
+  }
+
+  const query = String(req.query.q || "").trim();
+  if (!query) {
+    return res.status(400).json({ error: "Le paramètre q (requête) est requis." });
+  }
+
+  const maxResults = Math.max(1, Math.min(25, Math.floor(toNumber(req.query.maxResults, 12))));
+  const minDurationSec = Math.max(0, Math.min(7200, Math.floor(toNumber(req.query.minDurationSec, 300))));
+  const order = normalizeDiscoverOrder(req.query.order);
+  const safeSearch = normalizeSafeSearch(req.query.safeSearch);
+  const regionCodeRaw = String(req.query.regionCode || "FR").trim().toUpperCase();
+  const regionCode = /^[A-Z]{2}$/.test(regionCodeRaw) ? regionCodeRaw : "FR";
+  const relevanceLanguageRaw = String(req.query.relevanceLanguage || "").trim().toLowerCase();
+  const relevanceLanguage = /^[a-z]{2}$/.test(relevanceLanguageRaw) ? relevanceLanguageRaw : "";
+  const publishedWithinDays = Math.max(0, Math.min(3650, Math.floor(toNumber(req.query.publishedWithinDays, 365))));
+  const excludeSeen = boolFrom(req.query.excludeSeen, true);
+  const blockedChannelKeywords = parseCsvTokens(req.query.blockedChannelKeywords);
+  const blockedChannelIds = new Set(
+    String(req.query.blockedChannelIds || "")
+      .split(/[,\n;]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+
+  try {
+    const rawCandidates = await fetchYouTubeDiscoverRaw({
+      query,
+      maxResults: Math.max(10, maxResults),
+      order,
+      regionCode,
+      relevanceLanguage,
+      safeSearch,
+      publishedWithinDays
+    });
+    const nowMs = Date.now();
+    const queryTokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const seenVideoIds = excludeSeen ? getProcessedYouTubeVideoIdsFromJobs() : new Set();
+
+    let droppedByDuration = 0;
+    let droppedByHistory = 0;
+    let droppedByChannel = 0;
+
+    const candidates = rawCandidates
+      .filter((item) => {
+        if (Number(item.durationSec || 0) < minDurationSec) {
+          droppedByDuration += 1;
+          return false;
+        }
+        if (excludeSeen && seenVideoIds.has(String(item.videoId || ""))) {
+          droppedByHistory += 1;
+          return false;
+        }
+        const channelId = String(item.channelId || "").trim();
+        const normalizedChannelTitle = normalizeScoringToken(item.channelTitle || "");
+        if (channelId && blockedChannelIds.has(channelId)) {
+          droppedByChannel += 1;
+          return false;
+        }
+        if (blockedChannelKeywords.length > 0) {
+          const blockedMatch = blockedChannelKeywords.some((token) => normalizedChannelTitle.includes(token));
+          if (blockedMatch) {
+            droppedByChannel += 1;
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((item) => ({
+        ...item,
+        score: computeYouTubeCandidateScore(item, queryTokens, nowMs)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
+
+    return res.json({
+      ok: true,
+      query,
+      count: candidates.length,
+      filters: {
+        maxResults,
+        minDurationSec,
+        order,
+        regionCode,
+        relevanceLanguage: relevanceLanguage || null,
+        safeSearch,
+        publishedWithinDays,
+        excludeSeen,
+        blockedChannelKeywords,
+        blockedChannelIds: Array.from(blockedChannelIds)
+      },
+      stats: {
+        rawCount: rawCandidates.length,
+        droppedByDuration,
+        droppedByHistory,
+        droppedByChannel
+      },
+      candidates
+    });
+  } catch (error) {
+    return res.status(502).json({
+      error: error instanceof Error ? error.message : "Erreur lors de la découverte YouTube."
+    });
+  }
+});
+
+app.post("/api/automation/discover-generate-publish", async (req, res) => {
+  try {
+    const input = {
+      ...(req.query || {}),
+      ...(req.body || {})
+    };
+    if (!input.baseUrl) {
+      input.baseUrl = resolvePublicBaseUrl("", req);
+    }
+    const run = await runAutomationWorkflow(input, { req });
+    if (run.status === "failed") {
+      return res.status(500).json(sanitizeAutomationRun(run));
+    }
+    return res.json(sanitizeAutomationRun(run));
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || 500);
+    return res.status(statusCode).json({
+      error: error instanceof Error ? error.message : "Erreur automation"
+    });
+  }
+});
+
+app.get("/api/automation/schedule/status", (_req, res) => {
+  const config = readAutomationScheduleConfig();
+  return res.json(sanitizeAutomationScheduleStatus(config));
+});
+
+app.post("/api/automation/schedule", async (req, res) => {
+  try {
+    const payload = {
+      enabled: boolFrom(req.body.enabled, true),
+      intervalMinutes: toNumber(req.body.intervalMinutes, 180),
+      payload: {
+        ...(req.body.payload || {}),
+        ...(req.body.q || req.body.query ? { q: String(req.body.q || req.body.query || "") } : {}),
+        ...(req.body.baseUrl ? { baseUrl: String(req.body.baseUrl || "") } : {})
+      }
+    };
+    const saved = await writeAutomationScheduleConfig(payload);
+    if (saved.enabled) {
+      scheduleNextAutomationTick(saved);
+    } else {
+      clearAutomationScheduleTimer();
+      automationScheduleRuntime.enabled = false;
+    }
+    return res.status(201).json({
+      ok: true,
+      schedule: sanitizeAutomationScheduleStatus(saved)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de sauvegarder la planification automation."
+    });
+  }
+});
+
+app.post("/api/automation/schedule/run-now", async (_req, res) => {
+  const config = readAutomationScheduleConfig();
+  if (!config.enabled) {
+    return res.status(400).json({
+      error: "Planification inactive. Active-la avant un run immédiat."
+    });
+  }
+  if (automationScheduleRunning || automationPipelineRunning) {
+    return res.status(409).json({
+      error: "Une automatisation est déjà en cours."
+    });
+  }
+  automationScheduleRuntime.lastRunAt = new Date().toISOString();
+  try {
+    const run = await runAutomationWorkflow(config.payload || {}, { baseUrl: config?.payload?.baseUrl || "" });
+    automationScheduleRuntime.lastRunId = String(run.id || "");
+    automationScheduleRuntime.lastRunStatus = String(run.status || "");
+    automationScheduleRuntime.lastError = String(run.error || "");
+    return res.json({
+      ok: run.status === "completed",
+      run: sanitizeAutomationRun(run),
+      schedule: sanitizeAutomationScheduleStatus(config)
+    });
+  } catch (error) {
+    automationScheduleRuntime.lastRunId = "";
+    automationScheduleRuntime.lastRunStatus = "failed";
+    automationScheduleRuntime.lastError = error instanceof Error ? error.message : "Erreur run immédiat";
+    const statusCode = Number(error?.statusCode || 500);
+    return res.status(statusCode).json({
+      error: error instanceof Error ? error.message : "Impossible de lancer l'automatisation.",
+      schedule: sanitizeAutomationScheduleStatus(config)
+    });
+  }
+});
+
+app.delete("/api/automation/schedule", async (_req, res) => {
+  try {
+    const cleared = await clearAutomationScheduleConfig();
+    clearAutomationScheduleTimer();
+    automationScheduleRuntime.enabled = false;
+    return res.json({
+      ok: true,
+      schedule: sanitizeAutomationScheduleStatus(cleared)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de supprimer la planification automation."
+    });
+  }
+});
+
+app.post("/api/jobs", upload.single("video"), async (req, res) => {
+  const rawVideoUrl = String(req.body.videoUrl || "").trim();
+  const hasUpload = Boolean(req.file);
+  const hasVideoUrl = rawVideoUrl.length > 0;
+
+  if (!hasUpload && !hasVideoUrl) {
+    return res.status(400).json({ error: "Fichier vidéo ou lien vidéo requis" });
+  }
+  if (hasVideoUrl && !isValidHttpUrl(rawVideoUrl)) {
+    return res.status(400).json({ error: "Le lien vidéo doit être une URL http(s) valide" });
+  }
+  if (hasVideoUrl && isLikelyYouTubeUrl(rawVideoUrl) && !ytDlpAvailable) {
+    return res.status(400).json({
+      error: "Le serveur ne peut pas traiter les liens YouTube (yt-dlp indisponible)"
+    });
+  }
+
+  try {
+    const clipDuration = Math.min(600, Math.max(8, toNumber(req.body.clipDuration, DEFAULTS.clipDuration)));
+    const clipsCount = Math.min(12, Math.max(1, Math.floor(toNumber(req.body.clipsCount, DEFAULTS.clipsCount))));
+    const aspectRatio = ["9:16", "1:1", "16:9"].includes(req.body.aspectRatio) ? req.body.aspectRatio : DEFAULTS.aspectRatio;
+    const frameMode = ["full-video", "blur-fill", "black-bars"].includes(req.body.frameMode) ? req.body.frameMode : DEFAULTS.frameMode;
+    const transcript = String(req.body.transcript || "");
+    const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
+    const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
+    const subtitleTheme = ["classic", "bold", "cinema", "neon"].includes(req.body.subtitleTheme)
+      ? req.body.subtitleTheme
+      : DEFAULTS.subtitleTheme;
+    const highlightMode = ["balanced", "hook-first", "viral"].includes(req.body.highlightMode)
+      ? req.body.highlightMode
+      : DEFAULTS.highlightMode;
+    const languageMode = ["translate-to-french", "already-french", "no-added-audio"].includes(req.body.languageMode)
+      ? req.body.languageMode
+      : DEFAULTS.languageMode;
+    const includeAutoTranscript = boolFrom(req.body.includeAutoTranscript, DEFAULTS.includeAutoTranscript);
+    const dubFrenchAudio = boolFrom(req.body.dubFrenchAudio, DEFAULTS.dubFrenchAudio);
+    const autoDubVoiceBySpeaker = boolFrom(req.body.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker);
+    const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
+    const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
+    const youtubeCookies = String(req.body.youtubeCookies || "");
+
+    const id = uuidv4();
+    const useUrlSource = hasVideoUrl;
+    const jobDir = getJobDir(id);
+    let youtubeCookiesFilePath = "";
+    if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && youtubeCookies.trim()) {
+      let normalizedCookies = "";
+      try {
+        normalizedCookies = normalizeYouTubeCookies(youtubeCookies);
+      } catch (error) {
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : "Format de cookies invalide."
+        });
+      }
+      await fsp.mkdir(jobDir, { recursive: true });
+      youtubeCookiesFilePath = path.join(jobDir, "youtube-cookies.txt");
+      await fsp.writeFile(youtubeCookiesFilePath, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+      await fsp.mkdir(SECRETS_DIR, { recursive: true });
+      await fsp.writeFile(YOUTUBE_COOKIES_STORE_PATH, normalizedCookies, { encoding: "utf8", mode: 0o600 });
+    } else if (useUrlSource && isLikelyYouTubeUrl(rawVideoUrl) && hasStoredYoutubeCookies()) {
+      youtubeCookiesFilePath = YOUTUBE_COOKIES_STORE_PATH;
+    }
+    const job = {
+      id,
+      status: "queued",
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      sourceType: useUrlSource ? "url" : "upload",
+      sourceUrl: useUrlSource ? rawVideoUrl : "",
+      youtubeCookiesFilePath,
+      inputPath: useUrlSource ? "" : req.file.path,
+      originalFilename: useUrlSource ? "" : req.file.originalname,
+      duration: 0,
+      autoTranscriptUsed: false,
+      params: {
+        clipDuration,
+        clipsCount,
+        aspectRatio,
+        frameMode,
+        transcript,
+        minGapSecBetweenClips,
+        ignoreIntroSec,
+        subtitleTheme,
+        highlightMode,
+        languageMode,
+        includeAutoTranscript,
+        dubFrenchAudio: ["already-french", "no-added-audio"].includes(languageMode) ? false : dubFrenchAudio,
+        autoDubVoiceBySpeaker: ["already-french", "no-added-audio"].includes(languageMode) ? false : autoDubVoiceBySpeaker,
+        includeSrtInZip,
+        burnSubtitles,
+        hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
+      },
+      clips: [],
+      error: null
+    };
+
+    jobs.set(id, job);
+    await persistJobsDb();
+    await enqueueJob(id);
+    return res.status(202).json({ id, status: job.status, progress: job.progress });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur interne" });
+  }
+});
+
+app.get("/api/jobs/:jobId", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  return res.json(sanitizeJobForClient(job));
+});
+
+app.get("/api/jobs/:jobId/plan", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  const planPath = getJobPlanPath(job.id);
+  if (!fs.existsSync(planPath)) return res.status(409).json({ error: "Plan indisponible, job non terminé" });
+  return res.download(planPath, `clipforge-plan-${job.id}.json`);
+});
+
+app.get("/api/jobs/:jobId/clips/:clipId/stream", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  const clip = (job.clips || []).find((c) => c.id === req.params.clipId);
+  if (!clip) return res.status(404).json({ error: "Clip introuvable" });
+  const selectedPath = clip.burnedFilePath || clip.filePath;
+  if (!selectedPath || !fs.existsSync(selectedPath)) return res.status(404).json({ error: "Fichier clip indisponible" });
+  return res.sendFile(selectedPath);
+});
+
+app.get("/api/jobs/:jobId/clips/:clipId/download", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  const clip = (job.clips || []).find((c) => c.id === req.params.clipId);
+  if (!clip) return res.status(404).json({ error: "Clip introuvable" });
+  const selectedPath = clip.burnedFilePath || clip.filePath;
+  if (!selectedPath || !fs.existsSync(selectedPath)) return res.status(404).json({ error: "Fichier clip indisponible" });
+  return res.download(selectedPath, `${clip.id}.mp4`);
+});
+
+app.get("/api/jobs/:jobId/clips/:clipId/srt", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  const clip = (job.clips || []).find((c) => c.id === req.params.clipId);
+  if (!clip || !clip.srtPath || !fs.existsSync(clip.srtPath)) {
+    return res.status(404).json({ error: "Sous-titres introuvables" });
+  }
+  return res.download(clip.srtPath, `${clip.id}.srt`);
+});
+
+app.get("/api/jobs/:jobId/bundle", async (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
+  if (job.status !== "completed") return res.status(409).json({ error: "Job non terminé" });
+
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename=\"clipforge-bundle-${job.id}.zip\"`);
+
+  const archive = archiver("zip", { zlib: { level: 9 } });
+  archive.on("error", (err) => {
+    res.status(500).end(err.message);
+  });
+  archive.pipe(res);
+
+  const planPath = getJobPlanPath(job.id);
+  if (fs.existsSync(planPath)) archive.file(planPath, { name: "plan.json" });
+
+  for (const clip of job.clips || []) {
+    const selectedPath = clip.burnedFilePath || clip.filePath;
+    if (selectedPath && fs.existsSync(selectedPath)) {
+      archive.file(selectedPath, { name: `clips/${clip.id}.mp4` });
+    }
+    if (job.params.includeSrtInZip && clip.srtPath && fs.existsSync(clip.srtPath)) {
+      archive.file(clip.srtPath, { name: `subtitles/${clip.id}.srt` });
+    }
+  }
+
+  await archive.finalize();
+});
+
+app.use(express.static(ROOT_DIR, { index: false }));
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(ROOT_DIR, "index.html"));
+});
+
+ensureDirs()
+  .then(async () => {
+    ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
+    whisperAvailable = checkBinary("whisper", "--help");
+    ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
+    edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
+    await restoreJobsDb();
+    await initBullQueue();
+    const scheduleConfig = readAutomationScheduleConfig();
+    automationScheduleRuntime.enabled = Boolean(scheduleConfig.enabled);
+    automationScheduleRuntime.intervalMinutes = Number(scheduleConfig.intervalMinutes || 0);
+    automationScheduleRuntime.updatedAt = scheduleConfig.updatedAt || null;
+    if (scheduleConfig.enabled) {
+      scheduleNextAutomationTick(scheduleConfig);
+    }
+    app.listen(PORT, () => {
+      console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Impossible d'initialiser le serveur:", error);
+    process.exit(1);
+  });

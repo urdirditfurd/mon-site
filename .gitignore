@@ -1,0 +1,6 @@
+node_modules/
+storage/uploads/*
+storage/jobs/*
+storage/jobs-db.json
+!storage/uploads/.gitkeep
+!storage/jobs/.gitkeep
