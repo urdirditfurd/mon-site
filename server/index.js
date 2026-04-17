@@ -663,6 +663,12 @@ function normalizeTikTokPrivacyLevel(value) {
   return allowed.has(candidate) ? candidate : "SELF_ONLY";
 }
 
+function normalizeTikTokPublishSource(value) {
+  const allowed = new Set(["auto", "pull_from_url", "file_upload"]);
+  const candidate = String(value || "").trim().toLowerCase();
+  return allowed.has(candidate) ? candidate : "auto";
+}
+
 function parseHashtagsInput(rawInput) {
   const seen = new Set();
   const tags = String(rawInput || "")
@@ -709,6 +715,7 @@ function readRawTikTokConfig() {
       accessToken: "",
       openId: "",
       defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
       defaultHashtags: "",
       updatedAt: null
     };
@@ -720,6 +727,7 @@ function readRawTikTokConfig() {
       accessToken: String(parsed.accessToken || "").trim(),
       openId: String(parsed.openId || "").trim(),
       defaultPrivacyLevel: normalizeTikTokPrivacyLevel(parsed.defaultPrivacyLevel || "SELF_ONLY"),
+      publishSource: normalizeTikTokPublishSource(parsed.publishSource || "auto"),
       defaultHashtags: String(parsed.defaultHashtags || "").trim(),
       updatedAt: parsed.updatedAt || null
     };
@@ -728,6 +736,7 @@ function readRawTikTokConfig() {
       accessToken: "",
       openId: "",
       defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
       defaultHashtags: "",
       updatedAt: null
     };
@@ -754,6 +763,7 @@ async function saveTikTokConfig(input) {
     accessToken: String(input.accessToken || "").trim(),
     openId: String(input.openId || "").trim(),
     defaultPrivacyLevel: normalizeTikTokPrivacyLevel(input.defaultPrivacyLevel || "SELF_ONLY"),
+    publishSource: normalizeTikTokPublishSource(input.publishSource || "auto"),
     defaultHashtags: String(input.defaultHashtags || "").trim(),
     updatedAt: new Date().toISOString()
   };
@@ -828,6 +838,140 @@ async function tiktokApiRequest(endpoint, accessToken, bodyPayload) {
     throw new Error(message);
   }
   return payload;
+}
+
+function isTikTokPullFromUrlVerificationError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  if (!message) return false;
+  const hints = [
+    "verify",
+    "verified domain",
+    "verification signature",
+    "url prefix",
+    "pull_from_url",
+    "property could not be verified",
+    "url publique requise"
+  ];
+  return hints.some((hint) => message.includes(hint));
+}
+
+async function uploadTikTokFileToUploadUrl(uploadUrl, filePath, fileSize) {
+  const safeUrl = String(uploadUrl || "").trim();
+  if (!safeUrl) {
+    throw new Error("TikTok upload_url manquant.");
+  }
+  const size = Math.max(0, Number(fileSize) || 0);
+  if (!size) {
+    throw new Error("Clip vide: impossible d'uploader vers TikTok.");
+  }
+  const buffer = await fsp.readFile(filePath);
+  const response = await fetch(safeUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "video/mp4",
+      "Content-Length": String(size),
+      "Content-Range": `bytes 0-${size - 1}/${size}`
+    },
+    body: buffer
+  });
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    throw new Error(
+      `Upload TikTok échoué (${response.status})${responseText ? `: ${responseText.slice(0, 200)}` : ""}`
+    );
+  }
+}
+
+function buildTikTokPostInfo(title, privacyLevel, disableComment, disableDuet, disableStitch) {
+  return {
+    title,
+    privacy_level: privacyLevel,
+    disable_comment: disableComment,
+    disable_duet: disableDuet,
+    disable_stitch: disableStitch
+  };
+}
+
+async function publishClipToTikTokFromUrl({
+  accessToken,
+  jobId,
+  clip,
+  title,
+  postInfo,
+  baseUrl
+}) {
+  const videoUrl = `${String(baseUrl).replace(/\/+$/, "")}/api/jobs/${jobId}/clips/${clip.id}/download`;
+  const initPayload = {
+    post_info: postInfo,
+    source_info: {
+      source: "PULL_FROM_URL",
+      video_url: videoUrl
+    }
+  };
+  const initRes = await tiktokApiRequest("/post/publish/video/init/", accessToken, initPayload);
+  const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
+  if (!publishId) {
+    throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
+  }
+  const publishState = await waitForTiktokPublishCompletion(accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
+  return {
+    clipId: clip.id,
+    caption: title,
+    videoUrl,
+    publishId,
+    publishStatus: publishState.status,
+    publishRawStatus: publishState.rawStatus,
+    publishSourceUsed: "pull_from_url"
+  };
+}
+
+async function publishClipToTikTokFromFileUpload({
+  accessToken,
+  clip,
+  title,
+  postInfo
+}) {
+  const selectedPath = String(clip.burnedFilePath || clip.filePath || "").trim();
+  if (!selectedPath) {
+    throw new Error(`Chemin clip introuvable pour le clip ${clip.id}`);
+  }
+  const stats = await fsp.stat(selectedPath).catch(() => null);
+  if (!stats || !stats.isFile()) {
+    throw new Error(`Fichier clip introuvable pour le clip ${clip.id}`);
+  }
+  if (stats.size <= 0) {
+    throw new Error(`Fichier clip vide pour le clip ${clip.id}`);
+  }
+  const initPayload = {
+    post_info: postInfo,
+    source_info: {
+      source: "FILE_UPLOAD",
+      video_size: stats.size,
+      chunk_size: stats.size,
+      total_chunk_count: 1
+    }
+  };
+  const initRes = await tiktokApiRequest("/post/publish/video/init/", accessToken, initPayload);
+  const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
+  if (!publishId) {
+    throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
+  }
+  const uploadUrl = String(initRes?.data?.upload_url || initRes?.data?.uploadUrl || "").trim();
+  if (!uploadUrl) {
+    throw new Error(`TikTok upload_url manquant pour le clip ${clip.id}`);
+  }
+  await uploadTikTokFileToUploadUrl(uploadUrl, selectedPath, stats.size);
+  const publishState = await waitForTiktokPublishCompletion(accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
+  return {
+    clipId: clip.id,
+    caption: title,
+    filePath: selectedPath,
+    fileSizeBytes: stats.size,
+    publishId,
+    publishStatus: publishState.status,
+    publishRawStatus: publishState.rawStatus,
+    publishSourceUsed: "file_upload"
+  };
 }
 
 async function waitForTiktokPublishCompletion(accessToken, publishId, timeoutMs = TIKTOK_STATUS_POLL_TIMEOUT_MS) {
@@ -936,7 +1080,7 @@ async function publishJobClipsToTikTok(job, options = {}) {
   if (!Array.isArray(job.clips) || !job.clips.length) {
     throw new Error("Aucun clip à publier pour ce job.");
   }
-  const baseUrl = resolvePublicBaseUrl(options.baseUrl || "", options.req || null);
+  const publishSource = normalizeTikTokPublishSource(options.publishSource || cfg.publishSource || "auto");
   const privacyLevel = normalizeTikTokPrivacyLevel(options.privacyLevel || cfg.defaultPrivacyLevel || "SELF_ONLY");
   const disableComment = boolFrom(options.disableComment, false);
   const disableDuet = boolFrom(options.disableDuet, false);
@@ -945,35 +1089,49 @@ async function publishJobClipsToTikTok(job, options = {}) {
   const out = [];
 
   for (const clip of job.clips) {
-    const videoUrl = `${baseUrl}/api/jobs/${job.id}/clips/${clip.id}/download`;
     const title = buildTikTokCaptionForClip(job, clip, cfg.defaultHashtags || "", extraHashtags);
-    const initPayload = {
-      post_info: {
-        title,
-        privacy_level: privacyLevel,
-        disable_comment: disableComment,
-        disable_duet: disableDuet,
-        disable_stitch: disableStitch
-      },
-      source_info: {
-        source: "PULL_FROM_URL",
-        video_url: videoUrl
+    const postInfo = buildTikTokPostInfo(title, privacyLevel, disableComment, disableDuet, disableStitch);
+    let pullFromUrlError = null;
+
+    if (publishSource === "pull_from_url" || publishSource === "auto") {
+      try {
+        const baseUrl = resolvePublicBaseUrl(options.baseUrl || "", options.req || null);
+        const publishedFromUrl = await publishClipToTikTokFromUrl({
+          accessToken: cfg.accessToken,
+          jobId: job.id,
+          clip,
+          title,
+          postInfo,
+          baseUrl
+        });
+        out.push(publishedFromUrl);
+        continue;
+      } catch (error) {
+        if (publishSource === "pull_from_url") {
+          throw error;
+        }
+        if (!isTikTokPullFromUrlVerificationError(error)) {
+          throw error;
+        }
+        pullFromUrlError = error;
       }
-    };
-    const initRes = await tiktokApiRequest("/post/publish/video/init/", cfg.accessToken, initPayload);
-    const publishId = String(initRes?.data?.publish_id || initRes?.data?.publishId || "").trim();
-    if (!publishId) {
-      throw new Error(`TikTok publish_id manquant pour le clip ${clip.id}`);
     }
-    const publishState = await waitForTiktokPublishCompletion(cfg.accessToken, publishId, TIKTOK_STATUS_POLL_TIMEOUT_MS);
-    out.push({
-      clipId: clip.id,
-      caption: title,
-      videoUrl,
-      publishId,
-      publishStatus: publishState.status,
-      publishRawStatus: publishState.rawStatus
-    });
+
+    if (publishSource === "file_upload" || publishSource === "auto") {
+      const publishedFromFile = await publishClipToTikTokFromFileUpload({
+        accessToken: cfg.accessToken,
+        clip,
+        title,
+        postInfo
+      });
+      if (pullFromUrlError) {
+        publishedFromFile.fallbackReason = pullFromUrlError instanceof Error ? pullFromUrlError.message : String(pullFromUrlError);
+      }
+      out.push(publishedFromFile);
+      continue;
+    }
+
+    throw new Error(`Mode de publication TikTok invalide: ${publishSource}`);
   }
 
   return out;
@@ -1025,6 +1183,7 @@ function sanitizeAutomationSchedulePayload(rawInput = {}, fallbackPrivacy = "SEL
     ignoreIntroSec: Math.max(0, Math.min(600, Math.floor(toNumber(rawInput.ignoreIntroSec, 20)))),
     minGapSecBetweenClips: Math.max(0, Math.min(60, toNumber(rawInput.minGapSecBetweenClips, 6))),
     defaultPrivacyLevel: normalizeTikTokPrivacyLevel(rawInput.defaultPrivacyLevel || fallbackPrivacy || "SELF_ONLY"),
+    publishSource: normalizeTikTokPublishSource(rawInput.publishSource || "auto"),
     hashtags: String(rawInput.hashtags || "").trim(),
     baseUrl: String(rawInput.baseUrl || "").trim()
   };
@@ -1049,6 +1208,7 @@ function defaultAutomationScheduleConfig() {
       ignoreIntroSec: 20,
       minGapSecBetweenClips: 6,
       defaultPrivacyLevel: "SELF_ONLY",
+      publishSource: "auto",
       hashtags: "#funny #fyp",
       baseUrl: ""
     }),
@@ -1281,6 +1441,7 @@ async function runAutomationWorkflow(rawInput = {}, context = {}) {
             req: runReq,
             baseUrl: baseUrlHint,
             privacyLevel: normalizedInput.defaultPrivacyLevel,
+            publishSource: normalizedInput.publishSource || tiktokConfig.publishSource || "auto",
             hashtags: normalizedInput.hashtags
           });
           item.published = published;
@@ -2726,6 +2887,7 @@ app.get("/api/tiktok/config/status", async (_req, res) => {
     hasAccessToken: Boolean(config.accessToken),
     hasOpenId: Boolean(config.openId),
     defaultPrivacyLevel: config.defaultPrivacyLevel || "SELF_ONLY",
+    publishSource: normalizeTikTokPublishSource(config.publishSource || "auto"),
     defaultHashtags: String(config.defaultHashtags || "")
   });
 });
@@ -2737,6 +2899,7 @@ app.post("/api/tiktok/config", async (req, res) => {
     const defaultPrivacyLevelRaw = String(req.body.defaultPrivacyLevel || "SELF_ONLY").trim().toUpperCase();
     const allowedPrivacy = new Set(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]);
     const defaultPrivacyLevel = allowedPrivacy.has(defaultPrivacyLevelRaw) ? defaultPrivacyLevelRaw : "SELF_ONLY";
+    const publishSource = normalizeTikTokPublishSource(req.body.publishSource || "auto");
     const defaultHashtags = String(req.body.defaultHashtags || "").trim();
 
     if (!accessToken || !openId) {
@@ -2747,6 +2910,7 @@ app.post("/api/tiktok/config", async (req, res) => {
       accessToken,
       openId,
       defaultPrivacyLevel,
+      publishSource,
       defaultHashtags
     };
     await saveTikTokConfig(toPersist);
@@ -2754,6 +2918,7 @@ app.post("/api/tiktok/config", async (req, res) => {
       ok: true,
       configured: true,
       defaultPrivacyLevel,
+      publishSource,
       defaultHashtags
     });
   } catch (error) {
