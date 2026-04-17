@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+storage/jobs
+storage/uploads
+storage/secrets
+*.log
+coverage
+.DS_Store
