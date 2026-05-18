@@ -42,6 +42,24 @@ export AUTH_TOKEN_EXPIRY_MINUTES="120"
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Migrations base de données (Alembic)
+
+```bash
+# depuis trading_backend/
+alembic upgrade head
+```
+
+Créer une nouvelle migration:
+```bash
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
+
+Revenir d'une migration:
+```bash
+alembic downgrade -1
+```
+
 ## Endpoints principaux
 
 - `POST /api/users`  
@@ -197,4 +215,8 @@ Authorization: Bearer <token>
 ## Note migration locale
 
 Le projet utilise actuellement `create_all` (sans Alembic).  
-Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL/risk/auth.
+Le projet inclut maintenant Alembic (`alembic/` + migration initiale).  
+Si tu as déjà une base locale existante créée sans Alembic, deux options:
+
+1) **Repartir proprement**: supprimer/recréer la base puis `alembic upgrade head`.
+2) **Conserver les données**: aligner Alembic avec `alembic stamp head` (si le schéma DB est déjà identique).
