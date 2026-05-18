@@ -13,7 +13,7 @@ from app.db.database import get_session
 from app.models.simulated_order import SimulatedOrder
 from app.models.trading_profile import TradingProfile
 from app.models.user import User
-from app.schemas.trading import SimulatedOrderResponse
+from app.schemas.trading import OrderStatsResponse, SimulatedOrderResponse
 from app.schemas.user import TradingThresholdUpdateRequest
 
 router = APIRouter(prefix="/trading", tags=["Trading IA"])
@@ -75,13 +75,50 @@ async def list_user_orders(
         SimulatedOrderResponse(
             id=order.id,
             user_id=order.user_id,
+            broker=order.broker,
+            broker_order_id=order.broker_order_id,
+            asset_symbol=order.asset_symbol,
             headline=order.headline,
             direction=order.direction,
             confidence=order.confidence,
             seuil_utilise=order.seuil_utilise,
             montant_ordre=order.montant_ordre,
+            requested_price=order.requested_price,
+            filled_price=order.filled_price,
+            pnl_simule=order.pnl_simule,
             status=order.status,
+            rejection_reason=order.rejection_reason,
             created_at=order.created_at,
+            updated_at=order.updated_at,
         )
         for order in orders
     ]
+
+
+@router.get("/users/{user_id}/orders/stats", response_model=OrderStatsResponse)
+async def get_user_order_stats(
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> OrderStatsResponse:
+    """Retourne un résumé du pipeline d'exécution broker pour un utilisateur."""
+
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+
+    result = await session.execute(select(SimulatedOrder).where(SimulatedOrder.user_id == user_id))
+    orders = list(result.scalars().all())
+
+    pending_orders = sum(order.status == "pending" for order in orders)
+    filled_orders = sum(order.status == "filled" for order in orders)
+    rejected_orders = sum(order.status == "rejected" for order in orders)
+    total_pnl_simule = sum((order.pnl_simule for order in orders), Decimal("0.00"))
+
+    return OrderStatsResponse(
+        user_id=user_id,
+        total_orders=len(orders),
+        pending_orders=pending_orders,
+        filled_orders=filled_orders,
+        rejected_orders=rejected_orders,
+        total_pnl_simule=total_pnl_simule.quantize(Decimal("0.01")),
+    )

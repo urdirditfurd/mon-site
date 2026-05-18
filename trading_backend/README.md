@@ -8,6 +8,8 @@ Backend Python modulaire pour:
 - simulation de flux d'actualités financières en continu
 - moteur NLP mock (direction + confiance)
 - déclenchement d'ordres simulés selon seuil utilisateur
+- passerelle broker mock (statuts pending/filled/rejected)
+- calcul de PnL simulé par ordre exécuté
 
 ## Installation
 
@@ -42,7 +44,9 @@ uvicorn app.main:app --reload --port 8000
 - `PATCH /api/trading/users/{user_id}/threshold`  
   Met à jour le seuil de probabilité minimum (0 à 100) requis pour déclencher un trade IA.
 - `GET /api/trading/users/{user_id}/orders?limit=20`  
-  Retourne l'historique des ordres simulés déclenchés par la stratégie.
+  Retourne l'historique des ordres simulés déclenchés par la stratégie (avec statut broker et PnL).
+- `GET /api/trading/users/{user_id}/orders/stats`  
+  Retourne les statistiques d'exécution (`pending`, `filled`, `rejected`, PnL total).
 - `GET /api/news/live?limit=10`  
   Retourne les dernières actualités simulées et scorées par le NLP mock (toutes les 5 secondes).
 - `GET /api/health`  
@@ -55,4 +59,12 @@ uvicorn app.main:app --reload --port 8000
    - une direction (`buy` / `sell`)
    - une confiance (`0-100`)
 3. Le moteur de trading compare cette confiance au `seuil_probabilite_min` de chaque utilisateur.
-4. Si la confiance est suffisante et que `solde_engage > 0`, un ordre simulé est créé dans `simulated_orders`.
+4. Si la confiance est suffisante et que `solde_engage > 0`, un ordre est soumis au broker mock.
+5. Le broker mock renvoie un statut initial (`pending`, `filled` ou `rejected`).
+6. Les ordres `pending` sont finalisés en asynchrone avec un résultat `filled/rejected`.
+7. Les ordres `filled` reçoivent un `pnl_simule` calculé automatiquement.
+
+## Note migration locale
+
+Le projet utilise actuellement `create_all` (sans Alembic).  
+Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL.
