@@ -13,6 +13,8 @@ class UserCreateRequest(BaseModel):
     """Payload de création d'un utilisateur."""
 
     email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    role: str = Field(default="trader", pattern="^(trader|compliance|admin)$")
 
 
 class UserResponse(BaseModel):
@@ -20,6 +22,8 @@ class UserResponse(BaseModel):
 
     id: uuid.UUID
     email: EmailStr
+    role: str
+    is_active: bool
     created_at: datetime
     seuil_probabilite_min: Decimal
     is_trading_active: bool

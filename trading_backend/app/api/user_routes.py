@@ -14,6 +14,7 @@ from app.models.trading_profile import TradingProfile
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreateRequest, UserResponse
+from app.core.security import hash_password
 from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -31,7 +32,12 @@ async def create_user(
     if existing_user:
         raise HTTPException(status_code=409, detail="Un utilisateur avec cet email existe déjà.")
 
-    user = User(email=payload.email)
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        is_active=True,
+    )
     wallet = Wallet(
         user=user,
         solde_total=Decimal("0.00"),
@@ -67,6 +73,8 @@ async def create_user(
     return UserResponse(
         id=user.id,
         email=user.email,
+        role=user.role,
+        is_active=user.is_active,
         created_at=user.created_at,
         seuil_probabilite_min=trading_profile.seuil_probabilite_min,
         is_trading_active=trading_profile.is_trading_active,

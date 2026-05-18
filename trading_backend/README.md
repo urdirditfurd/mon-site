@@ -16,6 +16,7 @@ Backend Python modulaire pour:
 - monitoring dashboard + websocket temps réel
 - contrôle global du moteur (pause/reprise runtime)
 - reporting & conformité (historique filtré, rapports journaliers, export fiscal)
+- authentification Bearer + RBAC (`trader`, `compliance`, `admin`)
 
 ## Installation
 
@@ -31,6 +32,8 @@ pip install -r requirements.txt
 ```bash
 export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/trading_ai"
 export DEBUG="true"
+export AUTH_SECRET_KEY="change-me-in-production"
+export AUTH_TOKEN_EXPIRY_MINUTES="120"
 ```
 
 ## Lancer l'API
@@ -42,7 +45,11 @@ uvicorn app.main:app --reload --port 8000
 ## Endpoints principaux
 
 - `POST /api/users`  
-  Crée un utilisateur avec son wallet initial + seuil IA par défaut à `80%`.
+  Crée un utilisateur (inscription) avec wallet initial + seuil IA par défaut à `80%`.
+- `POST /api/auth/login`  
+  Authentifie l'utilisateur et renvoie un token Bearer.
+- `GET /api/auth/me`  
+  Retourne l'identité de l'utilisateur connecté.
 - `POST /api/wallets/{user_id}/deposit`  
   Simule un paiement Stripe et crédite `solde_total` + `solde_disponible`.
 - `POST /api/wallets/{user_id}/allocate`  
@@ -72,7 +79,7 @@ uvicorn app.main:app --reload --port 8000
 - `GET /api/monitoring/dashboard`  
   Snapshot global d'exploitation (users/orders/PnL/alerts + derniers événements runtime).
 - `WS /api/monitoring/ws`  
-  Flux temps réel des événements monitoring.
+  Flux temps réel des événements monitoring (token requis via query `?token=...`).
 - `GET /api/reporting/users/{user_id}/history`  
   Historique filtrable des ordres (`start_date`, `end_date`, `asset_symbol`, `status`).
 - `GET /api/reporting/users/{user_id}/summary`  
@@ -147,7 +154,47 @@ Sur les ordres exécutés:
   - détail par actif (trades, volume, gains/pertes).
 - Génération des exports tracée dans l'audit trail.
 
+## Brique K — Authentification & permissions (RBAC)
+
+- Auth Bearer token signé (HMAC SHA-256) avec expiration configurable.
+- Hash des mots de passe via `PBKDF2-SHA256`.
+- Rôles supportés:
+  - `trader`
+  - `compliance`
+  - `admin`
+- Règles principales:
+  - accès **self** autorisé sur ses données personnelles,
+  - accès transversal réservé à `admin/compliance`,
+  - monitoring dashboard + alert center réservés à `admin/compliance`,
+  - pause/reprise moteur réservés à `admin`.
+
+### Utilisation rapide auth
+
+1. Créer un utilisateur:
+```json
+POST /api/users
+{
+  "email": "alice@example.com",
+  "password": "SuperSecret123",
+  "role": "trader"
+}
+```
+
+2. Login:
+```json
+POST /api/auth/login
+{
+  "email": "alice@example.com",
+  "password": "SuperSecret123"
+}
+```
+
+3. Ajouter le header:
+```bash
+Authorization: Bearer <token>
+```
+
 ## Note migration locale
 
 Le projet utilise actuellement `create_all` (sans Alembic).  
-Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL/risk.
+Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL/risk/auth.

@@ -15,6 +15,8 @@ class Settings:
         "DATABASE_URL",
         "postgresql+asyncpg://postgres:postgres@localhost:5432/trading_ai",
     )
+    auth_secret_key: str = os.getenv("AUTH_SECRET_KEY", "change-me-in-production")
+    auth_token_expiry_minutes: int = int(os.getenv("AUTH_TOKEN_EXPIRY_MINUTES", "120"))
 
 
 settings = Settings()

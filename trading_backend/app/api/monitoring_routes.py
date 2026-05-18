@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import authenticate_websocket, require_roles
 from app.db.database import get_session
 from app.models.alert_event import AlertEvent
 from app.models.audit_event import AuditEvent
@@ -26,7 +27,11 @@ from app.schemas.monitoring import (
 )
 from app.services.audit_service import acknowledge_alert, log_audit_event
 
-router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
+router = APIRouter(
+    prefix="/monitoring",
+    tags=["Monitoring"],
+    dependencies=[Depends(require_roles("admin", "compliance"))],
+)
 
 
 def _to_audit_response(event: AuditEvent) -> AuditEventResponse:
@@ -195,6 +200,12 @@ async def get_dashboard_snapshot(
 @router.websocket("/ws")
 async def monitoring_ws(websocket: WebSocket) -> None:
     """WebSocket de monitoring runtime."""
+
+    try:
+        await authenticate_websocket(websocket, required_roles=("admin", "compliance"))
+    except HTTPException:
+        await websocket.close(code=4403)
+        return
 
     await websocket.accept()
     hub = websocket.app.state.monitoring_hub

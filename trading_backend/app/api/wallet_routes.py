@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import ensure_user_access, get_current_user
 from app.db.database import get_session
 from app.models.user import User
 from app.schemas.wallet import (
@@ -37,12 +38,14 @@ async def deposit_funds(
     payload: DepositRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> WalletOperationResponse:
     """Simule un dépôt Stripe puis crédite le portefeuille."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     wallet = await get_wallet_for_update(session, user_id)
     if not wallet:
@@ -83,12 +86,14 @@ async def allocate_funds_for_trading(
     payload: AllocateFundsRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> WalletOperationResponse:
     """Transfère un montant du solde disponible vers le solde engagé."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     wallet = await get_wallet_for_update(session, user_id)
     if not wallet:

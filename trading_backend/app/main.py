@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.auth_routes import router as auth_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
 from app.api.reporting_routes import router as reporting_router
@@ -56,6 +57,7 @@ app = FastAPI(
 )
 
 app.include_router(user_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")

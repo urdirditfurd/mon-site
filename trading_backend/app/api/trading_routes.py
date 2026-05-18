@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import ensure_user_access, get_current_user, require_roles
 from app.db.database import get_session
 from app.models.simulated_order import SimulatedOrder
 from app.models.trading_profile import TradingProfile
@@ -110,12 +111,14 @@ async def update_user_threshold(
     payload: TradingThresholdUpdateRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, str | Decimal]:
     """Met à jour le seuil de probabilité minimum d'un utilisateur."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
     threshold_value = payload.seuil_probabilite_min.quantize(Decimal("0.01"))
@@ -145,12 +148,14 @@ async def update_user_threshold(
 async def get_user_risk_profile(
     user_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> RiskProfileResponse:
     """Retourne la configuration + l'état courant de gestion du risque."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
     profile = await _ensure_profile(session, user_id, wallet)
@@ -168,12 +173,14 @@ async def update_user_risk_profile(
     payload: RiskProfileUpdateRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> RiskProfileResponse:
     """Met à jour la politique de risque d'un utilisateur."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
     profile = await _ensure_profile(session, user_id, wallet)
@@ -222,7 +229,10 @@ async def update_user_risk_profile(
 
 
 @router.get("/engine/control", response_model=EngineControlSnapshotResponse)
-async def get_engine_control_state(request: Request) -> EngineControlSnapshotResponse:
+async def get_engine_control_state(
+    request: Request,
+    _current_user: User = Depends(require_roles("admin", "compliance")),
+) -> EngineControlSnapshotResponse:
     """Retourne l'état runtime global du moteur."""
 
     engine = request.app.state.trading_engine
@@ -240,6 +250,7 @@ async def pause_engine(
     payload: EngineControlActionRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_roles("admin")),
 ) -> EngineControlSnapshotResponse:
     """Met le moteur global en pause."""
 
@@ -267,6 +278,7 @@ async def pause_engine(
 async def resume_engine(
     request: Request,
     session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_roles("admin")),
 ) -> EngineControlSnapshotResponse:
     """Relance le moteur global."""
 
@@ -294,12 +306,14 @@ async def list_user_orders(
     user_id: uuid.UUID,
     limit: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> list[SimulatedOrderResponse]:
     """Retourne les derniers ordres simulés générés pour un utilisateur."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     result = await session.execute(
         select(SimulatedOrder)
@@ -315,12 +329,14 @@ async def list_user_orders(
 async def get_user_order_stats(
     user_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> OrderStatsResponse:
     """Retourne un résumé du pipeline d'exécution broker pour un utilisateur."""
 
     user = await session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
 
     result = await session.execute(select(SimulatedOrder).where(SimulatedOrder.user_id == user_id))
     orders = list(result.scalars().all())

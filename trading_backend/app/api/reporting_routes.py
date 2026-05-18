@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import ensure_user_access, get_current_user, require_roles
 from app.db.database import get_session
 from app.models.user import User
 from app.schemas.reporting import (
@@ -65,10 +66,12 @@ async def get_user_history(
     status: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=2000),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> list[ReportOrderItemResponse]:
     """Historique filtrable par période, actif et statut."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
     period_start, period_end = _resolve_period(start_date, end_date, default_days=30)
     orders = await fetch_filtered_orders(
         session,
@@ -88,10 +91,12 @@ async def get_user_reporting_summary(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> ReportingSummaryResponse:
     """Résumé d'activité sur période."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
     period_start, period_end = _resolve_period(start_date, end_date, default_days=30)
     orders = await fetch_filtered_orders(
         session,
@@ -114,10 +119,16 @@ async def get_user_compliance_summary(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "compliance")),
 ) -> ComplianceSummaryResponse:
     """Résumé conformité (audit + alertes) sur période."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(
+        current_user=current_user,
+        target_user_id=user_id,
+        allow_roles=("admin", "compliance"),
+    )
     period_start, period_end = _resolve_period(start_date, end_date, default_days=30)
     return await compute_compliance_summary(
         session,
@@ -133,10 +144,12 @@ async def get_daily_report_json(
     request: Request,
     report_date: date | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ) -> DailyReportResponse:
     """Rapport journalier structuré JSON."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
     target_date = report_date or datetime.now(timezone.utc).date()
     report = await build_daily_report(session, user_id=user_id, report_date=target_date)
     await log_audit_event(
@@ -159,10 +172,16 @@ async def get_daily_report_pdf(
     request: Request,
     report_date: date | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "compliance")),
 ) -> Response:
     """Rapport journalier au format PDF."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(
+        current_user=current_user,
+        target_user_id=user_id,
+        allow_roles=("admin", "compliance"),
+    )
     target_date = report_date or datetime.now(timezone.utc).date()
     report = await build_daily_report(session, user_id=user_id, report_date=target_date)
 
@@ -226,10 +245,16 @@ async def get_tax_export(
     request: Request,
     year: int = Query(default=datetime.now(timezone.utc).year, ge=2000, le=2100),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "compliance")),
 ) -> TaxExportResponse:
     """Export fiscal annuel simplifié."""
 
     await _ensure_user_exists(session, user_id)
+    ensure_user_access(
+        current_user=current_user,
+        target_user_id=user_id,
+        allow_roles=("admin", "compliance"),
+    )
     export = await build_tax_export(
         session,
         user_id=user_id,
