@@ -5,3 +5,4 @@ asyncpg
 pydantic
 email-validator
 alembic
+pre-commit

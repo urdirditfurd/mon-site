@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: python-compile-check
+        name: Python compile check
+        entry: python -m compileall app alembic scripts
+        language: system
+        pass_filenames: false
+
+      - id: alembic-migration-check
+        name: Alembic migration strict check
+        entry: python scripts/migration_workflow.py check --strict
+        language: system
+        pass_filenames: false

@@ -34,6 +34,7 @@ export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/tradi
 export DEBUG="true"
 export AUTH_SECRET_KEY="change-me-in-production"
 export AUTH_TOKEN_EXPIRY_MINUTES="120"
+export AUTO_CREATE_TABLES="false"
 ```
 
 ## Lancer l'API
@@ -58,6 +59,21 @@ alembic upgrade head
 Revenir d'une migration:
 ```bash
 alembic downgrade -1
+```
+
+Workflow standardisé (recommandé):
+```bash
+make migrate-check-strict
+make migrate-release-dry
+make migrate-release
+make migrate-rollback-dry TARGET=-1
+make migrate-rollback TARGET=-1
+```
+
+Pré-commit (qualité migrations):
+```bash
+pre-commit install
+pre-commit run --all-files
 ```
 
 ## Endpoints principaux
@@ -211,6 +227,17 @@ POST /api/auth/login
 ```bash
 Authorization: Bearer <token>
 ```
+
+## Brique L — Workflow migrations incrémentales (dev/prod)
+
+- Ajout d'un workflow outillé: `scripts/migration_workflow.py`
+  - `check` (cohérence graphe migrations + compile check)
+  - `release` (pipeline release migration)
+  - `rollback` (downgrade contrôlé)
+- Ajout d'une config `.pre-commit-config.yaml` pour empêcher les migrations invalides avant commit.
+- Ajout d'un `Makefile` pour standardiser les commandes de l'équipe.
+- Runbook complet:
+  - `docs/migration-runbook.md`
 
 ## Note migration locale
 

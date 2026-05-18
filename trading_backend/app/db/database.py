@@ -25,12 +25,13 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Crée les tables si elles n'existent pas encore."""
+    """Initialise le metadata SQLAlchemy (optionnel create_all en local)."""
     # Import tardif pour s'assurer que les modèles sont bien enregistrés.
     from app.models import alert_event, audit_event, simulated_order, trading_profile, user, wallet  # noqa: F401
 
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    if settings.auto_create_tables:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
 
 
 async def close_db() -> None:

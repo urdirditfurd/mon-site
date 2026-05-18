@@ -17,6 +17,7 @@ class Settings:
     )
     auth_secret_key: str = os.getenv("AUTH_SECRET_KEY", "change-me-in-production")
     auth_token_expiry_minutes: int = int(os.getenv("AUTH_TOKEN_EXPIRY_MINUTES", "120"))
+    auto_create_tables: bool = os.getenv("AUTO_CREATE_TABLES", "false").lower() == "true"
 
 
 settings = Settings()
