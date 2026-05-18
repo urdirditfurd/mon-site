@@ -15,7 +15,10 @@ from app.models.simulated_order import SimulatedOrder
 from app.models.trading_profile import TradingProfile
 from app.models.user import User
 from app.models.wallet import Wallet
+from app.services.audit_service import ensure_open_alert, log_audit_event
 from app.services.broker_mock import MockBrokerGateway
+from app.services.engine_control import EngineControl
+from app.services.monitoring_hub import MonitoringHub
 from app.services.news_simulator import NewsSignal, NewsSimulator
 from app.services.risk_manager import RiskManager
 
@@ -33,13 +36,18 @@ class TradingEngine:
         session_factory: async_sessionmaker,
         broker_gateway: MockBrokerGateway | None = None,
         risk_manager: RiskManager | None = None,
+        monitoring_hub: MonitoringHub | None = None,
+        engine_control: EngineControl | None = None,
     ) -> None:
         self._news_simulator = news_simulator
         self._session_factory = session_factory
         self._broker_gateway = broker_gateway or MockBrokerGateway()
         self._risk_manager = risk_manager or RiskManager()
+        self._monitoring_hub = monitoring_hub
+        self._engine_control = engine_control or EngineControl()
         self._task: asyncio.Task[None] | None = None
         self._pending_resolution_tasks: set[asyncio.Task[None]] = set()
+        self._last_pause_event_key: str | None = None
 
     async def start(self) -> None:
         """Démarre la boucle d'exécution des ordres."""
@@ -70,13 +78,78 @@ class TradingEngine:
 
         while True:
             signal = await self._news_simulator.next_signal()
+            if self._engine_control.is_paused:
+                pause_key = f"paused:{self._engine_control.reason}"
+                if self._monitoring_hub and pause_key != self._last_pause_event_key:
+                    self._monitoring_hub.publish_event(
+                        channel="engine",
+                        event_type="engine_paused",
+                        severity="warning",
+                        message="Signal ignoré car le moteur est en pause globale.",
+                        payload=self._engine_control.snapshot(),
+                    )
+                self._last_pause_event_key = pause_key
+                continue
+            self._last_pause_event_key = None
             await self._process_signal(signal)
+
+    @property
+    def is_running(self) -> bool:
+        """Indique si la boucle principale est active."""
+
+        return bool(self._task and not self._task.done())
+
+    def control_snapshot(self) -> dict:
+        """Expose l'état de contrôle global."""
+
+        return self._engine_control.snapshot()
+
+    def pause_engine(self, reason: str) -> dict:
+        """Met le moteur en pause globale."""
+
+        self._engine_control.pause(reason)
+        if self._monitoring_hub:
+            self._monitoring_hub.publish_event(
+                channel="engine",
+                event_type="engine_paused_manual",
+                severity="warning",
+                message="Moteur mis en pause manuellement.",
+                payload=self._engine_control.snapshot(),
+            )
+        return self._engine_control.snapshot()
+
+    def resume_engine(self) -> dict:
+        """Relance le moteur global."""
+
+        self._engine_control.resume()
+        if self._monitoring_hub:
+            self._monitoring_hub.publish_event(
+                channel="engine",
+                event_type="engine_resumed_manual",
+                severity="info",
+                message="Moteur relancé manuellement.",
+                payload=self._engine_control.snapshot(),
+            )
+        return self._engine_control.snapshot()
 
     async def _process_signal(self, signal: NewsSignal) -> None:
         """Crée des ordres simulés pour les utilisateurs éligibles."""
 
         confidence_decimal = Decimal(str(signal.confidence)).quantize(Decimal("0.01"))
         pending_order_ids: list[uuid.UUID] = []
+        if self._monitoring_hub:
+            self._monitoring_hub.publish_event(
+                channel="signals",
+                event_type="news_signal_received",
+                severity="info",
+                message=f"Signal {signal.direction} reçu ({signal.confidence}%).",
+                payload={
+                    "news_id": str(signal.id),
+                    "headline": signal.headline,
+                    "source": signal.source,
+                    "confidence": signal.confidence,
+                },
+            )
 
         async with self._session_factory() as session:
             users = (
@@ -107,6 +180,33 @@ class TradingEngine:
 
                 risk_decision = self._risk_manager.evaluate_new_order(profile, user.wallet)
                 if not risk_decision.allowed:
+                    await log_audit_event(
+                        session,
+                        source="trading_engine",
+                        event_type="order_blocked_by_risk",
+                        severity="warning",
+                        message="Ordre bloqué par la politique de risque.",
+                        user_id=user.id,
+                        payload={
+                            "reason": risk_decision.reason,
+                            "news_id": str(signal.id),
+                            "confidence": str(confidence_decimal),
+                        },
+                        monitoring_hub=self._monitoring_hub,
+                    )
+                    alert_mapping = self._risk_alert_mapping(risk_decision.reason)
+                    if alert_mapping is not None:
+                        alert_code, severity = alert_mapping
+                        await ensure_open_alert(
+                            session,
+                            source="risk_manager",
+                            alert_code=alert_code,
+                            severity=severity,
+                            message=risk_decision.reason or "Blocage risque.",
+                            user_id=user.id,
+                            payload={"news_id": str(signal.id)},
+                            monitoring_hub=self._monitoring_hub,
+                        )
                     continue
 
                 montant = (user.wallet.solde_engage * ORDER_FRACTION).quantize(
@@ -158,8 +258,101 @@ class TradingEngine:
                         pnl_simule=final_result.pnl_simule,
                     )
                     order.status = final_result.status
+                    await log_audit_event(
+                        session,
+                        source="trading_engine",
+                        event_type="order_filled_instant",
+                        severity="info",
+                        message="Ordre exécuté instantanément.",
+                        user_id=user.id,
+                        payload={
+                            "order_id": str(order_id),
+                            "broker_order_id": order.broker_order_id,
+                            "asset_symbol": order.asset_symbol,
+                            "pnl_simule": str(order.pnl_simule),
+                            "status": order.status,
+                        },
+                        monitoring_hub=self._monitoring_hub,
+                    )
+                    if not profile.is_trading_active and profile.risk_block_reason:
+                        alert_mapping = self._risk_alert_mapping(profile.risk_block_reason)
+                        if alert_mapping is not None:
+                            alert_code, severity = alert_mapping
+                            await ensure_open_alert(
+                                session,
+                                source="risk_manager",
+                                alert_code=alert_code,
+                                severity=severity,
+                                message=profile.risk_block_reason,
+                                user_id=user.id,
+                                payload={"order_id": str(order_id)},
+                                monitoring_hub=self._monitoring_hub,
+                            )
                 elif submission.status == "pending":
                     pending_order_ids.append(order_id)
+                    await log_audit_event(
+                        session,
+                        source="trading_engine",
+                        event_type="order_pending",
+                        severity="info",
+                        message="Ordre soumis au broker et en attente d'exécution.",
+                        user_id=user.id,
+                        payload={
+                            "order_id": str(order_id),
+                            "broker_order_id": order.broker_order_id,
+                            "asset_symbol": order.asset_symbol,
+                            "status": order.status,
+                        },
+                        monitoring_hub=self._monitoring_hub,
+                    )
+                else:
+                    await ensure_open_alert(
+                        session,
+                        source="broker_gateway",
+                        alert_code="BROKER_REJECTED_ORDER",
+                        severity="medium",
+                        message="Le broker a rejeté un ordre.",
+                        user_id=user.id,
+                        payload={
+                            "order_id": str(order_id),
+                            "broker_order_id": order.broker_order_id,
+                            "reason": submission.rejection_reason,
+                        },
+                        monitoring_hub=self._monitoring_hub,
+                    )
+                    await log_audit_event(
+                        session,
+                        source="trading_engine",
+                        event_type="order_rejected",
+                        severity="warning",
+                        message="Ordre rejeté à la soumission broker.",
+                        user_id=user.id,
+                        payload={
+                            "order_id": str(order_id),
+                            "broker_order_id": order.broker_order_id,
+                            "reason": submission.rejection_reason,
+                        },
+                        monitoring_hub=self._monitoring_hub,
+                    )
+
+                await log_audit_event(
+                    session,
+                    source="trading_engine",
+                    event_type="order_submitted",
+                    severity="info",
+                    message="Ordre soumis au broker mock.",
+                    user_id=user.id,
+                    payload={
+                        "order_id": str(order_id),
+                        "news_id": str(signal.id),
+                        "direction": signal.direction,
+                        "confidence": str(confidence_decimal),
+                        "status": submission.status,
+                        "asset_symbol": submission.asset_symbol,
+                        "requested_price": str(submission.requested_price),
+                    },
+                    monitoring_hub=self._monitoring_hub,
+                )
 
                 session.add(order)
 
@@ -218,8 +411,64 @@ class TradingEngine:
                     montant_ordre=order.montant_ordre,
                     pnl_simule=result.pnl_simule,
                 )
+                await log_audit_event(
+                    session,
+                    source="trading_engine",
+                    event_type="order_filled_from_pending",
+                    severity="info",
+                    message="Ordre pending finalisé en filled.",
+                    user_id=order.user_id,
+                    payload={
+                        "order_id": str(order.id),
+                        "broker_order_id": order.broker_order_id,
+                        "pnl_simule": str(order.pnl_simule),
+                    },
+                    monitoring_hub=self._monitoring_hub,
+                )
             else:
                 order.pnl_simule = Decimal("0.00")
+                await ensure_open_alert(
+                    session,
+                    source="broker_gateway",
+                    alert_code="BROKER_PENDING_REJECTED",
+                    severity="medium",
+                    message="Ordre pending rejeté par le broker mock.",
+                    user_id=order.user_id,
+                    payload={
+                        "order_id": str(order.id),
+                        "broker_order_id": order.broker_order_id,
+                        "reason": order.rejection_reason,
+                    },
+                    monitoring_hub=self._monitoring_hub,
+                )
+                await log_audit_event(
+                    session,
+                    source="trading_engine",
+                    event_type="order_rejected_from_pending",
+                    severity="warning",
+                    message="Ordre pending rejeté lors de la finalisation.",
+                    user_id=order.user_id,
+                    payload={
+                        "order_id": str(order.id),
+                        "reason": order.rejection_reason,
+                    },
+                    monitoring_hub=self._monitoring_hub,
+                )
+
+            if not profile.is_trading_active and profile.risk_block_reason:
+                alert_mapping = self._risk_alert_mapping(profile.risk_block_reason)
+                if alert_mapping is not None:
+                    alert_code, severity = alert_mapping
+                    await ensure_open_alert(
+                        session,
+                        source="risk_manager",
+                        alert_code=alert_code,
+                        severity=severity,
+                        message=profile.risk_block_reason,
+                        user_id=order.user_id,
+                        payload={"order_id": str(order.id)},
+                        monitoring_hub=self._monitoring_hub,
+                    )
 
             session.add_all([order, wallet, profile])
             await session.commit()
@@ -242,3 +491,20 @@ class TradingEngine:
             equity_peak=baseline_equity,
             equity_current=baseline_equity,
         )
+
+    @staticmethod
+    def _risk_alert_mapping(reason: str | None) -> tuple[str, str] | None:
+        """Mappe une raison de blocage risque vers un code/gravité d'alerte."""
+
+        if not reason:
+            return None
+        lowered = reason.lower()
+        if "drawdown" in lowered:
+            return ("RISK_MAX_DRAWDOWN", "high")
+        if "capital engagé épuisé" in lowered:
+            return ("RISK_CAPITAL_DEPLETED", "high")
+        if "limite d'ordres" in lowered:
+            return ("RISK_DAILY_ORDER_LIMIT", "medium")
+        if "kill switch" in lowered:
+            return ("RISK_KILL_SWITCH_ACTIVE", "low")
+        return None

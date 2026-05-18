@@ -42,3 +42,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    audit_events: Mapped[list["AuditEvent"]] = relationship(
+        "AuditEvent",
+        back_populates="user",
+    )
+    alert_events: Mapped[list["AlertEvent"]] = relationship(
+        "AlertEvent",
+        back_populates="user",
+    )

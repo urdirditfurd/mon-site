@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,12 +14,17 @@ from app.models.trading_profile import TradingProfile
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreateRequest, UserResponse
+from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserCreateRequest, session: AsyncSession = Depends(get_session)) -> UserResponse:
+async def create_user(
+    payload: UserCreateRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> UserResponse:
     """Crée un utilisateur et son portefeuille initial à zéro."""
 
     existing_user = await session.scalar(select(User).where(User.email == payload.email))
@@ -47,6 +52,16 @@ async def create_user(payload: UserCreateRequest, session: AsyncSession = Depend
         equity_current=Decimal("0.00"),
     )
     session.add_all([user, wallet, trading_profile])
+    await log_audit_event(
+        session,
+        source="user_api",
+        event_type="user_created",
+        severity="info",
+        message="Nouvel utilisateur créé.",
+        user_id=user.id,
+        payload={"email": str(payload.email)},
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
     await session.commit()
     await session.refresh(user)
     return UserResponse(

@@ -6,7 +6,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,12 +16,15 @@ from app.models.trading_profile import TradingProfile
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.trading import (
+    EngineControlActionRequest,
+    EngineControlSnapshotResponse,
     OrderStatsResponse,
     RiskProfileResponse,
     RiskProfileUpdateRequest,
     SimulatedOrderResponse,
 )
 from app.schemas.user import TradingThresholdUpdateRequest
+from app.services.audit_service import log_audit_event
 from app.services.risk_manager import RiskManager
 
 router = APIRouter(prefix="/trading", tags=["Trading IA"])
@@ -105,6 +108,7 @@ def _to_risk_response(user_id: uuid.UUID, profile: TradingProfile) -> RiskProfil
 async def update_user_threshold(
     user_id: uuid.UUID,
     payload: TradingThresholdUpdateRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, str | Decimal]:
     """Met à jour le seuil de probabilité minimum d'un utilisateur."""
@@ -118,6 +122,16 @@ async def update_user_threshold(
     profile = await _ensure_profile(session, user_id, wallet)
     profile.seuil_probabilite_min = threshold_value
     session.add(profile)
+    await log_audit_event(
+        session,
+        source="trading_api",
+        event_type="threshold_updated",
+        severity="info",
+        message="Seuil de probabilité utilisateur mis à jour.",
+        user_id=user_id,
+        payload={"seuil_probabilite_min": str(threshold_value)},
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
 
     await session.commit()
 
@@ -152,6 +166,7 @@ async def get_user_risk_profile(
 async def update_user_risk_profile(
     user_id: uuid.UUID,
     payload: RiskProfileUpdateRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> RiskProfileResponse:
     """Met à jour la politique de risque d'un utilisateur."""
@@ -186,9 +201,92 @@ async def update_user_risk_profile(
         risk_manager.sync_daily_state(profile, wallet)
 
     session.add(profile)
+    await log_audit_event(
+        session,
+        source="trading_api",
+        event_type="risk_profile_updated",
+        severity="info",
+        message="Paramètres de risque utilisateur mis à jour.",
+        user_id=user_id,
+        payload={
+            "is_trading_active": profile.is_trading_active,
+            "max_orders_per_day": profile.max_orders_per_day,
+            "stop_loss_pct": str(profile.stop_loss_pct),
+            "max_drawdown_pct": str(profile.max_drawdown_pct),
+        },
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
     await session.commit()
     await session.refresh(profile)
     return _to_risk_response(user_id, profile)
+
+
+@router.get("/engine/control", response_model=EngineControlSnapshotResponse)
+async def get_engine_control_state(request: Request) -> EngineControlSnapshotResponse:
+    """Retourne l'état runtime global du moteur."""
+
+    engine = request.app.state.trading_engine
+    snapshot = engine.control_snapshot()
+    return EngineControlSnapshotResponse(
+        is_running=engine.is_running,
+        is_paused=snapshot["is_paused"],
+        reason=snapshot["reason"],
+        updated_at=snapshot["updated_at"],
+    )
+
+
+@router.patch("/engine/pause", response_model=EngineControlSnapshotResponse)
+async def pause_engine(
+    payload: EngineControlActionRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> EngineControlSnapshotResponse:
+    """Met le moteur global en pause."""
+
+    engine = request.app.state.trading_engine
+    snapshot = engine.pause_engine(payload.reason or "Pause manuelle demandée.")
+    await log_audit_event(
+        session,
+        source="trading_api",
+        event_type="engine_paused_manual",
+        severity="warning",
+        message="Pause globale du moteur demandée par API.",
+        payload={"reason": snapshot["reason"]},
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
+    await session.commit()
+    return EngineControlSnapshotResponse(
+        is_running=engine.is_running,
+        is_paused=snapshot["is_paused"],
+        reason=snapshot["reason"],
+        updated_at=snapshot["updated_at"],
+    )
+
+
+@router.patch("/engine/resume", response_model=EngineControlSnapshotResponse)
+async def resume_engine(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> EngineControlSnapshotResponse:
+    """Relance le moteur global."""
+
+    engine = request.app.state.trading_engine
+    snapshot = engine.resume_engine()
+    await log_audit_event(
+        session,
+        source="trading_api",
+        event_type="engine_resumed_manual",
+        severity="info",
+        message="Reprise globale du moteur demandée par API.",
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
+    await session.commit()
+    return EngineControlSnapshotResponse(
+        is_running=engine.is_running,
+        is_paused=snapshot["is_paused"],
+        reason=snapshot["reason"],
+        updated_at=snapshot["updated_at"],
+    )
 
 
 @router.get("/users/{user_id}/orders", response_model=list[SimulatedOrderResponse])

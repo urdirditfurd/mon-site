@@ -67,3 +67,18 @@ class RiskProfileUpdateRequest(BaseModel):
     stop_loss_pct: Decimal | None = Field(default=None, gt=0, le=100)
     max_drawdown_pct: Decimal | None = Field(default=None, gt=0, le=100)
     reset_daily_counters: bool = False
+
+
+class EngineControlActionRequest(BaseModel):
+    """Commande de pause moteur."""
+
+    reason: str | None = None
+
+
+class EngineControlSnapshotResponse(BaseModel):
+    """État global du moteur automatique."""
+
+    is_running: bool
+    is_paused: bool
+    reason: str | None
+    updated_at: datetime

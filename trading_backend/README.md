@@ -11,6 +11,10 @@ Backend Python modulaire pour:
 - passerelle broker mock (statuts pending/filled/rejected)
 - calcul de PnL simulé par ordre exécuté
 - gestion du risque (kill switch, stop-loss, max drawdown, limite d'ordres/jour)
+- audit trail persistant (journal d'événements système)
+- centre d'alertes opérationnelles (open/ack)
+- monitoring dashboard + websocket temps réel
+- contrôle global du moteur (pause/reprise runtime)
 
 ## Installation
 
@@ -52,6 +56,22 @@ uvicorn app.main:app --reload --port 8000
   Retourne l'historique des ordres simulés déclenchés par la stratégie (avec statut broker et PnL).
 - `GET /api/trading/users/{user_id}/orders/stats`  
   Retourne les statistiques d'exécution (`pending`, `filled`, `rejected`, PnL total).
+- `GET /api/trading/engine/control`  
+  Retourne l'état global du moteur (running/paused).
+- `PATCH /api/trading/engine/pause`  
+  Met le moteur en pause globale.
+- `PATCH /api/trading/engine/resume`  
+  Relance le moteur global.
+- `GET /api/monitoring/audit`  
+  Liste les événements d'audit (filtres: user, severity, event_type).
+- `GET /api/monitoring/alerts`  
+  Liste les alertes (open/ack).
+- `PATCH /api/monitoring/alerts/{alert_id}/ack`  
+  Acquitte une alerte.
+- `GET /api/monitoring/dashboard`  
+  Snapshot global d'exploitation (users/orders/PnL/alerts + derniers événements runtime).
+- `WS /api/monitoring/ws`  
+  Flux temps réel des événements monitoring.
 - `GET /api/news/live?limit=10`  
   Retourne les dernières actualités simulées et scorées par le NLP mock (toutes les 5 secondes).
 - `GET /api/health`  
@@ -82,6 +102,26 @@ Sur les ordres exécutés:
 4. **Stop-loss par ordre**: la perte max est cappée au pourcentage configuré.
 5. **Mise à jour equity/PnL**: `solde_engage`, `solde_total`, equity et PnL journalier sont recalculés.
 6. **Auto-pause sécurité**: si capital engagé épuisé ou drawdown limite atteint, le trading passe en pause.
+
+## Brique F — Audit & Monitoring
+
+- Chaque action clé (création user, dépôt, allocation, update risque, soumission/finalisation ordre, pause/reprise moteur) est tracée dans `audit_events`.
+- Les situations critiques génèrent des alertes persistées dans `alert_events`.
+- Les événements runtime sont aussi diffusés en mémoire via `MonitoringHub` pour le dashboard live.
+
+## Briques suivantes implémentées
+
+### G — Alerting opérationnel
+- Alertes dédupliquées pour les cas de risque/broker (`ensure_open_alert`).
+- Acquittement manuel via API.
+
+### H — Dashboard temps réel
+- Endpoint agrégé `GET /api/monitoring/dashboard`.
+- WebSocket `/api/monitoring/ws` (events + heartbeat).
+
+### I — Pilotage global moteur
+- Pause/reprise du moteur via API sans redémarrage backend.
+- Le moteur ignore les signaux entrants pendant une pause globale.
 
 ## Note migration locale
 
