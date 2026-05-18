@@ -1,0 +1,20 @@
+"""Configuration centrale de l'application FastAPI."""
+
+from __future__ import annotations
+
+import os
+
+
+class Settings:
+    """Expose les variables d'environnement avec valeurs par défaut."""
+
+    app_name: str = os.getenv("APP_NAME", "Trading IA Backend")
+    app_version: str = os.getenv("APP_VERSION", "0.1.0")
+    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/trading_ai",
+    )
+
+
+settings = Settings()
