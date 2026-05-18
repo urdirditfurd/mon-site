@@ -22,6 +22,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     created_at: datetime
     seuil_probabilite_min: Decimal
+    is_trading_active: bool
 
 
 class TradingThresholdUpdateRequest(BaseModel):

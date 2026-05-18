@@ -10,6 +10,7 @@ Backend Python modulaire pour:
 - déclenchement d'ordres simulés selon seuil utilisateur
 - passerelle broker mock (statuts pending/filled/rejected)
 - calcul de PnL simulé par ordre exécuté
+- gestion du risque (kill switch, stop-loss, max drawdown, limite d'ordres/jour)
 
 ## Installation
 
@@ -43,6 +44,10 @@ uvicorn app.main:app --reload --port 8000
   Déplace un montant de `solde_disponible` vers `solde_engage`.
 - `PATCH /api/trading/users/{user_id}/threshold`  
   Met à jour le seuil de probabilité minimum (0 à 100) requis pour déclencher un trade IA.
+- `GET /api/trading/users/{user_id}/risk`  
+  Retourne l'état courant de gestion du risque (drawdown, compteurs journaliers, kill switch).
+- `PATCH /api/trading/users/{user_id}/risk`  
+  Met à jour la politique de risque (kill switch, stop-loss, max drawdown, limite d'ordres/jour).
 - `GET /api/trading/users/{user_id}/orders?limit=20`  
   Retourne l'historique des ordres simulés déclenchés par la stratégie (avec statut broker et PnL).
 - `GET /api/trading/users/{user_id}/orders/stats`  
@@ -64,7 +69,21 @@ uvicorn app.main:app --reload --port 8000
 6. Les ordres `pending` sont finalisés en asynchrone avec un résultat `filled/rejected`.
 7. Les ordres `filled` reçoivent un `pnl_simule` calculé automatiquement.
 
+## Logique Brique E (gestion du risque)
+
+Les contrôles suivants sont appliqués avant chaque ordre:
+
+1. **Kill switch utilisateur**: si actif, aucun ordre n'est soumis.
+2. **Limite d'ordres par jour**: blocage dès que la limite configurée est atteinte.
+3. **Max drawdown**: si le drawdown courant dépasse la limite, le trading est auto-pausé.
+
+Sur les ordres exécutés:
+
+4. **Stop-loss par ordre**: la perte max est cappée au pourcentage configuré.
+5. **Mise à jour equity/PnL**: `solde_engage`, `solde_total`, equity et PnL journalier sont recalculés.
+6. **Auto-pause sécurité**: si capital engagé épuisé ou drawdown limite atteint, le trading passe en pause.
+
 ## Note migration locale
 
 Le projet utilise actuellement `create_all` (sans Alembic).  
-Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL.
+Si tu as déjà créé les tables avec un ancien schéma, supprime/recrée la base locale avant de redémarrer l'API pour prendre en compte les nouveaux champs broker/PnL/risk.

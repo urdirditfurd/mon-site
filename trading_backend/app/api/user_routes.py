@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,6 +36,15 @@ async def create_user(payload: UserCreateRequest, session: AsyncSession = Depend
     trading_profile = TradingProfile(
         user=user,
         seuil_probabilite_min=Decimal("80.00"),
+        is_trading_active=True,
+        max_orders_per_day=20,
+        stop_loss_pct=Decimal("2.50"),
+        max_drawdown_pct=Decimal("12.00"),
+        last_risk_reset_date=date.today(),
+        orders_today=0,
+        cumulative_pnl_today=Decimal("0.00"),
+        equity_peak=Decimal("0.00"),
+        equity_current=Decimal("0.00"),
     )
     session.add_all([user, wallet, trading_profile])
     await session.commit()
@@ -44,4 +54,5 @@ async def create_user(payload: UserCreateRequest, session: AsyncSession = Depend
         email=user.email,
         created_at=user.created_at,
         seuil_probabilite_min=trading_profile.seuil_probabilite_min,
+        is_trading_active=trading_profile.is_trading_active,
     )

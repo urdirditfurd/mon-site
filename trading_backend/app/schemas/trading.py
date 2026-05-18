@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SimulatedOrderResponse(BaseModel):
@@ -40,3 +40,30 @@ class OrderStatsResponse(BaseModel):
     filled_orders: int
     rejected_orders: int
     total_pnl_simule: Decimal
+
+
+class RiskProfileResponse(BaseModel):
+    """Vue API du profil de risque utilisateur."""
+
+    user_id: uuid.UUID
+    is_trading_active: bool
+    risk_block_reason: str | None
+    max_orders_per_day: int
+    stop_loss_pct: Decimal
+    max_drawdown_pct: Decimal
+    orders_today: int
+    cumulative_pnl_today: Decimal
+    equity_peak: Decimal
+    equity_current: Decimal
+    current_drawdown_pct: Decimal
+    last_risk_reset_date: date
+
+
+class RiskProfileUpdateRequest(BaseModel):
+    """Payload de mise à jour de la politique de risque."""
+
+    is_trading_active: bool | None = None
+    max_orders_per_day: int | None = Field(default=None, ge=1, le=1000)
+    stop_loss_pct: Decimal | None = Field(default=None, gt=0, le=100)
+    max_drawdown_pct: Decimal | None = Field(default=None, gt=0, le=100)
+    reset_daily_counters: bool = False

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import select
@@ -11,9 +12,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.models.simulated_order import SimulatedOrder
+from app.models.trading_profile import TradingProfile
 from app.models.user import User
+from app.models.wallet import Wallet
 from app.services.broker_mock import MockBrokerGateway
 from app.services.news_simulator import NewsSignal, NewsSimulator
+from app.services.risk_manager import RiskManager
 
 DEFAULT_SEUIL = Decimal("80.00")
 MIN_TRADE_AMOUNT = Decimal("10.00")
@@ -28,10 +32,12 @@ class TradingEngine:
         news_simulator: NewsSimulator,
         session_factory: async_sessionmaker,
         broker_gateway: MockBrokerGateway | None = None,
+        risk_manager: RiskManager | None = None,
     ) -> None:
         self._news_simulator = news_simulator
         self._session_factory = session_factory
         self._broker_gateway = broker_gateway or MockBrokerGateway()
+        self._risk_manager = risk_manager or RiskManager()
         self._task: asyncio.Task[None] | None = None
         self._pending_resolution_tasks: set[asyncio.Task[None]] = set()
 
@@ -86,12 +92,21 @@ class TradingEngine:
                 if user.wallet is None or user.wallet.solde_engage <= 0:
                     continue
 
+                profile = user.trading_profile
+                if profile is None:
+                    profile = self._build_default_profile(user.id, user.wallet)
+                    session.add(profile)
+
                 seuil = (
-                    user.trading_profile.seuil_probabilite_min
-                    if user.trading_profile is not None
+                    profile.seuil_probabilite_min
+                    if profile is not None
                     else DEFAULT_SEUIL
                 )
                 if confidence_decimal < seuil:
+                    continue
+
+                risk_decision = self._risk_manager.evaluate_new_order(profile, user.wallet)
+                if not risk_decision.allowed:
                     continue
 
                 montant = (user.wallet.solde_engage * ORDER_FRACTION).quantize(
@@ -110,6 +125,8 @@ class TradingEngine:
                     direction=signal.direction,
                     confidence=confidence_decimal,
                 )
+                self._risk_manager.register_order_submission(profile)
+
                 order_id = uuid.uuid4()
                 order = SimulatedOrder(
                     id=order_id,
@@ -134,7 +151,12 @@ class TradingEngine:
                         montant_ordre=montant,
                     )
                     order.filled_price = final_result.filled_price
-                    order.pnl_simule = final_result.pnl_simule
+                    order.pnl_simule = self._risk_manager.apply_fill_result(
+                        profile=profile,
+                        wallet=user.wallet,
+                        montant_ordre=montant,
+                        pnl_simule=final_result.pnl_simule,
+                    )
                     order.status = final_result.status
                 elif submission.status == "pending":
                     pending_order_ids.append(order_id)
@@ -177,10 +199,46 @@ class TradingEngine:
             order = await session.get(SimulatedOrder, order_id)
             if order is None or order.status != "pending":
                 return
+
+            wallet = await session.scalar(select(Wallet).where(Wallet.user_id == order.user_id))
+            profile = await session.scalar(select(TradingProfile).where(TradingProfile.user_id == order.user_id))
+            if wallet is None:
+                return
+            if profile is None:
+                profile = self._build_default_profile(order.user_id, wallet)
+                session.add(profile)
+
             order.status = result.status
             order.filled_price = result.filled_price
-            order.pnl_simule = result.pnl_simule
             order.rejection_reason = result.rejection_reason
+            if result.status == "filled":
+                order.pnl_simule = self._risk_manager.apply_fill_result(
+                    profile=profile,
+                    wallet=wallet,
+                    montant_ordre=order.montant_ordre,
+                    pnl_simule=result.pnl_simule,
+                )
+            else:
+                order.pnl_simule = Decimal("0.00")
 
-            session.add(order)
+            session.add_all([order, wallet, profile])
             await session.commit()
+
+    @staticmethod
+    def _build_default_profile(user_id: uuid.UUID, wallet: Wallet) -> TradingProfile:
+        """Crée un profil de trading par défaut si absent."""
+
+        baseline_equity = wallet.solde_engage.quantize(Decimal("0.01")) if wallet.solde_engage > 0 else Decimal("0.00")
+        return TradingProfile(
+            user_id=user_id,
+            seuil_probabilite_min=DEFAULT_SEUIL,
+            is_trading_active=True,
+            max_orders_per_day=20,
+            stop_loss_pct=Decimal("2.50"),
+            max_drawdown_pct=Decimal("12.00"),
+            last_risk_reset_date=date.today(),
+            orders_today=0,
+            cumulative_pnl_today=Decimal("0.00"),
+            equity_peak=baseline_equity,
+            equity_current=baseline_equity,
+        )
