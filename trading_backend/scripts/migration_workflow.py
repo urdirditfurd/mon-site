@@ -89,7 +89,7 @@ def _load_nodes() -> list[RevisionNode]:
 
 
 def _run_compile_check() -> bool:
-    print("• Vérification syntaxe Python (app + alembic)")
+    print("- Verification syntaxe Python (app + alembic)")
     ok = compileall.compile_dir(str(ROOT_DIR / "app"), quiet=1) and compileall.compile_dir(
         str(ROOT_DIR / "alembic"),
         quiet=1,
@@ -121,8 +121,8 @@ def check_migrations(strict: bool = False) -> int:
             issues.append(f"down_revision introuvable(s): {', '.join(unknown_refs)}")
 
         head_candidates = sorted(revision_set - down_refs)
-        print(f"• Migrations détectées: {len(nodes)}")
-        print(f"• Heads détectés: {', '.join(head_candidates) if head_candidates else 'aucun'}")
+        print(f"- Migrations detectees: {len(nodes)}")
+        print(f"- Heads detectes: {', '.join(head_candidates) if head_candidates else 'aucun'}")
 
         if strict and len(head_candidates) != 1:
             issues.append(
@@ -137,12 +137,12 @@ def check_migrations(strict: bool = False) -> int:
                 issues.append(f"{node.path.name}: fonction downgrade vide.")
 
     if issues:
-        print("✗ ÉCHEC")
+        print("[FAIL] ECHEC")
         for issue in issues:
             print(f"  - {issue}")
         return 1
 
-    print("✓ OK: migrations cohérentes")
+    print("[OK] migrations coherentes")
     return 0
 
 
@@ -151,14 +151,14 @@ def _run_alembic(command: list[str], database_url: str | None = None) -> int:
     if database_url:
         env["DATABASE_URL"] = database_url
     full_cmd = ["alembic", "-c", str(ALEMBIC_INI), *command]
-    print(f"• Exécution: {' '.join(full_cmd)}")
+    print(f"- Execution: {' '.join(full_cmd)}")
     try:
         subprocess.run(full_cmd, check=True, cwd=str(ROOT_DIR), env=env)
     except FileNotFoundError:
-        print("✗ alembic introuvable. Installe les dépendances: pip install -r requirements.txt")
+        print("[FAIL] alembic introuvable. Installe les dependances: pip install -r requirements.txt")
         return 1
     except subprocess.CalledProcessError as exc:
-        print(f"✗ commande échouée (exit={exc.returncode})")
+        print(f"[FAIL] commande echouee (exit={exc.returncode})")
         return exc.returncode
     return 0
 
@@ -172,7 +172,7 @@ def release_migrations(apply: bool, database_url: str | None) -> int:
         return check_code
 
     if not apply:
-        print("✓ Dry-run terminé. Pour appliquer: --apply")
+        print("[OK] Dry-run termine. Pour appliquer: --apply")
         return 0
 
     return _run_alembic(["upgrade", "head"], database_url=database_url)
@@ -187,7 +187,7 @@ def rollback_migrations(target: str, apply: bool, database_url: str | None) -> i
         return check_code
 
     if not apply:
-        print(f"✓ Dry-run rollback vers {target}. Pour appliquer: --apply")
+        print(f"[OK] Dry-run rollback vers {target}. Pour appliquer: --apply")
         return 0
 
     return _run_alembic(["downgrade", target], database_url=database_url)
