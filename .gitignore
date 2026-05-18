@@ -4,3 +4,5 @@ storage/jobs/*
 storage/jobs-db.json
 !storage/uploads/.gitkeep
 !storage/jobs/.gitkeep
+**/__pycache__/
+*.pyc
