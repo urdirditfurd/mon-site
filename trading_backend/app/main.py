@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
+from app.api.reporting_routes import router as reporting_router
 from app.api.trading_routes import router as trading_router
 from app.api.user_routes import router as user_router
 from app.api.wallet_routes import router as wallet_router
@@ -59,6 +60,7 @@ app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")
+app.include_router(reporting_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Health"])

@@ -15,6 +15,7 @@ Backend Python modulaire pour:
 - centre d'alertes opérationnelles (open/ack)
 - monitoring dashboard + websocket temps réel
 - contrôle global du moteur (pause/reprise runtime)
+- reporting & conformité (historique filtré, rapports journaliers, export fiscal)
 
 ## Installation
 
@@ -72,6 +73,18 @@ uvicorn app.main:app --reload --port 8000
   Snapshot global d'exploitation (users/orders/PnL/alerts + derniers événements runtime).
 - `WS /api/monitoring/ws`  
   Flux temps réel des événements monitoring.
+- `GET /api/reporting/users/{user_id}/history`  
+  Historique filtrable des ordres (`start_date`, `end_date`, `asset_symbol`, `status`).
+- `GET /api/reporting/users/{user_id}/summary`  
+  Résumé trading sur période (volume, PnL, win rate, etc.).
+- `GET /api/reporting/users/{user_id}/compliance`  
+  Résumé conformité sur période (audit events + alertes).
+- `GET /api/reporting/users/{user_id}/daily-report.json`  
+  Rapport journalier structuré JSON.
+- `GET /api/reporting/users/{user_id}/daily-report.pdf`  
+  Rapport journalier PDF (téléchargement).
+- `GET /api/reporting/users/{user_id}/tax-export?year=YYYY`  
+  Export fiscal simplifié annuel (PnL global + breakdown par actif).
 - `GET /api/news/live?limit=10`  
   Retourne les dernières actualités simulées et scorées par le NLP mock (toutes les 5 secondes).
 - `GET /api/health`  
@@ -122,6 +135,17 @@ Sur les ordres exécutés:
 ### I — Pilotage global moteur
 - Pause/reprise du moteur via API sans redémarrage backend.
 - Le moteur ignore les signaux entrants pendant une pause globale.
+
+## Brique J — Reporting & conformité
+
+- **Historique filtrable** par période/utilisateur/actif/statut.
+- **Résumé de performance** sur période (volume, PnL, win rate, confiance moyenne).
+- **Rapport journalier** exportable en JSON et PDF.
+- **Export fiscal simplifié annuel** avec:
+  - résultat imposable,
+  - pertes déductibles,
+  - détail par actif (trades, volume, gains/pertes).
+- Génération des exports tracée dans l'audit trail.
 
 ## Note migration locale
 
