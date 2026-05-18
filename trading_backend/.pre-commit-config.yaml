@@ -3,12 +3,12 @@ repos:
     hooks:
       - id: python-compile-check
         name: Python compile check
-        entry: python -m compileall app alembic scripts
+        entry: python -m compileall trading_backend/app trading_backend/alembic trading_backend/scripts
         language: system
         pass_filenames: false
 
       - id: alembic-migration-check
         name: Alembic migration strict check
-        entry: python scripts/migration_workflow.py check --strict
+        entry: python trading_backend/scripts/migration_workflow.py check --strict
         language: system
         pass_filenames: false
