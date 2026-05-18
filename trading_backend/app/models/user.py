@@ -31,3 +31,14 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    trading_profile: Mapped["TradingProfile"] = relationship(
+        "TradingProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    simulated_orders: Mapped[list["SimulatedOrder"]] = relationship(
+        "SimulatedOrder",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

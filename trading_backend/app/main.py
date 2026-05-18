@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.news_routes import router as news_router
+from app.api.trading_routes import router as trading_router
 from app.api.user_routes import router as user_router
 from app.api.wallet_routes import router as wallet_router
 from app.core.config import settings
-from app.db.database import close_db, init_db
+from app.db.database import AsyncSessionLocal, close_db, init_db
 from app.services.news_simulator import NewsSimulator
+from app.services.trading_engine import TradingEngine
 
 
 @asynccontextmanager
@@ -24,9 +26,17 @@ async def lifespan(app: FastAPI):
     app.state.news_simulator = simulator
     await simulator.start()
 
+    trading_engine = TradingEngine(
+        news_simulator=simulator,
+        session_factory=AsyncSessionLocal,
+    )
+    app.state.trading_engine = trading_engine
+    await trading_engine.start()
+
     try:
         yield
     finally:
+        await trading_engine.stop()
         await simulator.stop()
         await close_db()
 
@@ -41,6 +51,7 @@ app = FastAPI(
 app.include_router(user_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
+app.include_router(trading_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Health"])

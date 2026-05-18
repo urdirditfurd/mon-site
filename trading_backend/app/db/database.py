@@ -27,7 +27,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """Crée les tables si elles n'existent pas encore."""
     # Import tardif pour s'assurer que les modèles sont bien enregistrés.
-    from app.models import user, wallet  # noqa: F401
+    from app.models import simulated_order, trading_profile, user, wallet  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

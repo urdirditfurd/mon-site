@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import random
+import uuid
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+
+from app.services.nlp_mock import MockNLPEngine
 
 
 @dataclass(slots=True)
 class NewsSignal:
     """Structure interne d'une news analysée."""
 
+    id: uuid.UUID
     headline: str
+    source: str
     direction: str
     confidence: float
+    impact_label: str
     generated_at: datetime
 
 
@@ -25,19 +31,24 @@ class NewsSimulator:
     def __init__(self, interval_seconds: int = 5, max_items: int = 100) -> None:
         self.interval_seconds = interval_seconds
         self._items: deque[NewsSignal] = deque(maxlen=max_items)
+        self._queue: asyncio.Queue[NewsSignal] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
+        self._nlp_engine = MockNLPEngine()
+        self._sources = ["Reuters", "Bloomberg", "Financial Times", "TechWire"]
 
-        self._positive_headlines = [
+        self._headlines = [
             "Le patron de Nvidia annonce une nouvelle puce IA",
             "Résultats trimestriels supérieurs aux attentes chez Apple",
             "La FED évoque un ralentissement de la hausse des taux",
             "Microsoft signe un contrat cloud majeur en Europe",
-        ]
-        self._negative_headlines = [
             "Alerte inflation: les coûts de production repartent à la hausse",
             "Une big tech annonce un plan de licenciement massif",
             "Tensions géopolitiques: incertitude sur les marchés",
             "Guidance prudente d'un leader des semi-conducteurs",
+            "BlackRock confirme une stratégie d'expansion sur l'IA",
+            "Downgrade d'un acteur cloud après un trimestre décevant",
+            "OpenAI conclut un partenariat stratégique industriel",
+            "Retard de production sur une génération de GPU",
         ]
 
     async def start(self) -> None:
@@ -62,24 +73,25 @@ class NewsSimulator:
         """Produit une nouvelle fausse actualité toutes les X secondes."""
 
         while True:
-            self._items.append(self._generate_news_signal())
+            signal = self._generate_news_signal()
+            self._items.append(signal)
+            await self._queue.put(signal)
             await asyncio.sleep(self.interval_seconds)
 
     def _generate_news_signal(self) -> NewsSignal:
-        """Génère un signal aléatoire achat/vente + probabilité."""
+        """Génère une news puis l'analyse via le moteur NLP mock."""
 
-        direction = random.choice(["buy", "sell"])
-        if direction == "buy":
-            headline = random.choice(self._positive_headlines)
-            confidence = round(random.uniform(65.0, 98.0), 2)
-        else:
-            headline = random.choice(self._negative_headlines)
-            confidence = round(random.uniform(60.0, 95.0), 2)
+        headline = random.choice(self._headlines)
+        source = random.choice(self._sources)
+        analysis = self._nlp_engine.analyze(headline)
 
         return NewsSignal(
+            id=uuid.uuid4(),
             headline=headline,
-            direction=direction,
-            confidence=confidence,
+            source=source,
+            direction=analysis.direction,
+            confidence=analysis.confidence,
+            impact_label=analysis.impact_label,
             generated_at=datetime.now(timezone.utc),
         )
 
@@ -89,3 +101,8 @@ class NewsSimulator:
         limited = list(self._items)[-limit:]
         limited.reverse()
         return [asdict(item) for item in limited]
+
+    async def next_signal(self) -> NewsSignal:
+        """Bloque jusqu'à réception d'une nouvelle actualité."""
+
+        return await self._queue.get()
