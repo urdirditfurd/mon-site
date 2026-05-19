@@ -38,6 +38,7 @@ class TradingEngine:
         risk_manager: RiskManager | None = None,
         monitoring_hub: MonitoringHub | None = None,
         engine_control: EngineControl | None = None,
+        recovery_delay_seconds: int = 2,
     ) -> None:
         self._news_simulator = news_simulator
         self._session_factory = session_factory
@@ -45,9 +46,11 @@ class TradingEngine:
         self._risk_manager = risk_manager or RiskManager()
         self._monitoring_hub = monitoring_hub
         self._engine_control = engine_control or EngineControl()
+        self._recovery_delay_seconds = recovery_delay_seconds
         self._task: asyncio.Task[None] | None = None
         self._pending_resolution_tasks: set[asyncio.Task[None]] = set()
         self._last_pause_event_key: str | None = None
+        self._last_error: str | None = None
 
     async def start(self) -> None:
         """Démarre la boucle d'exécution des ordres."""
@@ -77,21 +80,36 @@ class TradingEngine:
         """Traite chaque news entrante."""
 
         while True:
-            signal = await self._news_simulator.next_signal()
-            if self._engine_control.is_paused:
-                pause_key = f"paused:{self._engine_control.reason}"
-                if self._monitoring_hub and pause_key != self._last_pause_event_key:
+            try:
+                signal = await self._news_simulator.next_signal()
+                if self._engine_control.is_paused:
+                    pause_key = f"paused:{self._engine_control.reason}"
+                    if self._monitoring_hub and pause_key != self._last_pause_event_key:
+                        self._monitoring_hub.publish_event(
+                            channel="engine",
+                            event_type="engine_paused",
+                            severity="warning",
+                            message="Signal ignoré car le moteur est en pause globale.",
+                            payload=self._engine_control.snapshot(),
+                        )
+                    self._last_pause_event_key = pause_key
+                    continue
+                self._last_pause_event_key = None
+                await self._process_signal(signal)
+                self._last_error = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._last_error = str(exc)
+                if self._monitoring_hub:
                     self._monitoring_hub.publish_event(
                         channel="engine",
-                        event_type="engine_paused",
-                        severity="warning",
-                        message="Signal ignoré car le moteur est en pause globale.",
-                        payload=self._engine_control.snapshot(),
+                        event_type="engine_loop_error",
+                        severity="critical",
+                        message="Erreur runtime dans la boucle du moteur.",
+                        payload={"error": str(exc)},
                     )
-                self._last_pause_event_key = pause_key
-                continue
-            self._last_pause_event_key = None
-            await self._process_signal(signal)
+                await asyncio.sleep(self._recovery_delay_seconds)
 
     @property
     def is_running(self) -> bool:
@@ -103,6 +121,16 @@ class TradingEngine:
         """Expose l'état de contrôle global."""
 
         return self._engine_control.snapshot()
+
+    def health_snapshot(self) -> dict:
+        """Expose la santé runtime du moteur."""
+
+        return {
+            "running": self.is_running,
+            "pending_resolution_tasks": len(self._pending_resolution_tasks),
+            "last_error": self._last_error,
+            "control": self.control_snapshot(),
+        }
 
     def pause_engine(self, reason: str) -> dict:
         """Met le moteur en pause globale."""
@@ -369,7 +397,26 @@ class TradingEngine:
             name=f"resolve-order-{order_id}",
         )
         self._pending_resolution_tasks.add(task)
-        task.add_done_callback(self._pending_resolution_tasks.discard)
+        task.add_done_callback(self._handle_pending_task_done)
+
+    def _handle_pending_task_done(self, task: asyncio.Task[None]) -> None:
+        """Nettoie les tâches pending et remonte les erreurs éventuelles."""
+
+        self._pending_resolution_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None:
+            return
+        self._last_error = str(error)
+        if self._monitoring_hub:
+            self._monitoring_hub.publish_event(
+                channel="engine",
+                event_type="pending_resolution_error",
+                severity="error",
+                message="Erreur pendant la résolution d'un ordre pending.",
+                payload={"error": str(error)},
+            )
 
     async def _resolve_pending_order(self, order_id: uuid.UUID) -> None:
         """Passe un ordre pending vers filled/rejected avec PnL simulé."""

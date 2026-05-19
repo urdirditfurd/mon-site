@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -37,3 +38,14 @@ async def init_db() -> None:
 async def close_db() -> None:
     """Ferme proprement le pool de connexions."""
     await engine.dispose()
+
+
+async def check_db_connection() -> bool:
+    """Vérifie que la base répond à une requête simple."""
+
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False

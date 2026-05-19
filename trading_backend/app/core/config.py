@@ -18,6 +18,9 @@ class Settings:
     auth_secret_key: str = os.getenv("AUTH_SECRET_KEY", "change-me-in-production")
     auth_token_expiry_minutes: int = int(os.getenv("AUTH_TOKEN_EXPIRY_MINUTES", "120"))
     auto_create_tables: bool = os.getenv("AUTO_CREATE_TABLES", "false").lower() == "true"
+    news_interval_seconds: int = int(os.getenv("NEWS_INTERVAL_SECONDS", "5"))
+    runtime_recovery_delay_seconds: int = int(os.getenv("RUNTIME_RECOVERY_DELAY_SECONDS", "2"))
+    run_migrations_on_startup: bool = os.getenv("RUN_MIGRATIONS_ON_STARTUP", "false").lower() == "true"
 
 
 settings = Settings()

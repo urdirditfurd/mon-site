@@ -28,11 +28,18 @@ class NewsSignal:
 class NewsSimulator:
     """Simule un flux d'actualités en continu."""
 
-    def __init__(self, interval_seconds: int = 5, max_items: int = 100) -> None:
+    def __init__(
+        self,
+        interval_seconds: int = 5,
+        max_items: int = 100,
+        recovery_delay_seconds: int = 2,
+    ) -> None:
         self.interval_seconds = interval_seconds
+        self.recovery_delay_seconds = recovery_delay_seconds
         self._items: deque[NewsSignal] = deque(maxlen=max_items)
         self._queue: asyncio.Queue[NewsSignal] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
+        self._last_error: str | None = None
         self._nlp_engine = MockNLPEngine()
         self._sources = ["Reuters", "Bloomberg", "Financial Times", "TechWire"]
 
@@ -73,10 +80,17 @@ class NewsSimulator:
         """Produit une nouvelle fausse actualité toutes les X secondes."""
 
         while True:
-            signal = self._generate_news_signal()
-            self._items.append(signal)
-            await self._queue.put(signal)
-            await asyncio.sleep(self.interval_seconds)
+            try:
+                signal = self._generate_news_signal()
+                self._items.append(signal)
+                await self._queue.put(signal)
+                self._last_error = None
+                await asyncio.sleep(self.interval_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._last_error = str(exc)
+                await asyncio.sleep(self.recovery_delay_seconds)
 
     def _generate_news_signal(self) -> NewsSignal:
         """Génère une news puis l'analyse via le moteur NLP mock."""
@@ -106,3 +120,19 @@ class NewsSimulator:
         """Bloque jusqu'à réception d'une nouvelle actualité."""
 
         return await self._queue.get()
+
+    @property
+    def is_running(self) -> bool:
+        """Indique si la boucle de génération est active."""
+
+        return bool(self._task and not self._task.done())
+
+    def health_snapshot(self) -> dict:
+        """Retourne un état runtime du simulateur."""
+
+        return {
+            "running": self.is_running,
+            "queue_size": self._queue.qsize(),
+            "items_buffered": len(self._items),
+            "last_error": self._last_error,
+        }
