@@ -21,6 +21,11 @@ class Settings:
     news_interval_seconds: int = int(os.getenv("NEWS_INTERVAL_SECONDS", "5"))
     runtime_recovery_delay_seconds: int = int(os.getenv("RUNTIME_RECOVERY_DELAY_SECONDS", "2"))
     run_migrations_on_startup: bool = os.getenv("RUN_MIGRATIONS_ON_STARTUP", "false").lower() == "true"
+    watchdog_interval_seconds: int = int(os.getenv("WATCHDOG_INTERVAL_SECONDS", "10"))
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    log_file_path: str = os.getenv("LOG_FILE_PATH", "storage/logs/trading-backend.log")
+    log_max_bytes: int = int(os.getenv("LOG_MAX_BYTES", "2097152"))
+    log_backup_count: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
 
 settings = Settings()

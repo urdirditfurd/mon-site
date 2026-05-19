@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
@@ -16,10 +18,48 @@ from app.api.trading_routes import router as trading_router
 from app.api.user_routes import router as user_router
 from app.api.wallet_routes import router as wallet_router
 from app.core.config import settings
+from app.core.logging_config import configure_logging
 from app.db.database import AsyncSessionLocal, check_db_connection, close_db, init_db
 from app.services.monitoring_hub import MonitoringHub
 from app.services.news_simulator import NewsSimulator
 from app.services.trading_engine import TradingEngine
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
+
+async def _watchdog_loop(app: FastAPI) -> None:
+    """Surveille simulateur et moteur, et relance si besoin."""
+
+    while True:
+        try:
+            simulator = app.state.news_simulator
+            engine = app.state.trading_engine
+
+            if not simulator.is_running:
+                logger.error("Watchdog: simulateur news arrêté, tentative de relance.")
+                await simulator.start()
+                app.state.monitoring_hub.publish_event(
+                    channel="watchdog",
+                    event_type="news_simulator_restarted",
+                    severity="critical",
+                    message="Watchdog: simulateur news redémarré.",
+                )
+
+            if not engine.is_running:
+                logger.error("Watchdog: trading engine arrêté, tentative de relance.")
+                await engine.start()
+                app.state.monitoring_hub.publish_event(
+                    channel="watchdog",
+                    event_type="trading_engine_restarted",
+                    severity="critical",
+                    message="Watchdog: trading engine redémarré.",
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Watchdog loop error: %s", exc)
+        await asyncio.sleep(settings.watchdog_interval_seconds)
 
 
 @asynccontextmanager
@@ -47,12 +87,23 @@ async def lifespan(app: FastAPI):
     app.state.trading_engine = trading_engine
     await trading_engine.start()
 
+    watchdog_task = asyncio.create_task(_watchdog_loop(app), name="runtime-watchdog-loop")
+    app.state.watchdog_task = watchdog_task
+
+    logger.info("Application startup complete with watchdog active.")
+
     try:
         yield
     finally:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
         await trading_engine.stop()
         await simulator.stop()
         await close_db()
+        logger.info("Application shutdown complete.")
 
 
 app = FastAPI(
@@ -107,3 +158,14 @@ async def readiness():
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content=jsonable_encoder(payload),
     )
+
+
+@app.get("/api/health/runtime", tags=["Health"])
+async def runtime_health() -> dict:
+    """Retourne le détail runtime pour supervision."""
+
+    return {
+        "news_simulator": app.state.news_simulator.health_snapshot(),
+        "trading_engine": app.state.trading_engine.health_snapshot(),
+        "watchdog_running": bool(app.state.watchdog_task and not app.state.watchdog_task.done()),
+    }
