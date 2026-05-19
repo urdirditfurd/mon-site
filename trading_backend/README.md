@@ -29,6 +29,26 @@ pip install -r requirements.txt
 
 ## Demarrage ultra simple
 
+### Option 0 - Bootstrap complet (recommande)
+
+Tu lances une seule commande, le script fait:
+- installation des dependances,
+- verifications,
+- migrations DB,
+- demarrage API.
+
+PowerShell Windows:
+```powershell
+cd .\trading_backend
+.\scripts\bootstrap.ps1
+```
+
+Linux / macOS:
+```bash
+cd trading_backend
+./scripts/bootstrap.sh
+```
+
 ### Option A - Local (PowerShell Windows)
 
 ```powershell
@@ -60,6 +80,11 @@ export DEBUG="true"
 export AUTH_SECRET_KEY="change-me-in-production"
 export AUTH_TOKEN_EXPIRY_MINUTES="120"
 export AUTO_CREATE_TABLES="false"
+export NEWS_INTERVAL_SECONDS="5"
+export RUNTIME_RECOVERY_DELAY_SECONDS="2"
+export WATCHDOG_INTERVAL_SECONDS="10"
+export LOG_LEVEL="INFO"
+export LOG_FILE_PATH="storage/logs/trading-backend.log"
 ```
 
 ## Lancer l'API
@@ -271,7 +296,9 @@ Authorization: Bearer <token>
 ## Mode operationnel continu
 
 - Boucles runtime auto-recover (simulateur news + moteur trading)
+- Watchdog qui relance automatiquement les composants internes si besoin
 - Endpoint readiness avec statut detaille
+- Logs persistants dans `storage/logs/trading-backend.log`
 - Docker Compose avec:
   - restart `unless-stopped`
   - healthchecks DB + API
