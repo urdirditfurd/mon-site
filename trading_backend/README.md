@@ -27,6 +27,31 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Demarrage ultra simple
+
+### Option A - Local (PowerShell Windows)
+
+```powershell
+cd .\trading_backend
+.\scripts\run-local.ps1
+```
+
+Le script:
+- applique les migrations Alembic,
+- puis lance l'API automatiquement.
+
+### Option B - Docker (recommande pour "toujours allume")
+
+```powershell
+cd .\trading_backend
+.\scripts\run-docker.ps1
+```
+
+Pour reconstruire les images:
+```powershell
+.\scripts\run-docker.ps1 -Build
+```
+
 ## Variables d'environnement
 
 ```bash
@@ -130,6 +155,10 @@ pre-commit run --all-files
   Retourne les dernières actualités simulées et scorées par le NLP mock (toutes les 5 secondes).
 - `GET /api/health`  
   Vérification de l'état de l'API.
+- `GET /api/health/live`  
+  Vérifie que le process API est vivant.
+- `GET /api/health/ready`  
+  Vérifie que la DB + moteur + simulateur sont prêts.
 
 ## Logique Brique C (résumé)
 
@@ -238,6 +267,15 @@ Authorization: Bearer <token>
 - Ajout d'un `Makefile` pour standardiser les commandes de l'équipe.
 - Runbook complet:
   - `docs/migration-runbook.md`
+
+## Mode operationnel continu
+
+- Boucles runtime auto-recover (simulateur news + moteur trading)
+- Endpoint readiness avec statut detaille
+- Docker Compose avec:
+  - restart `unless-stopped`
+  - healthchecks DB + API
+  - auto migration au demarrage container
 
 ## Note migration locale
 
