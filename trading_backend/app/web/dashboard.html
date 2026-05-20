@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading IA - Zero-tech Dashboard</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f1220;
+      color: #f1f5f9;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 { margin: 0 0 6px; }
+    .muted { color: #93a3b8; font-size: 14px; }
+    .grid {
+      margin-top: 16px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .card {
+      border: 1px solid #24324a;
+      border-radius: 10px;
+      padding: 14px;
+      background: #141a2d;
+    }
+    label { display: block; font-size: 13px; margin: 10px 0 4px; color: #c9d5e7; }
+    input {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #334966;
+      background: #0d1425;
+      color: #e6edf8;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 8px;
+      background: #2f80ed;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #49566b; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .status {
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      min-height: 18px;
+    }
+    .ok { color: #86efac; }
+    .ko { color: #fca5a5; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(110px, 1fr));
+      gap: 8px;
+    }
+    .metric {
+      background: #0d1425;
+      border: 1px solid #334966;
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 54px;
+    }
+    .metric b { display: block; font-size: 15px; margin-top: 2px; color: #e9f3ff; }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    li { margin-bottom: 6px; }
+    code {
+      background: #0d1425;
+      padding: 2px 5px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Trading IA - Dashboard simple</h1>
+    <div class="muted">Login, wallet, trading stats et monitoring live depuis une seule page.</div>
+
+    <div class="grid">
+      <section class="card">
+        <h3>1) Login</h3>
+        <label>Email</label>
+        <input id="email" value="admin@trading-ia.com" />
+        <label>Password</label>
+        <input id="password" type="password" value="Admin!ChangeMe2026" />
+        <div class="row">
+          <button id="loginBtn">Se connecter</button>
+          <button id="logoutBtn" class="secondary">Se deconnecter</button>
+          <button id="refreshBtn" class="secondary">Rafraichir</button>
+        </div>
+        <div id="authStatus" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h3>2) Operations wallet</h3>
+        <label>Montant depot</label>
+        <input id="depositAmount" value="50.00" />
+        <button id="depositBtn">Depot</button>
+        <label>Montant allocation trading</label>
+        <input id="allocateAmount" value="25.00" />
+        <button id="allocateBtn">Allouer</button>
+        <div id="walletActionStatus" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h3>3) Etat courant</h3>
+        <div class="metrics">
+          <div class="metric">User <b id="userInfo">-</b></div>
+          <div class="metric">Role <b id="roleInfo">-</b></div>
+          <div class="metric">Seuil IA <b id="thresholdInfo">-</b></div>
+          <div class="metric">Total <b id="walletTotal">-</b></div>
+          <div class="metric">Disponible <b id="walletAvailable">-</b></div>
+          <div class="metric">Engage <b id="walletEngaged">-</b></div>
+          <div class="metric">Ordres total <b id="ordersTotal">-</b></div>
+          <div class="metric">PnL total <b id="pnlTotal">-</b></div>
+          <div class="metric">Alertes open <b id="alertsOpen">-</b></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>4) Derniers ordres</h3>
+        <ul id="ordersList"></ul>
+      </section>
+
+      <section class="card">
+        <h3>5) Monitoring live (WebSocket)</h3>
+        <div class="muted">URL: <code>/api/monitoring/ws?token=...</code></div>
+        <div id="wsStatus" class="status">WS: non connecte</div>
+        <ul id="eventsList"></ul>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      token: localStorage.getItem("trading_token") || "",
+      userId: localStorage.getItem("trading_user_id") || "",
+      ws: null,
+    };
+
+    const setStatus = (id, text, ok = true) => {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = `status ${ok ? "ok" : "ko"}`;
+    };
+
+    const parseError = async (response) => {
+      try {
+        const payload = await response.json();
+        if (payload?.detail) {
+          return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+        }
+      } catch (_) {}
+      return `${response.status} ${response.statusText}`;
+    };
+
+    const apiFetch = async (path, options = {}) => {
+      const headers = Object.assign({}, options.headers || {});
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      if (options.jsonBody !== undefined) {
+        headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(options.jsonBody);
+      }
+      const res = await fetch(path, Object.assign({}, options, { headers }));
+      if (!res.ok) throw new Error(await parseError(res));
+      return res.status === 204 ? null : res.json();
+    };
+
+    const euro = (value) => Number(value).toFixed(2);
+
+    const renderOrders = (orders) => {
+      const ul = document.getElementById("ordersList");
+      ul.innerHTML = "";
+      orders.forEach((order) => {
+        const li = document.createElement("li");
+        li.textContent = `${order.asset_symbol} | ${order.direction} | conf=${order.confidence} | ${order.status} | pnl=${order.pnl_simule}`;
+        ul.appendChild(li);
+      });
+      if (!orders.length) ul.innerHTML = "<li>Aucun ordre pour le moment.</li>";
+    };
+
+    const prependEvent = (eventText) => {
+      const ul = document.getElementById("eventsList");
+      const li = document.createElement("li");
+      li.textContent = eventText;
+      ul.prepend(li);
+      while (ul.children.length > 40) ul.removeChild(ul.lastChild);
+    };
+
+    const closeWs = () => {
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+      }
+    };
+
+    const openWs = () => {
+      closeWs();
+      if (!state.token) return;
+      const protocol = location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${protocol}://${location.host}/api/monitoring/ws?token=${encodeURIComponent(state.token)}`;
+      const ws = new WebSocket(wsUrl);
+      state.ws = ws;
+
+      ws.onopen = () => setStatus("wsStatus", "WS: connecte", true);
+      ws.onclose = () => setStatus("wsStatus", "WS: deconnecte", false);
+      ws.onerror = () => setStatus("wsStatus", "WS: erreur", false);
+      ws.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          if (payload.type === "heartbeat") return;
+          if (payload.type === "snapshot") {
+            setStatus("wsStatus", `WS: connecte (${payload.subscribers} subscribers)`, true);
+            return;
+          }
+          if (payload.type === "event" && payload.data) {
+            const e = payload.data;
+            prependEvent(`${e.created_at} | ${e.channel} | ${e.event_type} | ${e.message}`);
+          }
+        } catch (err) {
+          prependEvent(`WS parse error: ${String(err)}`);
+        }
+      };
+    };
+
+    const refreshDashboard = async () => {
+      if (!state.token || !state.userId) return;
+
+      const me = await apiFetch("/api/auth/me");
+      document.getElementById("userInfo").textContent = me.email;
+      document.getElementById("roleInfo").textContent = me.role;
+
+      const wallet = await apiFetch(`/api/wallets/${state.userId}`);
+      document.getElementById("walletTotal").textContent = euro(wallet.solde_total);
+      document.getElementById("walletAvailable").textContent = euro(wallet.solde_disponible);
+      document.getElementById("walletEngaged").textContent = euro(wallet.solde_engage);
+
+      const risk = await apiFetch(`/api/trading/users/${state.userId}/risk`);
+      document.getElementById("thresholdInfo").textContent = risk.seuil_probabilite_min;
+
+      const stats = await apiFetch(`/api/trading/users/${state.userId}/orders/stats`);
+      document.getElementById("ordersTotal").textContent = stats.total_orders;
+      document.getElementById("pnlTotal").textContent = euro(stats.total_pnl_simule);
+
+      const monitoring = await apiFetch("/api/monitoring/dashboard");
+      document.getElementById("alertsOpen").textContent = monitoring.alerts_open;
+
+      const orders = await apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`);
+      renderOrders(orders);
+    };
+
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+      try {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        const login = await apiFetch("/api/auth/login", {
+          method: "POST",
+          jsonBody: { email, password },
+        });
+
+        state.token = login.access_token;
+        state.userId = login.user.id;
+        localStorage.setItem("trading_token", state.token);
+        localStorage.setItem("trading_user_id", state.userId);
+
+        setStatus("authStatus", "Login OK", true);
+        await refreshDashboard();
+        openWs();
+      } catch (err) {
+        setStatus("authStatus", `Login KO: ${String(err.message || err)}`, false);
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      state.token = "";
+      state.userId = "";
+      localStorage.removeItem("trading_token");
+      localStorage.removeItem("trading_user_id");
+      closeWs();
+      setStatus("authStatus", "Token efface", true);
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", async () => {
+      try {
+        await refreshDashboard();
+        setStatus("authStatus", "Rafraichissement OK", true);
+      } catch (err) {
+        setStatus("authStatus", `Refresh KO: ${String(err.message || err)}`, false);
+      }
+    });
+
+    document.getElementById("depositBtn").addEventListener("click", async () => {
+      try {
+        const amount = document.getElementById("depositAmount").value.trim();
+        await apiFetch(`/api/wallets/${state.userId}/deposit`, {
+          method: "POST",
+          jsonBody: { amount, payment_method: "pm_card_visa" },
+        });
+        await refreshDashboard();
+        setStatus("walletActionStatus", "Depot OK", true);
+      } catch (err) {
+        setStatus("walletActionStatus", `Depot KO: ${String(err.message || err)}`, false);
+      }
+    });
+
+    document.getElementById("allocateBtn").addEventListener("click", async () => {
+      try {
+        const amount = document.getElementById("allocateAmount").value.trim();
+        await apiFetch(`/api/wallets/${state.userId}/allocate`, {
+          method: "POST",
+          jsonBody: { amount },
+        });
+        await refreshDashboard();
+        setStatus("walletActionStatus", "Allocation OK", true);
+      } catch (err) {
+        setStatus("walletActionStatus", `Allocation KO: ${String(err.message || err)}`, false);
+      }
+    });
+
+    (async () => {
+      if (!state.token || !state.userId) {
+        setStatus("authStatus", "Pas encore connecte", false);
+        return;
+      }
+      try {
+        await refreshDashboard();
+        setStatus("authStatus", "Session restauree", true);
+        openWs();
+      } catch (err) {
+        setStatus("authStatus", `Session invalide: ${String(err.message || err)}`, false);
+      }
+    })();
+  </script>
+</body>
+</html>

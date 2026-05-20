@@ -102,6 +102,18 @@ Avec options:
   -AllocateAmount '25.00'
 ```
 
+### Option 0-quinquies - Mini interface web zero-tech
+
+Une fois l'API demarree, ouvre simplement:
+
+`http://127.0.0.1:8000/ui`
+
+Tu as:
+- login,
+- dashboard wallet/trading,
+- boutons depot + allocation,
+- flux monitoring live websocket.
+
 Par defaut, le script configure:
 - email: `admin@trading-ia.com`
 - password: `Admin!ChangeMe2026`
@@ -255,6 +267,8 @@ pre-commit run --all-files
   Vérifie que le process API est vivant.
 - `GET /api/health/ready`  
   Vérifie que la DB + moteur + simulateur sont prêts.
+- `GET /ui`  
+  Interface web zero-tech embarquee (login + dashboard + wallet + live monitoring).
 
 ## Logique Brique C (résumé)
 

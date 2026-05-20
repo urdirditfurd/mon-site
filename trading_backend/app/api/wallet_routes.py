@@ -5,11 +5,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import ensure_user_access, get_current_user
 from app.db.database import get_session
 from app.models.user import User
+from app.models.wallet import Wallet
 from app.schemas.wallet import (
     AllocateFundsRequest,
     DepositRequest,
@@ -30,6 +32,25 @@ def _to_wallet_response(user_id: uuid.UUID, wallet) -> WalletResponse:
         solde_disponible=wallet.solde_disponible,
         solde_engage=wallet.solde_engage,
     )
+
+
+@router.get("/{user_id}", response_model=WalletResponse)
+async def get_wallet(
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> WalletResponse:
+    """Retourne le portefeuille courant d'un utilisateur."""
+
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    ensure_user_access(current_user=current_user, target_user_id=user_id)
+
+    wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Portefeuille introuvable.")
+    return _to_wallet_response(user_id, wallet)
 
 
 @router.post("/{user_id}/deposit", response_model=WalletOperationResponse)

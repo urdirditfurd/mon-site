@@ -15,6 +15,7 @@ from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
 from app.api.reporting_routes import router as reporting_router
 from app.api.trading_routes import router as trading_router
+from app.api.ui_routes import router as ui_router
 from app.api.user_routes import router as user_router
 from app.api.wallet_routes import router as wallet_router
 from app.core.config import settings
@@ -113,6 +114,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(ui_router)
 app.include_router(user_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
