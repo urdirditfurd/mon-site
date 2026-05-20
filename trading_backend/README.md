@@ -68,6 +68,33 @@ Pour desinstaller:
 .\scripts\uninstall-autostart.ps1
 ```
 
+### Option 0-ter - Etape zero-tech (compte admin + wallet preconfigure)
+
+Une seule commande pour creer (ou mettre a jour) un compte admin de demo et le wallet:
+
+```powershell
+cd .\trading_backend
+.\scripts\zero-tech-setup.ps1 -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai'
+```
+
+Par defaut, le script configure:
+- email: `admin@trading.local`
+- password: `Admin!ChangeMe2026`
+- wallet total: `10000.00`
+- wallet engage (trading): `2500.00`
+- seuil IA: `75.00`
+
+Tu peux personnaliser:
+```powershell
+.\scripts\zero-tech-setup.ps1 `
+  -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai' `
+  -Email 'admin@tondomaine.com' `
+  -Password 'TaCleForteIci' `
+  -SeedTotal '15000.00' `
+  -SeedEngaged '5000.00' `
+  -Threshold '72.50'
+```
+
 ### Option A - Local (PowerShell Windows)
 
 ```powershell
