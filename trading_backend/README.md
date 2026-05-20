@@ -270,6 +270,20 @@ pre-commit run --all-files
 - `GET /ui`  
   Interface web zero-tech embarquee (login + dashboard + wallet + live monitoring).
 
+## Coeur algorithmique (mission IA data-driven)
+
+Le backend inclut maintenant un moteur dédié dans `app/services/decision_engine.py`:
+
+- `analyze_incoming_news(news_text, category)`  
+  Analyse NLP simulée, mapping sectoriel, calcul de probabilités haussier/baissier, TTL dynamique, persistance en `market_signals`.
+- `evaluate_trading_opportunity(user_id)`  
+  Croise les préférences utilisateur et les signaux valides récents, puis ouvre une opportunité en `active_trades` si les conditions sont réunies.
+
+Nouvelles tables PostgreSQL:
+- `user_preferences` (filtres classes d'actifs + secteurs + seuil min),
+- `market_signals` (news scorées avec métadonnées NLP/TTL),
+- `active_trades` (positions ouvertes avec horizon temporel théorique).
+
 ## Logique Brique C (résumé)
 
 1. Le simulateur génère une nouvelle actu financière toutes les 5 secondes.
