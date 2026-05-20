@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,7 +15,17 @@ from app.core.config import settings
 from app.db.database import Base
 
 # Import explicite des modèles pour autogenerate.
-from app.models import alert_event, audit_event, simulated_order, trading_profile, user, wallet  # noqa: F401
+from app.models import (  # noqa: F401
+    active_trade,
+    alert_event,
+    audit_event,
+    market_signal,
+    simulated_order,
+    trading_profile,
+    user,
+    user_preference,
+    wallet,
+)
 
 config = context.config
 if config.config_file_name is not None:
@@ -21,6 +33,8 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
+CONNECT_RETRIES = int(os.getenv("ALEMBIC_DB_CONNECT_RETRIES", "5"))
+CONNECT_RETRY_DELAY_SECONDS = float(os.getenv("ALEMBIC_DB_CONNECT_RETRY_DELAY_SECONDS", "1.5"))
 
 
 def run_migrations_offline() -> None:
@@ -56,15 +70,26 @@ async def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
+    try:
+        for attempt in range(1, CONNECT_RETRIES + 1):
+            try:
+                async with connectable.connect() as connection:
+                    await connection.run_sync(do_run_migrations)
+                return
+            except Exception as exc:
+                if attempt >= CONNECT_RETRIES:
+                    raise
+                wait_seconds = CONNECT_RETRY_DELAY_SECONDS * attempt
+                config.print_stdout(
+                    f"[alembic] database connect attempt {attempt}/{CONNECT_RETRIES} failed: {exc}. "
+                    f"Retrying in {wait_seconds:.1f}s."
+                )
+                await asyncio.sleep(wait_seconds)
+    finally:
+        await connectable.dispose()
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    import asyncio
-
     asyncio.run(run_migrations_online())
