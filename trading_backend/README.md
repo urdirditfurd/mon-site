@@ -84,7 +84,7 @@ S'il indique que l'API n'est pas demarree, lance:
 ```
 
 Par defaut, le script configure:
-- email: `admin@trading.local`
+- email: `admin@trading-ia.com`
 - password: `Admin!ChangeMe2026`
 - wallet total: `10000.00`
 - wallet engage (trading): `2500.00`

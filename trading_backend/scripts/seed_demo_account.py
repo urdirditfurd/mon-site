@@ -132,7 +132,7 @@ async def _run(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed a zero-tech demo admin account")
-    parser.add_argument("--email", default="admin@trading.local")
+    parser.add_argument("--email", default="admin@trading-ia.com")
     parser.add_argument("--password", default="Admin!ChangeMe2026")
     parser.add_argument("--seed-total", type=_decimal, default=Decimal("10000.00"))
     parser.add_argument("--seed-engaged", type=_decimal, default=Decimal("2500.00"))

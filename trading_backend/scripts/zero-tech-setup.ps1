@@ -1,7 +1,7 @@
 param(
     [string]$DatabaseUrl = "",
     [string]$AuthSecretKey = "change-me-in-production",
-    [string]$Email = "admin@trading.local",
+    [string]$Email = "admin@trading-ia.com",
     [string]$Password = "Admin!ChangeMe2026",
     [string]$SeedTotal = "10000.00",
     [string]$SeedEngaged = "2500.00",
