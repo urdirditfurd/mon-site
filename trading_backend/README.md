@@ -49,6 +49,25 @@ cd trading_backend
 ./scripts/bootstrap.sh
 ```
 
+### Option 0-bis - Mode non-stop auto au demarrage Windows
+
+Ouvre PowerShell **en administrateur** puis:
+
+```powershell
+cd .\trading_backend
+.\scripts\install-autostart.ps1 -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai'
+```
+
+Ce mode:
+- demarre automatiquement au boot Windows,
+- relance l'API si elle s'arrete,
+- applique les migrations au redemarrage.
+
+Pour desinstaller:
+```powershell
+.\scripts\uninstall-autostart.ps1
+```
+
 ### Option A - Local (PowerShell Windows)
 
 ```powershell
@@ -299,6 +318,7 @@ Authorization: Bearer <token>
 - Watchdog qui relance automatiquement les composants internes si besoin
 - Endpoint readiness avec statut detaille
 - Logs persistants dans `storage/logs/trading-backend.log`
+- Superviseur Windows avec logs dans `storage/logs/supervisor.log`
 - Docker Compose avec:
   - restart `unless-stopped`
   - healthchecks DB + API
