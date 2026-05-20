@@ -77,6 +77,12 @@ cd .\trading_backend
 .\scripts\zero-tech-setup.ps1 -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai'
 ```
 
+Le script initialise les donnees et verifie si l'API repond.  
+S'il indique que l'API n'est pas demarree, lance:
+```powershell
+.\scripts\run-local.ps1 -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai'
+```
+
 Par defaut, le script configure:
 - email: `admin@trading.local`
 - password: `Admin!ChangeMe2026`

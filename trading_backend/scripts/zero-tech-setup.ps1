@@ -33,8 +33,21 @@ python .\scripts\seed_demo_account.py `
     --seed-total $SeedTotal `
     --seed-engaged $SeedEngaged `
     --threshold $Threshold
+if ($LASTEXITCODE -ne 0) {
+    throw "[zero-tech] seed script failed (exit code $LASTEXITCODE)."
+}
 
 Write-Host "[zero-tech] done"
 Write-Host "[zero-tech] email: $Email"
 Write-Host "[zero-tech] password: $Password"
 Write-Host "[zero-tech] login URL: http://127.0.0.1:8000/docs"
+
+try {
+    $health = Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 3
+    if ($health.status -eq "ok") {
+        Write-Host "[zero-tech] API health: OK"
+    }
+}
+catch {
+    Write-Warning "[zero-tech] API is not running yet. Start it with: .\scripts\run-local.ps1 -DatabaseUrl '$DatabaseUrl' -AuthSecretKey '$AuthSecretKey'"
+}
