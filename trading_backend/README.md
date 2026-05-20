@@ -83,6 +83,25 @@ S'il indique que l'API n'est pas demarree, lance:
 .\scripts\run-local.ps1 -DatabaseUrl 'postgresql+asyncpg://postgres:PgStrong!2026@localhost:5432/trading_ai'
 ```
 
+### Option 0-quater - Test automatique OK/KO (health + login + wallet)
+
+Une seule commande pour verifier rapidement que l'application fonctionne:
+
+```powershell
+cd .\trading_backend
+.\scripts\zero-tech-smoke.ps1
+```
+
+Avec options:
+```powershell
+.\scripts\zero-tech-smoke.ps1 `
+  -BaseUrl 'http://127.0.0.1:8000' `
+  -Email 'admin@trading-ia.com' `
+  -Password 'Admin!ChangeMe2026' `
+  -DepositAmount '50.00' `
+  -AllocateAmount '25.00'
+```
+
 Par defaut, le script configure:
 - email: `admin@trading-ia.com`
 - password: `Admin!ChangeMe2026`
