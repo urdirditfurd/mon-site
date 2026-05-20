@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.api.auth_routes import router as auth_router
+from app.api.decision_routes import router as decision_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
 from app.api.reporting_routes import router as reporting_router
@@ -120,6 +121,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")
+app.include_router(decision_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")
 app.include_router(reporting_router, prefix="/api")
 

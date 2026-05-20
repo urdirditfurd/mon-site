@@ -269,6 +269,10 @@ pre-commit run --all-files
   Vérifie que la DB + moteur + simulateur sont prêts.
 - `GET /ui`  
   Interface web zero-tech embarquee (login + dashboard + wallet + live monitoring).
+- `POST /api/decision/signals/analyze`  
+  Lance l'analyse NLP simulée d'une news, persiste un `market_signal` et retourne score/TTL.
+- `POST /api/decision/users/{user_id}/evaluate`  
+  Évalue les signaux valides récents selon les préférences utilisateur et crée une opportunité `active_trade` si éligible.
 
 ## Coeur algorithmique (mission IA data-driven)
 
@@ -283,6 +287,15 @@ Nouvelles tables PostgreSQL:
 - `user_preferences` (filtres classes d'actifs + secteurs + seuil min),
 - `market_signals` (news scorées avec métadonnées NLP/TTL),
 - `active_trades` (positions ouvertes avec horizon temporel théorique).
+
+Exemple d'appel:
+```json
+POST /api/decision/signals/analyze
+{
+  "news_text": "Gold and lithium miners rally after supply shock in Asia",
+  "category": "reuters/stocks"
+}
+```
 
 ## Logique Brique C (résumé)
 
