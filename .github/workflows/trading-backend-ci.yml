@@ -54,8 +54,13 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trading_ai
         run: alembic -c ./alembic.ini upgrade head
 
+      - name: Run decision engine tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trading_ai
+        run: pytest tests/ -v --tb=short
+
       - name: Compile all python modules
-        run: python -m compileall app scripts alembic
+        run: python -m compileall app scripts alembic tests
 
       - name: API smoke test
         env:

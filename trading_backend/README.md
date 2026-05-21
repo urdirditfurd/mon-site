@@ -276,12 +276,13 @@ pre-commit run --all-files
 
 ## Coeur algorithmique (mission IA data-driven)
 
-Le backend inclut maintenant un moteur dédié dans `app/services/decision_engine.py`:
+Le coeur algorithmique est modulaire :
 
-- `analyze_incoming_news(news_text, category)`  
-  Analyse NLP simulée, mapping sectoriel, calcul de probabilités haussier/baissier, TTL dynamique, persistance en `market_signals`.
-- `evaluate_trading_opportunity(user_id)`  
-  Croise les préférences utilisateur et les signaux valides récents, puis ouvre une opportunité en `active_trades` si les conditions sont réunies.
+- `app/services/news_analyzer.py` — `analyze_incoming_news(news_text, category)`
+- `app/services/opportunity_evaluator.py` — `evaluate_trading_opportunity(user_id)`
+- `app/services/decision_engine.py` — façade (imports rétrocompatibles)
+
+Tests : `pytest tests/ -v` (unitaires sans DB ; intégration si PostgreSQL disponible).
 
 Nouvelles tables PostgreSQL:
 - `user_preferences` (filtres classes d'actifs + secteurs + seuil min),

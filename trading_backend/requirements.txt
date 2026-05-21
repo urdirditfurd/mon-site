@@ -6,3 +6,5 @@ pydantic
 email-validator
 alembic
 pre-commit
+pytest
+pytest-asyncio
