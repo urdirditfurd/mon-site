@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,43 @@ ASSET_STOCK = "stocks"
 
 MIN_SIGNAL_PROBABILITY = Decimal("70.00")
 MIN_RECOMMENDED_CAPITAL = Decimal("50.00")
+
+SECTOR_KEYWORDS: dict[str, set[str]] = {
+    SECTOR_MINES: {"or", "gold", "silver", "lithium", "copper", "cuivre", "nickel", "uranium", "mine", "mining"},
+    SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip", "puce"},
+    SECTOR_REAL_ESTATE: {"real estate", "reit", "housing", "mortgage", "immobilier", "property", "fonciere"},
+    SECTOR_INSURANCE: {"insurance", "assurance", "reinsurance", "insurer", "sinistre"},
+    SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage", "cereales"},
+}
+
+BULLISH_KEYWORDS = {
+    "upgrade",
+    "growth",
+    "record",
+    "beats",
+    "partnership",
+    "acquisition",
+    "rally",
+    "surge",
+    "hausse",
+    "bénéfice",
+    "benefice",
+    "contrat",
+}
+
+BEARISH_KEYWORDS = {
+    "downgrade",
+    "lawsuit",
+    "fraud",
+    "sanction",
+    "baisse",
+    "inflation",
+    "rate hike",
+    "warning",
+    "profit warning",
+    "enquête",
+    "enquete",
+}
 
 
 @dataclass(slots=True)
@@ -70,8 +108,32 @@ def _quantize_probability(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _clamp_decimal(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
     return max(minimum, min(value, maximum))
+
+
+def _normalise_text(value: str) -> str:
+    """Normalise les entrées texte sans perdre les accents utiles aux mots-clés FR."""
+
+    return " ".join(value.casefold().replace("_", " ").replace("/", " ").replace("-", " ").split())
+
+
+def _contains_keyword(normalised_text: str, keyword: str) -> bool:
+    """Détecte un mot-clé complet afin d'éviter les faux positifs de sous-chaîne."""
+
+    normalised_keyword = _normalise_text(keyword)
+    if " " in normalised_keyword or "-" in normalised_keyword:
+        return normalised_keyword in normalised_text
+
+    return re.search(rf"(?<!\w){re.escape(normalised_keyword)}(?!\w)", normalised_text) is not None
+
+
+def _count_keyword_hits(normalised_text: str, keywords: set[str]) -> int:
+    return sum(_contains_keyword(normalised_text, keyword) for keyword in keywords)
 
 
 def _noise_from_text(news_text: str, category: str) -> Decimal:
@@ -82,16 +144,16 @@ def _noise_from_text(news_text: str, category: str) -> Decimal:
 
 
 def _extract_source(category: str) -> str:
-    lowered = category.lower()
-    if "bloomberg" in lowered:
+    lowered = _normalise_text(category)
+    if _contains_keyword(lowered, "bloomberg"):
         return "bloomberg_enterprise"
-    if "reuters" in lowered:
+    if _contains_keyword(lowered, "reuters"):
         return "reuters_api"
-    if "benzinga" in lowered:
+    if _contains_keyword(lowered, "benzinga"):
         return "benzinga"
-    if "x" in lowered or "twitter" in lowered:
+    if _contains_keyword(lowered, "x") or _contains_keyword(lowered, "twitter"):
         return "x_api_v2"
-    if "rss" in lowered:
+    if _contains_keyword(lowered, "rss"):
         return "rss_certified"
     return "certified_feed"
 
@@ -111,53 +173,26 @@ def _source_confidence(source: str) -> Decimal:
 
 
 def _map_sector(news_text: str) -> str:
-    lowered = news_text.lower()
-    sector_keywords = {
-        SECTOR_MINES: {"or", "gold", "lithium", "copper", "cuivre", "nickel", "mine", "mining"},
-        SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip"},
-        SECTOR_REAL_ESTATE: {"real estate", "reit", "housing", "mortgage", "immobilier", "property"},
-        SECTOR_INSURANCE: {"insurance", "assurance", "reinsurance", "insurer", "sinistre"},
-        SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
-    }
-    for sector, keywords in sector_keywords.items():
-        if any(keyword in lowered for keyword in keywords):
+    lowered = _normalise_text(news_text)
+    for sector, keywords in SECTOR_KEYWORDS.items():
+        if any(_contains_keyword(lowered, keyword) for keyword in keywords):
             return sector
     return SECTOR_GENERAL
 
 
 def _resolve_asset_class(category: str) -> str:
-    lowered = category.lower()
-    if "crypto" in lowered or "binance" in lowered or "coinbase" in lowered:
+    lowered = _normalise_text(category)
+    if any(_contains_keyword(lowered, keyword) for keyword in {"crypto", "binance", "coinbase", "btc", "bitcoin"}):
         return ASSET_CRYPTO
-    if "etf" in lowered:
+    if any(_contains_keyword(lowered, keyword) for keyword in {"etf", "fund", "tracker"}):
         return ASSET_ETF
     return ASSET_STOCK
 
 
 def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) -> tuple[str, Decimal, Decimal]:
-    lowered = news_text.lower()
-    bullish_keywords = {
-        "upgrade",
-        "growth",
-        "record",
-        "beats",
-        "partnership",
-        "acquisition",
-        "hausse",
-        "bénéfice",
-    }
-    bearish_keywords = {
-        "downgrade",
-        "lawsuit",
-        "fraud",
-        "sanction",
-        "baisse",
-        "inflation",
-        "rate hike",
-        "warning",
-    }
-    bullish_hits = sum(keyword in lowered for keyword in bullish_keywords)
-    bearish_hits = sum(keyword in lowered for keyword in bearish_keywords)
+    lowered = _normalise_text(news_text)
+    bullish_hits = _count_keyword_hits(lowered, BULLISH_KEYWORDS)
+    bearish_hits = _count_keyword_hits(lowered, BEARISH_KEYWORDS)
 
     base = Decimal("58.00")
     source_bonus = (source_conf - Decimal("70.00")) / Decimal("6.0")
@@ -180,10 +215,13 @@ def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) 
 
 
 def _estimate_ttl_minutes(news_text: str, category: str, mapped_sector: str, strength: Decimal) -> int:
-    lowered = news_text.lower()
-    if any(keyword in lowered for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}):
+    lowered = _normalise_text(news_text)
+    if any(
+        _contains_keyword(lowered, keyword)
+        for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro", "taux directeur"}
+    ):
         base_ttl = 60 * 24 * 3
-    elif any(keyword in lowered for keyword in {"tweet", "post", "influencer", "rumor"}):
+    elif any(_contains_keyword(lowered, keyword) for keyword in {"tweet", "post", "influencer", "rumor", "rumeur"}):
         base_ttl = 45
     elif mapped_sector == SECTOR_MINES:
         base_ttl = 60 * 18
@@ -251,7 +289,7 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
     mapped_sector = _map_sector(news_text)
     polarity, bullish, bearish = _compute_probabilities(news_text, category, source_conf)
     strength = _quantize_probability(max(bullish, bearish))
-    is_valid_signal = strength >= MIN_SIGNAL_PROBABILITY
+    is_valid_signal = strength > MIN_SIGNAL_PROBABILITY
     ttl_minutes = _estimate_ttl_minutes(news_text, category, mapped_sector, strength)
     expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
 
@@ -302,17 +340,17 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 user_id=user_id,
             )
 
-        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id).with_for_update())
         if wallet is None:
             return TradingOpportunityResult(
                 should_execute=False,
                 reason="Wallet introuvable.",
                 user_id=user_id,
             )
-        if wallet.solde_disponible <= Decimal("0.00"):
+        if wallet.solde_disponible < MIN_RECOMMENDED_CAPITAL:
             return TradingOpportunityResult(
                 should_execute=False,
-                reason="Aucun capital disponible pour un nouveau trade.",
+                reason="Capital disponible insuffisant pour un nouveau trade.",
                 user_id=user_id,
             )
 
@@ -380,13 +418,13 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 market_signal_id=selected_signal.id,
             )
 
-        recommended_capital = _quantize_probability(
+        recommended_capital = _quantize_money(
             min(
                 wallet.solde_disponible,
                 max(MIN_RECOMMENDED_CAPITAL, wallet.solde_disponible * Decimal("0.20")),
             )
         )
-        if recommended_capital <= Decimal("0.00"):
+        if recommended_capital < MIN_RECOMMENDED_CAPITAL:
             await session.commit()
             return TradingOpportunityResult(
                 should_execute=False,
@@ -411,6 +449,8 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
             estimated_duration_minutes=estimated_duration,
             planned_close_at=planned_close,
         )
+        wallet.solde_disponible = _quantize_money(wallet.solde_disponible - recommended_capital)
+        wallet.solde_engage = _quantize_money(wallet.solde_engage + recommended_capital)
         session.add(active_trade)
         await session.commit()
         await session.refresh(active_trade)
