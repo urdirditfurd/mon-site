@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.advisor_routes import router as advisor_router
 from app.api.auth_routes import router as auth_router
+from app.api.integration_routes import router as integration_router
 from app.api.decision_routes import router as decision_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
@@ -127,6 +128,7 @@ app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
 app.include_router(preference_router, prefix="/api")
 app.include_router(advisor_router, prefix="/api")
+app.include_router(integration_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")
 app.include_router(decision_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")

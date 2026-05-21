@@ -135,6 +135,12 @@
     .action-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 18px; padding: 14px; display: grid; gap: 6px; }
     .action-card strong { color: var(--text); }
     .action-card small { color: var(--muted); line-height: 1.45; }
+    .connector-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+    .connector-card { border: 1px solid var(--field-border); border-radius: 16px; padding: 12px; background: var(--field); display: grid; gap: 8px; }
+    .connector-card strong { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .connector-card small { color: var(--muted); line-height: 1.45; }
+    .status-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; background: var(--red); box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.12); }
+    .status-dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.14); }
     @media (max-width: 760px) { .mini-grid { grid-template-columns: 1fr; } }
     .hidden { display: none !important; }
     .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
@@ -201,6 +207,7 @@
                 <a class="nav-chip" href="#home">Accueil</a>
                 <a class="nav-chip" href="#setup">Configuration</a>
                 <a class="nav-chip" href="#capital">Capital</a>
+                <a class="nav-chip" href="#connectors">Connecteurs</a>
                 <a class="nav-chip" href="#advisor">Conseiller IA</a>
                 <a class="nav-chip" href="#follow">Suivi</a>
               </nav>
@@ -281,8 +288,26 @@
           <div id="walletStatus" class="status"></div>
         </section>
 
+
+        <section class="card span-12" id="connectors">
+          <div class="row" style="justify-content: space-between;">
+            <div>
+              <h2>3. Connecteurs réels</h2>
+              <p class="muted">Les clés API restent uniquement côté serveur dans `.env.production`. L'interface affiche le statut et permet d'activer un broker quand les secrets sont présents.</p>
+            </div>
+            <button id="reloadIntegrationsBtn" class="secondary">Vérifier les connecteurs</button>
+          </div>
+          <h3>Paiement</h3>
+          <div id="paymentConnectors" class="connector-grid"></div>
+          <h3 style="margin-top: 16px;">Brokers / exchanges</h3>
+          <div id="brokerConnectors" class="connector-grid"></div>
+          <h3 style="margin-top: 16px;">Connexion sociale</h3>
+          <div id="oauthConnectors" class="connector-grid"></div>
+          <div id="integrationStatus" class="status"></div>
+        </section>
+
         <section class="card span-6" id="advisor">
-          <h2>3. Conseiller IA</h2>
+          <h2>4. Conseiller IA</h2>
           <p class="muted">Pose une question sur le risque, les plateformes, le capital ou la stratégie. Réponse contextuelle basée sur ton wallet et tes préférences.</p>
           <div id="chatLog" class="chat-log"></div>
           <textarea id="advisorMessage" placeholder="Ex: Je veux trader crypto avec 1000 euros, quel risque prendre ?"></textarea>
@@ -290,7 +315,7 @@
         </section>
 
         <section class="card span-6">
-          <h2>4. Démo signal IA</h2>
+          <h2>5. Démo signal IA</h2>
           <p class="muted">Injecte une news simulée, laisse le moteur scorer, puis évalue si une opportunité doit être ouverte selon tes préférences.</p>
           <textarea id="newsText">Reuters: Nvidia beats expectations and signs a major AI cloud partnership while lithium miners rally after supply shock.</textarea>
           <label>Catégorie / source</label>
@@ -428,6 +453,47 @@
       try { const data = await apiFetch(`/api/wallets/${state.userId}/allocate`, { method: "POST", jsonBody: { amount: $("allocateAmount").value } }); status("walletStatus", data.message, true); await refreshAll(); }
       catch (err) { status("walletStatus", err.message, false); }
     }
+
+    function connectorCard(item, kind) {
+      const configured = item.configured;
+      const env = item.required_env?.length ? `Variables: ${item.required_env.join(", ")}` : "";
+      const masked = item.masked_identifiers?.length ? ` | Config: ${item.masked_identifiers.join(", ")}` : "";
+      const action = kind === "broker"
+        ? `<button class="secondary" onclick="activateBroker('${item.id}')">${configured ? "Activer" : "Sélectionner en paper"}</button>`
+        : kind === "stripe" && item.id === "stripe"
+          ? `<button class="secondary" onclick="startStripeCheckout()">Checkout Stripe</button>`
+          : "";
+      return `<div class="connector-card"><strong>${item.label}<span class="status-dot ${configured ? "on" : ""}"></span></strong><small>${item.note}</small><small>${item.status}${masked}</small><small>${env}</small>${action}</div>`;
+    }
+    function renderConnectors(payload) {
+      $("paymentConnectors").innerHTML = payload.payments.map((item) => connectorCard(item, "stripe")).join("");
+      $("brokerConnectors").innerHTML = payload.brokers.map((item) => connectorCard(item, "broker")).join("");
+      $("oauthConnectors").innerHTML = payload.oauth.map((item) => connectorCard(item, "oauth")).join("");
+    }
+    async function loadIntegrations() {
+      try {
+        const payload = await apiFetch("/api/integrations/status");
+        renderConnectors(payload);
+        status("integrationStatus", "Statut des intégrations chargé.", true);
+      } catch (err) { status("integrationStatus", err.message, false); }
+    }
+    async function activateBroker(platform) {
+      try {
+        const result = await apiFetch("/api/integrations/brokers/activate", { method: "POST", jsonBody: { platform } });
+        status("integrationStatus", result.message, result.configured);
+        await refreshAll();
+      } catch (err) { status("integrationStatus", err.message, false); }
+    }
+    async function startStripeCheckout() {
+      try {
+        const result = await apiFetch("/api/integrations/payments/stripe/checkout", { method: "POST", jsonBody: { amount: $("depositAmount").value || "50" } });
+        if (result.checkout_url) location.href = result.checkout_url;
+        else status("integrationStatus", result.message, false);
+      } catch (err) { status("integrationStatus", err.message, false); }
+    }
+    window.activateBroker = activateBroker;
+    window.startStripeCheckout = startStripeCheckout;
+
     async function askAdvisor() {
       const message = $("advisorMessage").value.trim(); if (!message) return;
       const log = $("chatLog"); log.insertAdjacentHTML("beforeend", `<div class="msg user">${message.replaceAll("<", "&lt;")}</div>`); $("advisorMessage").value = "";
@@ -466,12 +532,12 @@
       $("homeProjects").textContent = `${stats.total_orders} signaux`;
       $("homeCycle").textContent = stats.pending_orders > 0 ? "En cours" : (stats.filled_orders > 0 ? "Historique OK" : "En veille");
       $("homePnl").textContent = `PnL ${money(stats.total_pnl_simule)}`;
-      applyPreferences(pref); renderOrders(orders);
+      applyPreferences(pref); renderOrders(orders); await loadIntegrations();
     }
 
     $("loginTab").onclick = () => setAuthMode("login"); $("registerTab").onclick = () => setAuthMode("register"); $("authSubmitBtn").onclick = submitAuth; $("logoutBtn").onclick = clearSession; $("refreshBtn").onclick = () => refreshAll().catch((err) => alert(err.message));
     $("themeToggle").onclick = () => applyTheme(state.theme === "light" ? "dark" : "light");
-    $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
+    $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("reloadIntegrationsBtn").onclick = loadIntegrations; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
 
     applyTheme(state.theme);
     if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(clearSession); }

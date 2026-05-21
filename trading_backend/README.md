@@ -435,6 +435,51 @@ Les intégrations réelles nécessitent des secrets serveur et/ou partenaires r�
 - dépôts réels: Stripe, GoCardless, Tink/Plaid ou PSP équivalent, jamais les identifiants bancaires directs de l'utilisateur,
 - OAuth Google: client ID/secret Google Cloud.
 
+
+### Variables d'intégration réelles
+
+À configurer uniquement côté serveur dans `.env.production` ou via un gestionnaire de secrets:
+
+```env
+PUBLIC_BASE_URL=https://trading.agent-leads.fr
+
+# Paiement réel via Stripe Checkout
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_CURRENCY=eur
+STRIPE_SUCCESS_URL=https://trading.agent-leads.fr/ui?payment=success
+STRIPE_CANCEL_URL=https://trading.agent-leads.fr/ui?payment=cancel
+
+# Google OAuth
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+
+# Crypto
+BINANCE_API_KEY=...
+BINANCE_API_SECRET=...
+COINBASE_API_KEY=...
+COINBASE_API_SECRET=...
+
+# Actions / ETF
+ALPACA_API_KEY=...
+ALPACA_API_SECRET=...
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+IBKR_GATEWAY_URL=https://127.0.0.1:5000
+```
+
+Règles sécurité:
+
+- ne jamais coller ces clés dans l'interface, dans un chat ou dans GitHub,
+- utiliser des clés API restreintes, sans droit de retrait pour crypto,
+- commencer par Alpaca paper / Binance testnet ou capital limité,
+- utiliser Stripe Checkout ou open banking régulé pour les dépôts, jamais les identifiants bancaires directs.
+
+Endpoints ajoutés:
+
+- `GET /api/integrations/status`
+- `POST /api/integrations/payments/stripe/checkout`
+- `POST /api/integrations/brokers/activate`
+- `GET /api/integrations/oauth/google/status`
+
 ## Déploiement VPS OVH
 
 Pour une mise en ligne commerciale, utiliser le déploiement Docker Compose production:
