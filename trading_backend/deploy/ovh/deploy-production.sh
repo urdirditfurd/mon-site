@@ -2,7 +2,14 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/urdirditfurd/mon-site.git}"
-BRANCH="${BRANCH:-main}"
+if [ -n "${BRANCH:-}" ]; then
+  TARGET_BRANCH="${BRANCH}"
+elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  TARGET_BRANCH="$(git branch --show-current)"
+else
+  TARGET_BRANCH="main"
+fi
+BRANCH="${TARGET_BRANCH}"
 APP_DIR="${APP_DIR:-$HOME/mon-site}"
 BACKEND_DIR="${APP_DIR}/trading_backend"
 ENV_FILE="${BACKEND_DIR}/.env.production"
