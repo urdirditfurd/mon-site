@@ -417,6 +417,16 @@ Authorization: Bearer <token>
   - healthchecks DB + API
   - auto migration au demarrage container
 
+## Déploiement VPS OVH
+
+Pour une mise en ligne commerciale, utiliser le déploiement Docker Compose production:
+
+- `docker-compose.prod.yml`
+- `.env.production.example`
+- `deploy/caddy/Caddyfile`
+
+Guide complet: [`docs/vps-ovh-deployment.md`](docs/vps-ovh-deployment.md)
+
 ## Note migration locale
 
 Le projet utilise actuellement `create_all` (sans Alembic).  
