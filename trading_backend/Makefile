@@ -26,3 +26,9 @@ precommit-install:
 
 precommit-run:
 	pre-commit run --all-files
+
+test-install:
+	$(PYTHON) -m pip install -r requirements-dev.txt
+
+test:
+	$(PYTHON) -m pytest

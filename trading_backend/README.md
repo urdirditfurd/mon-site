@@ -425,3 +425,33 @@ Si tu as déjà une base locale existante créée sans Alembic, deux options:
 
 1) **Repartir proprement**: supprimer/recréer la base puis `alembic upgrade head`.
 2) **Conserver les données**: aligner Alembic avec `alembic stamp head` (si le schéma DB est déjà identique).
+
+## Tests automatisés du moteur de décision
+
+Le cœur algorithmique (`app/services/decision_engine.py`) est couvert par
+une suite **pytest asynchrone** située dans `trading_backend/tests/`. Elle
+valide les trois livrables de la mission 1 sans dépendre d'un serveur
+PostgreSQL : un SQLite asynchrone éphémère est monté à la volée et le
+metadata SQLAlchemy y crée le schéma complet (`users`, `wallets`,
+`user_preferences`, `market_signals`, `active_trades`).
+
+Lancement :
+
+```bash
+cd trading_backend
+pip install -r requirements-dev.txt   # ou: make test-install
+make test                             # ou: pytest
+```
+
+Couverture :
+
+- **`analyze_incoming_news`** — scoring polarité haussier/baissier,
+  mapping sectoriel par frontière de mot (corrige le faux positif
+  historique où "major" matchait le ticker "or" des Mines), validation
+  stricte du seuil 70 %, TTL dynamique (macro vs tweet d'influenceur),
+  persistance du signal et déterminisme entrée → sortie.
+- **`evaluate_trading_opportunity`** — choix du signal le plus fort,
+  bascule `buy`/`sell` selon polarité, application stricte du seuil
+  utilisateur, filtrage par secteur et par classe d'actif, idempotence
+  (pas de double position sur le même signal), garde-fous wallet
+  (utilisateur inactif, capital nul, préférences manquantes).
