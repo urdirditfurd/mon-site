@@ -23,6 +23,8 @@ class MarketSignal(Base):
     category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     news_text: Mapped[str] = mapped_column(Text, nullable=False)
     mapped_sector: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False, default="stocks", index=True)
+    retention_category: Mapped[str] = mapped_column(String(32), nullable=False, default="corporate")
     sentiment_polarity: Mapped[str] = mapped_column(String(16), nullable=False)
     source_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     probability_bullish: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
@@ -31,6 +33,7 @@ class MarketSignal(Base):
     is_valid_signal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     time_to_live_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    keywords_matched: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

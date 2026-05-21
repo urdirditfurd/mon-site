@@ -36,6 +36,13 @@ class ActiveTrade(Base):
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
     probability_used: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     capital_engaged: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    entry_price_simulated: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4),
+        nullable=False,
+        default=Decimal("100.0000"),
+    )
+    exit_price_simulated: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    simulated_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
