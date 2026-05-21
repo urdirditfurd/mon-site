@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,10 @@ class UserPreference(Base):
     sector_real_estate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sector_insurance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sector_food: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    broker_platform: Mapped[str] = mapped_column(String(32), nullable=False, default="simulation")
+    broker_connection_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_connected")
+    funding_provider: Mapped[str] = mapped_column(String(32), nullable=False, default="simulated_psp")
+    paper_trading_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

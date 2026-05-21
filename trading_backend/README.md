@@ -417,6 +417,24 @@ Authorization: Bearer <token>
   - healthchecks DB + API
   - auto migration au demarrage container
 
+
+## SentiQ — statut produit trading
+
+La marque produit de l'application est maintenant **SentiQ**. L'interface embarquée `/ui` couvre:
+
+- inscription/connexion email + mot de passe (OAuth Google à connecter via Google Cloud),
+- onboarding broker: simulation, Binance, Coinbase, Alpaca, Interactive Brokers, Trade Republic en attente,
+- préférences de marchés et secteurs, seuil IA et paper trading,
+- capital avec dépôt simulé sécurisé (pas de saisie d'identifiants bancaires),
+- conseiller IA contextuel et démo de scoring news.
+
+Les intégrations réelles nécessitent des secrets serveur et/ou partenaires régulés:
+
+- crypto: clés API restreintes Binance ou Coinbase Advanced Trade,
+- actions/ETF: Alpaca ou Interactive Brokers Gateway,
+- dépôts réels: Stripe, GoCardless, Tink/Plaid ou PSP équivalent, jamais les identifiants bancaires directs de l'utilisateur,
+- OAuth Google: client ID/secret Google Cloud.
+
 ## Déploiement VPS OVH
 
 Pour une mise en ligne commerciale, utiliser le déploiement Docker Compose production:

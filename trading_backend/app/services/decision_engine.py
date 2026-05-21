@@ -271,6 +271,10 @@ def _default_preferences(user_id: uuid.UUID) -> UserPreference:
         sector_real_estate=False,
         sector_insurance=False,
         sector_food=False,
+        broker_platform="simulation",
+        broker_connection_status="not_connected",
+        funding_provider="simulated_psp",
+        paper_trading_enabled=True,
     )
 
 

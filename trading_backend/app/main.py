@@ -10,10 +10,12 @@ from fastapi import FastAPI, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
+from app.api.advisor_routes import router as advisor_router
 from app.api.auth_routes import router as auth_router
 from app.api.decision_routes import router as decision_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.news_routes import router as news_router
+from app.api.preference_routes import router as preference_router
 from app.api.reporting_routes import router as reporting_router
 from app.api.trading_routes import router as trading_router
 from app.api.ui_routes import router as ui_router
@@ -123,6 +125,8 @@ app.include_router(user_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
+app.include_router(preference_router, prefix="/api")
+app.include_router(advisor_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")
 app.include_router(decision_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")

@@ -3,354 +3,370 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Trading IA - Zero-tech Dashboard</title>
+  <title>SentiQ - Sentiment Trading OS</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --bg: #070b14;
+      --panel: rgba(15, 23, 42, 0.86);
+      --panel-strong: #111827;
+      --line: #1f3152;
+      --text: #e5eefb;
+      --muted: #8ea3c1;
+      --blue: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+      --violet: #8b5cf6;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+    }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
-      background: #0f1220;
-      color: #f1f5f9;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.22), transparent 34rem),
+        radial-gradient(circle at 80% 10%, rgba(139, 92, 246, 0.18), transparent 30rem),
+        var(--bg);
+      color: var(--text);
     }
-    .container {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 20px;
+    a { color: var(--blue); }
+    .shell { width: min(1280px, calc(100% - 32px)); margin: 0 auto; padding: 26px 0 48px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 900; color: #06111f; background: linear-gradient(135deg, var(--blue), var(--green)); box-shadow: var(--shadow); }
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: clamp(28px, 4vw, 48px); letter-spacing: -0.05em; }
+    h2 { font-size: 20px; letter-spacing: -0.02em; }
+    h3 { font-size: 15px; color: #dbeafe; }
+    .muted { color: var(--muted); }
+    .hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; align-items: stretch; margin-bottom: 18px; }
+    .hero-copy, .card { border: 1px solid var(--line); background: var(--panel); border-radius: 22px; padding: 20px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
+    .hero-copy p { color: var(--muted); max-width: 760px; line-height: 1.6; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .badge { padding: 7px 10px; border-radius: 999px; border: 1px solid #25436c; background: #0b1425; color: #b7d4ff; font-size: 12px; }
+    .auth-card { display: grid; gap: 10px; }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tab { background: #0b1425; color: var(--muted); border: 1px solid var(--line); }
+    .tab.active { color: #06111f; background: linear-gradient(135deg, var(--blue), var(--green)); border-color: transparent; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    label { display: block; margin: 12px 0 6px; color: #c7d8ef; font-size: 13px; font-weight: 650; }
+    input, select, textarea {
+      width: 100%; border: 1px solid #2a4168; border-radius: 13px; background: #08111f; color: var(--text); padding: 11px 12px; outline: none;
     }
-    h1 { margin: 0 0 6px; }
-    .muted { color: #93a3b8; font-size: 14px; }
-    .grid {
-      margin-top: 16px;
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    }
-    .card {
-      border: 1px solid #24324a;
-      border-radius: 10px;
-      padding: 14px;
-      background: #141a2d;
-    }
-    label { display: block; font-size: 13px; margin: 10px 0 4px; color: #c9d5e7; }
-    input {
-      width: 100%;
-      padding: 8px;
-      border-radius: 8px;
-      border: 1px solid #334966;
-      background: #0d1425;
-      color: #e6edf8;
-      box-sizing: border-box;
-    }
-    button {
-      margin-top: 10px;
-      padding: 8px 12px;
-      border: 0;
-      border-radius: 8px;
-      background: #2f80ed;
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button.secondary { background: #49566b; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
-    .status {
-      margin-top: 8px;
-      padding: 10px;
-      border-radius: 8px;
-      font-size: 13px;
-      background: #1e293b;
-      border: 1px solid #334155;
-      min-height: 18px;
-    }
-    .ok { color: #86efac; }
-    .ko { color: #fca5a5; }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(110px, 1fr));
-      gap: 8px;
-    }
-    .metric {
-      background: #0d1425;
-      border: 1px solid #334966;
-      border-radius: 8px;
-      padding: 10px;
-      min-height: 54px;
-    }
-    .metric b { display: block; font-size: 15px; margin-top: 2px; color: #e9f3ff; }
-    ul {
-      margin: 8px 0 0;
-      padding-left: 18px;
-      max-height: 220px;
-      overflow: auto;
-    }
-    li { margin-bottom: 6px; }
-    code {
-      background: #0d1425;
-      padding: 2px 5px;
-      border-radius: 6px;
-    }
+    textarea { min-height: 96px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14); }
+    button { border: 0; border-radius: 13px; padding: 11px 14px; background: linear-gradient(135deg, #2563eb, #06b6d4); color: #fff; font-weight: 800; cursor: pointer; }
+    button.secondary { background: #162238; color: #cfe1ff; border: 1px solid #2a4168; }
+    button.ghost { background: transparent; border: 1px solid #2a4168; color: #b7d4ff; }
+    button.danger { background: #7f1d1d; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .status { margin-top: 10px; border-radius: 13px; border: 1px solid #28405f; background: #0a1322; padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
+    .ok { color: var(--green); border-color: rgba(52, 211, 153, 0.28); }
+    .ko { color: var(--red); border-color: rgba(251, 113, 133, 0.32); }
+    .metric { background: #08111f; border: 1px solid #21395d; border-radius: 17px; padding: 16px; min-height: 88px; }
+    .metric span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric b { display: block; margin-top: 8px; font-size: 24px; }
+    .toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+    .check { border: 1px solid #263e64; border-radius: 14px; padding: 10px; display: flex; gap: 8px; align-items: center; background: #08111f; }
+    .check input { width: auto; }
+    .pill { font-size: 12px; border-radius: 999px; padding: 5px 8px; background: rgba(56, 189, 248, 0.12); color: #bae6fd; border: 1px solid rgba(56, 189, 248, 0.28); }
+    .warning { border-color: rgba(251, 191, 36, 0.35); color: #fde68a; }
+    .hidden { display: none !important; }
+    .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
+    .list li { border: 1px solid #20385d; border-radius: 13px; padding: 10px; background: #08111f; color: #cfe1ff; }
+    .chat-log { display: grid; gap: 10px; max-height: 360px; overflow: auto; margin-top: 10px; }
+    .msg { border: 1px solid #20385d; border-radius: 15px; padding: 12px; background: #08111f; white-space: pre-wrap; }
+    .msg.user { border-color: rgba(56, 189, 248, 0.45); }
+    .msg.ai { border-color: rgba(52, 211, 153, 0.35); }
+    @media (max-width: 980px) { .hero { grid-template-columns: 1fr; } .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; } }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Trading IA - Dashboard simple</h1>
-    <div class="muted">Login, wallet, trading stats et monitoring live depuis une seule page.</div>
-
-    <div class="grid">
-      <section class="card">
-        <h3>1) Login</h3>
-        <label>Email</label>
-        <input id="email" value="admin@trading-ia.com" />
-        <label>Password</label>
-        <input id="password" type="password" value="Admin!ChangeMe2026" />
-        <div class="row">
-          <button id="loginBtn">Se connecter</button>
-          <button id="logoutBtn" class="secondary">Se deconnecter</button>
-          <button id="refreshBtn" class="secondary">Rafraichir</button>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">SQ</div>
+        <div>
+          <h2>SentiQ</h2>
+          <div class="muted">Sentiment Trading OS</div>
         </div>
+      </div>
+      <div class="row">
+        <span id="sessionBadge" class="pill">Non connecté</span>
+        <button id="logoutBtn" class="ghost hidden">Déconnexion</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Trading autonome piloté par le sentiment de marché.</h1>
+        <p>SentiQ analyse des signaux news, applique ton seuil de probabilité, respecte tes secteurs et prépare l'exécution actions, ETF et crypto. Cette version démarre en simulation/paper trading pour valider la stratégie avant connexion broker réelle.</p>
+        <div class="badges">
+          <span class="badge">News scoring IA</span><span class="badge">Préférences sectorielles</span><span class="badge">Capital contrôlé</span><span class="badge">Binance / Coinbase / Alpaca prêts à connecter</span><span class="badge">HTTPS OVH</span>
+        </div>
+      </div>
+
+      <section class="card auth-card" id="authCard">
+        <div class="tabs">
+          <button id="loginTab" class="tab active">Connexion</button>
+          <button id="registerTab" class="tab">Créer un compte</button>
+        </div>
+        <label>Email</label>
+        <input id="authEmail" type="email" placeholder="vous@entreprise.com" autocomplete="email" />
+        <label>Mot de passe</label>
+        <input id="authPassword" type="password" placeholder="8 caractères minimum" autocomplete="current-password" />
+        <div class="row">
+          <button id="authSubmitBtn">Se connecter</button>
+          <button id="googleBtn" class="secondary" disabled>Google bientôt</button>
+        </div>
+        <div class="status warning">OAuth Google nécessite des clés Google Cloud. Pour l'instant, utilise email + mot de passe sécurisé.</div>
         <div id="authStatus" class="status"></div>
       </section>
+    </section>
 
-      <section class="card">
-        <h3>2) Operations wallet</h3>
-        <label>Montant depot</label>
-        <input id="depositAmount" value="50.00" />
-        <button id="depositBtn">Depot</button>
-        <label>Montant allocation trading</label>
-        <input id="allocateAmount" value="25.00" />
-        <button id="allocateBtn">Allouer</button>
-        <div id="walletActionStatus" class="status"></div>
-      </section>
+    <section id="appPanel" class="hidden">
+      <div class="grid">
+        <section class="card span-12">
+          <div class="row" style="justify-content: space-between;">
+            <div>
+              <h2>Tableau de bord SentiQ</h2>
+              <div class="muted" id="userLine">-</div>
+            </div>
+            <button id="refreshBtn" class="secondary">Rafraîchir</button>
+          </div>
+        </section>
 
-      <section class="card">
-        <h3>3) Etat courant</h3>
-        <div class="metrics">
-          <div class="metric">User <b id="userInfo">-</b></div>
-          <div class="metric">Role <b id="roleInfo">-</b></div>
-          <div class="metric">Seuil IA <b id="thresholdInfo">-</b></div>
-          <div class="metric">Total <b id="walletTotal">-</b></div>
-          <div class="metric">Disponible <b id="walletAvailable">-</b></div>
-          <div class="metric">Engage <b id="walletEngaged">-</b></div>
-          <div class="metric">Ordres total <b id="ordersTotal">-</b></div>
-          <div class="metric">PnL total <b id="pnlTotal">-</b></div>
-          <div class="metric">Alertes open <b id="alertsOpen">-</b></div>
-        </div>
-      </section>
+        <section class="metric span-3"><span>Total wallet</span><b id="walletTotal">-</b></section>
+        <section class="metric span-3"><span>Disponible</span><b id="walletAvailable">-</b></section>
+        <section class="metric span-3"><span>Engagé</span><b id="walletEngaged">-</b></section>
+        <section class="metric span-3"><span>Seuil IA</span><b id="thresholdMetric">-</b></section>
 
-      <section class="card">
-        <h3>4) Derniers ordres</h3>
-        <ul id="ordersList"></ul>
-      </section>
+        <section class="card span-7">
+          <h2>1. Onboarding trading</h2>
+          <p class="muted">Choisis tes marchés, tes secteurs, ton seuil et la plateforme cible. Les plateformes réelles restent verrouillées tant que les clés API ne sont pas configurées côté serveur.</p>
+          <label>Plateforme d'exécution</label>
+          <select id="brokerPlatform"></select>
+          <div id="brokerHelp" class="status"></div>
+          <div class="toggle-grid">
+            <label class="check"><input id="assetCrypto" type="checkbox" /> Crypto</label>
+            <label class="check"><input id="assetEtf" type="checkbox" /> ETF</label>
+            <label class="check"><input id="assetStocks" type="checkbox" /> Actions</label>
+            <label class="check"><input id="paperMode" type="checkbox" /> Paper trading</label>
+          </div>
+          <label>Seuil minimum IA (%)</label>
+          <input id="probabilityThreshold" type="number" min="0" max="100" step="0.01" value="80" />
+          <label>Préférences sectorielles</label>
+          <div class="toggle-grid">
+            <label class="check"><input id="sectorTech" type="checkbox" /> Tech / IA</label>
+            <label class="check"><input id="sectorMines" type="checkbox" /> Mines / matières premières</label>
+            <label class="check"><input id="sectorRealEstate" type="checkbox" /> Immobilier</label>
+            <label class="check"><input id="sectorInsurance" type="checkbox" /> Assurances</label>
+            <label class="check"><input id="sectorFood" type="checkbox" /> Alimentation</label>
+          </div>
+          <button id="savePrefsBtn">Sauvegarder ma stratégie</button>
+          <div id="prefsStatus" class="status"></div>
+        </section>
 
-      <section class="card">
-        <h3>5) Monitoring live (WebSocket)</h3>
-        <div class="muted">URL: <code>/api/monitoring/ws?token=...</code></div>
-        <div id="wsStatus" class="status">WS: non connecte</div>
-        <ul id="eventsList"></ul>
-      </section>
-    </div>
-  </div>
+        <section class="card span-5">
+          <h2>2. Capital sécurisé</h2>
+          <p class="muted">SentiQ ne demande jamais tes identifiants bancaires. Un vrai dépôt devra passer par un prestataire régulé (Stripe, GoCardless, Tink/Plaid selon pays). Ici le dépôt est simulé.</p>
+          <label>Montant à créditer (simulation)</label>
+          <input id="depositAmount" type="number" min="1" step="0.01" value="1000" />
+          <button id="depositBtn">Simuler un dépôt sécurisé</button>
+          <label>Montant à allouer au robot</label>
+          <input id="allocateAmount" type="number" min="1" step="0.01" value="250" />
+          <button id="allocateBtn">Allouer au trading autonome</button>
+          <div id="walletStatus" class="status"></div>
+        </section>
+
+        <section class="card span-6">
+          <h2>3. Conseiller IA</h2>
+          <p class="muted">Pose une question sur le risque, les plateformes, le capital ou la stratégie. Réponse contextuelle basée sur ton wallet et tes préférences.</p>
+          <div id="chatLog" class="chat-log"></div>
+          <textarea id="advisorMessage" placeholder="Ex: Je veux trader crypto avec 1000 euros, quel risque prendre ?"></textarea>
+          <button id="advisorBtn">Demander à SentiQ</button>
+        </section>
+
+        <section class="card span-6">
+          <h2>4. Démo signal IA</h2>
+          <p class="muted">Injecte une news simulée, laisse le moteur scorer, puis évalue si une opportunité doit être ouverte selon tes préférences.</p>
+          <textarea id="newsText">Reuters: Nvidia beats expectations and signs a major AI cloud partnership while lithium miners rally after supply shock.</textarea>
+          <label>Catégorie / source</label>
+          <input id="newsCategory" value="reuters/stocks" />
+          <div class="row"><button id="analyzeBtn">Analyser la news</button><button id="evaluateBtn" class="secondary">Évaluer opportunité</button></div>
+          <div id="decisionStatus" class="status"></div>
+        </section>
+
+        <section class="card span-6">
+          <h2>Ordres récents</h2>
+          <ul id="ordersList" class="list"><li>Aucun ordre chargé.</li></ul>
+        </section>
+
+        <section class="card span-6">
+          <h2>Monitoring live</h2>
+          <div id="wsStatus" class="status">WebSocket non connecté.</div>
+          <ul id="eventsList" class="list"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
 
   <script>
     const state = {
-      token: localStorage.getItem("trading_token") || "",
-      userId: localStorage.getItem("trading_user_id") || "",
+      mode: "login",
+      token: localStorage.getItem("sentiq_token") || "",
+      userId: localStorage.getItem("sentiq_user_id") || "",
+      email: localStorage.getItem("sentiq_email") || "",
+      platforms: [],
       ws: null,
     };
 
-    const setStatus = (id, text, ok = true) => {
-      const el = document.getElementById(id);
-      el.textContent = text;
-      el.className = `status ${ok ? "ok" : "ko"}`;
-    };
+    const $ = (id) => document.getElementById(id);
+    const money = (value) => `${Number(value || 0).toFixed(2)} EUR`;
+    const status = (id, text, ok = true) => { const el = $(id); el.textContent = text; el.className = `status ${ok ? "ok" : "ko"}`; };
 
-    const parseError = async (response) => {
-      try {
-        const payload = await response.json();
-        if (payload?.detail) {
-          return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
-        }
-      } catch (_) {}
-      return `${response.status} ${response.statusText}`;
-    };
-
-    const apiFetch = async (path, options = {}) => {
+    async function parseError(res) {
+      try { const payload = await res.json(); return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail); } catch (_) { return `${res.status} ${res.statusText}`; }
+    }
+    async function apiFetch(path, options = {}) {
       const headers = Object.assign({}, options.headers || {});
       if (state.token) headers.Authorization = `Bearer ${state.token}`;
-      if (options.jsonBody !== undefined) {
-        headers["Content-Type"] = "application/json";
-        options.body = JSON.stringify(options.jsonBody);
-      }
+      if (options.jsonBody !== undefined) { headers["Content-Type"] = "application/json"; options.body = JSON.stringify(options.jsonBody); }
       const res = await fetch(path, Object.assign({}, options, { headers }));
       if (!res.ok) throw new Error(await parseError(res));
       return res.status === 204 ? null : res.json();
-    };
+    }
 
-    const euro = (value) => Number(value).toFixed(2);
+    function setAuthMode(mode) {
+      state.mode = mode;
+      $("loginTab").classList.toggle("active", mode === "login");
+      $("registerTab").classList.toggle("active", mode === "register");
+      $("authSubmitBtn").textContent = mode === "login" ? "Se connecter" : "Créer mon compte";
+    }
+    function setSession(user) {
+      state.userId = user.id; state.email = user.email;
+      localStorage.setItem("sentiq_user_id", user.id); localStorage.setItem("sentiq_email", user.email);
+      $("sessionBadge").textContent = user.email;
+      $("authCard").classList.add("hidden"); $("appPanel").classList.remove("hidden"); $("logoutBtn").classList.remove("hidden");
+      $("userLine").textContent = `${user.email} | rôle ${user.role}`;
+    }
+    function clearSession() {
+      localStorage.removeItem("sentiq_token"); localStorage.removeItem("sentiq_user_id"); localStorage.removeItem("sentiq_email");
+      state.token = ""; state.userId = ""; state.email = "";
+      if (state.ws) state.ws.close();
+      $("sessionBadge").textContent = "Non connecté"; $("authCard").classList.remove("hidden"); $("appPanel").classList.add("hidden"); $("logoutBtn").classList.add("hidden");
+    }
 
-    const renderOrders = (orders) => {
-      const ul = document.getElementById("ordersList");
-      ul.innerHTML = "";
-      orders.forEach((order) => {
-        const li = document.createElement("li");
-        li.textContent = `${order.asset_symbol} | ${order.direction} | conf=${order.confidence} | ${order.status} | pnl=${order.pnl_simule}`;
-        ul.appendChild(li);
+    async function login(email, password) {
+      const data = await apiFetch("/api/auth/login", { method: "POST", jsonBody: { email, password } });
+      state.token = data.access_token; localStorage.setItem("sentiq_token", state.token); setSession(data.user); await refreshAll(); openWs();
+    }
+    async function submitAuth() {
+      const email = $("authEmail").value.trim(); const password = $("authPassword").value;
+      if (!email || !password) return status("authStatus", "Email et mot de passe requis.", false);
+      try {
+        if (state.mode === "register") await apiFetch("/api/users", { method: "POST", jsonBody: { email, password, role: "trader" } });
+        await login(email, password); status("authStatus", "Connecté.", true);
+      } catch (err) { status("authStatus", err.message, false); }
+    }
+
+    async function loadPlatforms() {
+      state.platforms = await apiFetch("/api/preferences/broker-platforms");
+      const select = $("brokerPlatform"); select.innerHTML = "";
+      state.platforms.forEach((platform) => {
+        const option = document.createElement("option"); option.value = platform.id; option.textContent = `${platform.label} - ${platform.status}`; select.appendChild(option);
       });
-      if (!orders.length) ul.innerHTML = "<li>Aucun ordre pour le moment.</li>";
-    };
+    }
+    function updateBrokerHelp() {
+      const platform = state.platforms.find((item) => item.id === $("brokerPlatform").value);
+      $("brokerHelp").textContent = platform ? `${platform.note} Marchés: ${platform.asset_classes.join(", ")}` : "";
+    }
+    function applyPreferences(pref) {
+      $("brokerPlatform").value = pref.broker_platform; updateBrokerHelp();
+      $("assetCrypto").checked = pref.enable_crypto; $("assetEtf").checked = pref.enable_etf; $("assetStocks").checked = pref.enable_stocks; $("paperMode").checked = pref.paper_trading_enabled;
+      $("sectorTech").checked = pref.sector_tech; $("sectorMines").checked = pref.sector_mines; $("sectorRealEstate").checked = pref.sector_real_estate; $("sectorInsurance").checked = pref.sector_insurance; $("sectorFood").checked = pref.sector_food;
+      $("probabilityThreshold").value = pref.minimum_probability_threshold; $("thresholdMetric").textContent = `${pref.minimum_probability_threshold}%`;
+    }
+    async function savePreferences() {
+      try {
+        const payload = {
+          broker_platform: $("brokerPlatform").value,
+          funding_provider: "simulated_psp",
+          paper_trading_enabled: $("paperMode").checked,
+          minimum_probability_threshold: $("probabilityThreshold").value,
+          enable_crypto: $("assetCrypto").checked,
+          enable_etf: $("assetEtf").checked,
+          enable_stocks: $("assetStocks").checked,
+          sector_tech: $("sectorTech").checked,
+          sector_mines: $("sectorMines").checked,
+          sector_real_estate: $("sectorRealEstate").checked,
+          sector_insurance: $("sectorInsurance").checked,
+          sector_food: $("sectorFood").checked,
+        };
+        const pref = await apiFetch(`/api/preferences/users/${state.userId}`, { method: "PATCH", jsonBody: payload });
+        applyPreferences(pref); status("prefsStatus", "Stratégie sauvegardée.", true); await refreshAll();
+      } catch (err) { status("prefsStatus", err.message, false); }
+    }
 
-    const prependEvent = (eventText) => {
-      const ul = document.getElementById("eventsList");
-      const li = document.createElement("li");
-      li.textContent = eventText;
-      ul.prepend(li);
-      while (ul.children.length > 40) ul.removeChild(ul.lastChild);
-    };
-
-    const closeWs = () => {
-      if (state.ws) {
-        state.ws.close();
-        state.ws = null;
-      }
-    };
-
-    const openWs = () => {
-      closeWs();
-      if (!state.token) return;
-      const protocol = location.protocol === "https:" ? "wss" : "ws";
-      const wsUrl = `${protocol}://${location.host}/api/monitoring/ws?token=${encodeURIComponent(state.token)}`;
-      const ws = new WebSocket(wsUrl);
-      state.ws = ws;
-
-      ws.onopen = () => setStatus("wsStatus", "WS: connecte", true);
-      ws.onclose = () => setStatus("wsStatus", "WS: deconnecte", false);
-      ws.onerror = () => setStatus("wsStatus", "WS: erreur", false);
-      ws.onmessage = (evt) => {
-        try {
-          const payload = JSON.parse(evt.data);
-          if (payload.type === "heartbeat") return;
-          if (payload.type === "snapshot") {
-            setStatus("wsStatus", `WS: connecte (${payload.subscribers} subscribers)`, true);
-            return;
-          }
-          if (payload.type === "event" && payload.data) {
-            const e = payload.data;
-            prependEvent(`${e.created_at} | ${e.channel} | ${e.event_type} | ${e.message}`);
-          }
-        } catch (err) {
-          prependEvent(`WS parse error: ${String(err)}`);
-        }
-      };
-    };
-
-    const refreshDashboard = async () => {
+    async function deposit() {
+      try { const data = await apiFetch(`/api/wallets/${state.userId}/deposit`, { method: "POST", jsonBody: { amount: $("depositAmount").value, payment_method: "simulated_secure_psp" } }); status("walletStatus", data.message, true); await refreshAll(); }
+      catch (err) { status("walletStatus", err.message, false); }
+    }
+    async function allocate() {
+      try { const data = await apiFetch(`/api/wallets/${state.userId}/allocate`, { method: "POST", jsonBody: { amount: $("allocateAmount").value } }); status("walletStatus", data.message, true); await refreshAll(); }
+      catch (err) { status("walletStatus", err.message, false); }
+    }
+    async function askAdvisor() {
+      const message = $("advisorMessage").value.trim(); if (!message) return;
+      const log = $("chatLog"); log.insertAdjacentHTML("beforeend", `<div class="msg user">${message.replaceAll("<", "&lt;")}</div>`); $("advisorMessage").value = "";
+      try {
+        const res = await apiFetch("/api/advisor/chat", { method: "POST", jsonBody: { message } });
+        const body = `${res.answer}\n\nActions:\n- ${res.suggested_actions.join("\n- ")}\n\nRisques:\n- ${(res.risk_flags.length ? res.risk_flags : ["Aucun signal de risque spécifique détecté."]).join("\n- ")}\n\n${res.disclaimer}`;
+        log.insertAdjacentHTML("beforeend", `<div class="msg ai">${body.replaceAll("<", "&lt;")}</div>`); log.scrollTop = log.scrollHeight;
+      } catch (err) { log.insertAdjacentHTML("beforeend", `<div class="msg ai">Erreur: ${err.message}</div>`); }
+    }
+    async function analyzeNews() {
+      try { const data = await apiFetch("/api/decision/signals/analyze", { method: "POST", jsonBody: { news_text: $("newsText").value, category: $("newsCategory").value } }); status("decisionStatus", `Signal ${data.signal_strength}% | secteur ${data.mapped_sector} | valide=${data.is_valid_signal} | TTL=${data.time_to_live_minutes} min`, true); }
+      catch (err) { status("decisionStatus", err.message, false); }
+    }
+    async function evaluateOpportunity() {
+      try { const data = await apiFetch(`/api/decision/users/${state.userId}/evaluate`, { method: "POST" }); status("decisionStatus", `${data.reason} Exécution=${data.should_execute} ${data.active_trade_id ? `| trade=${data.active_trade_id}` : ""}`, data.should_execute); await refreshAll(); }
+      catch (err) { status("decisionStatus", err.message, false); }
+    }
+    function renderOrders(orders) {
+      const ul = $("ordersList"); ul.innerHTML = "";
+      if (!orders.length) { ul.innerHTML = "<li>Aucun ordre pour le moment.</li>"; return; }
+      orders.forEach((order) => { const li = document.createElement("li"); li.textContent = `${order.asset_symbol} | ${order.direction} | ${order.status} | confiance ${order.confidence}% | PnL ${order.pnl_simule}`; ul.appendChild(li); });
+    }
+    function openWs() {
+      if (state.ws) state.ws.close(); if (!state.token) return;
+      const protocol = location.protocol === "https:" ? "wss" : "ws"; const ws = new WebSocket(`${protocol}://${location.host}/api/monitoring/ws?token=${encodeURIComponent(state.token)}`); state.ws = ws;
+      ws.onopen = () => status("wsStatus", "Monitoring live connecté.", true); ws.onclose = () => status("wsStatus", "Monitoring déconnecté.", false); ws.onerror = () => status("wsStatus", "Erreur WebSocket.", false);
+      ws.onmessage = (evt) => { try { const payload = JSON.parse(evt.data); if (payload.type !== "event" || !payload.data) return; const e = payload.data; const li = document.createElement("li"); li.textContent = `${e.created_at} | ${e.channel} | ${e.message}`; $("eventsList").prepend(li); } catch (_) {} };
+    }
+    async function refreshAll() {
       if (!state.token || !state.userId) return;
+      const me = await apiFetch("/api/auth/me"); setSession(me);
+      await loadPlatforms();
+      const [wallet, pref, orders] = await Promise.all([apiFetch(`/api/wallets/${state.userId}`), apiFetch(`/api/preferences/users/${state.userId}`), apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`)]);
+      $("walletTotal").textContent = money(wallet.solde_total); $("walletAvailable").textContent = money(wallet.solde_disponible); $("walletEngaged").textContent = money(wallet.solde_engage);
+      applyPreferences(pref); renderOrders(orders);
+    }
 
-      const me = await apiFetch("/api/auth/me");
-      document.getElementById("userInfo").textContent = me.email;
-      document.getElementById("roleInfo").textContent = me.role;
+    $("loginTab").onclick = () => setAuthMode("login"); $("registerTab").onclick = () => setAuthMode("register"); $("authSubmitBtn").onclick = submitAuth; $("logoutBtn").onclick = clearSession; $("refreshBtn").onclick = () => refreshAll().catch((err) => alert(err.message));
+    $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
 
-      const wallet = await apiFetch(`/api/wallets/${state.userId}`);
-      document.getElementById("walletTotal").textContent = euro(wallet.solde_total);
-      document.getElementById("walletAvailable").textContent = euro(wallet.solde_disponible);
-      document.getElementById("walletEngaged").textContent = euro(wallet.solde_engage);
-
-      const risk = await apiFetch(`/api/trading/users/${state.userId}/risk`);
-      document.getElementById("thresholdInfo").textContent = risk.seuil_probabilite_min;
-
-      const stats = await apiFetch(`/api/trading/users/${state.userId}/orders/stats`);
-      document.getElementById("ordersTotal").textContent = stats.total_orders;
-      document.getElementById("pnlTotal").textContent = euro(stats.total_pnl_simule);
-
-      const monitoring = await apiFetch("/api/monitoring/dashboard");
-      document.getElementById("alertsOpen").textContent = monitoring.alerts_open;
-
-      const orders = await apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`);
-      renderOrders(orders);
-    };
-
-    document.getElementById("loginBtn").addEventListener("click", async () => {
-      try {
-        const email = document.getElementById("email").value.trim();
-        const password = document.getElementById("password").value;
-        const login = await apiFetch("/api/auth/login", {
-          method: "POST",
-          jsonBody: { email, password },
-        });
-
-        state.token = login.access_token;
-        state.userId = login.user.id;
-        localStorage.setItem("trading_token", state.token);
-        localStorage.setItem("trading_user_id", state.userId);
-
-        setStatus("authStatus", "Login OK", true);
-        await refreshDashboard();
-        openWs();
-      } catch (err) {
-        setStatus("authStatus", `Login KO: ${String(err.message || err)}`, false);
-      }
-    });
-
-    document.getElementById("logoutBtn").addEventListener("click", () => {
-      state.token = "";
-      state.userId = "";
-      localStorage.removeItem("trading_token");
-      localStorage.removeItem("trading_user_id");
-      closeWs();
-      setStatus("authStatus", "Token efface", true);
-    });
-
-    document.getElementById("refreshBtn").addEventListener("click", async () => {
-      try {
-        await refreshDashboard();
-        setStatus("authStatus", "Rafraichissement OK", true);
-      } catch (err) {
-        setStatus("authStatus", `Refresh KO: ${String(err.message || err)}`, false);
-      }
-    });
-
-    document.getElementById("depositBtn").addEventListener("click", async () => {
-      try {
-        const amount = document.getElementById("depositAmount").value.trim();
-        await apiFetch(`/api/wallets/${state.userId}/deposit`, {
-          method: "POST",
-          jsonBody: { amount, payment_method: "pm_card_visa" },
-        });
-        await refreshDashboard();
-        setStatus("walletActionStatus", "Depot OK", true);
-      } catch (err) {
-        setStatus("walletActionStatus", `Depot KO: ${String(err.message || err)}`, false);
-      }
-    });
-
-    document.getElementById("allocateBtn").addEventListener("click", async () => {
-      try {
-        const amount = document.getElementById("allocateAmount").value.trim();
-        await apiFetch(`/api/wallets/${state.userId}/allocate`, {
-          method: "POST",
-          jsonBody: { amount },
-        });
-        await refreshDashboard();
-        setStatus("walletActionStatus", "Allocation OK", true);
-      } catch (err) {
-        setStatus("walletActionStatus", `Allocation KO: ${String(err.message || err)}`, false);
-      }
-    });
-
-    (async () => {
-      if (!state.token || !state.userId) {
-        setStatus("authStatus", "Pas encore connecte", false);
-        return;
-      }
-      try {
-        await refreshDashboard();
-        setStatus("authStatus", "Session restauree", true);
-        openWs();
-      } catch (err) {
-        setStatus("authStatus", `Session invalide: ${String(err.message || err)}`, false);
-      }
-    })();
+    if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(clearSession); }
   </script>
 </body>
 </html>
