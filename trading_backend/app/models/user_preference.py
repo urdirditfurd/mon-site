@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,12 @@ class UserPreference(Base):
     """Filtres de probabilité, classes d'actifs et secteurs favoris."""
 
     __tablename__ = "user_preferences"
+    __table_args__ = (
+        CheckConstraint(
+            "minimum_probability_threshold >= 0 AND minimum_probability_threshold <= 100",
+            name="ck_user_preferences_minimum_probability_threshold_range",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(

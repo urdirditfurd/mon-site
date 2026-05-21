@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,7 @@ ASSET_STOCK = "stocks"
 
 MIN_SIGNAL_PROBABILITY = Decimal("70.00")
 MIN_RECOMMENDED_CAPITAL = Decimal("50.00")
+TOKEN_PATTERN = re.compile(r"[a-zà-ÿ0-9]+", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -67,6 +69,10 @@ class TradingOpportunityResult:
 
 
 def _quantize_probability(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _quantize_amount(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
@@ -110,8 +116,17 @@ def _source_confidence(source: str) -> Decimal:
     return Decimal("78.00")
 
 
+def _contains_keyword(lowered_text: str, tokens: set[str], keyword: str) -> bool:
+    """Détecte mot-clé avec support mots isolés et expressions."""
+
+    if " " in keyword:
+        return keyword in lowered_text
+    return keyword in tokens
+
+
 def _map_sector(news_text: str) -> str:
     lowered = news_text.lower()
+    tokens = set(TOKEN_PATTERN.findall(lowered))
     sector_keywords = {
         SECTOR_MINES: {"or", "gold", "lithium", "copper", "cuivre", "nickel", "mine", "mining"},
         SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip"},
@@ -120,7 +135,7 @@ def _map_sector(news_text: str) -> str:
         SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
     }
     for sector, keywords in sector_keywords.items():
-        if any(keyword in lowered for keyword in keywords):
+        if any(_contains_keyword(lowered, tokens, keyword) for keyword in keywords):
             return sector
     return SECTOR_GENERAL
 
@@ -131,11 +146,14 @@ def _resolve_asset_class(category: str) -> str:
         return ASSET_CRYPTO
     if "etf" in lowered:
         return ASSET_ETF
+    if "action" in lowered or "stock" in lowered:
+        return ASSET_STOCK
     return ASSET_STOCK
 
 
 def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) -> tuple[str, Decimal, Decimal]:
     lowered = news_text.lower()
+    tokens = set(TOKEN_PATTERN.findall(lowered))
     bullish_keywords = {
         "upgrade",
         "growth",
@@ -156,8 +174,8 @@ def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) 
         "rate hike",
         "warning",
     }
-    bullish_hits = sum(keyword in lowered for keyword in bullish_keywords)
-    bearish_hits = sum(keyword in lowered for keyword in bearish_keywords)
+    bullish_hits = sum(_contains_keyword(lowered, tokens, keyword) for keyword in bullish_keywords)
+    bearish_hits = sum(_contains_keyword(lowered, tokens, keyword) for keyword in bearish_keywords)
 
     base = Decimal("58.00")
     source_bonus = (source_conf - Decimal("70.00")) / Decimal("6.0")
@@ -181,9 +199,13 @@ def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) 
 
 def _estimate_ttl_minutes(news_text: str, category: str, mapped_sector: str, strength: Decimal) -> int:
     lowered = news_text.lower()
-    if any(keyword in lowered for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}):
+    tokens = set(TOKEN_PATTERN.findall(lowered))
+    if any(
+        _contains_keyword(lowered, tokens, keyword)
+        for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}
+    ):
         base_ttl = 60 * 24 * 3
-    elif any(keyword in lowered for keyword in {"tweet", "post", "influencer", "rumor"}):
+    elif any(_contains_keyword(lowered, tokens, keyword) for keyword in {"tweet", "post", "influencer", "rumor"}):
         base_ttl = 45
     elif mapped_sector == SECTOR_MINES:
         base_ttl = 60 * 18
@@ -251,7 +273,7 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
     mapped_sector = _map_sector(news_text)
     polarity, bullish, bearish = _compute_probabilities(news_text, category, source_conf)
     strength = _quantize_probability(max(bullish, bearish))
-    is_valid_signal = strength >= MIN_SIGNAL_PROBABILITY
+    is_valid_signal = strength > MIN_SIGNAL_PROBABILITY
     ttl_minutes = _estimate_ttl_minutes(news_text, category, mapped_sector, strength)
     expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
 
@@ -331,7 +353,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                     MarketSignal.is_valid_signal.is_(True),
                     MarketSignal.expires_at > now,
                 )
-                .order_by(desc(MarketSignal.signal_strength), desc(MarketSignal.created_at))
+                .order_by(desc(MarketSignal.created_at), desc(MarketSignal.signal_strength))
                 .limit(50)
             )
         ).scalars().all()
@@ -351,7 +373,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 continue
             if not _is_sector_enabled(preference, signal.mapped_sector):
                 continue
-            if signal.signal_strength < threshold:
+            if signal.signal_strength <= threshold:
                 continue
             eligible_signals.append(signal)
 
@@ -380,7 +402,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 market_signal_id=selected_signal.id,
             )
 
-        recommended_capital = _quantize_probability(
+        recommended_capital = _quantize_amount(
             min(
                 wallet.solde_disponible,
                 max(MIN_RECOMMENDED_CAPITAL, wallet.solde_disponible * Decimal("0.20")),
@@ -398,6 +420,8 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
         direction = "buy" if selected_signal.sentiment_polarity != "negative" else "sell"
         estimated_duration = max(30, selected_signal.time_to_live_minutes)
         planned_close = now + timedelta(minutes=estimated_duration)
+        wallet.solde_disponible = _quantize_amount(wallet.solde_disponible - recommended_capital)
+        wallet.solde_engage = _quantize_amount(wallet.solde_engage + recommended_capital)
 
         active_trade = ActiveTrade(
             user_id=user_id,

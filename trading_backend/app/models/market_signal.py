@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, Numeric, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,19 @@ class MarketSignal(Base):
     """Stocke les événements news scorés et validés par le pipeline NLP."""
 
     __tablename__ = "market_signals"
+    __table_args__ = (
+        CheckConstraint("source_confidence >= 0 AND source_confidence <= 100", name="ck_market_signals_source_confidence_range"),
+        CheckConstraint(
+            "probability_bullish >= 0 AND probability_bullish <= 100",
+            name="ck_market_signals_probability_bullish_range",
+        ),
+        CheckConstraint(
+            "probability_bearish >= 0 AND probability_bearish <= 100",
+            name="ck_market_signals_probability_bearish_range",
+        ),
+        CheckConstraint("signal_strength >= 0 AND signal_strength <= 100", name="ck_market_signals_signal_strength_range"),
+        CheckConstraint("time_to_live_minutes > 0", name="ck_market_signals_ttl_positive"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown_source", index=True)
