@@ -1,9 +1,28 @@
-"""Moteur NLP + décision trading basé sur préférences utilisateur."""
+"""Moteur NLP + décision de trading basé sur les préférences utilisateur.
+
+Ce module implémente le cœur algorithmique de l'application :
+
+* ``analyze_incoming_news`` : pipeline NLP simulé qui score chaque news
+  certifiée (Bloomberg, Reuters, Benzinga, X/Twitter, RSS) en polarité,
+  confiance source, probabilité haussière / baissière, secteur cible et
+  durée de rétention dynamique (Time-To-Live).  Le signal scoré est
+  persisté dans ``market_signals`` et marqué ``is_valid_signal=True``
+  lorsqu'il dépasse 70 % de probabilité.
+* ``evaluate_trading_opportunity`` : croise les signaux valides récents
+  avec les préférences sectorielles, le seuil utilisateur, la classe
+  d'actifs autorisée et le capital disponible pour ouvrir (ou non) une
+  position dans ``active_trades`` avec un horizon de temps maximum.
+
+Les fonctions sont totalement asynchrones (SQLAlchemy AsyncSession) et
+strictement déterministes pour une même entrée (le bruit NLP est dérivé
+d'un hash SHA-256), ce qui simplifie les tests de régression.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,6 +37,11 @@ from app.models.user import User
 from app.models.user_preference import UserPreference
 from app.models.wallet import Wallet
 
+
+# ---------------------------------------------------------------------------
+# Constantes publiques exportées par le moteur.
+# ---------------------------------------------------------------------------
+
 SECTOR_TECH = "tech"
 SECTOR_MINES = "mines"
 SECTOR_REAL_ESTATE = "real_estate"
@@ -29,8 +53,18 @@ ASSET_CRYPTO = "crypto"
 ASSET_ETF = "etf"
 ASSET_STOCK = "stocks"
 
+#: Seuil de probabilité plancher imposé par la plateforme.  Un signal
+#: ne peut jamais être validé en dessous, même si la préférence
+#: utilisateur autorise un seuil plus bas.
 MIN_SIGNAL_PROBABILITY = Decimal("70.00")
+
+#: Plancher absolu de capital recommandé pour qu'un ordre soit envoyé.
 MIN_RECOMMENDED_CAPITAL = Decimal("50.00")
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses retournées par le moteur.
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -50,7 +84,7 @@ class NewsAnalysisResult:
 
 @dataclass(slots=True)
 class TradingOpportunityResult:
-    """Décision finale d'ouverture de position."""
+    """Décision finale d'ouverture (ou de rejet) de position."""
 
     should_execute: bool
     reason: str
@@ -66,22 +100,39 @@ class TradingOpportunityResult:
     active_trade_id: uuid.UUID | None = None
 
 
+# ---------------------------------------------------------------------------
+# Helpers numériques.
+# ---------------------------------------------------------------------------
+
+
 def _quantize_probability(value: Decimal) -> Decimal:
+    """Arrondit une probabilité à deux décimales (mode banker's half-up)."""
+
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _clamp_decimal(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
+    """Borne ``value`` dans l'intervalle ``[minimum, maximum]``."""
+
     return max(minimum, min(value, maximum))
 
 
 def _noise_from_text(news_text: str, category: str) -> Decimal:
+    """Bruit déterministe dans ``[-6.00, +6.00]`` dérivé du texte d'entrée."""
+
     digest = hashlib.sha256(f"{category}:{news_text.lower()}".encode("utf-8")).hexdigest()
     seed = int(digest[:8], 16)
-    # Bruit déterministe [-6.00, +6.00]
     return Decimal((seed % 1201) - 600) / Decimal("100")
 
 
+# ---------------------------------------------------------------------------
+# Sources, confiance et mots-clés.
+# ---------------------------------------------------------------------------
+
+
 def _extract_source(category: str) -> str:
+    """Mappe la catégorie d'origine vers un identifiant de source certifiée."""
+
     lowered = category.lower()
     if "bloomberg" in lowered:
         return "bloomberg_enterprise"
@@ -97,6 +148,8 @@ def _extract_source(category: str) -> str:
 
 
 def _source_confidence(source: str) -> Decimal:
+    """Confiance baseline associée à chaque source certifiée."""
+
     if source == "bloomberg_enterprise":
         return Decimal("95.00")
     if source == "reuters_api":
@@ -110,22 +163,82 @@ def _source_confidence(source: str) -> Decimal:
     return Decimal("78.00")
 
 
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    """Compile un motif insensible à la casse avec frontières de mot lexicales.
+
+    L'utilisation de lookarounds ``(?<![\\w])`` / ``(?![\\w])`` évite les
+    faux positifs typiques : ``"or"`` (ticker Mines) ne matche plus
+    ``"major"`` ni ``"forecast"``, ``"ai"`` ne matche plus ``"said"``.
+    """
+
+    escaped = re.escape(keyword)
+    return re.compile(rf"(?<![\w]){escaped}(?![\w])", re.IGNORECASE)
+
+
+_SECTOR_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        SECTOR_MINES,
+        (
+            "or", "gold", "lithium", "copper", "cuivre", "nickel",
+            "mine", "mining", "miner", "miners", "mines",
+            "platinum", "silver", "minerai", "minerais",
+        ),
+    ),
+    (
+        SECTOR_TECH,
+        (
+            "nvidia", "ai", "ia", "semiconductor", "semiconductors",
+            "cloud", "software", "cyber", "cybersecurity",
+            "chip", "chips", "saas", "datacenter", "tech",
+        ),
+    ),
+    (
+        SECTOR_REAL_ESTATE,
+        (
+            "real estate", "reit", "reits", "housing", "mortgage",
+            "immobilier", "property", "properties",
+        ),
+    ),
+    (
+        SECTOR_INSURANCE,
+        (
+            "insurance", "insurer", "insurers", "reinsurance",
+            "assurance", "sinistre", "sinistres",
+        ),
+    ),
+    (
+        SECTOR_FOOD,
+        (
+            "food", "agri", "agriculture", "wheat", "sugar",
+            "alimentation", "beverage", "beverages",
+        ),
+    ),
+)
+
+_COMPILED_SECTOR_KEYWORDS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = tuple(
+    (sector, tuple(_keyword_pattern(keyword) for keyword in keywords))
+    for sector, keywords in _SECTOR_KEYWORDS
+)
+
+
+def _contains_keyword(text: str, keywords: tuple[str, ...]) -> bool:
+    """Retourne ``True`` si un mot-clé apparaît comme token complet."""
+
+    return any(_keyword_pattern(keyword).search(text) for keyword in keywords)
+
+
 def _map_sector(news_text: str) -> str:
-    lowered = news_text.lower()
-    sector_keywords = {
-        SECTOR_MINES: {"or", "gold", "lithium", "copper", "cuivre", "nickel", "mine", "mining"},
-        SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip"},
-        SECTOR_REAL_ESTATE: {"real estate", "reit", "housing", "mortgage", "immobilier", "property"},
-        SECTOR_INSURANCE: {"insurance", "assurance", "reinsurance", "insurer", "sinistre"},
-        SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
-    }
-    for sector, keywords in sector_keywords.items():
-        if any(keyword in lowered for keyword in keywords):
+    """Mappe une news vers un secteur via correspondance par frontière de mot."""
+
+    for sector, patterns in _COMPILED_SECTOR_KEYWORDS:
+        if any(pattern.search(news_text) for pattern in patterns):
             return sector
     return SECTOR_GENERAL
 
 
 def _resolve_asset_class(category: str) -> str:
+    """Devine la classe d'actif visée à partir de la catégorie source."""
+
     lowered = category.lower()
     if "crypto" in lowered or "binance" in lowered or "coinbase" in lowered:
         return ASSET_CRYPTO
@@ -134,35 +247,82 @@ def _resolve_asset_class(category: str) -> str:
     return ASSET_STOCK
 
 
-def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) -> tuple[str, Decimal, Decimal]:
-    lowered = news_text.lower()
-    bullish_keywords = {
-        "upgrade",
-        "growth",
-        "record",
-        "beats",
-        "partnership",
-        "acquisition",
-        "hausse",
-        "bénéfice",
-    }
-    bearish_keywords = {
-        "downgrade",
-        "lawsuit",
-        "fraud",
-        "sanction",
-        "baisse",
-        "inflation",
-        "rate hike",
-        "warning",
-    }
-    bullish_hits = sum(keyword in lowered for keyword in bullish_keywords)
-    bearish_hits = sum(keyword in lowered for keyword in bearish_keywords)
+# ---------------------------------------------------------------------------
+# Scoring polarité + probabilités.
+# ---------------------------------------------------------------------------
+
+
+_BULLISH_KEYWORDS: tuple[str, ...] = (
+    "upgrade",
+    "growth",
+    "record",
+    "beats",
+    "partnership",
+    "acquisition",
+    "hausse",
+    "bénéfice",
+    "rally",
+    "surge",
+    "breakthrough",
+)
+
+_BEARISH_KEYWORDS: tuple[str, ...] = (
+    "downgrade",
+    "lawsuit",
+    "fraud",
+    "sanction",
+    "sanctions",
+    "baisse",
+    "inflation",
+    "rate hike",
+    "warning",
+    "crash",
+    "plunge",
+)
+
+
+def _compute_probabilities(
+    news_text: str,
+    category: str,
+    source_conf: Decimal,
+) -> tuple[str, Decimal, Decimal]:
+    """Calcule polarité, probabilité haussière et probabilité baissière.
+
+    Le score combine :
+
+    * une base de 58 %,
+    * un bonus de 8.5 points par mot-clé directionnel détecté
+      (haussier ou baissier confondu, pour reproduire l'intensité d'un
+      modèle FinBERT),
+    * un bonus pondéré par la confiance source,
+    * un petit bonus dépendant de la classe d'actif (crypto/stocks plus
+      volatils que ETF),
+    * un bruit déterministe dérivé du SHA-256 du texte d'entrée.
+
+    Le résultat est borné à ``[50, 99]`` puis quantifié à deux décimales.
+    """
+
+    bullish_hits = sum(
+        1 for keyword in _BULLISH_KEYWORDS if _keyword_pattern(keyword).search(news_text)
+    )
+    bearish_hits = sum(
+        1 for keyword in _BEARISH_KEYWORDS if _keyword_pattern(keyword).search(news_text)
+    )
 
     base = Decimal("58.00")
     source_bonus = (source_conf - Decimal("70.00")) / Decimal("6.0")
-    category_bonus = Decimal("3.00") if _resolve_asset_class(category) in {ASSET_CRYPTO, ASSET_STOCK} else Decimal("1.50")
-    score = base + (Decimal("8.50") * Decimal(bullish_hits + bearish_hits)) + source_bonus + category_bonus + _noise_from_text(news_text, category)
+    category_bonus = (
+        Decimal("3.00")
+        if _resolve_asset_class(category) in {ASSET_CRYPTO, ASSET_STOCK}
+        else Decimal("1.50")
+    )
+    score = (
+        base
+        + (Decimal("8.50") * Decimal(bullish_hits + bearish_hits))
+        + source_bonus
+        + category_bonus
+        + _noise_from_text(news_text, category)
+    )
     strength = _quantize_probability(_clamp_decimal(score, Decimal("50.00"), Decimal("99.00")))
 
     if bullish_hits > bearish_hits:
@@ -174,16 +334,60 @@ def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) 
         probability_bullish = _quantize_probability(Decimal("100.00") - strength)
         return ("negative", probability_bullish, probability_bearish)
 
-    neutral_center = _quantize_probability(_clamp_decimal(Decimal("52.00") + _noise_from_text(news_text, category), Decimal("45.00"), Decimal("65.00")))
+    neutral_center = _quantize_probability(
+        _clamp_decimal(
+            Decimal("52.00") + _noise_from_text(news_text, category),
+            Decimal("45.00"),
+            Decimal("65.00"),
+        )
+    )
     opposite = _quantize_probability(Decimal("100.00") - neutral_center)
     return ("neutral", neutral_center, opposite)
 
 
-def _estimate_ttl_minutes(news_text: str, category: str, mapped_sector: str, strength: Decimal) -> int:
-    lowered = news_text.lower()
-    if any(keyword in lowered for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}):
+# ---------------------------------------------------------------------------
+# Time-To-Live dynamique.
+# ---------------------------------------------------------------------------
+
+
+_MACRO_KEYWORDS: tuple[str, ...] = (
+    "interest rate",
+    "inflation",
+    "central bank",
+    "fed",
+    "ecb",
+    "macro",
+)
+
+_SHORT_LIFE_KEYWORDS: tuple[str, ...] = (
+    "tweet",
+    "post",
+    "influencer",
+    "rumor",
+)
+
+
+def _estimate_ttl_minutes(
+    news_text: str,
+    category: str,
+    mapped_sector: str,
+    strength: Decimal,
+) -> int:
+    """Estime la durée pendant laquelle un signal reste exploitable.
+
+    Heuristique :
+
+    * Macro-économique (taux, inflation, banque centrale) : 3 jours.
+    * Tweet / post / rumeur d'influenceur : 45 minutes.
+    * Mines : 18 h ; Tech : 8 h ; Crypto : 4 h ; reste : 6 h.
+
+    Le TTL est ensuite étiré linéairement avec la force du signal et
+    borné dans ``[30 min, 7 jours]``.
+    """
+
+    if _contains_keyword(news_text, _MACRO_KEYWORDS):
         base_ttl = 60 * 24 * 3
-    elif any(keyword in lowered for keyword in {"tweet", "post", "influencer", "rumor"}):
+    elif _contains_keyword(news_text, _SHORT_LIFE_KEYWORDS):
         base_ttl = 45
     elif mapped_sector == SECTOR_MINES:
         base_ttl = 60 * 18
@@ -199,7 +403,14 @@ def _estimate_ttl_minutes(news_text: str, category: str, mapped_sector: str, str
     return max(30, min(ttl, 60 * 24 * 7))
 
 
+# ---------------------------------------------------------------------------
+# Préférences utilisateur.
+# ---------------------------------------------------------------------------
+
+
 def _is_sector_enabled(preference: UserPreference, sector: str) -> bool:
+    """Indique si le secteur ``sector`` est activé dans les préférences."""
+
     if sector == SECTOR_TECH:
         return preference.sector_tech
     if sector == SECTOR_MINES:
@@ -214,6 +425,8 @@ def _is_sector_enabled(preference: UserPreference, sector: str) -> bool:
 
 
 def _is_asset_class_enabled(preference: UserPreference, asset_class: str) -> bool:
+    """Indique si la classe d'actifs ``asset_class`` est activée."""
+
     if asset_class == ASSET_CRYPTO:
         return preference.enable_crypto
     if asset_class == ASSET_ETF:
@@ -222,6 +435,8 @@ def _is_asset_class_enabled(preference: UserPreference, asset_class: str) -> boo
 
 
 def _default_preferences(user_id: uuid.UUID) -> UserPreference:
+    """Préférences sectorielles par défaut (tech + mines, seuil 70 %)."""
+
     return UserPreference(
         user_id=user_id,
         minimum_probability_threshold=Decimal("70.00"),
@@ -236,14 +451,32 @@ def _default_preferences(user_id: uuid.UUID) -> UserPreference:
     )
 
 
+# ---------------------------------------------------------------------------
+# API publique : analyse NLP d'une news + décision de trade.
+# ---------------------------------------------------------------------------
+
+
 async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisResult:
-    """Analyse une news entrante, calcule probabilités et persiste le signal."""
+    """Analyse une news entrante, calcule probabilités et persiste le signal.
+
+    :param news_text: contenu textuel brut de la news (UTF-8).
+    :param category: catégorie / source d'origine, libre-forme.  Sert à
+        identifier la source certifiée (Bloomberg, Reuters, Benzinga, X,
+        RSS) et la classe d'actif visée (crypto / etf / stock).
+    :raises ValueError: si l'un des deux paramètres est vide.
+    :returns: un :class:`NewsAnalysisResult` contenant la probabilité
+        haussière/baissière, le secteur mappé, la durée de rétention
+        dynamique et le statut ``is_valid_signal`` (True dès que la
+        probabilité dominante dépasse :data:`MIN_SIGNAL_PROBABILITY`).
+    """
 
     if not news_text or not news_text.strip():
         raise ValueError("news_text doit contenir du texte.")
     if not category or not category.strip():
         raise ValueError("category doit être renseignée.")
 
+    # Cession de contrôle au scheduler asyncio pour préserver la
+    # coopérativité même quand cette fonction est appelée en boucle.
     await asyncio.sleep(0)
 
     source = _extract_source(category)
@@ -268,7 +501,10 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
         is_valid_signal=is_valid_signal,
         time_to_live_minutes=ttl_minutes,
         expires_at=expires_at,
-        metadata_json={"pipeline_version": "v1.0", "asset_class": _resolve_asset_class(category)},
+        metadata_json={
+            "pipeline_version": "v1.0",
+            "asset_class": _resolve_asset_class(category),
+        },
     )
 
     async with AsyncSessionLocal() as session:
@@ -290,7 +526,27 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
 
 
 async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunityResult:
-    """Croise préférences utilisateur et signaux valides pour décider d'un trade."""
+    """Croise préférences utilisateur et signaux valides pour décider d'un trade.
+
+    Étapes :
+
+    1. Vérifie que l'utilisateur existe et est actif.
+    2. Vérifie qu'un wallet est associé et qu'un capital disponible
+       supérieur à zéro existe.
+    3. Charge ou crée les préférences utilisateur par défaut.
+    4. Sélectionne les signaux valides non expirés, triés par force
+       décroissante.
+    5. Filtre selon le seuil utilisateur, la classe d'actif et le
+       secteur autorisé.
+    6. Garantit l'idempotence : aucun nouveau trade n'est ouvert tant
+       qu'une position est déjà ouverte sur le même signal.
+    7. Ouvre une position ``ActiveTrade`` avec un capital recommandé
+       (20 % du solde disponible, plancher :data:`MIN_RECOMMENDED_CAPITAL`)
+       et un horizon de temps maximum ``planned_close_at``.
+
+    :returns: un :class:`TradingOpportunityResult` détaillant la
+        décision et — en cas d'exécution — l'identifiant du trade ouvert.
+    """
 
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
@@ -316,13 +572,17 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 user_id=user_id,
             )
 
-        preference = await session.scalar(select(UserPreference).where(UserPreference.user_id == user_id))
+        preference = await session.scalar(
+            select(UserPreference).where(UserPreference.user_id == user_id)
+        )
         if preference is None:
             preference = _default_preferences(user_id)
             session.add(preference)
             await session.flush()
 
-        threshold = _quantize_probability(max(preference.minimum_probability_threshold, MIN_SIGNAL_PROBABILITY))
+        threshold = _quantize_probability(
+            max(preference.minimum_probability_threshold, MIN_SIGNAL_PROBABILITY)
+        )
 
         recent_signals = (
             await session.execute(
