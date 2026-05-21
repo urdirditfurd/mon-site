@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -16,7 +17,7 @@ from app.models.active_trade import ActiveTrade
 from app.models.market_signal import MarketSignal
 from app.models.user import User
 from app.models.user_preference import UserPreference
-from app.models.wallet import Wallet
+from app.services.wallet_service import get_wallet_for_update
 
 SECTOR_TECH = "tech"
 SECTOR_MINES = "mines"
@@ -70,6 +71,10 @@ def _quantize_probability(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _quantize_amount(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _clamp_decimal(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
     return max(minimum, min(value, maximum))
 
@@ -120,7 +125,7 @@ def _map_sector(news_text: str) -> str:
         SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
     }
     for sector, keywords in sector_keywords.items():
-        if any(keyword in lowered for keyword in keywords):
+        if any(re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", lowered) for keyword in keywords):
             return sector
     return SECTOR_GENERAL
 
@@ -302,7 +307,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 user_id=user_id,
             )
 
-        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+        wallet = await get_wallet_for_update(session=session, user_id=user_id)
         if wallet is None:
             return TradingOpportunityResult(
                 should_execute=False,
@@ -380,7 +385,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 market_signal_id=selected_signal.id,
             )
 
-        recommended_capital = _quantize_probability(
+        recommended_capital = _quantize_amount(
             min(
                 wallet.solde_disponible,
                 max(MIN_RECOMMENDED_CAPITAL, wallet.solde_disponible * Decimal("0.20")),
@@ -398,6 +403,10 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
         direction = "buy" if selected_signal.sentiment_polarity != "negative" else "sell"
         estimated_duration = max(30, selected_signal.time_to_live_minutes)
         planned_close = now + timedelta(minutes=estimated_duration)
+
+        wallet.solde_disponible = _quantize_amount(wallet.solde_disponible - recommended_capital)
+        wallet.solde_engage = _quantize_amount(wallet.solde_engage + recommended_capital)
+        session.add(wallet)
 
         active_trade = ActiveTrade(
             user_id=user_id,
