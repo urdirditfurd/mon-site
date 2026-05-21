@@ -20,6 +20,9 @@ class AnalyzeNewsResponse(BaseModel):
     """Résultat du pipeline d'analyse NLP."""
 
     signal_id: uuid.UUID
+    source: str
+    source_confidence: Decimal
+    asset_class: str
     mapped_sector: str
     sentiment_polarity: str
     probability_bullish: Decimal
@@ -27,6 +30,8 @@ class AnalyzeNewsResponse(BaseModel):
     signal_strength: Decimal
     is_valid_signal: bool
     time_to_live_minutes: int
+    time_horizon_label: str
+    ttl_reason: str
     expires_at: datetime
 
 
@@ -41,7 +46,10 @@ class TradingOpportunityResponse(BaseModel):
     asset_class: str | None = None
     sector: str | None = None
     probability_used: Decimal | None = None
+    threshold_used: Decimal | None = None
     recommended_capital: Decimal | None = None
+    remaining_available_capital: Decimal | None = None
     estimated_duration_minutes: int | None = None
+    time_horizon_label: str | None = None
     planned_close_at: datetime | None = None
     active_trade_id: uuid.UUID | None = None

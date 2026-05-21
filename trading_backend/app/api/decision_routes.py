@@ -25,6 +25,9 @@ async def analyze_news(payload: AnalyzeNewsRequest, _current_user: User = Depend
 
     return AnalyzeNewsResponse(
         signal_id=result.signal_id,
+        source=result.source,
+        source_confidence=result.source_confidence,
+        asset_class=result.asset_class,
         mapped_sector=result.mapped_sector,
         sentiment_polarity=result.sentiment_polarity,
         probability_bullish=result.probability_bullish,
@@ -32,6 +35,8 @@ async def analyze_news(payload: AnalyzeNewsRequest, _current_user: User = Depend
         signal_strength=result.signal_strength,
         is_valid_signal=result.is_valid_signal,
         time_to_live_minutes=result.time_to_live_minutes,
+        time_horizon_label=result.time_horizon_label,
+        ttl_reason=result.ttl_reason,
         expires_at=result.expires_at,
     )
 
@@ -54,8 +59,11 @@ async def evaluate_user_opportunity(
         asset_class=result.asset_class,
         sector=result.sector,
         probability_used=result.probability_used,
+        threshold_used=result.threshold_used,
         recommended_capital=result.recommended_capital,
+        remaining_available_capital=result.remaining_available_capital,
         estimated_duration_minutes=result.estimated_duration_minutes,
+        time_horizon_label=result.time_horizon_label,
         planned_close_at=result.planned_close_at,
         active_trade_id=result.active_trade_id,
     )

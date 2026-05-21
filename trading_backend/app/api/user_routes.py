@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_session
 from app.models.trading_profile import TradingProfile
 from app.models.user import User
+from app.models.user_preference import UserPreference
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreateRequest, UserResponse
 from app.core.security import hash_password
@@ -57,7 +58,19 @@ async def create_user(
         equity_peak=Decimal("0.00"),
         equity_current=Decimal("0.00"),
     )
-    session.add_all([user, wallet, trading_profile])
+    user_preference = UserPreference(
+        user=user,
+        minimum_probability_threshold=trading_profile.seuil_probabilite_min,
+        enable_crypto=True,
+        enable_etf=True,
+        enable_stocks=True,
+        sector_tech=True,
+        sector_mines=True,
+        sector_real_estate=False,
+        sector_insurance=False,
+        sector_food=False,
+    )
+    session.add_all([user, wallet, trading_profile, user_preference])
     await log_audit_event(
         session,
         source="user_api",
