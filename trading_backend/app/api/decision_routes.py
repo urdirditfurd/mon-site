@@ -25,6 +25,9 @@ async def analyze_news(payload: AnalyzeNewsRequest, _current_user: User = Depend
 
     return AnalyzeNewsResponse(
         signal_id=result.signal_id,
+        source=result.source,
+        source_confidence=result.source_confidence,
+        asset_class=result.asset_class,
         mapped_sector=result.mapped_sector,
         sentiment_polarity=result.sentiment_polarity,
         probability_bullish=result.probability_bullish,

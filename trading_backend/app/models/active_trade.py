@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,11 @@ class ActiveTrade(Base):
     """Suivi des opportunités validées et ouvertes."""
 
     __tablename__ = "active_trades"
+    __table_args__ = (
+        CheckConstraint("probability_used >= 0 AND probability_used <= 100", name="ck_active_trades_probability_used_range"),
+        CheckConstraint("capital_engaged > 0", name="ck_active_trades_capital_positive"),
+        CheckConstraint("estimated_duration_minutes > 0", name="ck_active_trades_duration_positive"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(

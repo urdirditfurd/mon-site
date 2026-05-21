@@ -12,14 +12,17 @@ from pydantic import BaseModel, Field
 class AnalyzeNewsRequest(BaseModel):
     """Payload d'analyse d'une news entrante."""
 
-    news_text: str = Field(..., min_length=5, max_length=4000)
-    category: str = Field(..., min_length=2, max_length=64)
+    news_text: str = Field(..., min_length=5, max_length=4000, description="Texte brut de la news à scorer.")
+    category: str = Field(..., min_length=2, max_length=64, description="Canal ou univers d'origine: Reuters, ETF, Crypto, etc.")
 
 
 class AnalyzeNewsResponse(BaseModel):
     """Résultat du pipeline d'analyse NLP."""
 
     signal_id: uuid.UUID
+    source: str
+    source_confidence: Decimal
+    asset_class: str
     mapped_sector: str
     sentiment_polarity: str
     probability_bullish: Decimal
