@@ -5,6 +5,9 @@
 {$DOMAIN} {
 	encode gzip zstd
 
+	@sensitive path /.env* /.git* /.svn* /.hg* /.aws* /.docker* /config.env /config/*.env /serverless.yml /serverless.yaml /Dockerfile /docker-compose*.yml /Procfile
+	respond @sensitive 404
+
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
