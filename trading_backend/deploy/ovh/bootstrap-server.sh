@@ -6,7 +6,13 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-TARGET_USER="${SUDO_USER:-ubuntu}"
+if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+  TARGET_USER="${SUDO_USER}"
+elif id -u ubuntu >/dev/null 2>&1; then
+  TARGET_USER="ubuntu"
+else
+  TARGET_USER="root"
+fi
 
 echo "[bootstrap] Mise à jour système"
 apt-get update
@@ -26,7 +32,9 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 
 echo "[bootstrap] Activation Docker"
 systemctl enable --now docker
-usermod -aG docker "${TARGET_USER}"
+if [ "${TARGET_USER}" != "root" ]; then
+  usermod -aG docker "${TARGET_USER}"
+fi
 
 echo "[bootstrap] Pare-feu UFW"
 ufw allow OpenSSH
@@ -35,4 +43,8 @@ ufw allow 443/tcp
 ufw --force enable
 
 echo "[bootstrap] OK"
-echo "Déconnecte-toi puis reconnecte-toi en SSH pour activer le groupe docker pour ${TARGET_USER}."
+if [ "${TARGET_USER}" = "root" ]; then
+  echo "Tu es connecté en root: Docker est utilisable directement."
+else
+  echo "Déconnecte-toi puis reconnecte-toi en SSH pour activer le groupe docker pour ${TARGET_USER}."
+fi
