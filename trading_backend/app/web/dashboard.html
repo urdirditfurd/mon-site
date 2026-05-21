@@ -18,11 +18,11 @@
       --amber: #fbbf24;
       --red: #fb7185;
       --violet: #8b5cf6;
-      --field: var(--field);
-      --field-border: var(--field-border);
-      --chip-bg: var(--chip-bg);
-      --hero-glow-a: var(--hero-glow-a);
-      --hero-glow-b: var(--hero-glow-b);
+      --field: #08111f;
+      --field-border: #2a4168;
+      --chip-bg: #0b1425;
+      --hero-glow-a: rgba(56, 189, 248, 0.22);
+      --hero-glow-b: rgba(139, 92, 246, 0.18);
       --shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
     }
     :root[data-theme="light"] {
@@ -83,7 +83,7 @@
     .span-7 { grid-column: span 7; }
     .span-8 { grid-column: span 8; }
     .span-12 { grid-column: span 12; }
-    label { display: block; margin: 12px 0 6px; color: #c7d8ef; font-size: 13px; font-weight: 650; }
+    label { display: block; margin: 12px 0 6px; color: var(--text); font-size: 13px; font-weight: 650; }
     input, select, textarea {
       width: 100%; border: 1px solid var(--field-border); border-radius: 13px; background: var(--field); color: var(--text); padding: 11px 12px; outline: none;
     }
@@ -95,7 +95,7 @@
     button.danger { background: #7f1d1d; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .status { margin-top: 10px; border-radius: 13px; border: 1px solid var(--field-border); background: #0a1322; padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
+    .status { margin-top: 10px; border-radius: 13px; border: 1px solid var(--field-border); background: var(--field); padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
     .ok { color: var(--green); border-color: rgba(52, 211, 153, 0.28); }
     .ko { color: var(--red); border-color: rgba(251, 113, 133, 0.32); }
     .metric { background: var(--field); border: 1px solid var(--field-border); border-radius: 17px; padding: 16px; min-height: 88px; }
@@ -116,6 +116,26 @@
     :root[data-theme="light"] .logo { color: #ffffff; background: linear-gradient(135deg, #f97316, #2563eb); }
     :root[data-theme="light"] .metric b { color: #172033; }
     .theme-toggle { white-space: nowrap; }
+    .nav-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .nav-chip { text-decoration: none; border: 1px solid var(--field-border); background: var(--field); color: var(--text); border-radius: 999px; padding: 8px 12px; font-size: 13px; font-weight: 750; }
+    .home-card { min-height: 280px; display: grid; gap: 18px; }
+    .home-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    .home-title { font-size: clamp(24px, 3vw, 38px); letter-spacing: -0.04em; }
+    .home-sub { margin-top: 8px; color: var(--muted); line-height: 1.55; }
+    .portfolio-total { font-size: clamp(30px, 5vw, 56px); font-weight: 900; letter-spacing: -0.06em; }
+    .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 10px; }
+    .mini-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 16px; padding: 12px; }
+    .mini-card span { color: var(--muted); font-size: 12px; }
+    .mini-card b { display: block; margin-top: 4px; font-size: 18px; }
+    .chart-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 18px; padding: 14px; }
+    .bars { height: 150px; display: flex; gap: 10px; align-items: end; padding: 12px 6px 0; border-bottom: 1px solid var(--field-border); }
+    .bars i { flex: 1; border-radius: 10px 10px 0 0; background: linear-gradient(180deg, #fb923c, #2563eb); min-height: 12px; opacity: 0.9; }
+    .bar-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 8px; }
+    .action-stack { display: grid; gap: 12px; }
+    .action-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 18px; padding: 14px; display: grid; gap: 6px; }
+    .action-card strong { color: var(--text); }
+    .action-card small { color: var(--muted); line-height: 1.45; }
+    @media (max-width: 760px) { .mini-grid { grid-template-columns: 1fr; } }
     .hidden { display: none !important; }
     .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
     .list li { border: 1px solid var(--field-border); border-radius: 13px; padding: 10px; background: var(--field); color: var(--text); }
@@ -172,14 +192,50 @@
 
     <section id="appPanel" class="hidden">
       <div class="grid">
-        <section class="card span-12">
+        <section class="card span-12" id="home">
           <div class="row" style="justify-content: space-between;">
             <div>
-              <h2>Tableau de bord SentiQ</h2>
+              <h2>Accueil SentiQ</h2>
               <div class="muted" id="userLine">-</div>
+              <nav class="nav-row" aria-label="Navigation SentiQ">
+                <a class="nav-chip" href="#home">Accueil</a>
+                <a class="nav-chip" href="#setup">Configuration</a>
+                <a class="nav-chip" href="#capital">Capital</a>
+                <a class="nav-chip" href="#advisor">Conseiller IA</a>
+                <a class="nav-chip" href="#follow">Suivi</a>
+              </nav>
             </div>
             <button id="refreshBtn" class="secondary">Rafraîchir</button>
           </div>
+        </section>
+
+        <section class="card span-8 home-card">
+          <div class="home-head">
+            <div>
+              <h2 class="home-title">Bonjour <span id="firstName">Trader</span> ! 👋</h2>
+              <p class="home-sub">Votre cockpit regroupe capital, signaux, préférences et exécution. L'objectif: passer de la simulation à des connecteurs sécurisés quand les clés broker et paiement seront prêtes.</p>
+            </div>
+            <div>
+              <div class="muted">Patrimoine SentiQ</div>
+              <div class="portfolio-total" id="homePatrimony">-</div>
+            </div>
+          </div>
+          <div class="mini-grid">
+            <div class="mini-card"><span>Projets actifs</span><b id="homeProjects">-</b></div>
+            <div class="mini-card"><span>Cycle IA</span><b id="homeCycle">En veille</b></div>
+            <div class="mini-card"><span>Mode</span><b id="homeMode">Simulation</b></div>
+          </div>
+          <div class="chart-card">
+            <div class="row" style="justify-content: space-between;"><strong>Performance simulée</strong><span class="pill" id="homePnl">PnL 0.00 EUR</span></div>
+            <div class="bars" aria-hidden="true"><i style="height:20%"></i><i style="height:28%"></i><i style="height:36%"></i><i style="height:54%"></i><i style="height:70%"></i><i style="height:62%"></i></div>
+            <div class="bar-labels"><span>M-5</span><span>M-4</span><span>M-3</span><span>M-2</span><span>M-1</span><span>M</span></div>
+          </div>
+        </section>
+
+        <section class="card span-4 action-stack">
+          <div class="action-card"><strong>1. Finaliser la stratégie</strong><small>Marchés, seuil IA, paper trading et broker cible.</small></div>
+          <div class="action-card"><strong>2. Connecter le capital</strong><small>À terme via Stripe/GoCardless/Tink, jamais par identifiants bancaires en clair.</small></div>
+          <div class="action-card"><strong>3. Activer un broker</strong><small>Binance, Coinbase, Alpaca ou IBKR via clés API restreintes côté serveur.</small></div>
         </section>
 
         <section class="metric span-3"><span>Total wallet</span><b id="walletTotal">-</b></section>
@@ -187,7 +243,7 @@
         <section class="metric span-3"><span>Engagé</span><b id="walletEngaged">-</b></section>
         <section class="metric span-3"><span>Seuil IA</span><b id="thresholdMetric">-</b></section>
 
-        <section class="card span-7">
+        <section class="card span-7" id="setup">
           <h2>1. Onboarding trading</h2>
           <p class="muted">Choisis tes marchés, tes secteurs, ton seuil et la plateforme cible. Les plateformes réelles restent verrouillées tant que les clés API ne sont pas configurées côté serveur.</p>
           <label>Plateforme d'exécution</label>
@@ -213,7 +269,7 @@
           <div id="prefsStatus" class="status"></div>
         </section>
 
-        <section class="card span-5">
+        <section class="card span-5" id="capital">
           <h2>2. Capital sécurisé</h2>
           <p class="muted">SentiQ ne demande jamais tes identifiants bancaires. Un vrai dépôt devra passer par un prestataire régulé (Stripe, GoCardless, Tink/Plaid selon pays). Ici le dépôt est simulé.</p>
           <label>Montant à créditer (simulation)</label>
@@ -225,7 +281,7 @@
           <div id="walletStatus" class="status"></div>
         </section>
 
-        <section class="card span-6">
+        <section class="card span-6" id="advisor">
           <h2>3. Conseiller IA</h2>
           <p class="muted">Pose une question sur le risque, les plateformes, le capital ou la stratégie. Réponse contextuelle basée sur ton wallet et tes préférences.</p>
           <div id="chatLog" class="chat-log"></div>
@@ -243,7 +299,7 @@
           <div id="decisionStatus" class="status"></div>
         </section>
 
-        <section class="card span-6">
+        <section class="card span-6" id="follow">
           <h2>Ordres récents</h2>
           <ul id="ordersList" class="list"><li>Aucun ordre chargé.</li></ul>
         </section>
@@ -302,6 +358,8 @@
       $("sessionBadge").textContent = user.email;
       $("authCard").classList.add("hidden"); $("appPanel").classList.remove("hidden"); $("logoutBtn").classList.remove("hidden");
       $("userLine").textContent = `${user.email} | rôle ${user.role}`;
+      const name = user.email.split("@")[0].split(/[._-]/)[0] || "Trader";
+      $("firstName").textContent = name.charAt(0).toUpperCase() + name.slice(1);
     }
     function clearSession() {
       localStorage.removeItem("sentiq_token"); localStorage.removeItem("sentiq_user_id"); localStorage.removeItem("sentiq_email");
@@ -339,6 +397,7 @@
       $("assetCrypto").checked = pref.enable_crypto; $("assetEtf").checked = pref.enable_etf; $("assetStocks").checked = pref.enable_stocks; $("paperMode").checked = pref.paper_trading_enabled;
       $("sectorTech").checked = pref.sector_tech; $("sectorMines").checked = pref.sector_mines; $("sectorRealEstate").checked = pref.sector_real_estate; $("sectorInsurance").checked = pref.sector_insurance; $("sectorFood").checked = pref.sector_food;
       $("probabilityThreshold").value = pref.minimum_probability_threshold; $("thresholdMetric").textContent = `${pref.minimum_probability_threshold}%`;
+      $("homeMode").textContent = pref.paper_trading_enabled ? "Paper trading" : "Live à valider";
     }
     async function savePreferences() {
       try {
@@ -401,8 +460,12 @@
       if (!state.token || !state.userId) return;
       const me = await apiFetch("/api/auth/me"); setSession(me);
       await loadPlatforms();
-      const [wallet, pref, orders] = await Promise.all([apiFetch(`/api/wallets/${state.userId}`), apiFetch(`/api/preferences/users/${state.userId}`), apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`)]);
+      const [wallet, pref, orders, stats] = await Promise.all([apiFetch(`/api/wallets/${state.userId}`), apiFetch(`/api/preferences/users/${state.userId}`), apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`), apiFetch(`/api/trading/users/${state.userId}/orders/stats`)]);
       $("walletTotal").textContent = money(wallet.solde_total); $("walletAvailable").textContent = money(wallet.solde_disponible); $("walletEngaged").textContent = money(wallet.solde_engage);
+      $("homePatrimony").textContent = money(wallet.solde_total);
+      $("homeProjects").textContent = `${stats.total_orders} signaux`;
+      $("homeCycle").textContent = stats.pending_orders > 0 ? "En cours" : (stats.filled_orders > 0 ? "Historique OK" : "En veille");
+      $("homePnl").textContent = `PnL ${money(stats.total_pnl_simule)}`;
       applyPreferences(pref); renderOrders(orders);
     }
 
