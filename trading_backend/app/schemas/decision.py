@@ -1,4 +1,7 @@
-"""Schemas API pour le coeur de décision NLP."""
+"""Schemas API pour le cœur de décision NLP.
+
+Définit les contrats d'entrée/sortie des endpoints ``/decision/``.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,8 @@ class AnalyzeNewsResponse(BaseModel):
 
     signal_id: uuid.UUID
     mapped_sector: str
+    asset_class: str
+    direction: str
     sentiment_polarity: str
     probability_bullish: Decimal
     probability_bearish: Decimal
