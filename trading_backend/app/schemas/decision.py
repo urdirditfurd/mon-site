@@ -45,3 +45,35 @@ class TradingOpportunityResponse(BaseModel):
     estimated_duration_minutes: int | None = None
     planned_close_at: datetime | None = None
     active_trade_id: uuid.UUID | None = None
+
+
+class ActiveTradeResponse(BaseModel):
+    """Représentation d'une position ouverte ou clôturée."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    market_signal_id: uuid.UUID | None
+    asset_class: str
+    sector: str
+    direction: str
+    probability_used: Decimal
+    capital_engaged: Decimal
+    status: str
+    opened_at: datetime
+    estimated_duration_minutes: int
+    planned_close_at: datetime
+    closed_at: datetime | None
+    close_reason: str | None
+    pnl_realise: Decimal | None
+
+    model_config = {"from_attributes": True}
+
+
+class CloseTradeRequest(BaseModel):
+    """Clôture manuelle d'un trade actif."""
+
+    reason: str = Field(
+        default="Clôture manuelle demandée par l'utilisateur.",
+        min_length=5,
+        max_length=255,
+    )

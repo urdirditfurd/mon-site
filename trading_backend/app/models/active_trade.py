@@ -46,6 +46,13 @@ class ActiveTrade(Base):
     planned_close_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     close_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pnl_realise: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2),
+        nullable=True,
+        comment="PnL simulé calculé à la clôture (en devise du wallet).",
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="active_trades")
-    market_signal: Mapped["MarketSignal | None"] = relationship("MarketSignal", back_populates="active_trades")
+    market_signal: Mapped["MarketSignal | None"] = relationship(
+        "MarketSignal", back_populates="active_trades"
+    )

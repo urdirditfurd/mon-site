@@ -147,13 +147,20 @@ async def readiness():
     db_ok = await check_db_connection()
     simulator_snapshot = app.state.news_simulator.health_snapshot()
     engine_snapshot = app.state.trading_engine.health_snapshot()
+    lifecycle_snapshot = app.state.trade_lifecycle.health_snapshot()
 
-    ready = db_ok and simulator_snapshot["running"] and engine_snapshot["running"]
+    ready = (
+        db_ok
+        and simulator_snapshot["running"]
+        and engine_snapshot["running"]
+        and lifecycle_snapshot["running"]
+    )
     payload = {
         "status": "ready" if ready else "degraded",
         "database_ok": db_ok,
         "news_simulator": simulator_snapshot,
         "trading_engine": engine_snapshot,
+        "trade_lifecycle": lifecycle_snapshot,
     }
     if ready:
         return payload
