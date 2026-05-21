@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,55 @@ ASSET_STOCK = "stocks"
 
 MIN_SIGNAL_PROBABILITY = Decimal("70.00")
 MIN_RECOMMENDED_CAPITAL = Decimal("50.00")
+MONEY_QUANTUM = Decimal("0.01")
+PROBABILITY_QUANTUM = Decimal("0.01")
+
+SOURCE_CONFIDENCE_BY_SOURCE = {
+    "bloomberg_enterprise": Decimal("95.00"),
+    "reuters_api": Decimal("93.00"),
+    "benzinga": Decimal("88.00"),
+    "x_api_v2": Decimal("74.00"),
+    "rss_certified": Decimal("80.00"),
+    "certified_feed": Decimal("78.00"),
+}
+
+SECTOR_KEYWORDS = {
+    SECTOR_MINES: {"or", "gold", "lithium", "copper", "cuivre", "nickel", "mine", "mining"},
+    SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip"},
+    SECTOR_REAL_ESTATE: {"real estate", "reit", "housing", "mortgage", "immobilier", "property"},
+    SECTOR_INSURANCE: {"insurance", "assurance", "reinsurance", "insurer", "sinistre"},
+    SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
+}
+
+BULLISH_KEYWORDS = {
+    "upgrade",
+    "growth",
+    "record",
+    "beats",
+    "partnership",
+    "acquisition",
+    "hausse",
+    "bénéfice",
+}
+
+BEARISH_KEYWORDS = {
+    "downgrade",
+    "lawsuit",
+    "fraud",
+    "sanction",
+    "baisse",
+    "inflation",
+    "rate hike",
+    "warning",
+}
+
+MACRO_TTL_KEYWORDS = {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}
+SHORT_TTL_KEYWORDS = {"tweet", "post", "influencer", "rumor"}
+EXPLICIT_PROBABILITY_PATTERN = re.compile(
+    r"(?:probabilit[eé]|probability|confidence|confiance|score)\D{0,24}"
+    r"([0-9]{1,2}(?:[.,][0-9]{1,2})?|100(?:[.,]0{1,2})?)\s*%",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -67,7 +117,11 @@ class TradingOpportunityResult:
 
 
 def _quantize_probability(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return value.quantize(PROBABILITY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def _clamp_decimal(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
@@ -97,30 +151,22 @@ def _extract_source(category: str) -> str:
 
 
 def _source_confidence(source: str) -> Decimal:
-    if source == "bloomberg_enterprise":
-        return Decimal("95.00")
-    if source == "reuters_api":
-        return Decimal("93.00")
-    if source == "benzinga":
-        return Decimal("88.00")
-    if source == "x_api_v2":
-        return Decimal("74.00")
-    if source == "rss_certified":
-        return Decimal("80.00")
-    return Decimal("78.00")
+    return SOURCE_CONFIDENCE_BY_SOURCE.get(source, SOURCE_CONFIDENCE_BY_SOURCE["certified_feed"])
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    """Teste un mot-clé sans déclencher de faux positifs dans un autre mot."""
+
+    escaped_keyword = re.escape(keyword)
+    if " " in keyword:
+        return re.search(rf"(?<!\w){escaped_keyword}(?!\w)", text) is not None
+    return re.search(rf"\b{escaped_keyword}\b", text) is not None
 
 
 def _map_sector(news_text: str) -> str:
     lowered = news_text.lower()
-    sector_keywords = {
-        SECTOR_MINES: {"or", "gold", "lithium", "copper", "cuivre", "nickel", "mine", "mining"},
-        SECTOR_TECH: {"nvidia", "ai", "ia", "semiconductor", "cloud", "software", "cyber", "chip"},
-        SECTOR_REAL_ESTATE: {"real estate", "reit", "housing", "mortgage", "immobilier", "property"},
-        SECTOR_INSURANCE: {"insurance", "assurance", "reinsurance", "insurer", "sinistre"},
-        SECTOR_FOOD: {"food", "agri", "agriculture", "wheat", "sugar", "alimentation", "beverage"},
-    }
-    for sector, keywords in sector_keywords.items():
-        if any(keyword in lowered for keyword in keywords):
+    for sector, keywords in SECTOR_KEYWORDS.items():
+        if any(_contains_keyword(lowered, keyword) for keyword in keywords):
             return sector
     return SECTOR_GENERAL
 
@@ -134,36 +180,29 @@ def _resolve_asset_class(category: str) -> str:
     return ASSET_STOCK
 
 
+def _extract_explicit_probability(news_text: str) -> Decimal | None:
+    """Extrait une probabilité annotée dans la news quand le flux en fournit une."""
+
+    match = EXPLICIT_PROBABILITY_PATTERN.search(news_text)
+    if match is None:
+        return None
+    normalized_value = match.group(1).replace(",", ".")
+    return _quantize_probability(_clamp_decimal(Decimal(normalized_value), Decimal("0.00"), Decimal("100.00")))
+
+
 def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) -> tuple[str, Decimal, Decimal]:
     lowered = news_text.lower()
-    bullish_keywords = {
-        "upgrade",
-        "growth",
-        "record",
-        "beats",
-        "partnership",
-        "acquisition",
-        "hausse",
-        "bénéfice",
-    }
-    bearish_keywords = {
-        "downgrade",
-        "lawsuit",
-        "fraud",
-        "sanction",
-        "baisse",
-        "inflation",
-        "rate hike",
-        "warning",
-    }
-    bullish_hits = sum(keyword in lowered for keyword in bullish_keywords)
-    bearish_hits = sum(keyword in lowered for keyword in bearish_keywords)
+    explicit_probability = _extract_explicit_probability(news_text)
+    bullish_hits = sum(_contains_keyword(lowered, keyword) for keyword in BULLISH_KEYWORDS)
+    bearish_hits = sum(_contains_keyword(lowered, keyword) for keyword in BEARISH_KEYWORDS)
 
     base = Decimal("58.00")
     source_bonus = (source_conf - Decimal("70.00")) / Decimal("6.0")
     category_bonus = Decimal("3.00") if _resolve_asset_class(category) in {ASSET_CRYPTO, ASSET_STOCK} else Decimal("1.50")
     score = base + (Decimal("8.50") * Decimal(bullish_hits + bearish_hits)) + source_bonus + category_bonus + _noise_from_text(news_text, category)
     strength = _quantize_probability(_clamp_decimal(score, Decimal("50.00"), Decimal("99.00")))
+    if explicit_probability is not None:
+        strength = _quantize_probability((strength * Decimal("0.35")) + (explicit_probability * Decimal("0.65")))
 
     if bullish_hits > bearish_hits:
         probability_bullish = strength
@@ -181,9 +220,9 @@ def _compute_probabilities(news_text: str, category: str, source_conf: Decimal) 
 
 def _estimate_ttl_minutes(news_text: str, category: str, mapped_sector: str, strength: Decimal) -> int:
     lowered = news_text.lower()
-    if any(keyword in lowered for keyword in {"interest rate", "inflation", "central bank", "fed", "ecb", "macro"}):
+    if any(_contains_keyword(lowered, keyword) for keyword in MACRO_TTL_KEYWORDS):
         base_ttl = 60 * 24 * 3
-    elif any(keyword in lowered for keyword in {"tweet", "post", "influencer", "rumor"}):
+    elif any(_contains_keyword(lowered, keyword) for keyword in SHORT_TTL_KEYWORDS):
         base_ttl = 45
     elif mapped_sector == SECTOR_MINES:
         base_ttl = 60 * 18
@@ -237,7 +276,12 @@ def _default_preferences(user_id: uuid.UUID) -> UserPreference:
 
 
 async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisResult:
-    """Analyse une news entrante, calcule probabilités et persiste le signal."""
+    """Analyse une news entrante, calcule probabilités et persiste le signal.
+
+    Cette simulation de pipeline NLP financier combine la fiabilité de source,
+    la polarité lexicale, une probabilité explicite éventuelle et un horizon de
+    rétention adapté à la nature de l'information.
+    """
 
     if not news_text or not news_text.strip():
         raise ValueError("news_text doit contenir du texte.")
@@ -251,7 +295,7 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
     mapped_sector = _map_sector(news_text)
     polarity, bullish, bearish = _compute_probabilities(news_text, category, source_conf)
     strength = _quantize_probability(max(bullish, bearish))
-    is_valid_signal = strength >= MIN_SIGNAL_PROBABILITY
+    is_valid_signal = strength > MIN_SIGNAL_PROBABILITY
     ttl_minutes = _estimate_ttl_minutes(news_text, category, mapped_sector, strength)
     expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
 
@@ -290,7 +334,12 @@ async def analyze_incoming_news(news_text: str, category: str) -> NewsAnalysisRe
 
 
 async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunityResult:
-    """Croise préférences utilisateur et signaux valides pour décider d'un trade."""
+    """Croise préférences utilisateur et signaux valides pour décider d'un trade.
+
+    La décision est stricte: le signal doit dépasser le seuil utilisateur,
+    appartenir à un univers activé, ne pas être expiré et disposer d'un capital
+    réservable dans le portefeuille interne.
+    """
 
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
@@ -302,7 +351,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 user_id=user_id,
             )
 
-        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id))
+        wallet = await session.scalar(select(Wallet).where(Wallet.user_id == user_id).with_for_update())
         if wallet is None:
             return TradingOpportunityResult(
                 should_execute=False,
@@ -351,7 +400,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 continue
             if not _is_sector_enabled(preference, signal.mapped_sector):
                 continue
-            if signal.signal_strength < threshold:
+            if signal.signal_strength <= threshold:
                 continue
             eligible_signals.append(signal)
 
@@ -380,7 +429,7 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
                 market_signal_id=selected_signal.id,
             )
 
-        recommended_capital = _quantize_probability(
+        recommended_capital = _quantize_money(
             min(
                 wallet.solde_disponible,
                 max(MIN_RECOMMENDED_CAPITAL, wallet.solde_disponible * Decimal("0.20")),
@@ -412,6 +461,8 @@ async def evaluate_trading_opportunity(user_id: uuid.UUID) -> TradingOpportunity
             planned_close_at=planned_close,
         )
         session.add(active_trade)
+        wallet.solde_disponible = _quantize_money(wallet.solde_disponible - recommended_capital)
+        wallet.solde_engage = _quantize_money(wallet.solde_engage + recommended_capital)
         await session.commit()
         await session.refresh(active_trade)
 
