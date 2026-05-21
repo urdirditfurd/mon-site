@@ -18,7 +18,32 @@
       --amber: #fbbf24;
       --red: #fb7185;
       --violet: #8b5cf6;
+      --field: var(--field);
+      --field-border: var(--field-border);
+      --chip-bg: var(--chip-bg);
+      --hero-glow-a: var(--hero-glow-a);
+      --hero-glow-b: var(--hero-glow-b);
       --shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f8f4ef;
+      --panel: rgba(255, 255, 255, 0.92);
+      --panel-strong: #ffffff;
+      --line: #e8ded4;
+      --text: #243247;
+      --muted: #718096;
+      --blue: #2563eb;
+      --green: #14a56f;
+      --amber: #ea8a3a;
+      --red: #e05264;
+      --violet: #805ad5;
+      --field: #ffffff;
+      --field-border: #e3d9cf;
+      --chip-bg: #fff7ed;
+      --hero-glow-a: rgba(244, 114, 48, 0.16);
+      --hero-glow-b: rgba(37, 99, 235, 0.10);
+      --shadow: 0 18px 50px rgba(40, 32, 24, 0.10);
     }
     * { box-sizing: border-box; }
     body {
@@ -26,8 +51,8 @@
       min-height: 100vh;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.22), transparent 34rem),
-        radial-gradient(circle at 80% 10%, rgba(139, 92, 246, 0.18), transparent 30rem),
+        radial-gradient(circle at top left, var(--hero-glow-a), transparent 34rem),
+        radial-gradient(circle at 80% 10%, var(--hero-glow-b), transparent 30rem),
         var(--bg);
       color: var(--text);
     }
@@ -35,21 +60,21 @@
     .shell { width: min(1280px, calc(100% - 32px)); margin: 0 auto; padding: 26px 0 48px; }
     .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
     .brand { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 900; color: #06111f; background: linear-gradient(135deg, var(--blue), var(--green)); box-shadow: var(--shadow); }
+    .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 900; color: var(--bg); background: linear-gradient(135deg, var(--blue), var(--green)); box-shadow: var(--shadow); }
     h1, h2, h3 { margin: 0; }
     h1 { font-size: clamp(28px, 4vw, 48px); letter-spacing: -0.05em; }
     h2 { font-size: 20px; letter-spacing: -0.02em; }
-    h3 { font-size: 15px; color: #dbeafe; }
+    h3 { font-size: 15px; color: var(--text); }
     .muted { color: var(--muted); }
     .hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; align-items: stretch; margin-bottom: 18px; }
     .hero-copy, .card { border: 1px solid var(--line); background: var(--panel); border-radius: 22px; padding: 20px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
     .hero-copy p { color: var(--muted); max-width: 760px; line-height: 1.6; }
     .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-    .badge { padding: 7px 10px; border-radius: 999px; border: 1px solid #25436c; background: #0b1425; color: #b7d4ff; font-size: 12px; }
+    .badge { padding: 7px 10px; border-radius: 999px; border: 1px solid #25436c; background: var(--chip-bg); color: var(--text); font-size: 12px; }
     .auth-card { display: grid; gap: 10px; }
     .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .tab { background: #0b1425; color: var(--muted); border: 1px solid var(--line); }
-    .tab.active { color: #06111f; background: linear-gradient(135deg, var(--blue), var(--green)); border-color: transparent; }
+    .tab { background: var(--chip-bg); color: var(--muted); border: 1px solid var(--line); }
+    .tab.active { color: var(--bg); background: linear-gradient(135deg, var(--blue), var(--green)); border-color: transparent; }
     .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
     .span-3 { grid-column: span 3; }
     .span-4 { grid-column: span 4; }
@@ -60,32 +85,42 @@
     .span-12 { grid-column: span 12; }
     label { display: block; margin: 12px 0 6px; color: #c7d8ef; font-size: 13px; font-weight: 650; }
     input, select, textarea {
-      width: 100%; border: 1px solid #2a4168; border-radius: 13px; background: #08111f; color: var(--text); padding: 11px 12px; outline: none;
+      width: 100%; border: 1px solid var(--field-border); border-radius: 13px; background: var(--field); color: var(--text); padding: 11px 12px; outline: none;
     }
     textarea { min-height: 96px; resize: vertical; }
     input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14); }
     button { border: 0; border-radius: 13px; padding: 11px 14px; background: linear-gradient(135deg, #2563eb, #06b6d4); color: #fff; font-weight: 800; cursor: pointer; }
-    button.secondary { background: #162238; color: #cfe1ff; border: 1px solid #2a4168; }
-    button.ghost { background: transparent; border: 1px solid #2a4168; color: #b7d4ff; }
+    button.secondary { background: var(--panel-strong); color: var(--text); border: 1px solid var(--field-border); }
+    button.ghost { background: transparent; border: 1px solid var(--field-border); color: var(--text); }
     button.danger { background: #7f1d1d; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .status { margin-top: 10px; border-radius: 13px; border: 1px solid #28405f; background: #0a1322; padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
+    .status { margin-top: 10px; border-radius: 13px; border: 1px solid var(--field-border); background: #0a1322; padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
     .ok { color: var(--green); border-color: rgba(52, 211, 153, 0.28); }
     .ko { color: var(--red); border-color: rgba(251, 113, 133, 0.32); }
-    .metric { background: #08111f; border: 1px solid #21395d; border-radius: 17px; padding: 16px; min-height: 88px; }
+    .metric { background: var(--field); border: 1px solid var(--field-border); border-radius: 17px; padding: 16px; min-height: 88px; }
     .metric span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
     .metric b { display: block; margin-top: 8px; font-size: 24px; }
     .toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
-    .check { border: 1px solid #263e64; border-radius: 14px; padding: 10px; display: flex; gap: 8px; align-items: center; background: #08111f; }
+    .check { border: 1px solid var(--field-border); border-radius: 14px; padding: 10px; display: flex; gap: 8px; align-items: center; background: var(--field); }
     .check input { width: auto; }
-    .pill { font-size: 12px; border-radius: 999px; padding: 5px 8px; background: rgba(56, 189, 248, 0.12); color: #bae6fd; border: 1px solid rgba(56, 189, 248, 0.28); }
+    .pill { font-size: 12px; border-radius: 999px; padding: 5px 8px; background: rgba(56, 189, 248, 0.12); color: var(--blue); border: 1px solid rgba(56, 189, 248, 0.28); }
     .warning { border-color: rgba(251, 191, 36, 0.35); color: #fde68a; }
+    :root[data-theme="light"] .warning { color: #9a5b00; background: #fff7e6; }
+    :root[data-theme="light"] .badge,
+    :root[data-theme="light"] .pill { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+    :root[data-theme="light"] button.secondary,
+    :root[data-theme="light"] button.ghost,
+    :root[data-theme="light"] .tab { background: #ffffff; color: #475569; border-color: #e8ded4; }
+    :root[data-theme="light"] .tab.active { color: #ffffff; background: linear-gradient(135deg, #f97316, #2563eb); }
+    :root[data-theme="light"] .logo { color: #ffffff; background: linear-gradient(135deg, #f97316, #2563eb); }
+    :root[data-theme="light"] .metric b { color: #172033; }
+    .theme-toggle { white-space: nowrap; }
     .hidden { display: none !important; }
     .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
-    .list li { border: 1px solid #20385d; border-radius: 13px; padding: 10px; background: #08111f; color: #cfe1ff; }
+    .list li { border: 1px solid var(--field-border); border-radius: 13px; padding: 10px; background: var(--field); color: var(--text); }
     .chat-log { display: grid; gap: 10px; max-height: 360px; overflow: auto; margin-top: 10px; }
-    .msg { border: 1px solid #20385d; border-radius: 15px; padding: 12px; background: #08111f; white-space: pre-wrap; }
+    .msg { border: 1px solid var(--field-border); border-radius: 15px; padding: 12px; background: var(--field); white-space: pre-wrap; }
     .msg.user { border-color: rgba(56, 189, 248, 0.45); }
     .msg.ai { border-color: rgba(52, 211, 153, 0.35); }
     @media (max-width: 980px) { .hero { grid-template-columns: 1fr; } .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; } }
@@ -102,6 +137,7 @@
         </div>
       </div>
       <div class="row">
+        <button id="themeToggle" class="ghost theme-toggle">Mode clair</button>
         <span id="sessionBadge" class="pill">Non connecté</span>
         <button id="logoutBtn" class="ghost hidden">Déconnexion</button>
       </div>
@@ -232,6 +268,13 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    function applyTheme(theme) {
+      state.theme = theme;
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("sentiq_theme", theme);
+      const button = $("themeToggle");
+      if (button) button.textContent = theme === "light" ? "Mode sombre" : "Mode clair";
+    }
     const money = (value) => `${Number(value || 0).toFixed(2)} EUR`;
     const status = (id, text, ok = true) => { const el = $(id); el.textContent = text; el.className = `status ${ok ? "ok" : "ko"}`; };
 
@@ -364,8 +407,10 @@
     }
 
     $("loginTab").onclick = () => setAuthMode("login"); $("registerTab").onclick = () => setAuthMode("register"); $("authSubmitBtn").onclick = submitAuth; $("logoutBtn").onclick = clearSession; $("refreshBtn").onclick = () => refreshAll().catch((err) => alert(err.message));
+    $("themeToggle").onclick = () => applyTheme(state.theme === "light" ? "dark" : "light");
     $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
 
+    applyTheme(state.theme);
     if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(clearSession); }
   </script>
 </body>
