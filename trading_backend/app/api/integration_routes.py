@@ -43,6 +43,26 @@ async def integrations_status(_current_user: User = Depends(get_current_user)) -
     )
 
 
+
+@router.get("/public-status", response_model=IntegrationsStatusResponse)
+async def public_integrations_status() -> IntegrationsStatusResponse:
+    """Retourne un état public des connecteurs sans secret ni identifiant masqué."""
+
+    def scrub(statuses):
+        clean = []
+        for status in statuses:
+            payload = status.model_copy()
+            payload.masked_identifiers = []
+            clean.append(payload)
+        return clean
+
+    return IntegrationsStatusResponse(
+        payments=scrub(get_payment_statuses()),
+        brokers=scrub(get_broker_statuses()),
+        oauth=scrub(get_oauth_statuses()),
+    )
+
+
 @router.post("/payments/stripe/checkout", response_model=StripeCheckoutResponse)
 async def create_stripe_checkout(
     payload: StripeCheckoutRequest,

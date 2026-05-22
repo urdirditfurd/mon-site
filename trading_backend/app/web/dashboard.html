@@ -112,6 +112,12 @@
     .secondary { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 12px 18px; font-weight: 850; }
     .trader-hero { text-align: center; padding: 34px 20px; }
     .trader-hero h2 { font-size: 30px; margin: 0 0 10px; }
+    .cta-panel { min-height: 360px; display: grid; place-items: center; text-align: center; }
+    .cta-panel p { max-width: 720px; margin-left: auto; margin-right: auto; }
+    .wizard-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    .question-card { border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 18px; display: grid; gap: 10px; }
+    .question-card em { color: var(--muted); font-style: normal; font-size: 13px; }
+    .execution-summary { background: #fff7ef; border: 1px solid #fed7aa; border-radius: 20px; padding: 18px; line-height: 1.6; }
     .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
     .step { padding: 15px; border: 1px solid var(--line); background: #fff; border-radius: 18px; text-align: left; }
     .step b { display: block; margin-bottom: 5px; }
@@ -222,37 +228,51 @@
     </section>
 
     <section id="tradeView" class="view">
-      <div class="card trader-hero">
-        <h2>Commencer à trader</h2>
-        <p class="muted">Configure une opportunité : plateforme, type d’actif, secteur adapté et montant. SentiQ gardera le mode paper tant que les connexions réelles ne sont pas validées.</p>
+      <div class="card cta-panel">
+        <div>
+          <h1 class="hero-title">Trader avec SentiQ</h1>
+          <p class="lead">Lance un parcours guidé: SentiQ vérifie les plateformes connectées, demande l’actif, le secteur, le montant et prépare l’opportunité. Les clés API restent côté serveur.</p>
+          <button class="primary" id="openTradeWizardBtn">Commencer à trader</button>
+          <p class="muted" style="margin-top:18px;">Les plateformes connectées (Binance, Alpaca, Coinbase…) peuvent fournir les informations de marché et servir à l’exécution lorsque le mode live sera validé.</p>
+        </div>
       </div>
       <div class="steps">
-        <div class="step"><b>1. Plateforme</b><span class="muted">Binance, Coinbase, Alpaca, simulation.</span></div>
-        <div class="step"><b>2. Actif</b><span class="muted">Action, ETF ou crypto.</span></div>
-        <div class="step"><b>3. Secteur</b><span class="muted">Filtré selon la plateforme.</span></div>
-        <div class="step"><b>4. Montant</b><span class="muted">Capital engagé contrôlé.</span></div>
+        <div class="step"><b>Plateforme</b><span class="muted">Détection des connecteurs configurés.</span></div>
+        <div class="step"><b>Actif</b><span class="muted">Action, ETF ou crypto.</span></div>
+        <div class="step"><b>Secteur</b><span class="muted">Adapté au choix précédent.</span></div>
+        <div class="step"><b>Montant</b><span class="muted">Capital engagé contrôlé.</span></div>
+      </div>
+    </section>
+
+    <section id="tradeWizardView" class="view">
+      <div class="wizard-title">
+        <div>
+          <h1 class="hero-title">Préparer un trade</h1>
+          <p class="lead">Réponds aux questions. SentiQ prépare l’ordre et indique si la plateforme est connectée.</p>
+        </div>
+        <button class="secondary" id="backToTradeBtn">Retour</button>
       </div>
       <div class="grid">
-        <section class="card span-6">
-          <h2>Paramètres de trade</h2>
+        <section class="card span-7">
           <div class="form-grid">
-            <div><label>Plateforme</label><select id="platformSelect"><option>Alpaca Paper</option><option>Binance</option><option>Coinbase</option><option>Simulation</option></select></div>
-            <div><label>Type d’actif</label><select id="assetSelect"><option>Action</option><option>ETF</option><option>Crypto</option></select></div>
-            <div><label>Secteur</label><select id="sectorSelect"><option>Tech / IA</option><option>Matières premières</option><option>Finance</option><option>Énergie</option><option>Crypto majors</option></select></div>
-            <div><label>Montant</label><input id="amountInput" value="100" /></div>
+            <div class="question-card"><label>1. Sur quelle plateforme veux-tu trader ?</label><select id="platformSelect"></select><em id="platformStatus">Chargement des connecteurs...</em></div>
+            <div class="question-card"><label>2. Quel type d’actif ?</label><select id="assetSelect"></select><em>Les choix s’adaptent à la plateforme.</em></div>
+            <div class="question-card"><label>3. Quel secteur d’activité ?</label><select id="sectorSelect"></select><em>SentiQ utilisera ce filtre pour les news et signaux.</em></div>
+            <div class="question-card"><label>4. Montant à engager</label><input id="amountInput" type="number" min="1" step="0.01" value="100" /><em>Commence petit en paper trading.</em></div>
           </div>
           <label style="margin-top:16px;">Seuil de probabilité minimum</label>
           <input id="thresholdInput" type="range" min="50" max="95" value="80" />
-          <div class="status" id="tradeStatus">Mode présentation : aucun ordre réel ne sera envoyé.</div>
-          <button class="primary" id="startTradeBtn">Préparer l’opportunité</button>
+          <div class="status" id="tradeStatus">En attente de configuration.</div>
+          <button class="primary" id="prepareTradeBtn">Préparer l’opportunité</button>
         </section>
-        <section class="card span-6">
+        <section class="card span-5">
           <h2>Conseiller IA</h2>
           <p class="muted">Pose tes questions sur les marchés, les plateformes, le risque ou les termes techniques.</p>
           <div class="chat-log" id="chatLog"><div class="message ai">Bonjour, je suis SentiQ IA. Je peux expliquer les choix de plateforme, le risque, le montant à engager et les signaux d’actualité.</div></div>
           <textarea id="chatInput" placeholder="Ex : quel montant engager sur Nvidia avec un profil prudent ?"></textarea>
           <button class="secondary" id="chatBtn">Envoyer</button>
         </section>
+        <section class="span-12 execution-summary" id="executionSummary">Aucune opportunité préparée pour le moment.</section>
       </div>
     </section>
   </main>
@@ -260,21 +280,115 @@
   <script>
     const views = document.querySelectorAll('.view');
     const navLinks = document.querySelectorAll('.nav-link');
-    navLinks.forEach((button) => {
-      button.addEventListener('click', () => {
-        navLinks.forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-        views.forEach((view) => view.classList.toggle('active', view.id === button.dataset.view));
-      });
-    });
+    let integrationStatus = { brokers: [] };
 
-    document.getElementById('startTradeBtn').addEventListener('click', () => {
-      const platform = document.getElementById('platformSelect').value;
+    const platformCapabilities = {
+      simulation: {
+        label: 'Simulation SentiQ',
+        assets: ['Action', 'ETF', 'Crypto'],
+        sectors: ['Tech / IA', 'Matières premières', 'Finance', 'Énergie', 'Crypto majors', 'Santé', 'Immobilier'],
+        configured: true,
+      },
+      alpaca: {
+        label: 'Alpaca Paper',
+        assets: ['Action', 'ETF'],
+        sectors: ['Tech / IA', 'Finance', 'Énergie', 'Santé', 'Industrie', 'Immobilier'],
+        configured: false,
+      },
+      binance: {
+        label: 'Binance',
+        assets: ['Crypto'],
+        sectors: ['Crypto majors', 'DeFi', 'Layer 1', 'AI tokens', 'Stablecoins'],
+        configured: false,
+      },
+      coinbase: {
+        label: 'Coinbase',
+        assets: ['Crypto'],
+        sectors: ['Crypto majors', 'DeFi', 'Layer 1', 'AI tokens', 'Stablecoins'],
+        configured: false,
+      },
+      interactive_brokers: {
+        label: 'Interactive Brokers',
+        assets: ['Action', 'ETF'],
+        sectors: ['Tech / IA', 'Finance', 'Énergie', 'Santé', 'Industrie', 'Matières premières'],
+        configured: false,
+      },
+    };
+
+    function showView(viewId) {
+      views.forEach((view) => view.classList.toggle('active', view.id === viewId));
+      navLinks.forEach((item) => item.classList.toggle('active', item.dataset.view === viewId || (viewId === 'tradeWizardView' && item.dataset.view === 'tradeView')));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    navLinks.forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
+
+    function setOptions(select, values) {
+      select.innerHTML = '';
+      values.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+    }
+
+    async function loadPublicIntegrations() {
+      try {
+        const response = await fetch('/api/integrations/public-status');
+        if (!response.ok) throw new Error('status unavailable');
+        integrationStatus = await response.json();
+      } catch (_) {
+        integrationStatus = { brokers: [] };
+      }
+      for (const broker of integrationStatus.brokers || []) {
+        if (platformCapabilities[broker.id]) platformCapabilities[broker.id].configured = broker.configured;
+      }
+      populatePlatforms();
+    }
+
+    function populatePlatforms() {
+      const select = document.getElementById('platformSelect');
+      const configured = Object.entries(platformCapabilities).filter(([id, item]) => item.configured || id === 'simulation');
+      select.innerHTML = '';
+      configured.forEach(([id, item]) => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = `${item.label}${item.configured ? ' — connecté' : ' — démo'}`;
+        select.appendChild(option);
+      });
+      if (!select.value) select.value = configured[0]?.[0] || 'simulation';
+      updateWizardOptions();
+    }
+
+    function updateWizardOptions() {
+      const platformId = document.getElementById('platformSelect').value || 'simulation';
+      const platform = platformCapabilities[platformId] || platformCapabilities.simulation;
+      setOptions(document.getElementById('assetSelect'), platform.assets);
+      setOptions(document.getElementById('sectorSelect'), platform.sectors);
+      const brokerStatus = (integrationStatus.brokers || []).find((broker) => broker.id === platformId);
+      const status = platform.configured ? 'connectée côté serveur' : 'mode démonstration';
+      document.getElementById('platformStatus').textContent = brokerStatus ? `${brokerStatus.label}: ${status}. ${brokerStatus.note}` : `${platform.label}: ${status}.`;
+    }
+
+    document.getElementById('openTradeWizardBtn').addEventListener('click', async () => {
+      await loadPublicIntegrations();
+      showView('tradeWizardView');
+    });
+    document.getElementById('backToTradeBtn').addEventListener('click', () => showView('tradeView'));
+    document.getElementById('platformSelect').addEventListener('change', updateWizardOptions);
+
+    document.getElementById('prepareTradeBtn').addEventListener('click', () => {
+      const platformId = document.getElementById('platformSelect').value;
+      const platform = platformCapabilities[platformId] || platformCapabilities.simulation;
       const asset = document.getElementById('assetSelect').value;
       const sector = document.getElementById('sectorSelect').value;
       const amount = document.getElementById('amountInput').value;
-      document.getElementById('tradeStatus').textContent = `Opportunité préparée : ${platform} | ${asset} | ${sector} | ${amount} €. Validation IA et connexion broker requises avant ordre réel.`;
+      const threshold = document.getElementById('thresholdInput').value;
+      const executionMode = platform.configured ? 'plateforme connectée, exécution possible après garde-fous serveur' : 'simulation uniquement';
+      document.getElementById('tradeStatus').textContent = `Opportunité préparée sur ${platform.label}.`;
       document.getElementById('tradeStatus').className = 'status ok';
+      document.getElementById('executionSummary').innerHTML = `<strong>Résumé</strong><br>Plateforme: ${platform.label}<br>Actif: ${asset}<br>Secteur: ${sector}<br>Montant: ${amount} €<br>Seuil IA: ${threshold}%<br>Mode: ${executionMode}.`;
     });
 
     document.getElementById('chatBtn').addEventListener('click', () => {
@@ -283,11 +397,14 @@
       if (!message) return;
       const log = document.getElementById('chatLog');
       const safe = message.replaceAll('<', '&lt;');
+      const platform = platformCapabilities[document.getElementById('platformSelect').value] || platformCapabilities.simulation;
       log.insertAdjacentHTML('beforeend', `<div class="message">${safe}</div>`);
-      log.insertAdjacentHTML('beforeend', '<div class="message ai">SentiQ IA : commence en paper trading, limite le montant engagé, vérifie le seuil IA et n’active un broker réel qu’avec clés API restreintes côté serveur.</div>');
+      log.insertAdjacentHTML('beforeend', `<div class="message ai">SentiQ IA : pour ${platform.label}, vérifie que la clé API est restreinte, démarre en paper trading et ne passe en réel qu'après validation du seuil IA, du montant et du risque maximal.</div>`);
       input.value = '';
       log.scrollTop = log.scrollHeight;
     });
+
+    loadPublicIntegrations();
   </script>
 </body>
 </html>
