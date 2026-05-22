@@ -3,615 +3,291 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SentiQ - Sentiment Trading OS</title>
+  <title>SentiQ - Trading piloté par le sentiment</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #070b14;
-      --panel: rgba(15, 23, 42, 0.86);
-      --panel-strong: #111827;
-      --line: #1f3152;
-      --text: #e5eefb;
-      --muted: #8ea3c1;
-      --blue: #38bdf8;
-      --green: #34d399;
-      --amber: #fbbf24;
-      --red: #fb7185;
-      --violet: #8b5cf6;
-      --field: #08111f;
-      --field-border: #2a4168;
-      --chip-bg: #0b1425;
-      --hero-glow-a: rgba(56, 189, 248, 0.22);
-      --hero-glow-b: rgba(139, 92, 246, 0.18);
-      --shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
-    }
-    :root[data-theme="light"] {
       color-scheme: light;
-      --bg: #f8f4ef;
-      --panel: rgba(255, 255, 255, 0.92);
-      --panel-strong: #ffffff;
-      --line: #e8ded4;
-      --text: #243247;
-      --muted: #718096;
-      --blue: #2563eb;
-      --green: #14a56f;
-      --amber: #ea8a3a;
-      --red: #e05264;
-      --violet: #805ad5;
-      --field: #ffffff;
-      --field-border: #e3d9cf;
-      --chip-bg: #fff7ed;
-      --hero-glow-a: rgba(244, 114, 48, 0.16);
-      --hero-glow-b: rgba(37, 99, 235, 0.10);
-      --shadow: 0 18px 50px rgba(40, 32, 24, 0.10);
+      --bg: #fbf8f4;
+      --card: #ffffff;
+      --card-soft: #fff7ef;
+      --text: #152238;
+      --muted: #7b8798;
+      --line: #eadfd5;
+      --orange: #ff7043;
+      --orange-dark: #ea5b2f;
+      --green: #16a673;
+      --blue: #1f4d7a;
+      --shadow: 0 18px 45px rgba(65, 45, 25, 0.10);
+      --radius: 24px;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
       min-height: 100vh;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top left, var(--hero-glow-a), transparent 34rem),
-        radial-gradient(circle at 80% 10%, var(--hero-glow-b), transparent 30rem),
-        var(--bg);
       color: var(--text);
+      background:
+        radial-gradient(circle at 78% 4%, rgba(255, 112, 67, 0.17), transparent 320px),
+        linear-gradient(180deg, #fffdfb 0%, var(--bg) 56%, #fff 100%);
     }
-    a { color: var(--blue); }
-    .shell { width: min(1280px, calc(100% - 32px)); margin: 0 auto; padding: 26px 0 48px; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 900; color: var(--bg); background: linear-gradient(135deg, var(--blue), var(--green)); box-shadow: var(--shadow); }
-    h1, h2, h3 { margin: 0; }
-    h1 { font-size: clamp(28px, 4vw, 48px); letter-spacing: -0.05em; }
-    h2 { font-size: 20px; letter-spacing: -0.02em; }
-    h3 { font-size: 15px; color: var(--text); }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; border: 0; }
+    .shell { width: min(1160px, calc(100% - 36px)); margin: 0 auto; padding: 22px 0 54px; }
+    .topbar {
+      height: 58px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid rgba(234, 223, 213, 0.65);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 253, 251, 0.86);
+      backdrop-filter: blur(14px);
+    }
+    .brand { font-size: 24px; font-weight: 850; letter-spacing: -0.04em; color: #0e1b2d; }
+    .nav { display: flex; align-items: center; gap: 26px; }
+    .nav button { background: transparent; color: var(--text); font-weight: 720; font-size: 16px; padding: 10px 4px; border-bottom: 3px solid transparent; }
+    .nav button.active { color: var(--blue); border-color: var(--orange); }
+    .account { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .balance-pill { padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-weight: 800; box-shadow: 0 8px 18px rgba(30, 45, 68, 0.05); }
+    .round { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; }
+    .round.plus { background: var(--orange); color: #fff; font-size: 22px; }
+    .round.avatar { background: #183251; color: #fff; font-size: 14px; }
+    .view { display: none; padding-top: 42px; animation: fade 0.2s ease; }
+    .view.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .hero-title { font-size: clamp(28px, 4vw, 46px); margin: 0 0 10px; letter-spacing: -0.05em; }
+    .lead { color: var(--muted); font-size: 17px; line-height: 1.65; }
+    .section-title { font-size: 21px; margin: 42px 0 18px; letter-spacing: -0.02em; }
     .muted { color: var(--muted); }
-    .hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; align-items: stretch; margin-bottom: 18px; }
-    .hero-copy, .card { border: 1px solid var(--line); background: var(--panel); border-radius: 22px; padding: 20px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
-    .hero-copy p { color: var(--muted); max-width: 760px; line-height: 1.6; }
-    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-    .badge { padding: 7px 10px; border-radius: 999px; border: 1px solid #25436c; background: var(--chip-bg); color: var(--text); font-size: 12px; }
-    .auth-card { display: grid; gap: 10px; }
-    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .tab { background: var(--chip-bg); color: var(--muted); border: 1px solid var(--line); }
-    .tab.active { color: var(--bg); background: linear-gradient(135deg, var(--blue), var(--green)); border-color: transparent; }
-    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
-    .span-3 { grid-column: span 3; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
     .span-4 { grid-column: span 4; }
     .span-5 { grid-column: span 5; }
     .span-6 { grid-column: span 6; }
     .span-7 { grid-column: span 7; }
     .span-8 { grid-column: span 8; }
     .span-12 { grid-column: span 12; }
-    label { display: block; margin: 12px 0 6px; color: var(--text); font-size: 13px; font-weight: 650; }
-    input, select, textarea {
-      width: 100%; border: 1px solid var(--field-border); border-radius: 13px; background: var(--field); color: var(--text); padding: 11px 12px; outline: none;
-    }
-    textarea { min-height: 96px; resize: vertical; }
-    input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14); }
-    button { border: 0; border-radius: 13px; padding: 11px 14px; background: linear-gradient(135deg, #2563eb, #06b6d4); color: #fff; font-weight: 800; cursor: pointer; }
-    button.secondary { background: var(--panel-strong); color: var(--text); border: 1px solid var(--field-border); }
-    button.ghost { background: transparent; border: 1px solid var(--field-border); color: var(--text); }
-    button.danger { background: #7f1d1d; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .status { margin-top: 10px; border-radius: 13px; border: 1px solid var(--field-border); background: var(--field); padding: 11px; color: var(--muted); min-height: 42px; line-height: 1.45; }
-    .ok { color: var(--green); border-color: rgba(52, 211, 153, 0.28); }
-    .ko { color: var(--red); border-color: rgba(251, 113, 133, 0.32); }
-    .metric { background: var(--field); border: 1px solid var(--field-border); border-radius: 17px; padding: 16px; min-height: 88px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+    .soft-card { background: linear-gradient(135deg, #fff, var(--card-soft)); }
+    .news-layout { display: grid; grid-template-columns: 1.15fr 0.9fr; gap: 18px; align-items: stretch; }
+    .main-news { overflow: hidden; padding: 0; }
+    .news-image { min-height: 210px; background: linear-gradient(135deg, #24415f, #f3a176); position: relative; }
+    .news-image::after { content: "Macro"; position: absolute; left: 16px; top: 16px; background: #fff; color: var(--orange-dark); border-radius: 999px; padding: 7px 10px; font-weight: 900; font-size: 12px; }
+    .news-content { padding: 18px; }
+    .news-content h3 { margin: 0; font-size: 23px; line-height: 1.25; }
+    .markets { display: grid; gap: 10px; }
+    .market-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+    .market-row b { font-size: 14px; }
+    .market-row span { color: var(--green); font-weight: 850; }
+    .side-news { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .mini-news { min-height: 120px; border-radius: 18px; padding: 12px; color: #fff; display: flex; align-items: end; font-size: 13px; font-weight: 820; background: linear-gradient(135deg, #1f4d7a, #7c98b5); }
+    .mini-news.orange { background: linear-gradient(135deg, #f97316, #f9c27e); }
+    .metric-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 22px; }
+    .metric { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 18px; }
     .metric span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-    .metric b { display: block; margin-top: 8px; font-size: 24px; }
-    .toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
-    .check { border: 1px solid var(--field-border); border-radius: 14px; padding: 10px; display: flex; gap: 8px; align-items: center; background: var(--field); }
-    .check input { width: auto; }
-    .pill { font-size: 12px; border-radius: 999px; padding: 5px 8px; background: rgba(56, 189, 248, 0.12); color: var(--blue); border: 1px solid rgba(56, 189, 248, 0.28); }
-    .warning { border-color: rgba(251, 191, 36, 0.35); color: #fde68a; }
-    :root[data-theme="light"] .warning { color: #9a5b00; background: #fff7e6; }
-    :root[data-theme="light"] .badge,
-    :root[data-theme="light"] .pill { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
-    :root[data-theme="light"] button.secondary,
-    :root[data-theme="light"] button.ghost,
-    :root[data-theme="light"] .tab { background: #ffffff; color: #475569; border-color: #e8ded4; }
-    :root[data-theme="light"] .tab.active { color: #ffffff; background: linear-gradient(135deg, #f97316, #2563eb); }
-    :root[data-theme="light"] .logo { color: #ffffff; background: linear-gradient(135deg, #f97316, #2563eb); }
-    :root[data-theme="light"] .metric b { color: #172033; }
-    .theme-toggle { white-space: nowrap; }
-    .nav-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-    .nav-chip { text-decoration: none; border: 1px solid var(--field-border); background: var(--field); color: var(--text); border-radius: 999px; padding: 8px 12px; font-size: 13px; font-weight: 750; }
-    .home-card { min-height: 280px; display: grid; gap: 18px; }
-    .home-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
-    .home-title { font-size: clamp(24px, 3vw, 38px); letter-spacing: -0.04em; }
-    .home-sub { margin-top: 8px; color: var(--muted); line-height: 1.55; }
-    .portfolio-total { font-size: clamp(30px, 5vw, 56px); font-weight: 900; letter-spacing: -0.06em; }
-    .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 10px; }
-    .mini-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 16px; padding: 12px; }
-    .mini-card span { color: var(--muted); font-size: 12px; }
-    .mini-card b { display: block; margin-top: 4px; font-size: 18px; }
-    .chart-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 18px; padding: 14px; }
-    .bars { height: 150px; display: flex; gap: 10px; align-items: end; padding: 12px 6px 0; border-bottom: 1px solid var(--field-border); }
-    .bars i { flex: 1; border-radius: 10px 10px 0 0; background: linear-gradient(180deg, #fb923c, #2563eb); min-height: 12px; opacity: 0.9; }
-    .bar-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 8px; }
-    .action-stack { display: grid; gap: 12px; }
-    .action-card { border: 1px solid var(--field-border); background: var(--field); border-radius: 18px; padding: 14px; display: grid; gap: 6px; }
-    .action-card strong { color: var(--text); }
-    .action-card small { color: var(--muted); line-height: 1.45; }
-    .connector-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
-    .connector-card { border: 1px solid var(--field-border); border-radius: 16px; padding: 12px; background: var(--field); display: grid; gap: 8px; }
-    .connector-card strong { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-    .connector-card small { color: var(--muted); line-height: 1.45; }
-    .status-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; background: var(--red); box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.12); }
-    .status-dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.14); }
-    @media (max-width: 760px) { .mini-grid { grid-template-columns: 1fr; } }
+    .metric b { display: block; margin-top: 8px; font-size: 24px; letter-spacing: -0.04em; }
+    .tabs { display: flex; gap: 38px; margin: 24px 0; font-size: 20px; }
+    .tabs button { background: transparent; font-weight: 800; color: var(--muted); padding: 0 0 8px; border-bottom: 3px solid transparent; }
+    .tabs button.active { color: var(--text); border-color: var(--orange); }
+    .project-list { display: grid; gap: 18px; }
+    .project { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 20px; background: #fff; border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
+    .project-icon { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; background: #fff1e8; color: var(--orange); font-size: 24px; font-weight: 900; }
+    .project h3 { margin: 0 0 8px; font-size: 20px; }
+    .project-stats { display: flex; gap: 26px; flex-wrap: wrap; color: var(--muted); }
+    .project-stats b { color: var(--text); }
+    .gain { color: var(--green); font-weight: 900; font-size: 20px; }
+    .chart { min-height: 320px; display: grid; grid-template-columns: 1fr 240px; gap: 20px; }
+    .bars { height: 230px; display: flex; gap: 14px; align-items: end; padding: 18px 10px 0; border-bottom: 1px solid var(--line); }
+    .bars i { flex: 1; min-height: 12px; border-radius: 12px 12px 0 0; background: var(--orange); }
+    .chart-detail { border: 1px solid var(--line); border-radius: 18px; padding: 16px; align-self: start; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    label { display: block; font-weight: 760; margin: 0 0 8px; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 16px; padding: 13px 14px; outline: none; }
+    textarea { min-height: 132px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--orange); box-shadow: 0 0 0 4px rgba(255, 112, 67, 0.12); }
+    .primary { background: var(--orange); color: #fff; border-radius: 999px; padding: 14px 22px; font-weight: 900; box-shadow: 0 12px 22px rgba(255, 112, 67, 0.22); }
+    .secondary { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 12px 18px; font-weight: 850; }
+    .trader-hero { text-align: center; padding: 34px 20px; }
+    .trader-hero h2 { font-size: 30px; margin: 0 0 10px; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
+    .step { padding: 15px; border: 1px solid var(--line); background: #fff; border-radius: 18px; text-align: left; }
+    .step b { display: block; margin-bottom: 5px; }
+    .chat { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .chat-log { max-height: 300px; overflow: auto; display: grid; gap: 10px; }
+    .message { padding: 13px 15px; border-radius: 18px; background: #fff; border: 1px solid var(--line); line-height: 1.45; }
+    .message.ai { background: #fff7ef; }
+    .status { margin-top: 12px; padding: 13px 14px; border-radius: 16px; border: 1px solid var(--line); background: #fff; color: var(--muted); }
+    .ok { color: var(--green); }
+    .ko { color: #e11d48; }
     .hidden { display: none !important; }
-    .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
-    .list li { border: 1px solid var(--field-border); border-radius: 13px; padding: 10px; background: var(--field); color: var(--text); }
-    .chat-log { display: grid; gap: 10px; max-height: 360px; overflow: auto; margin-top: 10px; }
-    .msg { border: 1px solid var(--field-border); border-radius: 15px; padding: 12px; background: var(--field); white-space: pre-wrap; }
-    .msg.user { border-color: rgba(56, 189, 248, 0.45); }
-    .msg.ai { border-color: rgba(52, 211, 153, 0.35); }
-    @media (max-width: 980px) { .hero { grid-template-columns: 1fr; } .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; } }
+    @media (max-width: 900px) {
+      .topbar { grid-template-columns: 1fr; height: auto; padding: 10px 0; }
+      .nav, .account { justify-content: flex-start; }
+      .grid, .news-layout, .chart, .form-grid, .steps, .metric-strip { grid-template-columns: 1fr; }
+      .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
+      .project { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <div class="brand">
-        <div class="logo">SQ</div>
-        <div>
-          <h2>SentiQ</h2>
-          <div class="muted">Sentiment Trading OS</div>
-        </div>
-      </div>
-      <div class="row">
-        <button id="themeToggle" class="ghost theme-toggle">Mode clair</button>
-        <span id="sessionBadge" class="pill">Présentation publique</span>
-        <button id="logoutBtn" class="ghost hidden">Déconnexion</button>
+      <div class="brand">SentiQ</div>
+      <nav class="nav" aria-label="Navigation principale">
+        <button class="nav-link active" data-view="homeView">Accueil</button>
+        <button class="nav-link" data-view="followView">Suivi</button>
+        <button class="nav-link" data-view="tradeView">Trader</button>
+      </nav>
+      <div class="account">
+        <span class="balance-pill">28,38 €</span>
+        <span class="round plus">+</span>
+        <span class="round avatar">EM</span>
       </div>
     </header>
 
-    <section class="hero">
-      <div class="hero-copy">
-        <h1>Trading autonome piloté par le sentiment de marché.</h1>
-        <p>SentiQ analyse des signaux news, applique ton seuil de probabilité, respecte tes secteurs et prépare l'exécution actions, ETF et crypto. Cette version démarre en simulation/paper trading pour valider la stratégie avant connexion broker réelle.</p>
-        <div class="badges">
-          <span class="badge">News scoring IA</span><span class="badge">Préférences sectorielles</span><span class="badge">Capital contrôlé</span><span class="badge">Binance / Coinbase / Alpaca prêts à connecter</span><span class="badge">HTTPS OVH</span>
-        </div>
+    <section id="homeView" class="view active">
+      <h1 class="hero-title">Bonjour Lil ! 👋</h1>
+      <p class="lead">Votre patrimoine <strong>SentiQ</strong> est de <strong id="homeWealth">2 000 €</strong>. Suivez les marchés, vos signaux IA et les prochaines opportunités détectées.</p>
+      <div class="metric-strip">
+        <div class="metric"><span>Capital actif</span><b>2 000 €</b></div>
+        <div class="metric"><span>Gain simulé</span><b class="ok">+210,60 €</b></div>
+        <div class="metric"><span>Signaux suivis</span><b>5</b></div>
+        <div class="metric"><span>Mode</span><b>Paper</b></div>
       </div>
 
-      <section class="card auth-card hidden" id="authCard">
-        <div class="tabs">
-          <button id="loginTab" class="tab active">Connexion</button>
-          <button id="registerTab" class="tab">Créer un compte</button>
-        </div>
-        <label>Email</label>
-        <input id="authEmail" type="email" placeholder="vous@entreprise.com" autocomplete="email" />
-        <label>Mot de passe</label>
-        <input id="authPassword" type="password" placeholder="8 caractères minimum" autocomplete="current-password" />
-        <div class="row">
-          <button id="authSubmitBtn">Se connecter</button>
-          <button id="googleBtn" class="secondary" disabled>Google bientôt</button>
-        </div>
-        <div class="status warning">OAuth Google nécessite des clés Google Cloud. Pour l'instant, utilise email + mot de passe sécurisé.</div>
-        <div id="authStatus" class="status"></div>
-      </section>
+      <h2 class="section-title">Actualités</h2>
+      <div class="news-layout">
+        <article class="card main-news">
+          <div class="news-image"></div>
+          <div class="news-content">
+            <h3>Retraite, inflation, tech : les signaux macro influencent les marchés européens.</h3>
+            <p class="muted">Le moteur SentiQ transforme ces actualités en probabilités exploitables selon ton seuil.</p>
+          </div>
+        </article>
+        <aside class="card">
+          <h3>Marchés</h3>
+          <div class="markets">
+            <div class="market-row"><b>CAC 40</b><span>+0,35%</span></div>
+            <div class="market-row"><b>SBF 120</b><span>+0,39%</span></div>
+            <div class="market-row"><b>NASDAQ Tech</b><span>+0,71%</span></div>
+            <div class="market-row"><b>BTC/EUR</b><span>+1,24%</span></div>
+          </div>
+        </aside>
+      </div>
+      <div class="side-news" style="margin-top:18px;">
+        <div class="mini-news">Nvidia : demande IA toujours soutenue</div>
+        <div class="mini-news orange">Matières premières : lithium sous tension</div>
+        <div class="mini-news">ETF : flux entrants sur indices US</div>
+        <div class="mini-news orange">Crypto : volatilité accrue avant macro</div>
+      </div>
     </section>
 
-    <section id="appPanel">
+    <section id="followView" class="view">
+      <h1 class="hero-title">Suivi</h1>
+      <p class="lead">Retrouvez vos positions en cours, les cycles terminés et la performance simulée.</p>
+      <div class="tabs">
+        <button class="active" id="ongoingTab">En cours (2)</button>
+        <button id="doneTab">Fini (3)</button>
+      </div>
       <div class="grid">
-        <section class="card span-12" id="home">
-          <div class="row" style="justify-content: space-between;">
+        <section class="span-7 project-list">
+          <article class="project">
+            <div class="project-icon">NV</div>
             <div>
-              <h2>Accueil SentiQ</h2>
-              <div class="muted" id="userLine">-</div>
-              <nav class="nav-row" aria-label="Navigation SentiQ">
-                <a class="nav-chip" href="#home">Accueil</a>
-                <a class="nav-chip" href="#setup">Configuration</a>
-                <a class="nav-chip" href="#capital">Capital</a>
-                <a class="nav-chip" href="#connectors">Connecteurs</a>
-                <a class="nav-chip" href="#advisor">Conseiller IA</a>
-                <a class="nav-chip" href="#follow">Suivi</a>
-              </nav>
+              <h3>Action Nvidia</h3>
+              <div class="project-stats"><span>investi <b>100 €</b></span><span>probabilité IA <b>84 %</b></span><span>horizon <b>8h</b></span></div>
             </div>
-            <button id="refreshBtn" class="secondary">Rafraîchir</button>
-          </div>
-        </section>
-
-        <section class="card span-8 home-card">
-          <div class="home-head">
+            <div class="gain">+10 €</div>
+          </article>
+          <article class="project">
+            <div class="project-icon">TS</div>
             <div>
-              <h2 class="home-title">Bonjour <span id="firstName">Trader</span> ! 👋</h2>
-              <p class="home-sub">Votre cockpit regroupe capital, signaux, préférences et exécution. L'objectif: passer de la simulation à des connecteurs sécurisés quand les clés broker et paiement seront prêtes.</p>
+              <h3>Action Tesla</h3>
+              <div class="project-stats"><span>investi <b>2 000 €</b></span><span>probabilité IA <b>79 %</b></span><span>horizon <b>2j</b></span></div>
             </div>
-            <div>
-              <div class="muted">Patrimoine SentiQ</div>
-              <div class="portfolio-total" id="homePatrimony">-</div>
-            </div>
-          </div>
-          <div class="mini-grid">
-            <div class="mini-card"><span>Projets actifs</span><b id="homeProjects">-</b></div>
-            <div class="mini-card"><span>Cycle IA</span><b id="homeCycle">En veille</b></div>
-            <div class="mini-card"><span>Mode</span><b id="homeMode">Simulation</b></div>
-          </div>
-          <div class="chart-card">
-            <div class="row" style="justify-content: space-between;"><strong>Performance simulée</strong><span class="pill" id="homePnl">PnL 0.00 EUR</span></div>
-            <div class="bars" aria-hidden="true"><i style="height:20%"></i><i style="height:28%"></i><i style="height:36%"></i><i style="height:54%"></i><i style="height:70%"></i><i style="height:62%"></i></div>
-            <div class="bar-labels"><span>M-5</span><span>M-4</span><span>M-3</span><span>M-2</span><span>M-1</span><span>M</span></div>
-          </div>
+            <div class="gain">+200,60 €</div>
+          </article>
         </section>
-
-        <section class="card span-4 action-stack">
-          <div class="action-card"><strong>1. Finaliser la stratégie</strong><small>Marchés, seuil IA, paper trading et broker cible.</small></div>
-          <div class="action-card"><strong>2. Connecter le capital</strong><small>À terme via Stripe/GoCardless/Tink, jamais par identifiants bancaires en clair.</small></div>
-          <div class="action-card"><strong>3. Activer un broker</strong><small>Binance, Coinbase, Alpaca ou IBKR via clés API restreintes côté serveur.</small></div>
-        </section>
-
-        <section class="metric span-3"><span>Total wallet</span><b id="walletTotal">-</b></section>
-        <section class="metric span-3"><span>Disponible</span><b id="walletAvailable">-</b></section>
-        <section class="metric span-3"><span>Engagé</span><b id="walletEngaged">-</b></section>
-        <section class="metric span-3"><span>Seuil IA</span><b id="thresholdMetric">-</b></section>
-
-        <section class="card span-7" id="setup">
-          <h2>1. Onboarding trading</h2>
-          <p class="muted">Choisis tes marchés, tes secteurs, ton seuil et la plateforme cible. Les plateformes réelles restent verrouillées tant que les clés API ne sont pas configurées côté serveur.</p>
-          <label>Plateforme d'exécution</label>
-          <select id="brokerPlatform"></select>
-          <div id="brokerHelp" class="status"></div>
-          <div class="toggle-grid">
-            <label class="check"><input id="assetCrypto" type="checkbox" /> Crypto</label>
-            <label class="check"><input id="assetEtf" type="checkbox" /> ETF</label>
-            <label class="check"><input id="assetStocks" type="checkbox" /> Actions</label>
-            <label class="check"><input id="paperMode" type="checkbox" /> Paper trading</label>
+        <section class="card span-5 chart">
+          <div>
+            <h3>Revenus simulés</h3>
+            <div class="bars"><i style="height:22%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:82%"></i><i style="height:76%"></i><i style="height:90%"></i></div>
           </div>
-          <label>Seuil minimum IA (%)</label>
-          <input id="probabilityThreshold" type="number" min="0" max="100" step="0.01" value="80" />
-          <label>Préférences sectorielles</label>
-          <div class="toggle-grid">
-            <label class="check"><input id="sectorTech" type="checkbox" /> Tech / IA</label>
-            <label class="check"><input id="sectorMines" type="checkbox" /> Mines / matières premières</label>
-            <label class="check"><input id="sectorRealEstate" type="checkbox" /> Immobilier</label>
-            <label class="check"><input id="sectorInsurance" type="checkbox" /> Assurances</label>
-            <label class="check"><input id="sectorFood" type="checkbox" /> Alimentation</label>
-          </div>
-          <button id="savePrefsBtn">Sauvegarder ma stratégie</button>
-          <div id="prefsStatus" class="status"></div>
+          <div class="chart-detail"><strong>Juin - Mai</strong><p class="muted">Revenus +176,90 €</p><p class="muted">Fiscalité estimée -51,29 €</p></div>
         </section>
+      </div>
+    </section>
 
-        <section class="card span-5" id="capital">
-          <h2>2. Capital sécurisé</h2>
-          <p class="muted">SentiQ ne demande jamais tes identifiants bancaires. Un vrai dépôt devra passer par un prestataire régulé (Stripe, GoCardless, Tink/Plaid selon pays). Ici le dépôt est simulé.</p>
-          <label>Montant à créditer (simulation)</label>
-          <input id="depositAmount" type="number" min="1" step="0.01" value="1000" />
-          <button id="depositBtn">Simuler un dépôt sécurisé</button>
-          <label>Montant à allouer au robot</label>
-          <input id="allocateAmount" type="number" min="1" step="0.01" value="250" />
-          <button id="allocateBtn">Allouer au trading autonome</button>
-          <div id="walletStatus" class="status"></div>
-        </section>
-
-
-        <section class="card span-12" id="connectors">
-          <div class="row" style="justify-content: space-between;">
-            <div>
-              <h2>3. Connecteurs réels</h2>
-              <p class="muted">Les clés API restent uniquement côté serveur dans `.env.production`. L'interface affiche le statut et permet d'activer un broker quand les secrets sont présents.</p>
-            </div>
-            <button id="reloadIntegrationsBtn" class="secondary">Vérifier les connecteurs</button>
-          </div>
-          <h3>Paiement</h3>
-          <div id="paymentConnectors" class="connector-grid"></div>
-          <h3 style="margin-top: 16px;">Brokers / exchanges</h3>
-          <div id="brokerConnectors" class="connector-grid"></div>
-          <h3 style="margin-top: 16px;">Connexion sociale</h3>
-          <div id="oauthConnectors" class="connector-grid"></div>
-          <div id="integrationStatus" class="status"></div>
-        </section>
-
-        <section class="card span-6" id="advisor">
-          <h2>4. Conseiller IA</h2>
-          <p class="muted">Pose une question sur le risque, les plateformes, le capital ou la stratégie. Réponse contextuelle basée sur ton wallet et tes préférences.</p>
-          <div id="chatLog" class="chat-log"></div>
-          <textarea id="advisorMessage" placeholder="Ex: Je veux trader crypto avec 1000 euros, quel risque prendre ?"></textarea>
-          <button id="advisorBtn">Demander à SentiQ</button>
-        </section>
-
+    <section id="tradeView" class="view">
+      <div class="card trader-hero">
+        <h2>Commencer à trader</h2>
+        <p class="muted">Configure une opportunité : plateforme, type d’actif, secteur adapté et montant. SentiQ gardera le mode paper tant que les connexions réelles ne sont pas validées.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><b>1. Plateforme</b><span class="muted">Binance, Coinbase, Alpaca, simulation.</span></div>
+        <div class="step"><b>2. Actif</b><span class="muted">Action, ETF ou crypto.</span></div>
+        <div class="step"><b>3. Secteur</b><span class="muted">Filtré selon la plateforme.</span></div>
+        <div class="step"><b>4. Montant</b><span class="muted">Capital engagé contrôlé.</span></div>
+      </div>
+      <div class="grid">
         <section class="card span-6">
-          <h2>5. Démo signal IA</h2>
-          <p class="muted">Injecte une news simulée, laisse le moteur scorer, puis évalue si une opportunité doit être ouverte selon tes préférences.</p>
-          <textarea id="newsText">Reuters: Nvidia beats expectations and signs a major AI cloud partnership while lithium miners rally after supply shock.</textarea>
-          <label>Catégorie / source</label>
-          <input id="newsCategory" value="reuters/stocks" />
-          <div class="row"><button id="analyzeBtn">Analyser la news</button><button id="evaluateBtn" class="secondary">Évaluer opportunité</button></div>
-          <div id="decisionStatus" class="status"></div>
+          <h2>Paramètres de trade</h2>
+          <div class="form-grid">
+            <div><label>Plateforme</label><select id="platformSelect"><option>Alpaca Paper</option><option>Binance</option><option>Coinbase</option><option>Simulation</option></select></div>
+            <div><label>Type d’actif</label><select id="assetSelect"><option>Action</option><option>ETF</option><option>Crypto</option></select></div>
+            <div><label>Secteur</label><select id="sectorSelect"><option>Tech / IA</option><option>Matières premières</option><option>Finance</option><option>Énergie</option><option>Crypto majors</option></select></div>
+            <div><label>Montant</label><input id="amountInput" value="100" /></div>
+          </div>
+          <label style="margin-top:16px;">Seuil de probabilité minimum</label>
+          <input id="thresholdInput" type="range" min="50" max="95" value="80" />
+          <div class="status" id="tradeStatus">Mode présentation : aucun ordre réel ne sera envoyé.</div>
+          <button class="primary" id="startTradeBtn">Préparer l’opportunité</button>
         </section>
-
-        <section class="card span-6" id="follow">
-          <h2>Ordres récents</h2>
-          <ul id="ordersList" class="list"><li>Aucun ordre chargé.</li></ul>
-        </section>
-
         <section class="card span-6">
-          <h2>Monitoring live</h2>
-          <div id="wsStatus" class="status">WebSocket non connecté.</div>
-          <ul id="eventsList" class="list"></ul>
+          <h2>Conseiller IA</h2>
+          <p class="muted">Pose tes questions sur les marchés, les plateformes, le risque ou les termes techniques.</p>
+          <div class="chat-log" id="chatLog"><div class="message ai">Bonjour, je suis SentiQ IA. Je peux expliquer les choix de plateforme, le risque, le montant à engager et les signaux d’actualité.</div></div>
+          <textarea id="chatInput" placeholder="Ex : quel montant engager sur Nvidia avec un profil prudent ?"></textarea>
+          <button class="secondary" id="chatBtn">Envoyer</button>
         </section>
       </div>
     </section>
   </main>
 
   <script>
-    const state = {
-      mode: "login",
-      token: localStorage.getItem("sentiq_token") || "",
-      userId: localStorage.getItem("sentiq_user_id") || "",
-      email: localStorage.getItem("sentiq_email") || "",
-      platforms: [],
-      ws: null,
-    };
-
-    const DEMO_PREF = {
-      broker_platform: "simulation",
-      minimum_probability_threshold: "80.00",
-      enable_crypto: true,
-      enable_etf: true,
-      enable_stocks: true,
-      sector_tech: true,
-      sector_mines: true,
-      sector_real_estate: false,
-      sector_insurance: false,
-      sector_food: false,
-      paper_trading_enabled: true,
-    };
-    const DEMO_INTEGRATIONS = {
-      payments: [
-        { id: "stripe", label: "Stripe Checkout", configured: false, status: "à configurer", required_env: ["STRIPE_SECRET_KEY"], masked_identifiers: [], note: "Paiement réel prêt à activer côté serveur." },
-        { id: "open_banking", label: "Open banking", configured: false, status: "prévu", required_env: ["OPEN_BANKING_CLIENT_ID"], masked_identifiers: [], note: "Virement bancaire via prestataire régulé, sans identifiants bancaires dans SentiQ." },
-      ],
-      brokers: [
-        { id: "alpaca", label: "Alpaca Paper", configured: true, status: "démo", required_env: ["ALPACA_API_KEY", "ALPACA_API_SECRET"], masked_identifiers: ["paper"], note: "Actions/ETF en paper trading." },
-        { id: "binance", label: "Binance", configured: false, status: "clé serveur requise", required_env: ["BINANCE_API_KEY", "BINANCE_API_SECRET"], masked_identifiers: [], note: "Crypto avec clé restreinte et IP VPS autorisée." },
-        { id: "coinbase", label: "Coinbase", configured: false, status: "clé serveur requise", required_env: ["COINBASE_API_KEY", "COINBASE_API_SECRET"], masked_identifiers: [], note: "Advanced Trade API." },
-      ],
-      oauth: [
-        { id: "google", label: "Google OAuth", configured: false, status: "prévu", required_env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], masked_identifiers: [], note: "Connexion sociale à activer plus tard." },
-      ],
-    };
-    function requireSession(targetStatusId = "integrationStatus") {
-      if (state.token && state.userId) return true;
-      status(targetStatusId, "Mode présentation publique: cette action sera activée après réactivation de la connexion.", false);
-      return false;
-    }
-    const $ = (id) => document.getElementById(id);
-    function applyTheme(theme) {
-      state.theme = theme;
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem("sentiq_theme", theme);
-      const button = $("themeToggle");
-      if (button) button.textContent = theme === "light" ? "Mode sombre" : "Mode clair";
-    }
-    const money = (value) => `${Number(value || 0).toFixed(2)} EUR`;
-    const status = (id, text, ok = true) => { const el = $(id); el.textContent = text; el.className = `status ${ok ? "ok" : "ko"}`; };
-
-    async function parseError(res) {
-      try { const payload = await res.json(); return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail); } catch (_) { return `${res.status} ${res.statusText}`; }
-    }
-    async function apiFetch(path, options = {}) {
-      const headers = Object.assign({}, options.headers || {});
-      if (state.token) headers.Authorization = `Bearer ${state.token}`;
-      if (options.jsonBody !== undefined) { headers["Content-Type"] = "application/json"; options.body = JSON.stringify(options.jsonBody); }
-      const res = await fetch(path, Object.assign({}, options, { headers }));
-      if (!res.ok) throw new Error(await parseError(res));
-      return res.status === 204 ? null : res.json();
-    }
-
-    function setAuthMode(mode) {
-      state.mode = mode;
-      $("loginTab").classList.toggle("active", mode === "login");
-      $("registerTab").classList.toggle("active", mode === "register");
-      $("authSubmitBtn").textContent = mode === "login" ? "Se connecter" : "Créer mon compte";
-    }
-    function setSession(user) {
-      state.userId = user.id; state.email = user.email;
-      localStorage.setItem("sentiq_user_id", user.id); localStorage.setItem("sentiq_email", user.email);
-      $("sessionBadge").textContent = user.email;
-      $("authCard").classList.add("hidden"); $("appPanel").classList.remove("hidden"); $("logoutBtn").classList.remove("hidden");
-      $("userLine").textContent = `${user.email} | rôle ${user.role}`;
-      const name = user.email.split("@")[0].split(/[._-]/)[0] || "Trader";
-      $("firstName").textContent = name.charAt(0).toUpperCase() + name.slice(1);
-    }
-    function clearSession() {
-      localStorage.removeItem("sentiq_token"); localStorage.removeItem("sentiq_user_id"); localStorage.removeItem("sentiq_email");
-      state.token = ""; state.userId = ""; state.email = "";
-      if (state.ws) state.ws.close();
-      showPublicDemo();
-    }
-
-    async function login(email, password) {
-      const data = await apiFetch("/api/auth/login", { method: "POST", jsonBody: { email, password } });
-      state.token = data.access_token; localStorage.setItem("sentiq_token", state.token); setSession(data.user); await refreshAll(); openWs();
-    }
-    async function submitAuth() {
-      const email = $("authEmail").value.trim(); const password = $("authPassword").value;
-      if (!email || !password) return status("authStatus", "Email et mot de passe requis.", false);
-      try {
-        if (state.mode === "register") await apiFetch("/api/users", { method: "POST", jsonBody: { email, password, role: "trader" } });
-        await login(email, password); status("authStatus", "Connecté.", true);
-      } catch (err) { status("authStatus", err.message, false); }
-    }
-
-    async function loadPlatforms() {
-      state.platforms = await apiFetch("/api/preferences/broker-platforms");
-      const select = $("brokerPlatform"); select.innerHTML = "";
-      state.platforms.forEach((platform) => {
-        const option = document.createElement("option"); option.value = platform.id; option.textContent = `${platform.label} - ${platform.status}`; select.appendChild(option);
+    const views = document.querySelectorAll('.view');
+    const navLinks = document.querySelectorAll('.nav-link');
+    navLinks.forEach((button) => {
+      button.addEventListener('click', () => {
+        navLinks.forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        views.forEach((view) => view.classList.toggle('active', view.id === button.dataset.view));
       });
-    }
-    function updateBrokerHelp() {
-      const platform = state.platforms.find((item) => item.id === $("brokerPlatform").value);
-      $("brokerHelp").textContent = platform ? `${platform.note} Marchés: ${platform.asset_classes.join(", ")}` : "";
-    }
-    function applyPreferences(pref) {
-      $("brokerPlatform").value = pref.broker_platform; updateBrokerHelp();
-      $("assetCrypto").checked = pref.enable_crypto; $("assetEtf").checked = pref.enable_etf; $("assetStocks").checked = pref.enable_stocks; $("paperMode").checked = pref.paper_trading_enabled;
-      $("sectorTech").checked = pref.sector_tech; $("sectorMines").checked = pref.sector_mines; $("sectorRealEstate").checked = pref.sector_real_estate; $("sectorInsurance").checked = pref.sector_insurance; $("sectorFood").checked = pref.sector_food;
-      $("probabilityThreshold").value = pref.minimum_probability_threshold; $("thresholdMetric").textContent = `${pref.minimum_probability_threshold}%`;
-      $("homeMode").textContent = pref.paper_trading_enabled ? "Paper trading" : "Live à valider";
-    }
-    async function savePreferences() {
-      if (!requireSession("prefsStatus")) return;
-      try {
-        const payload = {
-          broker_platform: $("brokerPlatform").value,
-          funding_provider: "simulated_psp",
-          paper_trading_enabled: $("paperMode").checked,
-          minimum_probability_threshold: $("probabilityThreshold").value,
-          enable_crypto: $("assetCrypto").checked,
-          enable_etf: $("assetEtf").checked,
-          enable_stocks: $("assetStocks").checked,
-          sector_tech: $("sectorTech").checked,
-          sector_mines: $("sectorMines").checked,
-          sector_real_estate: $("sectorRealEstate").checked,
-          sector_insurance: $("sectorInsurance").checked,
-          sector_food: $("sectorFood").checked,
-        };
-        const pref = await apiFetch(`/api/preferences/users/${state.userId}`, { method: "PATCH", jsonBody: payload });
-        applyPreferences(pref); status("prefsStatus", "Stratégie sauvegardée.", true); await refreshAll();
-      } catch (err) { status("prefsStatus", err.message, false); }
-    }
+    });
 
-    async function deposit() {
-      if (!requireSession("walletStatus")) return;
-      try { const data = await apiFetch(`/api/wallets/${state.userId}/deposit`, { method: "POST", jsonBody: { amount: $("depositAmount").value, payment_method: "simulated_secure_psp" } }); status("walletStatus", data.message, true); await refreshAll(); }
-      catch (err) { status("walletStatus", err.message, false); }
-    }
-    async function allocate() {
-      if (!requireSession("walletStatus")) return;
-      try { const data = await apiFetch(`/api/wallets/${state.userId}/allocate`, { method: "POST", jsonBody: { amount: $("allocateAmount").value } }); status("walletStatus", data.message, true); await refreshAll(); }
-      catch (err) { status("walletStatus", err.message, false); }
-    }
+    document.getElementById('startTradeBtn').addEventListener('click', () => {
+      const platform = document.getElementById('platformSelect').value;
+      const asset = document.getElementById('assetSelect').value;
+      const sector = document.getElementById('sectorSelect').value;
+      const amount = document.getElementById('amountInput').value;
+      document.getElementById('tradeStatus').textContent = `Opportunité préparée : ${platform} | ${asset} | ${sector} | ${amount} €. Validation IA et connexion broker requises avant ordre réel.`;
+      document.getElementById('tradeStatus').className = 'status ok';
+    });
 
-    function connectorCard(item, kind) {
-      const configured = item.configured;
-      const env = item.required_env?.length ? `Variables: ${item.required_env.join(", ")}` : "";
-      const masked = item.masked_identifiers?.length ? ` | Config: ${item.masked_identifiers.join(", ")}` : "";
-      const action = kind === "broker"
-        ? `<button class="secondary" onclick="activateBroker('${item.id}')">${configured ? "Activer" : "Sélectionner en paper"}</button>`
-        : kind === "stripe" && item.id === "stripe"
-          ? `<button class="secondary" onclick="startStripeCheckout()">Checkout Stripe</button>`
-          : "";
-      return `<div class="connector-card"><strong>${item.label}<span class="status-dot ${configured ? "on" : ""}"></span></strong><small>${item.note}</small><small>${item.status}${masked}</small><small>${env}</small>${action}</div>`;
-    }
-    function renderConnectors(payload) {
-      $("paymentConnectors").innerHTML = payload.payments.map((item) => connectorCard(item, "stripe")).join("");
-      $("brokerConnectors").innerHTML = payload.brokers.map((item) => connectorCard(item, "broker")).join("");
-      $("oauthConnectors").innerHTML = payload.oauth.map((item) => connectorCard(item, "oauth")).join("");
-    }
-    async function loadIntegrations() {
-      if (!state.token || !state.userId) { renderConnectors(DEMO_INTEGRATIONS); status("integrationStatus", "Mode présentation: statuts connecteurs simulés.", true); return; }
-      try {
-        const payload = await apiFetch("/api/integrations/status");
-        renderConnectors(payload);
-        status("integrationStatus", "Statut des intégrations chargé.", true);
-      } catch (err) { status("integrationStatus", err.message, false); }
-    }
-    async function activateBroker(platform) {
-      if (!requireSession("integrationStatus")) return;
-      try {
-        const result = await apiFetch("/api/integrations/brokers/activate", { method: "POST", jsonBody: { platform } });
-        status("integrationStatus", result.message, result.configured);
-        await refreshAll();
-      } catch (err) { status("integrationStatus", err.message, false); }
-    }
-    async function startStripeCheckout() {
-      if (!requireSession("integrationStatus")) return;
-      try {
-        const result = await apiFetch("/api/integrations/payments/stripe/checkout", { method: "POST", jsonBody: { amount: $("depositAmount").value || "50" } });
-        if (result.checkout_url) location.href = result.checkout_url;
-        else status("integrationStatus", result.message, false);
-      } catch (err) { status("integrationStatus", err.message, false); }
-    }
-    window.activateBroker = activateBroker;
-    window.startStripeCheckout = startStripeCheckout;
-
-    async function askAdvisor() {
-      const message = $("advisorMessage").value.trim(); if (!message) return;
-      const log = $("chatLog"); log.insertAdjacentHTML("beforeend", `<div class="msg user">${message.replaceAll("<", "&lt;")}</div>`); $("advisorMessage").value = "";
-      if (!state.token || !state.userId) {
-        const body = "Mode présentation: SentiQ recommande de finaliser le choix broker, rester en paper trading, puis connecter Stripe/Binance/Alpaca avec clés serveur sécurisées. Aucune clé ni identifiant bancaire ne doit être saisi dans le chat.";
-        log.insertAdjacentHTML("beforeend", `<div class="msg ai">${body}</div>`); log.scrollTop = log.scrollHeight; return;
-      }
-      try {
-        const res = await apiFetch("/api/advisor/chat", { method: "POST", jsonBody: { message } });
-        const body = `${res.answer}\n\nActions:\n- ${res.suggested_actions.join("\n- ")}\n\nRisques:\n- ${(res.risk_flags.length ? res.risk_flags : ["Aucun signal de risque spécifique détecté."]).join("\n- ")}\n\n${res.disclaimer}`;
-        log.insertAdjacentHTML("beforeend", `<div class="msg ai">${body.replaceAll("<", "&lt;")}</div>`); log.scrollTop = log.scrollHeight;
-      } catch (err) { log.insertAdjacentHTML("beforeend", `<div class="msg ai">Erreur: ${err.message}</div>`); }
-    }
-    async function analyzeNews() {
-      if (!requireSession("decisionStatus")) return;
-      try { const data = await apiFetch("/api/decision/signals/analyze", { method: "POST", jsonBody: { news_text: $("newsText").value, category: $("newsCategory").value } }); status("decisionStatus", `Signal ${data.signal_strength}% | secteur ${data.mapped_sector} | valide=${data.is_valid_signal} | TTL=${data.time_to_live_minutes} min`, true); }
-      catch (err) { status("decisionStatus", err.message, false); }
-    }
-    async function evaluateOpportunity() {
-      if (!requireSession("decisionStatus")) return;
-      try { const data = await apiFetch(`/api/decision/users/${state.userId}/evaluate`, { method: "POST" }); status("decisionStatus", `${data.reason} Exécution=${data.should_execute} ${data.active_trade_id ? `| trade=${data.active_trade_id}` : ""}`, data.should_execute); await refreshAll(); }
-      catch (err) { status("decisionStatus", err.message, false); }
-    }
-    function renderOrders(orders) {
-      const ul = $("ordersList"); ul.innerHTML = "";
-      if (!orders.length) { ul.innerHTML = "<li>Aucun ordre pour le moment.</li>"; return; }
-      orders.forEach((order) => { const li = document.createElement("li"); li.textContent = `${order.asset_symbol} | ${order.direction} | ${order.status} | confiance ${order.confidence}% | PnL ${order.pnl_simule}`; ul.appendChild(li); });
-    }
-    function openWs() {
-      if (state.ws) state.ws.close(); if (!state.token) return;
-      const protocol = location.protocol === "https:" ? "wss" : "ws"; const ws = new WebSocket(`${protocol}://${location.host}/api/monitoring/ws?token=${encodeURIComponent(state.token)}`); state.ws = ws;
-      ws.onopen = () => status("wsStatus", "Monitoring live connecté.", true); ws.onclose = () => status("wsStatus", "Monitoring déconnecté.", false); ws.onerror = () => status("wsStatus", "Erreur WebSocket.", false);
-      ws.onmessage = (evt) => { try { const payload = JSON.parse(evt.data); if (payload.type !== "event" || !payload.data) return; const e = payload.data; const li = document.createElement("li"); li.textContent = `${e.created_at} | ${e.channel} | ${e.message}`; $("eventsList").prepend(li); } catch (_) {} };
-    }
-    async function showPublicDemo() {
-      state.userId = ""; state.email = "";
-      $("authCard").classList.add("hidden");
-      $("appPanel").classList.remove("hidden");
-      $("logoutBtn").classList.add("hidden");
-      $("sessionBadge").textContent = "Présentation publique";
-      $("userLine").textContent = "Mode présentation publique | connexion temporairement masquée";
-      $("firstName").textContent = "Eva";
-      await loadPlatforms().catch(() => { state.platforms = [{ id: "simulation", label: "Simulation", asset_classes: ["Actions", "ETF", "Crypto"], note: "Mode présentation." }]; });
-      applyPreferences(DEMO_PREF);
-      $("walletTotal").textContent = money(6733.77);
-      $("walletAvailable").textContent = money(5283.77);
-      $("walletEngaged").textContent = money(1450.00);
-      $("homePatrimony").textContent = money(6733.77);
-      $("homeProjects").textContent = "5 signaux";
-      $("homeCycle").textContent = "En veille";
-      $("homePnl").textContent = `PnL ${money(176.90)}`;
-      renderOrders([
-        { asset_symbol: "AAPL", direction: "buy", status: "paper", confidence: "84.20", pnl_simule: "42.80" },
-        { asset_symbol: "BTC", direction: "buy", status: "watchlist", confidence: "78.40", pnl_simule: "0.00" },
-      ]);
-      renderConnectors(DEMO_INTEGRATIONS);
-      status("wsStatus", "Monitoring désactivé en présentation publique.", true);
-      status("integrationStatus", "Aperçu connecteurs: les vrais statuts apparaîtront après connexion serveur.", true);
-    }
-
-    async function refreshAll() {
-      if (!state.token || !state.userId) { await showPublicDemo(); return; }
-      const me = await apiFetch("/api/auth/me"); setSession(me);
-      await loadPlatforms();
-      const [wallet, pref, orders, stats] = await Promise.all([apiFetch(`/api/wallets/${state.userId}`), apiFetch(`/api/preferences/users/${state.userId}`), apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`), apiFetch(`/api/trading/users/${state.userId}/orders/stats`)]);
-      $("walletTotal").textContent = money(wallet.solde_total); $("walletAvailable").textContent = money(wallet.solde_disponible); $("walletEngaged").textContent = money(wallet.solde_engage);
-      $("homePatrimony").textContent = money(wallet.solde_total);
-      $("homeProjects").textContent = `${stats.total_orders} signaux`;
-      $("homeCycle").textContent = stats.pending_orders > 0 ? "En cours" : (stats.filled_orders > 0 ? "Historique OK" : "En veille");
-      $("homePnl").textContent = `PnL ${money(stats.total_pnl_simule)}`;
-      applyPreferences(pref); renderOrders(orders); await loadIntegrations();
-    }
-
-    $("loginTab").onclick = () => setAuthMode("login"); $("registerTab").onclick = () => setAuthMode("register"); $("authSubmitBtn").onclick = submitAuth; $("logoutBtn").onclick = clearSession; $("refreshBtn").onclick = () => refreshAll().catch((err) => alert(err.message));
-    $("themeToggle").onclick = () => applyTheme(state.theme === "light" ? "dark" : "light");
-    $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("reloadIntegrationsBtn").onclick = loadIntegrations; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
-
-    applyTheme(state.theme);
-    if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(showPublicDemo); }
-    else { showPublicDemo(); }
+    document.getElementById('chatBtn').addEventListener('click', () => {
+      const input = document.getElementById('chatInput');
+      const message = input.value.trim();
+      if (!message) return;
+      const log = document.getElementById('chatLog');
+      const safe = message.replaceAll('<', '&lt;');
+      log.insertAdjacentHTML('beforeend', `<div class="message">${safe}</div>`);
+      log.insertAdjacentHTML('beforeend', '<div class="message ai">SentiQ IA : commence en paper trading, limite le montant engagé, vérifie le seuil IA et n’active un broker réel qu’avec clés API restreintes côté serveur.</div>');
+      input.value = '';
+      log.scrollTop = log.scrollHeight;
+    });
   </script>
 </body>
 </html>
