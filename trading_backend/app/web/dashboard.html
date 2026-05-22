@@ -164,7 +164,7 @@
       </div>
       <div class="row">
         <button id="themeToggle" class="ghost theme-toggle">Mode clair</button>
-        <span id="sessionBadge" class="pill">Non connecté</span>
+        <span id="sessionBadge" class="pill">Présentation publique</span>
         <button id="logoutBtn" class="ghost hidden">Déconnexion</button>
       </div>
     </header>
@@ -178,7 +178,7 @@
         </div>
       </div>
 
-      <section class="card auth-card" id="authCard">
+      <section class="card auth-card hidden" id="authCard">
         <div class="tabs">
           <button id="loginTab" class="tab active">Connexion</button>
           <button id="registerTab" class="tab">Créer un compte</button>
@@ -196,7 +196,7 @@
       </section>
     </section>
 
-    <section id="appPanel" class="hidden">
+    <section id="appPanel">
       <div class="grid">
         <section class="card span-12" id="home">
           <div class="row" style="justify-content: space-between;">
@@ -348,6 +348,38 @@
       ws: null,
     };
 
+    const DEMO_PREF = {
+      broker_platform: "simulation",
+      minimum_probability_threshold: "80.00",
+      enable_crypto: true,
+      enable_etf: true,
+      enable_stocks: true,
+      sector_tech: true,
+      sector_mines: true,
+      sector_real_estate: false,
+      sector_insurance: false,
+      sector_food: false,
+      paper_trading_enabled: true,
+    };
+    const DEMO_INTEGRATIONS = {
+      payments: [
+        { id: "stripe", label: "Stripe Checkout", configured: false, status: "à configurer", required_env: ["STRIPE_SECRET_KEY"], masked_identifiers: [], note: "Paiement réel prêt à activer côté serveur." },
+        { id: "open_banking", label: "Open banking", configured: false, status: "prévu", required_env: ["OPEN_BANKING_CLIENT_ID"], masked_identifiers: [], note: "Virement bancaire via prestataire régulé, sans identifiants bancaires dans SentiQ." },
+      ],
+      brokers: [
+        { id: "alpaca", label: "Alpaca Paper", configured: true, status: "démo", required_env: ["ALPACA_API_KEY", "ALPACA_API_SECRET"], masked_identifiers: ["paper"], note: "Actions/ETF en paper trading." },
+        { id: "binance", label: "Binance", configured: false, status: "clé serveur requise", required_env: ["BINANCE_API_KEY", "BINANCE_API_SECRET"], masked_identifiers: [], note: "Crypto avec clé restreinte et IP VPS autorisée." },
+        { id: "coinbase", label: "Coinbase", configured: false, status: "clé serveur requise", required_env: ["COINBASE_API_KEY", "COINBASE_API_SECRET"], masked_identifiers: [], note: "Advanced Trade API." },
+      ],
+      oauth: [
+        { id: "google", label: "Google OAuth", configured: false, status: "prévu", required_env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], masked_identifiers: [], note: "Connexion sociale à activer plus tard." },
+      ],
+    };
+    function requireSession(targetStatusId = "integrationStatus") {
+      if (state.token && state.userId) return true;
+      status(targetStatusId, "Mode présentation publique: cette action sera activée après réactivation de la connexion.", false);
+      return false;
+    }
     const $ = (id) => document.getElementById(id);
     function applyTheme(theme) {
       state.theme = theme;
@@ -390,7 +422,7 @@
       localStorage.removeItem("sentiq_token"); localStorage.removeItem("sentiq_user_id"); localStorage.removeItem("sentiq_email");
       state.token = ""; state.userId = ""; state.email = "";
       if (state.ws) state.ws.close();
-      $("sessionBadge").textContent = "Non connecté"; $("authCard").classList.remove("hidden"); $("appPanel").classList.add("hidden"); $("logoutBtn").classList.add("hidden");
+      showPublicDemo();
     }
 
     async function login(email, password) {
@@ -425,6 +457,7 @@
       $("homeMode").textContent = pref.paper_trading_enabled ? "Paper trading" : "Live à valider";
     }
     async function savePreferences() {
+      if (!requireSession("prefsStatus")) return;
       try {
         const payload = {
           broker_platform: $("brokerPlatform").value,
@@ -446,10 +479,12 @@
     }
 
     async function deposit() {
+      if (!requireSession("walletStatus")) return;
       try { const data = await apiFetch(`/api/wallets/${state.userId}/deposit`, { method: "POST", jsonBody: { amount: $("depositAmount").value, payment_method: "simulated_secure_psp" } }); status("walletStatus", data.message, true); await refreshAll(); }
       catch (err) { status("walletStatus", err.message, false); }
     }
     async function allocate() {
+      if (!requireSession("walletStatus")) return;
       try { const data = await apiFetch(`/api/wallets/${state.userId}/allocate`, { method: "POST", jsonBody: { amount: $("allocateAmount").value } }); status("walletStatus", data.message, true); await refreshAll(); }
       catch (err) { status("walletStatus", err.message, false); }
     }
@@ -471,6 +506,7 @@
       $("oauthConnectors").innerHTML = payload.oauth.map((item) => connectorCard(item, "oauth")).join("");
     }
     async function loadIntegrations() {
+      if (!state.token || !state.userId) { renderConnectors(DEMO_INTEGRATIONS); status("integrationStatus", "Mode présentation: statuts connecteurs simulés.", true); return; }
       try {
         const payload = await apiFetch("/api/integrations/status");
         renderConnectors(payload);
@@ -478,6 +514,7 @@
       } catch (err) { status("integrationStatus", err.message, false); }
     }
     async function activateBroker(platform) {
+      if (!requireSession("integrationStatus")) return;
       try {
         const result = await apiFetch("/api/integrations/brokers/activate", { method: "POST", jsonBody: { platform } });
         status("integrationStatus", result.message, result.configured);
@@ -485,6 +522,7 @@
       } catch (err) { status("integrationStatus", err.message, false); }
     }
     async function startStripeCheckout() {
+      if (!requireSession("integrationStatus")) return;
       try {
         const result = await apiFetch("/api/integrations/payments/stripe/checkout", { method: "POST", jsonBody: { amount: $("depositAmount").value || "50" } });
         if (result.checkout_url) location.href = result.checkout_url;
@@ -497,6 +535,10 @@
     async function askAdvisor() {
       const message = $("advisorMessage").value.trim(); if (!message) return;
       const log = $("chatLog"); log.insertAdjacentHTML("beforeend", `<div class="msg user">${message.replaceAll("<", "&lt;")}</div>`); $("advisorMessage").value = "";
+      if (!state.token || !state.userId) {
+        const body = "Mode présentation: SentiQ recommande de finaliser le choix broker, rester en paper trading, puis connecter Stripe/Binance/Alpaca avec clés serveur sécurisées. Aucune clé ni identifiant bancaire ne doit être saisi dans le chat.";
+        log.insertAdjacentHTML("beforeend", `<div class="msg ai">${body}</div>`); log.scrollTop = log.scrollHeight; return;
+      }
       try {
         const res = await apiFetch("/api/advisor/chat", { method: "POST", jsonBody: { message } });
         const body = `${res.answer}\n\nActions:\n- ${res.suggested_actions.join("\n- ")}\n\nRisques:\n- ${(res.risk_flags.length ? res.risk_flags : ["Aucun signal de risque spécifique détecté."]).join("\n- ")}\n\n${res.disclaimer}`;
@@ -504,10 +546,12 @@
       } catch (err) { log.insertAdjacentHTML("beforeend", `<div class="msg ai">Erreur: ${err.message}</div>`); }
     }
     async function analyzeNews() {
+      if (!requireSession("decisionStatus")) return;
       try { const data = await apiFetch("/api/decision/signals/analyze", { method: "POST", jsonBody: { news_text: $("newsText").value, category: $("newsCategory").value } }); status("decisionStatus", `Signal ${data.signal_strength}% | secteur ${data.mapped_sector} | valide=${data.is_valid_signal} | TTL=${data.time_to_live_minutes} min`, true); }
       catch (err) { status("decisionStatus", err.message, false); }
     }
     async function evaluateOpportunity() {
+      if (!requireSession("decisionStatus")) return;
       try { const data = await apiFetch(`/api/decision/users/${state.userId}/evaluate`, { method: "POST" }); status("decisionStatus", `${data.reason} Exécution=${data.should_execute} ${data.active_trade_id ? `| trade=${data.active_trade_id}` : ""}`, data.should_execute); await refreshAll(); }
       catch (err) { status("decisionStatus", err.message, false); }
     }
@@ -522,8 +566,34 @@
       ws.onopen = () => status("wsStatus", "Monitoring live connecté.", true); ws.onclose = () => status("wsStatus", "Monitoring déconnecté.", false); ws.onerror = () => status("wsStatus", "Erreur WebSocket.", false);
       ws.onmessage = (evt) => { try { const payload = JSON.parse(evt.data); if (payload.type !== "event" || !payload.data) return; const e = payload.data; const li = document.createElement("li"); li.textContent = `${e.created_at} | ${e.channel} | ${e.message}`; $("eventsList").prepend(li); } catch (_) {} };
     }
+    async function showPublicDemo() {
+      state.userId = ""; state.email = "";
+      $("authCard").classList.add("hidden");
+      $("appPanel").classList.remove("hidden");
+      $("logoutBtn").classList.add("hidden");
+      $("sessionBadge").textContent = "Présentation publique";
+      $("userLine").textContent = "Mode présentation publique | connexion temporairement masquée";
+      $("firstName").textContent = "Eva";
+      await loadPlatforms().catch(() => { state.platforms = [{ id: "simulation", label: "Simulation", asset_classes: ["Actions", "ETF", "Crypto"], note: "Mode présentation." }]; });
+      applyPreferences(DEMO_PREF);
+      $("walletTotal").textContent = money(6733.77);
+      $("walletAvailable").textContent = money(5283.77);
+      $("walletEngaged").textContent = money(1450.00);
+      $("homePatrimony").textContent = money(6733.77);
+      $("homeProjects").textContent = "5 signaux";
+      $("homeCycle").textContent = "En veille";
+      $("homePnl").textContent = `PnL ${money(176.90)}`;
+      renderOrders([
+        { asset_symbol: "AAPL", direction: "buy", status: "paper", confidence: "84.20", pnl_simule: "42.80" },
+        { asset_symbol: "BTC", direction: "buy", status: "watchlist", confidence: "78.40", pnl_simule: "0.00" },
+      ]);
+      renderConnectors(DEMO_INTEGRATIONS);
+      status("wsStatus", "Monitoring désactivé en présentation publique.", true);
+      status("integrationStatus", "Aperçu connecteurs: les vrais statuts apparaîtront après connexion serveur.", true);
+    }
+
     async function refreshAll() {
-      if (!state.token || !state.userId) return;
+      if (!state.token || !state.userId) { await showPublicDemo(); return; }
       const me = await apiFetch("/api/auth/me"); setSession(me);
       await loadPlatforms();
       const [wallet, pref, orders, stats] = await Promise.all([apiFetch(`/api/wallets/${state.userId}`), apiFetch(`/api/preferences/users/${state.userId}`), apiFetch(`/api/trading/users/${state.userId}/orders?limit=10`), apiFetch(`/api/trading/users/${state.userId}/orders/stats`)]);
@@ -540,7 +610,8 @@
     $("brokerPlatform").onchange = updateBrokerHelp; $("savePrefsBtn").onclick = savePreferences; $("depositBtn").onclick = deposit; $("allocateBtn").onclick = allocate; $("reloadIntegrationsBtn").onclick = loadIntegrations; $("advisorBtn").onclick = askAdvisor; $("analyzeBtn").onclick = analyzeNews; $("evaluateBtn").onclick = evaluateOpportunity;
 
     applyTheme(state.theme);
-    if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(clearSession); }
+    if (state.token && state.userId) { apiFetch("/api/auth/me").then((me) => { setSession(me); return refreshAll(); }).then(openWs).catch(showPublicDemo); }
+    else { showPublicDemo(); }
   </script>
 </body>
 </html>
