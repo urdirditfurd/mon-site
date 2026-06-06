@@ -136,6 +136,14 @@
     }
     .chat-msg { margin-bottom: 8px; }
     .chat-msg.bot { color: var(--muted); }
+    .auth-toggle {
+      background: none; border: 0; color: var(--accent);
+      font-size: 13px; cursor: pointer; padding: 0; margin-top: 12px;
+      text-decoration: underline; text-underline-offset: 3px;
+    }
+    .auth-toggle:hover { color: #60a5fa; }
+    .pwd-hint { font-size: 11px; color: #64748b; margin: -4px 0 10px; }
+    .auth-welcome { font-size: 13px; color: var(--muted); margin: 0 18px 12px; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -173,21 +181,24 @@
     </div>
   </div>
 
-  <!-- Gate connexion -->
+  <!-- Gate connexion / inscription -->
   <div id="authGate" class="app">
     <header><div class="logo">Senti<span>Q</span></div></header>
-    <h1 style="padding:0 18px">Connexion</h1>
+    <h1 id="authTitle" style="padding:0 18px">Connexion</h1>
+    <p id="authWelcome" class="auth-welcome hidden"></p>
     <div style="padding:0 18px">
       <button class="btn oauth google" id="btnGoogle">Continuer avec Google</button>
       <button class="btn oauth apple" id="btnApple">Continuer avec Apple</button>
       <p class="hint" style="text-align:center;margin:12px 0">— ou connexion classique —</p>
       <label>Email</label>
-      <input id="loginEmail" type="email" placeholder="vous@email.com" />
+      <input id="loginEmail" type="email" placeholder="vous@email.com" autocomplete="email" />
       <label>Mot de passe</label>
-      <input id="loginPassword" type="password" placeholder="••••••••" />
-      <button class="btn" id="btnLoginClassic">Se connecter</button>
+      <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
+      <p id="pwdHint" class="pwd-hint">Minimum 8 caractères.</p>
+      <button class="btn" id="btnAuthPrimary">Se connecter</button>
+      <button type="button" class="auth-toggle" id="btnToggleAuth">Première visite ? Créer un compte</button>
       <div id="loginStatus" class="status"></div>
-      <p class="hint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
+      <p class="hint" id="authFooterHint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
     </div>
   </div>
 
@@ -320,6 +331,7 @@
 
   <script>
     const TELEGRAM_URL = "https://t.me/sentiq_actus"; // ← remplacez par votre canal
+    const MIN_PASSWORD_LENGTH = 8;
     const PLATFORMS = [
       { id: "alpaca", label: "Alpaca (Actions/ETF)" },
       { id: "binance", label: "Binance (Crypto)" },
@@ -331,7 +343,79 @@
       userId: localStorage.getItem("trading_user_id") || "",
       profile: JSON.parse(localStorage.getItem("sentiq_profile") || "null"),
       trade: { platform: "", asset: "", sector: "" },
+      authMode: "login",
     };
+
+    function getKnownAccounts() {
+      try {
+        return JSON.parse(localStorage.getItem("sentiq_known_accounts") || "[]");
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function markKnownAccount(email) {
+      const normalized = email.trim().toLowerCase();
+      if (!normalized) return;
+      const accounts = getKnownAccounts();
+      if (!accounts.includes(normalized)) {
+        accounts.push(normalized);
+        localStorage.setItem("sentiq_known_accounts", JSON.stringify(accounts));
+      }
+      localStorage.setItem("sentiq_last_email", normalized);
+    }
+
+    function isKnownAccount(email) {
+      return getKnownAccounts().includes(email.trim().toLowerCase());
+    }
+
+    function setAuthMode(mode) {
+      state.authMode = mode;
+      const isSignup = mode === "signup";
+      $("authTitle").textContent = isSignup ? "Créer un compte" : "Connexion";
+      $("btnAuthPrimary").textContent = isSignup ? "Créer mon compte" : "Se connecter";
+      $("btnToggleAuth").textContent = isSignup
+        ? "J'ai déjà un compte — Se connecter"
+        : "Première visite ? Créer un compte";
+      $("loginPassword").autocomplete = isSignup ? "new-password" : "current-password";
+      $("pwdHint").textContent = isSignup
+        ? `Minimum ${MIN_PASSWORD_LENGTH} caractères requis.`
+        : `Min. ${MIN_PASSWORD_LENGTH} caractères si vous créez un compte.`;
+      $("pwdHint").style.opacity = isSignup ? "1" : "0.55";
+      $("authFooterHint").textContent = isSignup
+        ? "Après création, vous serez connecté automatiquement."
+        : "Un e-mail de confirmation sera envoyé après connexion réussie.";
+      $("authWelcome").classList.toggle("hidden", !isSignup);
+      if (isSignup) {
+        $("authWelcome").textContent =
+          "Bienvenue ! Créez votre compte pour personnaliser SentiQ et suivre vos signaux.";
+      }
+      setStatus("loginStatus", "", true);
+    }
+
+    function initAuthScreen() {
+      const known = getKnownAccounts();
+      const lastEmail = localStorage.getItem("sentiq_last_email") || "";
+      if (lastEmail) $("loginEmail").value = lastEmail;
+
+      if (known.length === 0) {
+        setAuthMode("signup");
+      } else {
+        setAuthMode("login");
+        $("authWelcome").classList.remove("hidden");
+        $("authWelcome").textContent = `Compte connu sur cet appareil (${known.length}). Connectez-vous ou créez un autre compte.`;
+      }
+
+      $("loginEmail")?.addEventListener("blur", () => {
+        const email = $("loginEmail").value.trim().toLowerCase();
+        if (!email) return;
+        if (isKnownAccount(email)) {
+          setAuthMode("login");
+          $("authWelcome").classList.remove("hidden");
+          $("authWelcome").textContent = "Ce compte est déjà enregistré ici. Connectez-vous.";
+        }
+      });
+    }
 
     const $ = (id) => document.getElementById(id);
     const euro = (v) => Number(v || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -420,6 +504,7 @@
       state.userId = login.user.id;
       localStorage.setItem("trading_token", state.token);
       localStorage.setItem("trading_user_id", state.userId);
+      markKnownAccount(email);
       await sendLoginConfirmationEmail(email);
       setStatus("loginStatus", "Connexion réussie. E-mail de confirmation envoyé (si SMTP configuré).", true);
       showApp(true);
@@ -427,12 +512,46 @@
       await refreshAll();
     }
 
-    $("btnLoginClassic")?.addEventListener("click", async () => {
-      try {
-        await doLogin($("loginEmail").value.trim(), $("loginPassword").value);
-      } catch (e) {
-        setStatus("loginStatus", e.message, false);
+    async function doSignup(email, password) {
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        throw new Error(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`);
       }
+      await api("/api/users", {
+        method: "POST",
+        body: { email, password, role: "trader" },
+      });
+      markKnownAccount(email);
+      setStatus("loginStatus", "Compte créé ! Connexion en cours…", true);
+      await doLogin(email, password);
+    }
+
+    $("btnAuthPrimary")?.addEventListener("click", async () => {
+      try {
+        const email = $("loginEmail").value.trim();
+        const password = $("loginPassword").value;
+        if (!email) {
+          setStatus("loginStatus", "Indiquez votre adresse e-mail.", false);
+          return;
+        }
+        if (state.authMode === "signup") {
+          await doSignup(email, password);
+        } else {
+          await doLogin(email, password);
+        }
+      } catch (e) {
+        const msg = e.message || String(e);
+        if (msg.includes("existe déjà") || msg.includes("409")) {
+          markKnownAccount($("loginEmail").value.trim());
+          setStatus("loginStatus", "Ce compte existe déjà. Utilisez « Se connecter ».", false);
+          setAuthMode("login");
+        } else {
+          setStatus("loginStatus", msg, false);
+        }
+      }
+    });
+
+    $("btnToggleAuth")?.addEventListener("click", () => {
+      setAuthMode(state.authMode === "login" ? "signup" : "login");
     });
 
     $("btnGoogle")?.addEventListener("click", () => {
@@ -634,6 +753,7 @@
     });
 
     renderPlatforms();
+    initAuthScreen();
     if (state.token && state.userId) {
       showApp(true);
       if (state.profile?.prenom) applyGreeting();
