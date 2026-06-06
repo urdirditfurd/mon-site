@@ -64,3 +64,28 @@ async def me(current_user: User = Depends(get_current_user)) -> AuthUserResponse
     """Retourne l'identité de l'utilisateur courant."""
 
     return _to_auth_user(current_user)
+
+
+@router.post("/login-confirmation", status_code=status.HTTP_202_ACCEPTED)
+async def login_confirmation(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Enregistre une confirmation de connexion (SMTP à brancher en production)."""
+
+    await log_audit_event(
+        session,
+        source="auth_api",
+        event_type="login_confirmation_requested",
+        severity="info",
+        message=f"Confirmation de connexion pour {current_user.email}.",
+        user_id=current_user.id,
+        payload={"email": current_user.email},
+        monitoring_hub=request.app.state.monitoring_hub,
+    )
+    await session.commit()
+    return {
+        "status": "accepted",
+        "message": "Confirmation enregistrée. Configurez SMTP pour l'envoi réel.",
+    }

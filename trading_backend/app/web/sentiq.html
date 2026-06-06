@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SentiQ — Trading piloté par le sentiment</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e17;
+      --panel: #12182a;
+      --panel2: #171f35;
+      --border: #2a3550;
+      --text: #eef2ff;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent2: #22c55e;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 80px; }
+    header {
+      padding: 16px 18px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo { font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+    .logo span { color: var(--accent); }
+    nav.bottom {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #0f1424ee; backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-around; padding: 10px 0 14px;
+    }
+    nav.bottom button {
+      background: none; border: 0; color: var(--muted);
+      font-size: 12px; cursor: pointer; padding: 4px 12px;
+    }
+    nav.bottom button.active { color: var(--accent); font-weight: 700; }
+    .screen { display: none; padding: 0 18px 24px; }
+    .screen.active { display: block; }
+    h1 { font-size: 26px; margin: 8px 0 6px; line-height: 1.2; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 14px; padding: 14px;
+    }
+    .card.full { grid-column: 1 / -1; }
+    .card label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .card b { font-size: 18px; }
+    .card.positive b { color: var(--accent2); }
+    .capital-row { display: flex; align-items: center; gap: 10px; }
+    .btn-plus {
+      width: 36px; height: 36px; border-radius: 50%; border: 0;
+      background: var(--accent); color: #fff; font-size: 22px;
+      font-weight: 700; cursor: pointer; line-height: 1;
+    }
+    .news-item {
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .news-item:last-child { border-bottom: 0; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tabs button {
+      flex: 1; padding: 8px; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--panel); color: var(--muted); cursor: pointer;
+    }
+    .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .position {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 14px; margin-bottom: 10px;
+    }
+    .position .gain { color: var(--accent2); font-weight: 700; }
+    .position .loss { color: var(--danger); font-weight: 700; }
+    input, select, textarea {
+      width: 100%; padding: 10px 12px; margin: 6px 0 10px;
+      border-radius: 10px; border: 1px solid var(--border);
+      background: var(--panel2); color: var(--text);
+    }
+    .btn {
+      display: inline-block; width: 100%; padding: 12px;
+      border: 0; border-radius: 12px; background: var(--accent);
+      color: #fff; font-weight: 700; cursor: pointer; margin-top: 8px;
+    }
+    .btn.secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+    .btn.oauth { margin-top: 6px; }
+    .btn.google { background: #fff; color: #333; }
+    .btn.apple { background: #000; border: 1px solid #444; }
+    .modal {
+      display: none; position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,.75); align-items: center; justify-content: center; padding: 18px;
+    }
+    .modal.open { display: flex; }
+    .modal-box {
+      width: 100%; max-width: 400px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 16px; padding: 20px;
+      max-height: 90vh; overflow-y: auto;
+    }
+    .modal-box h2 { margin: 0 0 12px; font-size: 20px; }
+    .step { margin-bottom: 16px; }
+    .step-num { font-size: 12px; color: var(--accent); font-weight: 700; }
+    .pill {
+      display: inline-block; padding: 6px 12px; margin: 4px 4px 4px 0;
+      border-radius: 999px; border: 1px solid var(--border);
+      background: var(--panel2); font-size: 13px; cursor: pointer;
+    }
+    .pill.selected { border-color: var(--accent); background: #1e3a5f; }
+    .threshold-row { display: flex; align-items: center; gap: 10px; }
+    .threshold-row input[type=range] { flex: 1; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .status { font-size: 13px; margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--panel2); }
+    .status.ok { color: var(--accent2); }
+    .status.err { color: var(--danger); }
+    .telegram-banner {
+      display: flex; align-items: center; gap: 10px;
+      background: #1a2744; border: 1px solid #2563eb44;
+      border-radius: 12px; padding: 12px; margin-bottom: 16px; text-decoration: none; color: inherit;
+    }
+    .telegram-banner:hover { border-color: var(--accent); }
+    .hidden { display: none !important; }
+    #authGate { padding-top: 40px; }
+    .chat-box {
+      height: 200px; overflow-y: auto; background: var(--panel2);
+      border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .chat-msg { margin-bottom: 8px; }
+    .chat-msg.bot { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <!-- Modal onboarding 1ère connexion -->
+  <div id="onboardingModal" class="modal">
+    <div class="modal-box">
+      <h2>Bienvenue sur SentiQ</h2>
+      <p class="sub">Quelques questions pour personnaliser votre expérience.</p>
+      <label>Prénom</label>
+      <input id="obPrenom" placeholder="Ex: Marie" required />
+      <label>Nom</label>
+      <input id="obNom" placeholder="Ex: Dupont" />
+      <label>Âge</label>
+      <input id="obAge" type="number" min="18" max="99" placeholder="Ex: 32" />
+      <label>Objectif d'investissement</label>
+      <select id="obObjectif">
+        <option value="preservation">Préserver mon capital</option>
+        <option value="croissance">Croissance modérée</option>
+        <option value="performance">Performance maximale</option>
+        <option value="decouverte">Découvrir le trading IA</option>
+      </select>
+      <button class="btn" id="obSave">Continuer</button>
+    </div>
+  </div>
+
+  <!-- Modal ajout argent (+) -->
+  <div id="depositModal" class="modal">
+    <div class="modal-box">
+      <h2>Ajouter des fonds</h2>
+      <label>Montant (€)</label>
+      <input id="depositAmount" type="number" min="10" step="10" value="100" />
+      <button class="btn" id="confirmDeposit">Confirmer le dépôt</button>
+      <button class="btn secondary" id="closeDeposit">Annuler</button>
+      <div id="depositStatus" class="status"></div>
+    </div>
+  </div>
+
+  <!-- Gate connexion -->
+  <div id="authGate" class="app">
+    <header><div class="logo">Senti<span>Q</span></div></header>
+    <h1 style="padding:0 18px">Connexion</h1>
+    <div style="padding:0 18px">
+      <button class="btn oauth google" id="btnGoogle">Continuer avec Google</button>
+      <button class="btn oauth apple" id="btnApple">Continuer avec Apple</button>
+      <p class="hint" style="text-align:center;margin:12px 0">— ou connexion classique —</p>
+      <label>Email</label>
+      <input id="loginEmail" type="email" placeholder="vous@email.com" />
+      <label>Mot de passe</label>
+      <input id="loginPassword" type="password" placeholder="••••••••" />
+      <button class="btn" id="btnLoginClassic">Se connecter</button>
+      <div id="loginStatus" class="status"></div>
+      <p class="hint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
+    </div>
+  </div>
+
+  <!-- App principale -->
+  <div id="mainApp" class="app hidden">
+    <header>
+      <div class="logo">Senti<span>Q</span></div>
+      <button class="btn secondary" style="width:auto;padding:6px 12px;margin:0;font-size:12px" id="btnLogout">Déconnexion</button>
+    </header>
+
+    <!-- ACCUEIL -->
+    <section id="screen-home" class="screen active">
+      <h1 id="greetingTitle">Bonjour ! 👋</h1>
+      <p class="sub" id="greetingSub">Votre patrimoine SentiQ est en cours de chargement…</p>
+
+      <a id="telegramLink" class="telegram-banner" href="https://t.me/sentiq_actus" target="_blank" rel="noopener">
+        <span style="font-size:24px">📢</span>
+        <div>
+          <b>Actus SentiQ sur Telegram</b>
+          <div class="hint">Canal lecture seule — suivez les signaux, pas de messages</div>
+        </div>
+      </a>
+
+      <div class="cards">
+        <div class="card">
+          <label>Capital actif</label>
+          <div class="capital-row">
+            <b id="capitalActive">— €</b>
+            <button class="btn-plus" id="btnAddMoney" title="Ajouter des fonds">+</button>
+          </div>
+        </div>
+        <div class="card positive">
+          <label>Gain simulé</label>
+          <b id="gainSimule">— €</b>
+        </div>
+        <div class="card">
+          <label>Signaux suivis</label>
+          <b id="signalsCount">—</b>
+        </div>
+        <div class="card">
+          <label>Mode</label>
+          <b id="modeLabel">Paper</b>
+        </div>
+      </div>
+
+      <h3 style="margin:0 0 10px">Actualités</h3>
+      <div class="card full" id="newsList">
+        <div class="news-item">Chargement des actualités…</div>
+      </div>
+    </section>
+
+    <!-- SUIVI -->
+    <section id="screen-track" class="screen">
+      <h1>Suivi</h1>
+      <p class="sub">Positions en cours et cycles terminés.</p>
+      <div class="tabs">
+        <button class="active" data-tab="open">En cours</button>
+        <button data-tab="closed">Fini</button>
+      </div>
+      <div id="positionsOpen"></div>
+      <div id="positionsClosed" class="hidden"></div>
+      <div class="card full" style="margin-top:16px">
+        <label>Revenus simulés</label>
+        <b id="revenusSimules" class="positive">— €</b>
+      </div>
+    </section>
+
+    <!-- TRADER -->
+    <section id="screen-trade" class="screen">
+      <h1>Trader avec SentiQ</h1>
+      <p class="sub">Parcours guidé : plateforme, actif, secteur, montant.</p>
+
+      <div class="step">
+        <div class="step-num">1. Plateforme</div>
+        <div id="platformChoices"></div>
+        <p class="hint">Les clés API restent côté serveur.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2. Type d'actif</div>
+        <div id="assetChoices">
+          <span class="pill" data-asset="stocks">Action</span>
+          <span class="pill" data-asset="etf">ETF</span>
+          <span class="pill" data-asset="crypto">Crypto</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3. Secteur</div>
+        <div id="sectorChoices">
+          <span class="pill" data-sector="tech">Tech</span>
+          <span class="pill" data-sector="mines">Mines</span>
+          <span class="pill" data-sector="real_estate">Immobilier</span>
+          <span class="pill" data-sector="insurance">Assurance</span>
+          <span class="pill" data-sector="food">Alimentation</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4. Montant à engager (€)</div>
+        <input id="tradeAmount" type="number" min="10" step="10" value="100" />
+      </div>
+
+      <div class="step">
+        <div class="step-num">Seuil de probabilité minimum</div>
+        <div class="threshold-row">
+          <input id="thresholdSlider" type="range" min="50" max="99" value="75" />
+          <b id="thresholdValue">75</b><span>%</span>
+        </div>
+        <p class="hint" id="thresholdHint">Charge le seuil depuis votre profil…</p>
+        <button class="btn secondary" id="saveThreshold" style="margin-top:6px">Enregistrer le seuil</button>
+      </div>
+
+      <button class="btn" id="btnPrepareTrade">Préparer l'opportunité</button>
+      <div id="tradeStatus" class="status"></div>
+
+      <div class="card full" style="margin-top:20px">
+        <h3 style="margin:0 0 8px">Conseiller IA</h3>
+        <div class="chat-box" id="chatBox">
+          <div class="chat-msg bot">Bonjour ! Je peux expliquer le seuil de probabilité, le risque et les signaux d'actualité.</div>
+        </div>
+        <input id="chatInput" placeholder="Posez votre question…" />
+        <button class="btn secondary" id="btnChatSend">Envoyer</button>
+      </div>
+    </section>
+
+    <nav class="bottom">
+      <button data-screen="home" class="active">Accueil</button>
+      <button data-screen="track">Suivi</button>
+      <button data-screen="trade">Trader</button>
+    </nav>
+  </div>
+
+  <script>
+    const TELEGRAM_URL = "https://t.me/sentiq_actus"; // ← remplacez par votre canal
+    const PLATFORMS = [
+      { id: "alpaca", label: "Alpaca (Actions/ETF)" },
+      { id: "binance", label: "Binance (Crypto)" },
+      { id: "coinbase", label: "Coinbase Advanced" },
+    ];
+
+    const state = {
+      token: localStorage.getItem("trading_token") || "",
+      userId: localStorage.getItem("trading_user_id") || "",
+      profile: JSON.parse(localStorage.getItem("sentiq_profile") || "null"),
+      trade: { platform: "", asset: "", sector: "" },
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const euro = (v) => Number(v || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const setStatus = (id, msg, ok = true) => {
+      const el = $(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `status ${ok ? "ok" : "err"}`;
+    };
+
+    async function api(path, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      if (opts.body && typeof opts.body === "object") {
+        headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify(opts.body);
+      }
+      const res = await fetch(path, { ...opts, headers });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
+      return res.status === 204 ? null : res.json();
+    }
+
+    function applyGreeting() {
+      const prenom = state.profile?.prenom || "Investisseur";
+      $("greetingTitle").textContent = `Bonjour ${prenom} ! 👋`;
+      const objLabels = {
+        preservation: "préserver votre capital",
+        croissance: "une croissance modérée",
+        performance: "maximiser la performance",
+        decouverte: "découvrir le trading IA",
+      };
+      const obj = objLabels[state.profile?.objectif] || "suivre les marchés";
+      $("greetingSub").textContent =
+        `Votre objectif : ${obj}. Suivez les signaux IA et les opportunités détectées par SentiQ.`;
+    }
+
+    function showOnboardingIfNeeded() {
+      if (!state.token) return;
+      if (state.profile?.prenom) { applyGreeting(); return; }
+      $("onboardingModal").classList.add("open");
+    }
+
+    $("obSave")?.addEventListener("click", () => {
+      const prenom = $("obPrenom").value.trim();
+      if (!prenom) { alert("Le prénom est obligatoire."); return; }
+      state.profile = {
+        prenom,
+        nom: $("obNom").value.trim(),
+        age: $("obAge").value,
+        objectif: $("obObjectif").value,
+        createdAt: new Date().toISOString(),
+      };
+      localStorage.setItem("sentiq_profile", JSON.stringify(state.profile));
+      $("onboardingModal").classList.remove("open");
+      applyGreeting();
+    });
+
+    function showApp(loggedIn) {
+      $("authGate").classList.toggle("hidden", loggedIn);
+      $("mainApp").classList.toggle("hidden", !loggedIn);
+    }
+
+    async function sendLoginConfirmationEmail(email) {
+      try {
+        await api("/api/auth/login-confirmation", {
+          method: "POST",
+          body: { email },
+        });
+      } catch (_) {
+        // Endpoint optionnel — ne bloque pas la connexion
+        console.info("Confirmation e-mail : endpoint non configuré (normal en dev).");
+      }
+    }
+
+    async function doLogin(email, password) {
+      const login = await api("/api/auth/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      state.token = login.access_token;
+      state.userId = login.user.id;
+      localStorage.setItem("trading_token", state.token);
+      localStorage.setItem("trading_user_id", state.userId);
+      await sendLoginConfirmationEmail(email);
+      setStatus("loginStatus", "Connexion réussie. E-mail de confirmation envoyé (si SMTP configuré).", true);
+      showApp(true);
+      showOnboardingIfNeeded();
+      await refreshAll();
+    }
+
+    $("btnLoginClassic")?.addEventListener("click", async () => {
+      try {
+        await doLogin($("loginEmail").value.trim(), $("loginPassword").value);
+      } catch (e) {
+        setStatus("loginStatus", e.message, false);
+      }
+    });
+
+    $("btnGoogle")?.addEventListener("click", () => {
+      setStatus("loginStatus", "Google OAuth : configurez GOOGLE_CLIENT_ID sur le serveur (Phase 2).", false);
+    });
+    $("btnApple")?.addEventListener("click", () => {
+      setStatus("loginStatus", "Apple OAuth : configurez APPLE_CLIENT_ID sur le serveur (Phase 2).", false);
+    });
+
+    $("btnLogout")?.addEventListener("click", () => {
+      state.token = ""; state.userId = "";
+      localStorage.removeItem("trading_token");
+      localStorage.removeItem("trading_user_id");
+      showApp(false);
+    });
+
+    $("btnAddMoney")?.addEventListener("click", () => $("depositModal").classList.add("open"));
+    $("closeDeposit")?.addEventListener("click", () => $("depositModal").classList.remove("open"));
+    $("confirmDeposit")?.addEventListener("click", async () => {
+      try {
+        const amount = String($("depositAmount").value);
+        await api(`/api/wallets/${state.userId}/deposit`, {
+          method: "POST",
+          body: { amount, payment_method: "pm_card_visa" },
+        });
+        $("depositModal").classList.remove("open");
+        setStatus("depositStatus", "Dépôt effectué.", true);
+        await refreshAll();
+      } catch (e) {
+        setStatus("depositStatus", e.message, false);
+      }
+    });
+
+    $("telegramLink").href = TELEGRAM_URL;
+
+    function renderPlatforms() {
+      const el = $("platformChoices");
+      el.innerHTML = "";
+      PLATFORMS.forEach((p) => {
+        const span = document.createElement("span");
+        span.className = "pill";
+        span.textContent = p.label;
+        span.dataset.platform = p.id;
+        span.addEventListener("click", () => {
+          el.querySelectorAll(".pill").forEach((x) => x.classList.remove("selected"));
+          span.classList.add("selected");
+          state.trade.platform = p.id;
+        });
+        el.appendChild(span);
+      });
+    }
+
+    document.querySelectorAll("#assetChoices .pill, #sectorChoices .pill").forEach((pill) => {
+      pill.addEventListener("click", () => {
+        pill.parentElement.querySelectorAll(".pill").forEach((x) => x.classList.remove("selected"));
+        pill.classList.add("selected");
+        if (pill.dataset.asset) state.trade.asset = pill.dataset.asset;
+        if (pill.dataset.sector) state.trade.sector = pill.dataset.sector;
+      });
+    });
+
+    $("thresholdSlider")?.addEventListener("input", () => {
+      $("thresholdValue").textContent = $("thresholdSlider").value;
+    });
+
+    async function loadThreshold() {
+      try {
+        const risk = await api(`/api/trading/users/${state.userId}/risk`);
+        const seuil = Number(risk.seuil_probabilite_min || 75);
+        $("thresholdSlider").value = seuil;
+        $("thresholdValue").textContent = seuil;
+        $("thresholdHint").textContent =
+          `Seuil actif : ${seuil} %. Seuls les signaux IA ≥ ${seuil} % déclencheront un trade.`;
+      } catch (e) {
+        $("thresholdHint").textContent =
+          "Impossible de charger le seuil — vérifiez votre connexion.";
+      }
+    }
+
+    $("saveThreshold")?.addEventListener("click", async () => {
+      try {
+        const val = $("thresholdSlider").value;
+        await api(`/api/trading/users/${state.userId}/threshold`, {
+          method: "PATCH",
+          body: { seuil_probabilite_min: val },
+        });
+        $("thresholdHint").textContent = `Seuil enregistré : ${val} %.`;
+        setStatus("tradeStatus", `Seuil mis à jour à ${val} %.`, true);
+      } catch (e) {
+        setStatus("tradeStatus", e.message, false);
+      }
+    });
+
+    $("btnPrepareTrade")?.addEventListener("click", async () => {
+      if (!state.trade.platform || !state.trade.asset || !state.trade.sector) {
+        setStatus("tradeStatus", "Complétez plateforme, actif et secteur.", false);
+        return;
+      }
+      try {
+        const result = await api(`/api/decision/users/${state.userId}/evaluate`, { method: "POST" });
+        if (result.should_execute) {
+          setStatus("tradeStatus",
+            `Opportunité préparée ! ${result.direction} · ${result.sector} · ${result.probability_used} % · ${result.estimated_duration_minutes} min.`,
+            true);
+        } else {
+          setStatus("tradeStatus", result.reason || "Aucune opportunité pour le moment.", false);
+        }
+      } catch (e) {
+        setStatus("tradeStatus", e.message, false);
+      }
+    });
+
+    $("btnChatSend")?.addEventListener("click", () => {
+      const q = $("chatInput").value.trim();
+      if (!q) return;
+      const box = $("chatBox");
+      box.innerHTML += `<div class="chat-msg">${q}</div>`;
+      let reply = "Je traite votre question…";
+      if (/seuil|probabilit/i.test(q)) {
+        reply = "Le seuil de probabilité filtre les signaux IA : seuls ceux au-dessus de votre % minimum déclenchent un trade.";
+      } else if (/telegram/i.test(q)) {
+        reply = "Le canal Telegram SentiQ est en lecture seule : vous recevez les actus sans pouvoir poster.";
+      } else if (/risque/i.test(q)) {
+        reply = "En mode Paper, aucun argent réel n'est engagé. Commencez petit et ajustez le seuil selon votre tolérance.";
+      }
+      box.innerHTML += `<div class="chat-msg bot">${reply}</div>`;
+      $("chatInput").value = "";
+      box.scrollTop = box.scrollHeight;
+    });
+
+    async function refreshAll() {
+      if (!state.token || !state.userId) return;
+      try {
+        const wallet = await api(`/api/wallets/${state.userId}`);
+        $("capitalActive").textContent = `${euro(wallet.solde_disponible)} €`;
+
+        const stats = await api(`/api/trading/users/${state.userId}/orders/stats`);
+        const pnl = Number(stats.total_pnl_simule || 0);
+        $("gainSimule").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
+        $("signalsCount").textContent = stats.total_orders || 0;
+        $("revenusSimules").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
+
+        const news = await api("/api/news/live?limit=5");
+        const nl = $("newsList");
+        nl.innerHTML = "";
+        (news.items || news || []).slice(0, 5).forEach((n) => {
+          const div = document.createElement("div");
+          div.className = "news-item";
+          div.textContent = n.headline || n.title || n.news_text || JSON.stringify(n);
+          nl.appendChild(div);
+        });
+        if (!nl.children.length) nl.innerHTML = '<div class="news-item">Aucune actualité pour le moment.</div>';
+
+        const orders = await api(`/api/trading/users/${state.userId}/orders?limit=10`);
+        renderPositions(orders || []);
+        await loadThreshold();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderPositions(orders) {
+      const open = orders.filter((o) => o.status === "pending" || o.status === "filled");
+      const closed = orders.filter((o) => o.status === "rejected" || o.status === "closed");
+      const mk = (list, elId) => {
+        const el = $(elId);
+        el.innerHTML = "";
+        list.forEach((o) => {
+          const div = document.createElement("div");
+          div.className = "position";
+          const pnl = Number(o.pnl_simule || 0);
+          div.innerHTML = `
+            <div><b>${o.asset_symbol || "—"}</b><br><span class="hint">${o.direction} · ${o.confidence}%</span></div>
+            <div class="${pnl >= 0 ? "gain" : "loss"}">${pnl >= 0 ? "+" : ""}${euro(pnl)} €</div>`;
+          el.appendChild(div);
+        });
+        if (!list.length) el.innerHTML = '<p class="hint">Aucune position.</p>';
+      };
+      mk(open, "positionsOpen");
+      mk(closed, "positionsClosed");
+    }
+
+    document.querySelectorAll("nav.bottom button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("nav.bottom button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+        btn.classList.add("active");
+        $(`screen-${btn.dataset.screen}`).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        $("positionsOpen").classList.toggle("hidden", btn.dataset.tab !== "open");
+        $("positionsClosed").classList.toggle("hidden", btn.dataset.tab !== "closed");
+      });
+    });
+
+    renderPlatforms();
+    if (state.token && state.userId) {
+      showApp(true);
+      if (state.profile?.prenom) applyGreeting();
+      showOnboardingIfNeeded();
+      refreshAll();
+    } else {
+      showApp(false);
+    }
+  </script>
+</body>
+</html>
