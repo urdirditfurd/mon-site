@@ -26,6 +26,8 @@ class Settings:
     log_file_path: str = os.getenv("LOG_FILE_PATH", "storage/logs/trading-backend.log")
     log_max_bytes: int = int(os.getenv("LOG_MAX_BYTES", "2097152"))
     log_backup_count: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    apple_client_id: str = os.getenv("APPLE_CLIENT_ID", "")
 
 
 settings = Settings()

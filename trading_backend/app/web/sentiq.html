@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SentiQ — Trading piloté par le sentiment</title>
+  <meta name="sentiq-version" content="2.2" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
       color-scheme: dark;
@@ -96,6 +97,14 @@
     .btn.oauth { margin-top: 6px; }
     .btn.google { background: #fff; color: #333; }
     .btn.apple { background: #000; border: 1px solid #444; }
+    .btn-signup {
+      background: transparent;
+      border: 2px solid var(--accent2);
+      color: var(--accent2);
+    }
+    .btn-signup:hover { background: #14532d33; }
+    .auth-actions { display: grid; gap: 8px; margin-top: 8px; }
+    #googleBtnContainer { min-height: 44px; display: flex; justify-content: center; margin-top: 6px; }
     .modal {
       display: none; position: fixed; inset: 0; z-index: 1000;
       background: rgba(0,0,0,.75); align-items: center; justify-content: center; padding: 18px;
@@ -187,16 +196,18 @@
     <h1 id="authTitle" style="padding:0 18px">Connexion</h1>
     <p id="authWelcome" class="auth-welcome hidden"></p>
     <div style="padding:0 18px">
-      <button class="btn oauth google" id="btnGoogle">Continuer avec Google</button>
-      <button class="btn oauth apple" id="btnApple">Continuer avec Apple</button>
+      <div id="googleBtnContainer"></div>
+      <button class="btn oauth apple hidden" id="btnApple">Continuer avec Apple</button>
       <p class="hint" style="text-align:center;margin:12px 0">— ou connexion classique —</p>
       <label>Email</label>
       <input id="loginEmail" type="email" placeholder="vous@email.com" autocomplete="email" />
       <label>Mot de passe</label>
       <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
-      <p id="pwdHint" class="pwd-hint">Minimum 8 caractères.</p>
-      <button class="btn" id="btnAuthPrimary">Se connecter</button>
-      <button type="button" class="auth-toggle" id="btnToggleAuth">Première visite ? Créer un compte</button>
+      <p id="pwdHint" class="pwd-hint">Minimum 8 caractères requis.</p>
+      <div class="auth-actions">
+        <button class="btn" id="btnAuthPrimary">Se connecter</button>
+        <button type="button" class="btn btn-signup" id="btnAuthSecondary">Créer un compte</button>
+      </div>
       <div id="loginStatus" class="status"></div>
       <p class="hint" id="authFooterHint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
     </div>
@@ -330,8 +341,8 @@
   </div>
 
   <script>
+    let minPasswordLength = 8;
     const TELEGRAM_URL = "https://t.me/sentiq_actus"; // ← remplacez par votre canal
-    const MIN_PASSWORD_LENGTH = 8;
     const PLATFORMS = [
       { id: "alpaca", label: "Alpaca (Actions/ETF)" },
       { id: "binance", label: "Binance (Crypto)" },
@@ -344,6 +355,7 @@
       profile: JSON.parse(localStorage.getItem("sentiq_profile") || "null"),
       trade: { platform: "", asset: "", sector: "" },
       authMode: "login",
+      authConfig: { google_enabled: false, google_client_id: null, min_password_length: 8 },
     };
 
     function getKnownAccounts() {
@@ -372,23 +384,23 @@
     function setAuthMode(mode) {
       state.authMode = mode;
       const isSignup = mode === "signup";
+      const minLen = state.authConfig.min_password_length || minPasswordLength;
       $("authTitle").textContent = isSignup ? "Créer un compte" : "Connexion";
       $("btnAuthPrimary").textContent = isSignup ? "Créer mon compte" : "Se connecter";
-      $("btnToggleAuth").textContent = isSignup
-        ? "J'ai déjà un compte — Se connecter"
-        : "Première visite ? Créer un compte";
+      $("btnAuthSecondary").textContent = isSignup ? "J'ai déjà un compte" : "Créer un compte";
       $("loginPassword").autocomplete = isSignup ? "new-password" : "current-password";
       $("pwdHint").textContent = isSignup
-        ? `Minimum ${MIN_PASSWORD_LENGTH} caractères requis.`
-        : `Min. ${MIN_PASSWORD_LENGTH} caractères si vous créez un compte.`;
-      $("pwdHint").style.opacity = isSignup ? "1" : "0.55";
+        ? `Minimum ${minLen} caractères requis.`
+        : `Min. ${minLen} caractères pour créer un compte.`;
+      $("pwdHint").style.opacity = isSignup ? "1" : "0.6";
       $("authFooterHint").textContent = isSignup
         ? "Après création, vous serez connecté automatiquement."
         : "Un e-mail de confirmation sera envoyé après connexion réussie.";
-      $("authWelcome").classList.toggle("hidden", !isSignup);
+      $("authWelcome").classList.toggle("hidden", !isSignup && getKnownAccounts().length > 0);
       if (isSignup) {
+        $("authWelcome").classList.remove("hidden");
         $("authWelcome").textContent =
-          "Bienvenue ! Créez votre compte pour personnaliser SentiQ et suivre vos signaux.";
+          "Bienvenue ! Créez votre compte pour personnaliser SentiQ.";
       }
       setStatus("loginStatus", "", true);
     }
@@ -495,26 +507,31 @@
       }
     }
 
-    async function doLogin(email, password) {
-      const login = await api("/api/auth/login", {
-        method: "POST",
-        body: { email, password },
-      });
+    async function finishAuth(login, email) {
       state.token = login.access_token;
       state.userId = login.user.id;
       localStorage.setItem("trading_token", state.token);
       localStorage.setItem("trading_user_id", state.userId);
       markKnownAccount(email);
       await sendLoginConfirmationEmail(email);
-      setStatus("loginStatus", "Connexion réussie. E-mail de confirmation envoyé (si SMTP configuré).", true);
+      setStatus("loginStatus", "Connexion réussie.", true);
       showApp(true);
       showOnboardingIfNeeded();
       await refreshAll();
     }
 
+    async function doLogin(email, password) {
+      const login = await api("/api/auth/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      await finishAuth(login, email);
+    }
+
     async function doSignup(email, password) {
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        throw new Error(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`);
+      const minLen = state.authConfig.min_password_length || minPasswordLength;
+      if (password.length < minLen) {
+        throw new Error(`Le mot de passe doit contenir au moins ${minLen} caractères.`);
       }
       await api("/api/users", {
         method: "POST",
@@ -523,6 +540,62 @@
       markKnownAccount(email);
       setStatus("loginStatus", "Compte créé ! Connexion en cours…", true);
       await doLogin(email, password);
+    }
+
+    async function doGoogleLogin(credential) {
+      const login = await api("/api/auth/google", {
+        method: "POST",
+        body: { credential },
+      });
+      await finishAuth(login, login.user.email);
+    }
+
+    function initGoogleSignIn() {
+      const container = $("googleBtnContainer");
+      if (!container) return;
+
+      if (!state.authConfig.google_enabled || !state.authConfig.google_client_id) {
+        container.innerHTML =
+          '<p class="hint" style="text-align:center;margin:0">Google : ajoutez GOOGLE_CLIENT_ID dans .env.production</p>';
+        return;
+      }
+
+      const tryRender = () => {
+        if (!window.google?.accounts?.id) {
+          setTimeout(tryRender, 200);
+          return;
+        }
+        container.innerHTML = "";
+        window.google.accounts.id.initialize({
+          client_id: state.authConfig.google_client_id,
+          callback: async (response) => {
+            try {
+              await doGoogleLogin(response.credential);
+            } catch (e) {
+              setStatus("loginStatus", e.message || String(e), false);
+            }
+          },
+        });
+        window.google.accounts.id.renderButton(container, {
+          theme: "outline",
+          size: "large",
+          width: 320,
+          text: "continue_with",
+          locale: "fr",
+        });
+      };
+      tryRender();
+    }
+
+    async function loadAuthConfig() {
+      try {
+        const cfg = await fetch("/api/auth/public-config").then((r) => r.json());
+        state.authConfig = cfg;
+        minPasswordLength = cfg.min_password_length || 8;
+      } catch (_) {
+        state.authConfig = { google_enabled: false, min_password_length: 8 };
+      }
+      initGoogleSignIn();
     }
 
     $("btnAuthPrimary")?.addEventListener("click", async () => {
@@ -550,15 +623,15 @@
       }
     });
 
-    $("btnToggleAuth")?.addEventListener("click", () => {
+    $("btnToggleAuth")?.remove?.();
+
+    $("btnAuthSecondary")?.addEventListener("click", () => {
       setAuthMode(state.authMode === "login" ? "signup" : "login");
     });
 
-    $("btnGoogle")?.addEventListener("click", () => {
-      setStatus("loginStatus", "Google OAuth : configurez GOOGLE_CLIENT_ID sur le serveur (Phase 2).", false);
-    });
+    $("btnGoogle")?.remove?.();
     $("btnApple")?.addEventListener("click", () => {
-      setStatus("loginStatus", "Apple OAuth : configurez APPLE_CLIENT_ID sur le serveur (Phase 2).", false);
+      setStatus("loginStatus", "Apple Sign-In : configuration à venir.", false);
     });
 
     $("btnLogout")?.addEventListener("click", () => {
@@ -754,6 +827,7 @@
 
     renderPlatforms();
     initAuthScreen();
+    loadAuthConfig();
     if (state.token && state.userId) {
       showApp(true);
       if (state.profile?.prenom) applyGreeting();

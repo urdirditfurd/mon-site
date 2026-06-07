@@ -30,3 +30,18 @@ class LoginResponse(BaseModel):
     token_type: str
     expires_in_seconds: int
     user: AuthUserResponse
+
+
+class GoogleAuthRequest(BaseModel):
+    """Jeton ID renvoyé par Google Identity Services."""
+
+    credential: str = Field(..., min_length=10)
+
+
+class PublicAuthConfigResponse(BaseModel):
+    """Configuration publique pour l'écran de connexion."""
+
+    google_client_id: str | None = None
+    google_enabled: bool = False
+    apple_enabled: bool = False
+    min_password_length: int = 8
