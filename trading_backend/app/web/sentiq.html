@@ -554,9 +554,15 @@
       const container = $("googleBtnContainer");
       if (!container) return;
 
-      if (!state.authConfig.google_enabled || !state.authConfig.google_client_id) {
+      if (!state.authConfig.google_enabled && !state.authConfig.google_client_id) {
         container.innerHTML =
           '<p class="hint" style="text-align:center;margin:0">Google : ajoutez GOOGLE_CLIENT_ID dans .env.production</p>';
+        return;
+      }
+      const clientId = state.authConfig.google_client_id;
+      if (!clientId) {
+        container.innerHTML =
+          '<p class="hint" style="text-align:center;margin:0">Google non configuré.</p>';
         return;
       }
 

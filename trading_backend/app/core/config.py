@@ -5,6 +5,24 @@ from __future__ import annotations
 import os
 
 
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def get_google_client_id() -> str:
+    """Lit GOOGLE_CLIENT_ID à la volée (évite cache vide au démarrage Docker)."""
+
+    return (
+        _env("GOOGLE_CLIENT_ID")
+        or _env("GOOGLE_OAUTH_CLIENT_ID")
+        or _env("VITE_GOOGLE_CLIENT_ID")
+    )
+
+
+def get_apple_client_id() -> str:
+    return _env("APPLE_CLIENT_ID") or _env("APPLE_OAUTH_CLIENT_ID")
+
+
 class Settings:
     """Expose les variables d'environnement avec valeurs par défaut."""
 
@@ -26,15 +44,14 @@ class Settings:
     log_file_path: str = os.getenv("LOG_FILE_PATH", "storage/logs/trading-backend.log")
     log_max_bytes: int = int(os.getenv("LOG_MAX_BYTES", "2097152"))
     log_backup_count: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
-    google_client_id: str = (
-        os.getenv("GOOGLE_CLIENT_ID", "")
-        or os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
-        or os.getenv("VITE_GOOGLE_CLIENT_ID", "")
-    ).strip()
-    apple_client_id: str = (
-        os.getenv("APPLE_CLIENT_ID", "")
-        or os.getenv("APPLE_OAUTH_CLIENT_ID", "")
-    ).strip()
+
+    @property
+    def google_client_id(self) -> str:
+        return get_google_client_id()
+
+    @property
+    def apple_client_id(self) -> str:
+        return get_apple_client_id()
 
 
 settings = Settings()

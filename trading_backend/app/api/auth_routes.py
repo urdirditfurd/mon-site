@@ -91,14 +91,14 @@ async def login_with_google(
 ) -> LoginResponse:
     """Connexion ou inscription via Google Sign-In."""
 
-    if not settings.google_client_id.strip():
+    if not get_google_client_id():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Connexion Google non configurée sur le serveur.",
         )
 
     try:
-        google_user = verify_google_id_token(payload.credential, settings.google_client_id.strip())
+        google_user = verify_google_id_token(payload.credential, get_google_client_id())
     except GoogleOAuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
