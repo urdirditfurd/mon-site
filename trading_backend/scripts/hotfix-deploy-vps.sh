@@ -8,8 +8,11 @@ API="${API_CONTAINER:-trading-api}"
 
 echo "=== SentiQ hotfix deploy ==="
 cd "$ROOT"
+
+# Écraser les conflits git locaux sur le VPS
+git stash push -u -m "vps-auto-stash-$(date +%s)" 2>/dev/null || true
 git fetch origin cursor/decision-engine-core-9969
-git checkout cursor/decision-engine-core-9969
+git checkout cursor/decision-engine-core-9969 2>/dev/null || git checkout -b cursor/decision-engine-core-9969 origin/cursor/decision-engine-core-9969
 git pull origin cursor/decision-engine-core-9969
 
 UI_SRC="$BACKEND/app/web/sentiq.html"
