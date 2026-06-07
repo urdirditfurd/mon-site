@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import get_google_client_id, settings
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.db.database import get_session
 from app.models.trading_profile import TradingProfile
@@ -20,7 +20,6 @@ from app.schemas.auth import (
     GoogleAuthRequest,
     LoginRequest,
     LoginResponse,
-    PublicAuthConfigResponse,
 )
 from app.services.audit_service import log_audit_event
 from app.services.google_oauth import GoogleOAuthError, generate_oauth_password, verify_google_id_token
@@ -68,19 +67,6 @@ async def _provision_new_user(session: AsyncSession, email: str, password: str) 
     session.add_all([user, wallet, trading_profile])
     await session.flush()
     return user
-
-
-@router.get("/public-config", response_model=PublicAuthConfigResponse)
-async def public_auth_config() -> PublicAuthConfigResponse:
-    """Expose la config OAuth publique pour l'interface de connexion."""
-
-    google_id = settings.google_client_id.strip() or None
-    return PublicAuthConfigResponse(
-        google_client_id=google_id,
-        google_enabled=bool(google_id),
-        apple_enabled=bool(settings.apple_client_id.strip()),
-        min_password_length=8,
-    )
 
 
 @router.post("/google", response_model=LoginResponse)

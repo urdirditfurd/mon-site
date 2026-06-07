@@ -573,7 +573,7 @@
         }
         container.innerHTML = "";
         window.google.accounts.id.initialize({
-          client_id: state.authConfig.google_client_id,
+          client_id: clientId,
           callback: async (response) => {
             try {
               await doGoogleLogin(response.credential);
@@ -597,6 +597,9 @@
       try {
         const cfg = await fetch("/api/auth/public-config").then((r) => r.json());
         state.authConfig = cfg;
+        if (cfg.google_client_id && !cfg.google_enabled) {
+          state.authConfig.google_enabled = true;
+        }
         minPasswordLength = cfg.min_password_length || 8;
       } catch (_) {
         state.authConfig = { google_enabled: false, min_password_length: 8 };

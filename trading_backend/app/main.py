@@ -19,7 +19,7 @@ from app.api.trading_routes import router as trading_router
 from app.api.ui_routes import router as ui_router
 from app.api.user_routes import router as user_router
 from app.api.wallet_routes import router as wallet_router
-from app.core.config import settings
+from app.core.config import get_apple_client_id, get_google_client_id, settings
 from app.core.logging_config import configure_logging
 from app.db.database import AsyncSessionLocal, check_db_connection, close_db, init_db
 from app.services.monitoring_hub import MonitoringHub
@@ -124,6 +124,21 @@ app.include_router(trading_router, prefix="/api")
 app.include_router(decision_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")
 app.include_router(reporting_router, prefix="/api")
+
+
+@app.get("/api/auth/public-config", tags=["Auth"])
+async def public_auth_config() -> dict[str, str | bool | int | None]:
+    """
+    Config OAuth publique (déclarée ici pour survivre aux hot-deploy sans purge __pycache__).
+    """
+
+    google_id = get_google_client_id() or None
+    return {
+        "google_client_id": google_id,
+        "google_enabled": bool(google_id),
+        "apple_enabled": bool(get_apple_client_id()),
+        "min_password_length": 8,
+    }
 
 
 @app.get("/api/health", tags=["Health"])
