@@ -1,65 +1,49 @@
 #!/usr/bin/env bash
-# Hotfix SentiQ — déploie UI + auth Google SANS docker compose down
+# SentiQ — déploiement correct (rebuild image, pas docker cp avant recreate)
 set -euo pipefail
 
 ROOT="${ROOT:-/root/mon-site}"
 BACKEND="$ROOT/trading_backend"
 API="${API_CONTAINER:-trading-api}"
 
-echo "=== SentiQ hotfix deploy ==="
+echo "=== SentiQ deploy v3 ==="
 cd "$ROOT"
-
-# Écraser les conflits git locaux sur le VPS
-git stash push -u -m "vps-auto-stash-$(date +%s)" 2>/dev/null || true
 git fetch origin cursor/decision-engine-core-9969
-git checkout cursor/decision-engine-core-9969 2>/dev/null || git checkout -b cursor/decision-engine-core-9969 origin/cursor/decision-engine-core-9969
-git pull origin cursor/decision-engine-core-9969
+git reset --hard origin/cursor/decision-engine-core-9969
 
-UI_SRC="$BACKEND/app/web/sentiq.html"
-if [[ ! -f "$UI_SRC" ]]; then
-  echo "ERREUR: $UI_SRC introuvable"
-  exit 1
-fi
-
-if ! docker ps --format '{{.Names}}' | grep -qx "$API"; then
-  API=$(docker ps --format '{{.Names}}' | grep -E 'api' | grep -v caddy | head -1)
-  echo "Conteneur API détecté: $API"
-fi
-
-echo "--- Copie UI dans le conteneur (3 emplacements) ---"
-docker exec "$API" mkdir -p /app/app/web /app/app/static
-docker cp "$UI_SRC" "$API:/app/app/web/sentiq.html"
-docker cp "$UI_SRC" "$API:/app/app/web/dashboard.html"
-docker cp "$UI_SRC" "$API:/app/app/static/index.html"
-
-echo "--- Copie backend auth Google ---"
-docker cp "$BACKEND/app/api/auth_routes.py" "$API:/app/app/api/auth_routes.py"
-docker cp "$BACKEND/app/api/ui_routes.py" "$API:/app/app/api/ui_routes.py"
-docker cp "$BACKEND/app/core/config.py" "$API:/app/app/core/config.py"
-docker cp "$BACKEND/app/schemas/auth.py" "$API:/app/app/schemas/auth.py"
-docker cp "$BACKEND/app/services/google_oauth.py" "$API:/app/app/services/google_oauth.py"
-
-echo "--- Vérification fichier UI dans le conteneur ---"
-docker exec "$API" grep -c "btnAuthSecondary" /app/app/web/sentiq.html
-docker exec "$API" grep -c "googleBtnContainer" /app/app/web/sentiq.html
-docker exec "$API" grep -c "Phase 2" /app/app/web/sentiq.html && echo "ATTENTION: ancien texte Phase 2 encore présent!" || echo "OK: pas de Phase 2"
-
-echo "--- Recréer API avec .env.production (SANS down) ---"
 cd "$BACKEND"
-docker compose -p trading_backend --env-file .env.production up -d --force-recreate api
-sleep 20
 
-echo "--- Test API ---"
+echo "--- Rebuild image (code Git -> image Docker) ---"
+docker compose -p trading_backend --env-file .env.production build api
+
+echo "--- Recreate API avec .env.production (GOOGLE_CLIENT_ID) ---"
+docker compose -p trading_backend --env-file .env.production up -d --force-recreate api
+
+echo "--- Attente démarrage ---"
+sleep 25
+
+echo "--- Tests ---"
 curl -s http://127.0.0.1:8000/api/health/live || true
 echo ""
 curl -s http://127.0.0.1:8000/api/auth/public-config || true
 echo ""
-
-echo "--- Test UI ---"
-curl -s http://127.0.0.1:8000/ui | grep -o "btnAuthSecondary\|Créer un compte\|googleBtnContainer\|sentiq-version" | head -6
+docker exec "$API" grep -c "btnAuthSecondary" /app/app/web/sentiq.html 2>/dev/null || \
+  docker exec "$API" grep -c "btnAuthSecondary" /app/app/web/dashboard.html
+echo ""
+curl -s http://127.0.0.1:8000/ui | grep -o "btnAuthSecondary\|Créer un compte\|googleBtnContainer" | head -5
 
 echo ""
-echo "=== FINI ==="
-echo "Ouvrez https://trading.agent-leads.fr/ui avec Ctrl+Shift+R"
-echo "Si Google ne marche pas, vérifiez dans .env.production:"
-echo "  GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com"
+echo "=== Caddy (si 502 sur le site public) ---"
+if docker ps --format '{{.Names}}' | grep -q caddy; then
+  CADDY=$(docker ps --format '{{.Names}}' | grep caddy | head -1)
+  CADDY_NET=$(docker inspect "$CADDY" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+  docker network connect "$CADDY_NET" "$API" 2>/dev/null || true
+  docker exec "$CADDY" sed -i 's/trading_backend-api-1/trading-api/g' /etc/caddy/Caddyfile 2>/dev/null || true
+  docker exec "$CADDY" caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+  echo "Caddy OK"
+else
+  echo "Pas de Caddy — lancez-le si besoin (port 443)"
+fi
+
+echo ""
+echo "=== FINI — Ctrl+Shift+R sur https://trading.agent-leads.fr/ui ==="
