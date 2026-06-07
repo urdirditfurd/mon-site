@@ -26,4 +26,10 @@ async def ui_dashboard() -> FileResponse:
     """Serve the SentiQ HTML dashboard."""
 
     target = _SENTIQ_FILE if _SENTIQ_FILE.exists() else _FALLBACK_FILE
-    return FileResponse(target)
+    return FileResponse(
+        target,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
