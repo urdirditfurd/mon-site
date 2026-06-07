@@ -46,8 +46,14 @@ docker restart "$API"
 sleep 20
 
 echo "--- Diagnostic conteneur ---"
-docker exec "$API" grep -c public-config /app/app/api/auth_routes.py
-docker exec "$API" grep -c public-config /app/app/main.py
+MAIN_HITS=$(docker exec "$API" grep -c public-config /app/app/main.py || echo 0)
+AUTH_HITS=$(docker exec "$API" grep -c public-config /app/app/api/auth_routes.py || echo 0)
+echo "public-config dans main.py: $MAIN_HITS (attendu >= 1)"
+echo "public-config dans auth_routes.py: $AUTH_HITS (0 = normal, route dans main.py)"
+if [ "$MAIN_HITS" -lt 1 ]; then
+  echo "ERREUR: main.py copié sans la route public-config"
+  exit 1
+fi
 docker exec "$API" python -c "
 from app.main import app
 paths = sorted({getattr(r, 'path', '') for r in app.routes if 'public-config' in getattr(r, 'path', '')})
