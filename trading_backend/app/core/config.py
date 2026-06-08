@@ -44,6 +44,9 @@ class Settings:
     log_file_path: str = os.getenv("LOG_FILE_PATH", "storage/logs/trading-backend.log")
     log_max_bytes: int = int(os.getenv("LOG_MAX_BYTES", "2097152"))
     log_backup_count: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    telegram_channel_username: str = _env("TELEGRAM_CHANNEL_USERNAME") or _env("TELEGRAM_CHANNEL")
+    telegram_news_enabled: bool = _env("TELEGRAM_NEWS_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    telegram_news_poll_seconds: int = int(_env("TELEGRAM_NEWS_POLL_SECONDS", "90"))
 
     @property
     def google_client_id(self) -> str:

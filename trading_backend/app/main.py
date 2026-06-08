@@ -23,7 +23,9 @@ from app.core.config import get_apple_client_id, get_google_client_id, settings
 from app.core.logging_config import configure_logging
 from app.db.database import AsyncSessionLocal, check_db_connection, close_db, init_db
 from app.services.monitoring_hub import MonitoringHub
+from app.services.news_feed_hub import NewsFeedHub
 from app.services.news_simulator import NewsSimulator
+from app.services.telegram_news import TelegramNewsIngester
 from app.services.trading_engine import TradingEngine
 
 configure_logging()
@@ -78,7 +80,20 @@ async def lifespan(app: FastAPI):
         recovery_delay_seconds=settings.runtime_recovery_delay_seconds,
     )
     app.state.news_simulator = simulator
-    await simulator.start()
+
+    telegram_channel = settings.telegram_channel_username if settings.telegram_news_enabled else ""
+    telegram_ingester = TelegramNewsIngester(
+        channel_username=telegram_channel,
+        poll_seconds=settings.telegram_news_poll_seconds,
+        recovery_delay_seconds=settings.runtime_recovery_delay_seconds,
+    )
+    news_feed_hub = NewsFeedHub(simulator=simulator, telegram=telegram_ingester)
+    app.state.news_feed_hub = news_feed_hub
+    await news_feed_hub.start()
+    if telegram_channel:
+        logger.info("Flux Telegram activé pour @%s", telegram_channel)
+    else:
+        logger.info("Flux Telegram désactivé — simulateur d'actualités actif.")
 
     trading_engine = TradingEngine(
         news_simulator=simulator,
@@ -103,7 +118,7 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         await trading_engine.stop()
-        await simulator.stop()
+        await news_feed_hub.stop()
         await close_db()
         logger.info("Application shutdown complete.")
 

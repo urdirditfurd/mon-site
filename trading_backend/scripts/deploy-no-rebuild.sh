@@ -24,9 +24,13 @@ FILES=(
   app/main.py
   app/api/auth_routes.py
   app/api/ui_routes.py
+  app/api/news_routes.py
   app/core/config.py
   app/schemas/auth.py
+  app/schemas/news.py
   app/services/google_oauth.py
+  app/services/telegram_news.py
+  app/services/news_feed_hub.py
   app/web/sentiq.html
 )
 
@@ -46,6 +50,8 @@ sleep 20
 
 echo "--- Tests ---"
 curl -sf http://127.0.0.1:8000/api/auth/public-config
+echo ""
+curl -s http://127.0.0.1:8000/api/news/telegram/status || true
 echo ""
 curl -s http://127.0.0.1:8000/ui | grep -o "btnAuthSecondary\|Créer un compte\|googleBtnContainer" | head -5
 echo ""

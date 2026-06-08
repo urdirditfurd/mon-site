@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 
 class SimulatedNews(BaseModel):
-    """Une news financière analysée par le moteur IA simulé."""
+    """Une news financière (Telegram ou simulateur)."""
 
     id: uuid.UUID
     headline: str
@@ -18,3 +18,5 @@ class SimulatedNews(BaseModel):
     confidence: float
     impact_label: str
     generated_at: datetime
+    news_text: str | None = None
+    url: str | None = None
