@@ -3,21 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="sentiq-version" content="2.3" />
+  <meta name="sentiq-version" content="2.4" />
+  <title>SentiQ — Trading piloté par le sentiment</title>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #0b0e17;
-      --panel: #12182a;
-      --panel2: #171f35;
-      --border: #2a3550;
-      --text: #eef2ff;
-      --muted: #94a3b8;
-      --accent: #3b82f6;
-      --accent2: #22c55e;
-      --danger: #ef4444;
-      --warn: #f59e0b;
+      color-scheme: light;
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --panel2: #f8fafc;
+      --border: #dbe3ef;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent2: #16a34a;
+      --danger: #dc2626;
+      --warn: #d97706;
+      --shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
     }
     * { box-sizing: border-box; }
     body {
@@ -37,17 +39,32 @@
     .logo span { color: var(--accent); }
     nav.bottom {
       position: fixed; bottom: 0; left: 0; right: 0;
-      background: #0f1424ee; backdrop-filter: blur(8px);
+      background: #ffffffee; backdrop-filter: blur(10px);
       border-top: 1px solid var(--border);
-      display: flex; justify-content: space-around; padding: 10px 0 14px;
+      display: flex; justify-content: space-around; padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
+      box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
+      max-width: 480px; margin: 0 auto;
     }
     nav.bottom button {
       background: none; border: 0; color: var(--muted);
-      font-size: 12px; cursor: pointer; padding: 4px 12px;
+      font-size: 11px; cursor: pointer; padding: 6px 10px;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      min-width: 72px; border-radius: 12px;
     }
-    nav.bottom button.active { color: var(--accent); font-weight: 700; }
-    .screen { display: none; padding: 0 18px 24px; }
+    nav.bottom button .nav-ico { font-size: 20px; line-height: 1; }
+    nav.bottom button.active {
+      color: var(--accent); font-weight: 700;
+      background: #eff6ff;
+    }
+    .screen { display: none; padding: 0 14px 24px; }
     .screen.active { display: block; }
+    .screen-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
     h1 { font-size: 26px; margin: 8px 0 6px; line-height: 1.2; }
     .sub { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
     .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
@@ -102,7 +119,7 @@
       border: 2px solid var(--accent2);
       color: var(--accent2);
     }
-    .btn-signup:hover { background: #14532d33; }
+    .btn-signup:hover { background: #f0fdf4; }
     .auth-actions { display: grid; gap: 8px; margin-top: 8px; }
     #googleBtnContainer { min-height: 44px; display: flex; justify-content: center; margin-top: 6px; }
     .modal {
@@ -123,7 +140,7 @@
       border-radius: 999px; border: 1px solid var(--border);
       background: var(--panel2); font-size: 13px; cursor: pointer;
     }
-    .pill.selected { border-color: var(--accent); background: #1e3a5f; }
+    .pill.selected { border-color: var(--accent); background: #eff6ff; color: var(--accent); }
     .threshold-row { display: flex; align-items: center; gap: 10px; }
     .threshold-row input[type=range] { flex: 1; }
     .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -132,7 +149,7 @@
     .status.err { color: var(--danger); }
     .telegram-banner {
       display: flex; align-items: center; gap: 10px;
-      background: #1a2744; border: 1px solid #2563eb44;
+      background: #eff6ff; border: 1px solid #bfdbfe;
       border-radius: 12px; padding: 12px; margin-bottom: 16px; text-decoration: none; color: inherit;
     }
     .telegram-banner:hover { border-color: var(--accent); }
@@ -193,9 +210,10 @@
   <!-- Gate connexion / inscription -->
   <div id="authGate" class="app">
     <header><div class="logo">Senti<span>Q</span></div></header>
-    <h1 id="authTitle" style="padding:0 18px">Connexion</h1>
+    <div class="screen-panel" style="margin:0 14px">
+    <h1 id="authTitle">Connexion</h1>
     <p id="authWelcome" class="auth-welcome hidden"></p>
-    <div style="padding:0 18px">
+    <div>
       <div id="googleBtnContainer"></div>
       <button class="btn oauth apple hidden" id="btnApple">Continuer avec Apple</button>
       <p class="hint" style="text-align:center;margin:12px 0">— ou connexion classique —</p>
@@ -211,6 +229,7 @@
       <div id="loginStatus" class="status"></div>
       <p class="hint" id="authFooterHint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
     </div>
+    </div>
   </div>
 
   <!-- App principale -->
@@ -222,6 +241,7 @@
 
     <!-- ACCUEIL -->
     <section id="screen-home" class="screen active">
+      <div class="screen-panel">
       <h1 id="greetingTitle">Bonjour ! 👋</h1>
       <p class="sub" id="greetingSub">Votre patrimoine SentiQ est en cours de chargement…</p>
 
@@ -259,10 +279,12 @@
       <div class="card full" id="newsList">
         <div class="news-item">Chargement des actualités…</div>
       </div>
+      </div>
     </section>
 
     <!-- SUIVI -->
     <section id="screen-track" class="screen">
+      <div class="screen-panel">
       <h1>Suivi</h1>
       <p class="sub">Positions en cours et cycles terminés.</p>
       <div class="tabs">
@@ -275,10 +297,12 @@
         <label>Revenus simulés</label>
         <b id="revenusSimules" class="positive">— €</b>
       </div>
+      </div>
     </section>
 
     <!-- TRADER -->
     <section id="screen-trade" class="screen">
+      <div class="screen-panel">
       <h1>Trader avec SentiQ</h1>
       <p class="sub">Parcours guidé : plateforme, actif, secteur, montant.</p>
 
@@ -323,20 +347,21 @@
       <button class="btn" id="btnPrepareTrade">Préparer l'opportunité</button>
       <div id="tradeStatus" class="status"></div>
 
-      <div class="card full" style="margin-top:20px">
-        <h3 style="margin:0 0 8px">Conseiller IA</h3>
-        <div class="chat-box" id="chatBox">
+      <details class="card full" style="margin-top:20px;padding:14px">
+        <summary style="cursor:pointer;font-weight:700">Conseiller IA</summary>
+        <div class="chat-box" id="chatBox" style="margin-top:10px">
           <div class="chat-msg bot">Bonjour ! Je peux expliquer le seuil de probabilité, le risque et les signaux d'actualité.</div>
         </div>
         <input id="chatInput" placeholder="Posez votre question…" />
         <button class="btn secondary" id="btnChatSend">Envoyer</button>
+      </details>
       </div>
     </section>
 
     <nav class="bottom">
-      <button data-screen="home" class="active">Accueil</button>
-      <button data-screen="track">Suivi</button>
-      <button data-screen="trade">Trader</button>
+      <button type="button" data-screen="home" class="active"><span class="nav-ico">🏠</span>Accueil</button>
+      <button type="button" data-screen="track"><span class="nav-ico">📊</span>Suivi</button>
+      <button type="button" data-screen="trade"><span class="nav-ico">⚡</span>Trader</button>
     </nav>
   </div>
 
@@ -493,6 +518,15 @@
     function showApp(loggedIn) {
       $("authGate").classList.toggle("hidden", loggedIn);
       $("mainApp").classList.toggle("hidden", !loggedIn);
+      if (loggedIn) switchScreen("home");
+    }
+
+    function switchScreen(name) {
+      document.querySelectorAll("nav.bottom button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.screen === name);
+      });
+      document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+      $(`screen-${name}`)?.classList.add("active");
     }
 
     async function sendLoginConfirmationEmail(email) {
@@ -817,12 +851,7 @@
     }
 
     document.querySelectorAll("nav.bottom button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll("nav.bottom button").forEach((b) => b.classList.remove("active"));
-        document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
-        btn.classList.add("active");
-        $(`screen-${btn.dataset.screen}`).classList.add("active");
-      });
+      btn.addEventListener("click", () => switchScreen(btn.dataset.screen));
     });
 
     document.querySelectorAll(".tabs button").forEach((btn) => {
