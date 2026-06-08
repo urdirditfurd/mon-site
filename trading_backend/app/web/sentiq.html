@@ -3,181 +3,154 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="sentiq-version" content="2.4" />
+  <meta name="sentiq-version" content="3.0-orange" />
   <title>SentiQ — Trading piloté par le sentiment</title>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
       color-scheme: light;
-      --bg: #eef2f7;
-      --panel: #ffffff;
-      --panel2: #f8fafc;
-      --border: #dbe3ef;
-      --text: #0f172a;
-      --muted: #64748b;
-      --accent: #2563eb;
-      --accent2: #16a34a;
-      --danger: #dc2626;
-      --warn: #d97706;
-      --shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+      --bg: #fbf8f4;
+      --card: #ffffff;
+      --card-soft: #fff7ef;
+      --text: #152238;
+      --muted: #7b8798;
+      --line: #eadfd5;
+      --orange: #ff7043;
+      --orange-dark: #ea5b2f;
+      --green: #16a673;
+      --blue: #1f4d7a;
+      --shadow: 0 18px 45px rgba(65, 45, 25, 0.10);
+      --radius: 24px;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      font-family: Inter, system-ui, sans-serif;
-      background: var(--bg);
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
+      background:
+        radial-gradient(circle at 78% 4%, rgba(255, 112, 67, 0.17), transparent 320px),
+        linear-gradient(180deg, #fffdfb 0%, var(--bg) 56%, #fff 100%);
     }
-    .app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 80px; }
-    header {
-      padding: 16px 18px 8px;
-      display: flex;
-      justify-content: space-between;
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; border: 0; }
+    .shell { width: min(1160px, calc(100% - 36px)); margin: 0 auto; padding: 22px 0 54px; }
+    .topbar {
+      height: 58px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid rgba(234, 223, 213, 0.65);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 253, 251, 0.86);
+      backdrop-filter: blur(14px);
     }
-    .logo { font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
-    .logo span { color: var(--accent); }
-    nav.bottom {
-      position: fixed; bottom: 0; left: 0; right: 0;
-      background: #ffffffee; backdrop-filter: blur(10px);
-      border-top: 1px solid var(--border);
-      display: flex; justify-content: space-around; padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
-      box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
-      max-width: 480px; margin: 0 auto;
-    }
-    nav.bottom button {
-      background: none; border: 0; color: var(--muted);
-      font-size: 11px; cursor: pointer; padding: 6px 10px;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      min-width: 72px; border-radius: 12px;
-    }
-    nav.bottom button .nav-ico { font-size: 20px; line-height: 1; }
-    nav.bottom button.active {
-      color: var(--accent); font-weight: 700;
-      background: #eff6ff;
-    }
-    .screen { display: none; padding: 0 14px 24px; }
-    .screen.active { display: block; }
-    .screen-panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 18px;
-      box-shadow: var(--shadow);
-    }
-    h1 { font-size: 26px; margin: 8px 0 6px; line-height: 1.2; }
-    .sub { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
-    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-    .card {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 14px; padding: 14px;
-    }
-    .card.full { grid-column: 1 / -1; }
-    .card label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    .card b { font-size: 18px; }
-    .card.positive b { color: var(--accent2); }
-    .capital-row { display: flex; align-items: center; gap: 10px; }
-    .btn-plus {
-      width: 36px; height: 36px; border-radius: 50%; border: 0;
-      background: var(--accent); color: #fff; font-size: 22px;
-      font-weight: 700; cursor: pointer; line-height: 1;
-    }
-    .news-item {
-      padding: 12px 0; border-bottom: 1px solid var(--border);
-      font-size: 14px;
-    }
-    .news-item:last-child { border-bottom: 0; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-    .tabs button {
-      flex: 1; padding: 8px; border-radius: 10px; border: 1px solid var(--border);
-      background: var(--panel); color: var(--muted); cursor: pointer;
-    }
-    .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .position {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 14px; background: var(--panel); border: 1px solid var(--border);
-      border-radius: 14px; margin-bottom: 10px;
-    }
-    .position .gain { color: var(--accent2); font-weight: 700; }
-    .position .loss { color: var(--danger); font-weight: 700; }
-    input, select, textarea {
-      width: 100%; padding: 10px 12px; margin: 6px 0 10px;
-      border-radius: 10px; border: 1px solid var(--border);
-      background: var(--panel2); color: var(--text);
-    }
-    .btn {
-      display: inline-block; width: 100%; padding: 12px;
-      border: 0; border-radius: 12px; background: var(--accent);
-      color: #fff; font-weight: 700; cursor: pointer; margin-top: 8px;
-    }
-    .btn.secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
-    .btn.oauth { margin-top: 6px; }
-    .btn.google { background: #fff; color: #333; }
-    .btn.apple { background: #000; border: 1px solid #444; }
-    .btn-signup {
-      background: transparent;
-      border: 2px solid var(--accent2);
-      color: var(--accent2);
-    }
-    .btn-signup:hover { background: #f0fdf4; }
-    .auth-actions { display: grid; gap: 8px; margin-top: 8px; }
-    #googleBtnContainer { min-height: 44px; display: flex; justify-content: center; margin-top: 6px; }
-    .modal {
-      display: none; position: fixed; inset: 0; z-index: 1000;
-      background: rgba(0,0,0,.75); align-items: center; justify-content: center; padding: 18px;
-    }
-    .modal.open { display: flex; }
-    .modal-box {
-      width: 100%; max-width: 400px; background: var(--panel);
-      border: 1px solid var(--border); border-radius: 16px; padding: 20px;
-      max-height: 90vh; overflow-y: auto;
-    }
-    .modal-box h2 { margin: 0 0 12px; font-size: 20px; }
-    .step { margin-bottom: 16px; }
-    .step-num { font-size: 12px; color: var(--accent); font-weight: 700; }
-    .pill {
-      display: inline-block; padding: 6px 12px; margin: 4px 4px 4px 0;
-      border-radius: 999px; border: 1px solid var(--border);
-      background: var(--panel2); font-size: 13px; cursor: pointer;
-    }
-    .pill.selected { border-color: var(--accent); background: #eff6ff; color: var(--accent); }
-    .threshold-row { display: flex; align-items: center; gap: 10px; }
-    .threshold-row input[type=range] { flex: 1; }
-    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .status { font-size: 13px; margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--panel2); }
-    .status.ok { color: var(--accent2); }
-    .status.err { color: var(--danger); }
-    .telegram-banner {
-      display: flex; align-items: center; gap: 10px;
-      background: #eff6ff; border: 1px solid #bfdbfe;
-      border-radius: 12px; padding: 12px; margin-bottom: 16px; text-decoration: none; color: inherit;
-    }
-    .telegram-banner:hover { border-color: var(--accent); }
+    .brand { font-size: 24px; font-weight: 850; letter-spacing: -0.04em; color: #0e1b2d; }
+    .nav { display: flex; align-items: center; gap: 26px; }
+    .nav button { background: transparent; color: var(--text); font-weight: 720; font-size: 16px; padding: 10px 4px; border-bottom: 3px solid transparent; }
+    .nav button.active { color: var(--blue); border-color: var(--orange); }
+    .account { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .balance-pill { padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-weight: 800; box-shadow: 0 8px 18px rgba(30, 45, 68, 0.05); }
+    .round { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; }
+    .round.plus { background: var(--orange); color: #fff; font-size: 22px; }
+    .round.avatar { background: #183251; color: #fff; font-size: 14px; }
+    .view { display: none; padding-top: 42px; animation: fade 0.2s ease; }
+    .view.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .hero-title { font-size: clamp(28px, 4vw, 46px); margin: 0 0 10px; letter-spacing: -0.05em; }
+    .lead { color: var(--muted); font-size: 17px; line-height: 1.65; }
+    .section-title { font-size: 21px; margin: 42px 0 18px; letter-spacing: -0.02em; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+    .news-layout { display: grid; grid-template-columns: 1.15fr 0.9fr; gap: 18px; align-items: stretch; }
+    .main-news { overflow: hidden; padding: 0; }
+    .news-image { min-height: 210px; background: linear-gradient(135deg, #24415f, #f3a176); position: relative; }
+    .news-image::after { content: "Macro"; position: absolute; left: 16px; top: 16px; background: #fff; color: var(--orange-dark); border-radius: 999px; padding: 7px 10px; font-weight: 900; font-size: 12px; }
+    .news-content { padding: 18px; }
+    .news-content h3 { margin: 0; font-size: 23px; line-height: 1.25; }
+    .side-news { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .mini-news { min-height: 100px; border-radius: 18px; padding: 12px; color: #fff; display: flex; align-items: end; font-size: 13px; font-weight: 820; background: linear-gradient(135deg, #1f4d7a, #7c98b5); }
+    .mini-news.orange { background: linear-gradient(135deg, #f97316, #f9c27e); }
+    .metric-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 22px; }
+    .metric { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 18px; }
+    .metric span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric b { display: block; margin-top: 8px; font-size: 24px; letter-spacing: -0.04em; }
+    .tabs { display: flex; gap: 38px; margin: 24px 0; font-size: 20px; }
+    .tabs button { background: transparent; font-weight: 800; color: var(--muted); padding: 0 0 8px; border-bottom: 3px solid transparent; }
+    .tabs button.active { color: var(--text); border-color: var(--orange); }
+    .project-list { display: grid; gap: 18px; }
+    .project { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 20px; background: #fff; border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
+    .project-icon { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; background: #fff1e8; color: var(--orange); font-size: 24px; font-weight: 900; }
+    .project h3 { margin: 0 0 8px; font-size: 20px; }
+    .project-stats { display: flex; gap: 26px; flex-wrap: wrap; color: var(--muted); }
+    .project-stats b { color: var(--text); }
+    .gain { color: var(--green); font-weight: 900; font-size: 20px; }
+    .loss { color: #e11d48; font-weight: 900; font-size: 20px; }
+    .chart { min-height: 280px; display: grid; grid-template-columns: 1fr 240px; gap: 20px; }
+    .bars { height: 200px; display: flex; gap: 14px; align-items: end; padding: 18px 10px 0; border-bottom: 1px solid var(--line); }
+    .bars i { flex: 1; min-height: 12px; border-radius: 12px 12px 0 0; background: var(--orange); }
+    .chart-detail { border: 1px solid var(--line); border-radius: 18px; padding: 16px; align-self: start; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    label { display: block; font-weight: 760; margin: 0 0 8px; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 16px; padding: 13px 14px; outline: none; }
+    textarea { min-height: 132px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--orange); box-shadow: 0 0 0 4px rgba(255, 112, 67, 0.12); }
+    .primary { background: var(--orange); color: #fff; border-radius: 999px; padding: 14px 22px; font-weight: 900; box-shadow: 0 12px 22px rgba(255, 112, 67, 0.22); }
+    .secondary { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 12px 18px; font-weight: 850; }
+    .cta-panel { min-height: 320px; display: grid; place-items: center; text-align: center; }
+    .wizard-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    .question-card { border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 18px; display: grid; gap: 10px; }
+    .question-card em { color: var(--muted); font-style: normal; font-size: 13px; }
+    .execution-summary { background: #fff7ef; border: 1px solid #fed7aa; border-radius: 20px; padding: 18px; line-height: 1.6; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
+    .step { padding: 15px; border: 1px solid var(--line); background: #fff; border-radius: 18px; text-align: left; }
+    .step b { display: block; margin-bottom: 5px; }
+    .chat-log { max-height: 300px; overflow: auto; display: grid; gap: 10px; }
+    .message { padding: 13px 15px; border-radius: 18px; background: #fff; border: 1px solid var(--line); line-height: 1.45; }
+    .message.ai { background: #fff7ef; }
+    .status { margin-top: 12px; padding: 13px 14px; border-radius: 16px; border: 1px solid var(--line); background: #fff; color: var(--muted); }
+    .status.ok { color: var(--green); }
+    .status.err { color: #e11d48; }
     .hidden { display: none !important; }
-    #authGate { padding-top: 40px; }
-    .chat-box {
-      height: 200px; overflow-y: auto; background: var(--panel2);
-      border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px;
-      font-size: 13px;
+    .modal { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(21, 34, 56, 0.45); align-items: center; justify-content: center; padding: 18px; }
+    .modal.open { display: flex; }
+    .modal-box { width: 100%; max-width: 420px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto; }
+    .modal-box h2 { margin: 0 0 12px; }
+    .auth-shell { width: min(480px, calc(100% - 32px)); margin: 40px auto; }
+    .auth-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow); }
+    .auth-welcome { color: var(--muted); font-size: 14px; margin: 0 0 16px; line-height: 1.5; }
+    .pwd-hint { font-size: 12px; color: var(--muted); margin: -4px 0 10px; }
+    .auth-actions { display: grid; gap: 10px; margin-top: 12px; }
+    .btn-signup { background: transparent; border: 2px solid var(--orange); color: var(--orange-dark); border-radius: 999px; padding: 12px 18px; font-weight: 850; }
+    #googleBtnContainer { min-height: 44px; display: flex; justify-content: center; margin: 8px 0; }
+    .telegram-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 18px; color: var(--blue); font-weight: 700; text-decoration: none; }
+    .logout-link { background: none; color: var(--muted); font-size: 13px; text-decoration: underline; padding: 0; }
+    @media (max-width: 900px) {
+      .topbar { grid-template-columns: 1fr; height: auto; padding: 10px 0; }
+      .nav, .account { justify-content: flex-start; flex-wrap: wrap; }
+      .grid, .news-layout, .chart, .form-grid, .steps, .metric-strip, .side-news { grid-template-columns: 1fr; }
+      .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
+      .project { grid-template-columns: 1fr; }
     }
-    .chat-msg { margin-bottom: 8px; }
-    .chat-msg.bot { color: var(--muted); }
-    .auth-toggle {
-      background: none; border: 0; color: var(--accent);
-      font-size: 13px; cursor: pointer; padding: 0; margin-top: 12px;
-      text-decoration: underline; text-underline-offset: 3px;
-    }
-    .auth-toggle:hover { color: #60a5fa; }
-    .pwd-hint { font-size: 11px; color: #64748b; margin: -4px 0 10px; }
-    .auth-welcome { font-size: 13px; color: var(--muted); margin: 0 18px 12px; line-height: 1.5; }
   </style>
 </head>
 <body>
-  <!-- Modal onboarding 1ère connexion -->
+  <!-- Onboarding -->
   <div id="onboardingModal" class="modal">
     <div class="modal-box">
       <h2>Bienvenue sur SentiQ</h2>
-      <p class="sub">Quelques questions pour personnaliser votre expérience.</p>
+      <p class="muted">Quelques questions pour personnaliser votre expérience.</p>
       <label>Prénom</label>
       <input id="obPrenom" placeholder="Ex: Marie" required />
       <label>Nom</label>
@@ -191,183 +164,189 @@
         <option value="performance">Performance maximale</option>
         <option value="decouverte">Découvrir le trading IA</option>
       </select>
-      <button class="btn" id="obSave">Continuer</button>
+      <button class="primary" id="obSave" style="width:100%;margin-top:14px">Continuer</button>
     </div>
   </div>
 
-  <!-- Modal ajout argent (+) -->
+  <!-- Dépôt -->
   <div id="depositModal" class="modal">
     <div class="modal-box">
       <h2>Ajouter des fonds</h2>
       <label>Montant (€)</label>
       <input id="depositAmount" type="number" min="10" step="10" value="100" />
-      <button class="btn" id="confirmDeposit">Confirmer le dépôt</button>
-      <button class="btn secondary" id="closeDeposit">Annuler</button>
+      <button class="primary" id="confirmDeposit" style="width:100%;margin-top:14px">Confirmer le dépôt</button>
+      <button class="secondary" id="closeDeposit" style="width:100%;margin-top:8px">Annuler</button>
       <div id="depositStatus" class="status"></div>
     </div>
   </div>
 
-  <!-- Gate connexion / inscription -->
-  <div id="authGate" class="app">
-    <header><div class="logo">Senti<span>Q</span></div></header>
-    <div class="screen-panel" style="margin:0 14px">
-    <h1 id="authTitle">Connexion</h1>
-    <p id="authWelcome" class="auth-welcome hidden"></p>
-    <div>
+  <!-- Connexion -->
+  <div id="authGate" class="auth-shell">
+    <div class="brand" style="text-align:center;margin-bottom:18px">SentiQ</div>
+    <div class="auth-card">
+      <h1 id="authTitle" style="margin:0 0 8px">Connexion</h1>
+      <p id="authWelcome" class="auth-welcome hidden"></p>
       <div id="googleBtnContainer"></div>
-      <button class="btn oauth apple hidden" id="btnApple">Continuer avec Apple</button>
-      <p class="hint" style="text-align:center;margin:12px 0">— ou connexion classique —</p>
+      <p class="muted" style="text-align:center;margin:14px 0">— ou connexion classique —</p>
       <label>Email</label>
       <input id="loginEmail" type="email" placeholder="vous@email.com" autocomplete="email" />
       <label>Mot de passe</label>
       <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
       <p id="pwdHint" class="pwd-hint">Minimum 8 caractères requis.</p>
       <div class="auth-actions">
-        <button class="btn" id="btnAuthPrimary">Se connecter</button>
-        <button type="button" class="btn btn-signup" id="btnAuthSecondary">Créer un compte</button>
+        <button class="primary" id="btnAuthPrimary" style="width:100%">Se connecter</button>
+        <button type="button" class="btn-signup" id="btnAuthSecondary" style="width:100%">Créer un compte</button>
       </div>
       <div id="loginStatus" class="status"></div>
-      <p class="hint" id="authFooterHint">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
-    </div>
+      <p class="muted" id="authFooterHint" style="font-size:13px;margin-top:12px">Un e-mail de confirmation sera envoyé après connexion réussie.</p>
     </div>
   </div>
 
-  <!-- App principale -->
-  <div id="mainApp" class="app hidden">
-    <header>
-      <div class="logo">Senti<span>Q</span></div>
-      <button class="btn secondary" style="width:auto;padding:6px 12px;margin:0;font-size:12px" id="btnLogout">Déconnexion</button>
+  <!-- App principale (blanc + orange, 3 pages) -->
+  <main id="mainApp" class="shell hidden">
+    <header class="topbar">
+      <div class="brand">SentiQ</div>
+      <nav class="nav" aria-label="Navigation principale">
+        <button type="button" class="nav-link active" data-view="homeView">Accueil</button>
+        <button type="button" class="nav-link" data-view="followView">Suivi</button>
+        <button type="button" class="nav-link" data-view="tradeView">Trader</button>
+      </nav>
+      <div class="account">
+        <span class="balance-pill" id="topBalance">— €</span>
+        <button type="button" class="round plus" id="btnAddMoney" title="Ajouter des fonds">+</button>
+        <span class="round avatar" id="userAvatar">SQ</span>
+        <button type="button" class="logout-link" id="btnLogout">Déconnexion</button>
+      </div>
     </header>
 
-    <!-- ACCUEIL -->
-    <section id="screen-home" class="screen active">
-      <div class="screen-panel">
-      <h1 id="greetingTitle">Bonjour ! 👋</h1>
-      <p class="sub" id="greetingSub">Votre patrimoine SentiQ est en cours de chargement…</p>
-
-      <a id="telegramLink" class="telegram-banner" href="https://t.me/sentiq_actus" target="_blank" rel="noopener">
-        <span style="font-size:24px">📢</span>
-        <div>
-          <b>Actus SentiQ sur Telegram</b>
-          <div class="hint">Canal lecture seule — suivez les signaux, pas de messages</div>
-        </div>
-      </a>
-
-      <div class="cards">
-        <div class="card">
-          <label>Capital actif</label>
-          <div class="capital-row">
-            <b id="capitalActive">— €</b>
-            <button class="btn-plus" id="btnAddMoney" title="Ajouter des fonds">+</button>
+    <section id="homeView" class="view active">
+      <h1 class="hero-title" id="greetingTitle">Bonjour ! 👋</h1>
+      <p class="lead" id="greetingSub">Votre patrimoine SentiQ est en cours de chargement…</p>
+      <div class="metric-strip">
+        <div class="metric"><span>Capital actif</span><b id="capitalActive">— €</b></div>
+        <div class="metric"><span>Gain simulé</span><b class="ok" id="gainSimule">— €</b></div>
+        <div class="metric"><span>Signaux suivis</span><b id="signalsCount">—</b></div>
+        <div class="metric"><span>Mode</span><b id="modeLabel">Paper</b></div>
+      </div>
+      <h2 class="section-title">Actualités</h2>
+      <div class="news-layout">
+        <article class="card main-news" id="mainNewsCard">
+          <div class="news-image"></div>
+          <div class="news-content">
+            <h3 id="mainNewsTitle">Chargement des actualités…</h3>
+            <p class="muted" id="mainNewsBody">SentiQ transforme les signaux macro en probabilités exploitables.</p>
           </div>
-        </div>
-        <div class="card positive">
-          <label>Gain simulé</label>
-          <b id="gainSimule">— €</b>
-        </div>
-        <div class="card">
-          <label>Signaux suivis</label>
-          <b id="signalsCount">—</b>
-        </div>
-        <div class="card">
-          <label>Mode</label>
-          <b id="modeLabel">Paper</b>
-        </div>
+        </article>
+        <aside class="card">
+          <h3>Telegram</h3>
+          <p class="muted">Canal lecture seule — suivez les actus SentiQ.</p>
+          <a id="telegramLink" class="telegram-link" href="https://t.me/sentiq_actus" target="_blank" rel="noopener">📢 Rejoindre le canal</a>
+        </aside>
       </div>
-
-      <h3 style="margin:0 0 10px">Actualités</h3>
-      <div class="card full" id="newsList">
-        <div class="news-item">Chargement des actualités…</div>
-      </div>
-      </div>
+      <div class="side-news" id="sideNews" style="margin-top:18px;"></div>
     </section>
 
-    <!-- SUIVI -->
-    <section id="screen-track" class="screen">
-      <div class="screen-panel">
-      <h1>Suivi</h1>
-      <p class="sub">Positions en cours et cycles terminés.</p>
+    <section id="followView" class="view">
+      <h1 class="hero-title">Suivi</h1>
+      <p class="lead">Retrouvez vos positions en cours, les cycles terminés et la performance simulée.</p>
       <div class="tabs">
-        <button class="active" data-tab="open">En cours</button>
-        <button data-tab="closed">Fini</button>
+        <button type="button" class="active" data-tab="open" id="ongoingTab">En cours</button>
+        <button type="button" data-tab="closed" id="doneTab">Fini</button>
       </div>
-      <div id="positionsOpen"></div>
-      <div id="positionsClosed" class="hidden"></div>
-      <div class="card full" style="margin-top:16px">
-        <label>Revenus simulés</label>
-        <b id="revenusSimules" class="positive">— €</b>
-      </div>
-      </div>
-    </section>
-
-    <!-- TRADER -->
-    <section id="screen-trade" class="screen">
-      <div class="screen-panel">
-      <h1>Trader avec SentiQ</h1>
-      <p class="sub">Parcours guidé : plateforme, actif, secteur, montant.</p>
-
-      <div class="step">
-        <div class="step-num">1. Plateforme</div>
-        <div id="platformChoices"></div>
-        <p class="hint">Les clés API restent côté serveur.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">2. Type d'actif</div>
-        <div id="assetChoices">
-          <span class="pill" data-asset="stocks">Action</span>
-          <span class="pill" data-asset="etf">ETF</span>
-          <span class="pill" data-asset="crypto">Crypto</span>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">3. Secteur</div>
-        <div id="sectorChoices">
-          <span class="pill" data-sector="tech">Tech</span>
-          <span class="pill" data-sector="mines">Mines</span>
-          <span class="pill" data-sector="real_estate">Immobilier</span>
-          <span class="pill" data-sector="insurance">Assurance</span>
-          <span class="pill" data-sector="food">Alimentation</span>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">4. Montant à engager (€)</div>
-        <input id="tradeAmount" type="number" min="10" step="10" value="100" />
-      </div>
-
-      <div class="step">
-        <div class="step-num">Seuil de probabilité minimum</div>
-        <div class="threshold-row">
-          <input id="thresholdSlider" type="range" min="50" max="99" value="75" />
-          <b id="thresholdValue">75</b><span>%</span>
-        </div>
-        <p class="hint" id="thresholdHint">Charge le seuil depuis votre profil…</p>
-        <button class="btn secondary" id="saveThreshold" style="margin-top:6px">Enregistrer le seuil</button>
-      </div>
-
-      <button class="btn" id="btnPrepareTrade">Préparer l'opportunité</button>
-      <div id="tradeStatus" class="status"></div>
-
-      <details class="card full" style="margin-top:20px;padding:14px">
-        <summary style="cursor:pointer;font-weight:700">Conseiller IA</summary>
-        <div class="chat-box" id="chatBox" style="margin-top:10px">
-          <div class="chat-msg bot">Bonjour ! Je peux expliquer le seuil de probabilité, le risque et les signaux d'actualité.</div>
-        </div>
-        <input id="chatInput" placeholder="Posez votre question…" />
-        <button class="btn secondary" id="btnChatSend">Envoyer</button>
-      </details>
+      <div class="grid">
+        <section class="span-7 project-list" id="positionsOpen"></section>
+        <section class="span-5 project-list hidden" id="positionsClosed"></section>
+        <section class="card span-5 chart">
+          <div>
+            <h3>Revenus simulés</h3>
+            <div class="bars" id="pnlBars"><i style="height:30%"></i><i style="height:55%"></i><i style="height:72%"></i><i style="height:88%"></i></div>
+          </div>
+          <div class="chart-detail">
+            <strong>Performance</strong>
+            <p class="muted" id="revenusSimules">— €</p>
+          </div>
+        </section>
       </div>
     </section>
 
-    <nav class="bottom">
-      <button type="button" data-screen="home" class="active"><span class="nav-ico">🏠</span>Accueil</button>
-      <button type="button" data-screen="track"><span class="nav-ico">📊</span>Suivi</button>
-      <button type="button" data-screen="trade"><span class="nav-ico">⚡</span>Trader</button>
-    </nav>
-  </div>
+    <section id="tradeView" class="view">
+      <div class="card cta-panel">
+        <div>
+          <h1 class="hero-title">Trader avec SentiQ</h1>
+          <p class="lead">Lance un parcours guidé : plateforme, actif, secteur, montant. Les clés API restent côté serveur.</p>
+          <button class="primary" id="openTradeWizardBtn">Commencer à trader</button>
+        </div>
+      </div>
+      <div class="steps">
+        <div class="step"><b>Plateforme</b><span class="muted">Alpaca, Binance, Coinbase…</span></div>
+        <div class="step"><b>Actif</b><span class="muted">Action, ETF ou crypto.</span></div>
+        <div class="step"><b>Secteur</b><span class="muted">Tech, mines, immobilier…</span></div>
+        <div class="step"><b>Montant</b><span class="muted">Capital engagé contrôlé.</span></div>
+      </div>
+    </section>
+
+    <section id="tradeWizardView" class="view">
+      <div class="wizard-title">
+        <div>
+          <h1 class="hero-title">Préparer un trade</h1>
+          <p class="lead">Réponds aux questions. SentiQ prépare l'ordre selon ton seuil de probabilité.</p>
+        </div>
+        <button type="button" class="secondary" id="backToTradeBtn">Retour</button>
+      </div>
+      <div class="grid">
+        <section class="card span-7">
+          <div class="form-grid">
+            <div class="question-card">
+              <label>1. Plateforme</label>
+              <select id="platformSelect"></select>
+              <em id="platformStatus">Les clés API restent côté serveur.</em>
+            </div>
+            <div class="question-card">
+              <label>2. Type d'actif</label>
+              <select id="assetSelect">
+                <option value="stocks">Action</option>
+                <option value="etf">ETF</option>
+                <option value="crypto">Crypto</option>
+              </select>
+            </div>
+            <div class="question-card">
+              <label>3. Secteur</label>
+              <select id="sectorSelect">
+                <option value="tech">Tech</option>
+                <option value="mines">Mines</option>
+                <option value="real_estate">Immobilier</option>
+                <option value="insurance">Assurance</option>
+                <option value="food">Alimentation</option>
+              </select>
+            </div>
+            <div class="question-card">
+              <label>4. Montant à engager (€)</label>
+              <input id="amountInput" type="number" min="10" step="10" value="100" />
+            </div>
+          </div>
+          <label style="margin-top:16px;">Seuil de probabilité minimum : <b id="thresholdValue">75</b>%</label>
+          <input id="thresholdInput" type="range" min="50" max="99" value="75" />
+          <p class="muted" id="thresholdHint" style="font-size:13px">Charge le seuil depuis votre profil…</p>
+          <button type="button" class="secondary" id="saveThreshold" style="margin-top:8px">Enregistrer le seuil</button>
+          <div class="status" id="tradeStatus">Prêt à préparer une opportunité.</div>
+          <button class="primary" id="prepareTradeBtn" style="margin-top:12px">Préparer l'opportunité</button>
+        </section>
+        <section class="card span-5">
+          <h2>Conseiller IA</h2>
+          <div class="chat-log" id="chatLog">
+            <div class="message ai">Bonjour ! Je peux expliquer le seuil de probabilité, le risque et les signaux d'actualité.</div>
+          </div>
+          <textarea id="chatInput" placeholder="Posez votre question…"></textarea>
+          <button type="button" class="secondary" id="chatBtn" style="margin-top:8px">Envoyer</button>
+        </section>
+        <section class="span-12 execution-summary" id="executionSummary">Aucune opportunité préparée pour le moment.</section>
+      </div>
+    </section>
+  </main>
 
   <script>
     let minPasswordLength = 8;
-    const TELEGRAM_URL = "https://t.me/sentiq_actus"; // ← remplacez par votre canal
+    const TELEGRAM_URL = "https://t.me/sentiq_actus";
     const PLATFORMS = [
       { id: "alpaca", label: "Alpaca (Actions/ETF)" },
       { id: "binance", label: "Binance (Crypto)" },
@@ -378,91 +357,19 @@
       token: localStorage.getItem("trading_token") || "",
       userId: localStorage.getItem("trading_user_id") || "",
       profile: JSON.parse(localStorage.getItem("sentiq_profile") || "null"),
-      trade: { platform: "", asset: "", sector: "" },
       authMode: "login",
       authConfig: { google_enabled: false, google_client_id: null, min_password_length: 8 },
     };
 
-    function getKnownAccounts() {
-      try {
-        return JSON.parse(localStorage.getItem("sentiq_known_accounts") || "[]");
-      } catch (_) {
-        return [];
-      }
-    }
-
-    function markKnownAccount(email) {
-      const normalized = email.trim().toLowerCase();
-      if (!normalized) return;
-      const accounts = getKnownAccounts();
-      if (!accounts.includes(normalized)) {
-        accounts.push(normalized);
-        localStorage.setItem("sentiq_known_accounts", JSON.stringify(accounts));
-      }
-      localStorage.setItem("sentiq_last_email", normalized);
-    }
-
-    function isKnownAccount(email) {
-      return getKnownAccounts().includes(email.trim().toLowerCase());
-    }
-
-    function setAuthMode(mode) {
-      state.authMode = mode;
-      const isSignup = mode === "signup";
-      const minLen = state.authConfig.min_password_length || minPasswordLength;
-      $("authTitle").textContent = isSignup ? "Créer un compte" : "Connexion";
-      $("btnAuthPrimary").textContent = isSignup ? "Créer mon compte" : "Se connecter";
-      $("btnAuthSecondary").textContent = isSignup ? "J'ai déjà un compte" : "Créer un compte";
-      $("loginPassword").autocomplete = isSignup ? "new-password" : "current-password";
-      $("pwdHint").textContent = isSignup
-        ? `Minimum ${minLen} caractères requis.`
-        : `Min. ${minLen} caractères pour créer un compte.`;
-      $("pwdHint").style.opacity = isSignup ? "1" : "0.6";
-      $("authFooterHint").textContent = isSignup
-        ? "Après création, vous serez connecté automatiquement."
-        : "Un e-mail de confirmation sera envoyé après connexion réussie.";
-      $("authWelcome").classList.toggle("hidden", !isSignup && getKnownAccounts().length > 0);
-      if (isSignup) {
-        $("authWelcome").classList.remove("hidden");
-        $("authWelcome").textContent =
-          "Bienvenue ! Créez votre compte pour personnaliser SentiQ.";
-      }
-      setStatus("loginStatus", "", true);
-    }
-
-    function initAuthScreen() {
-      const known = getKnownAccounts();
-      const lastEmail = localStorage.getItem("sentiq_last_email") || "";
-      if (lastEmail) $("loginEmail").value = lastEmail;
-
-      if (known.length === 0) {
-        setAuthMode("signup");
-      } else {
-        setAuthMode("login");
-        $("authWelcome").classList.remove("hidden");
-        $("authWelcome").textContent = `Compte connu sur cet appareil (${known.length}). Connectez-vous ou créez un autre compte.`;
-      }
-
-      $("loginEmail")?.addEventListener("blur", () => {
-        const email = $("loginEmail").value.trim().toLowerCase();
-        if (!email) return;
-        if (isKnownAccount(email)) {
-          setAuthMode("login");
-          $("authWelcome").classList.remove("hidden");
-          $("authWelcome").textContent = "Ce compte est déjà enregistré ici. Connectez-vous.";
-        }
-      });
-    }
-
     const $ = (id) => document.getElementById(id);
     const euro = (v) => Number(v || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    const setStatus = (id, msg, ok = true) => {
+    function setStatus(id, msg, ok = true) {
       const el = $(id);
       if (!el) return;
       el.textContent = msg;
       el.className = `status ${ok ? "ok" : "err"}`;
-    };
+    }
 
     async function api(path, opts = {}) {
       const headers = { ...(opts.headers || {}) };
@@ -480,6 +387,24 @@
       return res.status === 204 ? null : res.json();
     }
 
+    function showView(viewId) {
+      document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === viewId));
+      document.querySelectorAll(".nav-link").forEach((b) => {
+        b.classList.toggle("active", b.dataset.view === viewId || (viewId === "tradeWizardView" && b.dataset.view === "tradeView"));
+      });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    document.querySelectorAll(".nav-link").forEach((btn) => {
+      btn.addEventListener("click", () => showView(btn.dataset.view));
+    });
+
+    function showApp(loggedIn) {
+      $("authGate").classList.toggle("hidden", loggedIn);
+      $("mainApp").classList.toggle("hidden", !loggedIn);
+      if (loggedIn) showView("homeView");
+    }
+
     function applyGreeting() {
       const prenom = state.profile?.prenom || "Investisseur";
       $("greetingTitle").textContent = `Bonjour ${prenom} ! 👋`;
@@ -492,6 +417,8 @@
       const obj = objLabels[state.profile?.objectif] || "suivre les marchés";
       $("greetingSub").textContent =
         `Votre objectif : ${obj}. Suivez les signaux IA et les opportunités détectées par SentiQ.`;
+      const initials = (state.profile?.prenom?.[0] || "S") + (state.profile?.nom?.[0] || "Q");
+      $("userAvatar").textContent = initials.toUpperCase();
     }
 
     function showOnboardingIfNeeded() {
@@ -515,30 +442,42 @@
       applyGreeting();
     });
 
-    function showApp(loggedIn) {
-      $("authGate").classList.toggle("hidden", loggedIn);
-      $("mainApp").classList.toggle("hidden", !loggedIn);
-      if (loggedIn) switchScreen("home");
+    function getKnownAccounts() {
+      try { return JSON.parse(localStorage.getItem("sentiq_known_accounts") || "[]"); } catch (_) { return []; }
     }
-
-    function switchScreen(name) {
-      document.querySelectorAll("nav.bottom button").forEach((b) => {
-        b.classList.toggle("active", b.dataset.screen === name);
-      });
-      document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
-      $(`screen-${name}`)?.classList.add("active");
+    function markKnownAccount(email) {
+      const n = email.trim().toLowerCase();
+      if (!n) return;
+      const a = getKnownAccounts();
+      if (!a.includes(n)) { a.push(n); localStorage.setItem("sentiq_known_accounts", JSON.stringify(a)); }
+      localStorage.setItem("sentiq_last_email", n);
     }
+    function isKnownAccount(email) { return getKnownAccounts().includes(email.trim().toLowerCase()); }
 
-    async function sendLoginConfirmationEmail(email) {
-      try {
-        await api("/api/auth/login-confirmation", {
-          method: "POST",
-          body: { email },
-        });
-      } catch (_) {
-        // Endpoint optionnel — ne bloque pas la connexion
-        console.info("Confirmation e-mail : endpoint non configuré (normal en dev).");
+    function setAuthMode(mode) {
+      state.authMode = mode;
+      const isSignup = mode === "signup";
+      const minLen = state.authConfig.min_password_length || minPasswordLength;
+      $("authTitle").textContent = isSignup ? "Créer un compte" : "Connexion";
+      $("btnAuthPrimary").textContent = isSignup ? "Créer mon compte" : "Se connecter";
+      $("btnAuthSecondary").textContent = isSignup ? "J'ai déjà un compte" : "Créer un compte";
+      $("pwdHint").textContent = isSignup ? `Minimum ${minLen} caractères requis.` : `Min. ${minLen} caractères pour créer un compte.`;
+      $("authFooterHint").textContent = isSignup ? "Après création, vous serez connecté automatiquement." : "Un e-mail de confirmation sera envoyé après connexion réussie.";
+      if (isSignup) {
+        $("authWelcome").classList.remove("hidden");
+        $("authWelcome").textContent = "Bienvenue ! Créez votre compte pour personnaliser SentiQ.";
+      } else {
+        $("authWelcome").classList.toggle("hidden", getKnownAccounts().length === 0);
       }
+    }
+
+    function initAuthScreen() {
+      const lastEmail = localStorage.getItem("sentiq_last_email") || "";
+      if (lastEmail) $("loginEmail").value = lastEmail;
+      setAuthMode(getKnownAccounts().length === 0 ? "signup" : "login");
+      $("loginEmail")?.addEventListener("blur", () => {
+        if (isKnownAccount($("loginEmail").value)) setAuthMode("login");
+      });
     }
 
     async function finishAuth(login, email) {
@@ -547,7 +486,6 @@
       localStorage.setItem("trading_token", state.token);
       localStorage.setItem("trading_user_id", state.userId);
       markKnownAccount(email);
-      await sendLoginConfirmationEmail(email);
       setStatus("loginStatus", "Connexion réussie.", true);
       showApp(true);
       showOnboardingIfNeeded();
@@ -555,74 +493,41 @@
     }
 
     async function doLogin(email, password) {
-      const login = await api("/api/auth/login", {
-        method: "POST",
-        body: { email, password },
-      });
+      const login = await api("/api/auth/login", { method: "POST", body: { email, password } });
       await finishAuth(login, email);
     }
 
     async function doSignup(email, password) {
       const minLen = state.authConfig.min_password_length || minPasswordLength;
-      if (password.length < minLen) {
-        throw new Error(`Le mot de passe doit contenir au moins ${minLen} caractères.`);
-      }
-      await api("/api/users", {
-        method: "POST",
-        body: { email, password, role: "trader" },
-      });
+      if (password.length < minLen) throw new Error(`Le mot de passe doit contenir au moins ${minLen} caractères.`);
+      await api("/api/users", { method: "POST", body: { email, password, role: "trader" } });
       markKnownAccount(email);
-      setStatus("loginStatus", "Compte créé ! Connexion en cours…", true);
       await doLogin(email, password);
     }
 
     async function doGoogleLogin(credential) {
-      const login = await api("/api/auth/google", {
-        method: "POST",
-        body: { credential },
-      });
+      const login = await api("/api/auth/google", { method: "POST", body: { credential } });
       await finishAuth(login, login.user.email);
     }
 
     function initGoogleSignIn() {
       const container = $("googleBtnContainer");
       if (!container) return;
-
-      if (!state.authConfig.google_enabled && !state.authConfig.google_client_id) {
-        container.innerHTML =
-          '<p class="hint" style="text-align:center;margin:0">Google : ajoutez GOOGLE_CLIENT_ID dans .env.production</p>';
-        return;
-      }
       const clientId = state.authConfig.google_client_id;
       if (!clientId) {
-        container.innerHTML =
-          '<p class="hint" style="text-align:center;margin:0">Google non configuré.</p>';
+        container.innerHTML = '<p class="muted" style="text-align:center;margin:0">Google non configuré.</p>';
         return;
       }
-
       const tryRender = () => {
-        if (!window.google?.accounts?.id) {
-          setTimeout(tryRender, 200);
-          return;
-        }
+        if (!window.google?.accounts?.id) { setTimeout(tryRender, 200); return; }
         container.innerHTML = "";
         window.google.accounts.id.initialize({
           client_id: clientId,
-          callback: async (response) => {
-            try {
-              await doGoogleLogin(response.credential);
-            } catch (e) {
-              setStatus("loginStatus", e.message || String(e), false);
-            }
+          callback: async (r) => {
+            try { await doGoogleLogin(r.credential); } catch (e) { setStatus("loginStatus", e.message, false); }
           },
         });
-        window.google.accounts.id.renderButton(container, {
-          theme: "outline",
-          size: "large",
-          width: 320,
-          text: "continue_with",
-          locale: "fr",
-        });
+        window.google.accounts.id.renderButton(container, { theme: "outline", size: "large", width: 320, text: "continue_with", locale: "fr" });
       };
       tryRender();
     }
@@ -631,9 +536,7 @@
       try {
         const cfg = await fetch("/api/auth/public-config").then((r) => r.json());
         state.authConfig = cfg;
-        if (cfg.google_client_id && !cfg.google_enabled) {
-          state.authConfig.google_enabled = true;
-        }
+        if (cfg.google_client_id && !cfg.google_enabled) state.authConfig.google_enabled = true;
         minPasswordLength = cfg.min_password_length || 8;
       } catch (_) {
         state.authConfig = { google_enabled: false, min_password_length: 8 };
@@ -645,38 +548,13 @@
       try {
         const email = $("loginEmail").value.trim();
         const password = $("loginPassword").value;
-        if (!email) {
-          setStatus("loginStatus", "Indiquez votre adresse e-mail.", false);
-          return;
-        }
-        if (state.authMode === "signup") {
-          await doSignup(email, password);
-        } else {
-          await doLogin(email, password);
-        }
-      } catch (e) {
-        const msg = e.message || String(e);
-        if (msg.includes("existe déjà") || msg.includes("409")) {
-          markKnownAccount($("loginEmail").value.trim());
-          setStatus("loginStatus", "Ce compte existe déjà. Utilisez « Se connecter ».", false);
-          setAuthMode("login");
-        } else {
-          setStatus("loginStatus", msg, false);
-        }
-      }
+        if (!email) { setStatus("loginStatus", "Indiquez votre adresse e-mail.", false); return; }
+        if (state.authMode === "signup") await doSignup(email, password);
+        else await doLogin(email, password);
+      } catch (e) { setStatus("loginStatus", e.message, false); }
     });
 
-    $("btnToggleAuth")?.remove?.();
-
-    $("btnAuthSecondary")?.addEventListener("click", () => {
-      setAuthMode(state.authMode === "login" ? "signup" : "login");
-    });
-
-    $("btnGoogle")?.remove?.();
-    $("btnApple")?.addEventListener("click", () => {
-      setStatus("loginStatus", "Apple Sign-In : configuration à venir.", false);
-    });
-
+    $("btnAuthSecondary")?.addEventListener("click", () => setAuthMode(state.authMode === "login" ? "signup" : "login"));
     $("btnLogout")?.addEventListener("click", () => {
       state.token = ""; state.userId = "";
       localStorage.removeItem("trading_token");
@@ -688,146 +566,91 @@
     $("closeDeposit")?.addEventListener("click", () => $("depositModal").classList.remove("open"));
     $("confirmDeposit")?.addEventListener("click", async () => {
       try {
-        const amount = String($("depositAmount").value);
         await api(`/api/wallets/${state.userId}/deposit`, {
           method: "POST",
-          body: { amount, payment_method: "pm_card_visa" },
+          body: { amount: String($("depositAmount").value), payment_method: "pm_card_visa" },
         });
         $("depositModal").classList.remove("open");
-        setStatus("depositStatus", "Dépôt effectué.", true);
         await refreshAll();
-      } catch (e) {
-        setStatus("depositStatus", e.message, false);
-      }
+      } catch (e) { setStatus("depositStatus", e.message, false); }
     });
 
     $("telegramLink").href = TELEGRAM_URL;
 
-    function renderPlatforms() {
-      const el = $("platformChoices");
-      el.innerHTML = "";
+    function populatePlatforms() {
+      const sel = $("platformSelect");
+      sel.innerHTML = "";
       PLATFORMS.forEach((p) => {
-        const span = document.createElement("span");
-        span.className = "pill";
-        span.textContent = p.label;
-        span.dataset.platform = p.id;
-        span.addEventListener("click", () => {
-          el.querySelectorAll(".pill").forEach((x) => x.classList.remove("selected"));
-          span.classList.add("selected");
-          state.trade.platform = p.id;
-        });
-        el.appendChild(span);
+        const o = document.createElement("option");
+        o.value = p.id;
+        o.textContent = p.label;
+        sel.appendChild(o);
       });
     }
 
-    document.querySelectorAll("#assetChoices .pill, #sectorChoices .pill").forEach((pill) => {
-      pill.addEventListener("click", () => {
-        pill.parentElement.querySelectorAll(".pill").forEach((x) => x.classList.remove("selected"));
-        pill.classList.add("selected");
-        if (pill.dataset.asset) state.trade.asset = pill.dataset.asset;
-        if (pill.dataset.sector) state.trade.sector = pill.dataset.sector;
-      });
-    });
+    $("openTradeWizardBtn")?.addEventListener("click", () => showView("tradeWizardView"));
+    $("backToTradeBtn")?.addEventListener("click", () => showView("tradeView"));
 
-    $("thresholdSlider")?.addEventListener("input", () => {
-      $("thresholdValue").textContent = $("thresholdSlider").value;
+    $("thresholdInput")?.addEventListener("input", () => {
+      $("thresholdValue").textContent = $("thresholdInput").value;
     });
 
     async function loadThreshold() {
       try {
         const risk = await api(`/api/trading/users/${state.userId}/risk`);
         const seuil = Number(risk.seuil_probabilite_min || 75);
-        $("thresholdSlider").value = seuil;
+        $("thresholdInput").value = seuil;
         $("thresholdValue").textContent = seuil;
-        $("thresholdHint").textContent =
-          `Seuil actif : ${seuil} %. Seuls les signaux IA ≥ ${seuil} % déclencheront un trade.`;
-      } catch (e) {
-        $("thresholdHint").textContent =
-          "Impossible de charger le seuil — vérifiez votre connexion.";
+        $("thresholdHint").textContent = `Seuil actif : ${seuil} %. Seuls les signaux IA ≥ ${seuil} % déclencheront un trade.`;
+      } catch (_) {
+        $("thresholdHint").textContent = "Impossible de charger le seuil — vérifiez votre connexion.";
       }
     }
 
     $("saveThreshold")?.addEventListener("click", async () => {
       try {
-        const val = $("thresholdSlider").value;
-        await api(`/api/trading/users/${state.userId}/threshold`, {
-          method: "PATCH",
-          body: { seuil_probabilite_min: val },
-        });
+        const val = $("thresholdInput").value;
+        await api(`/api/trading/users/${state.userId}/threshold`, { method: "PATCH", body: { seuil_probabilite_min: val } });
         $("thresholdHint").textContent = `Seuil enregistré : ${val} %.`;
         setStatus("tradeStatus", `Seuil mis à jour à ${val} %.`, true);
-      } catch (e) {
-        setStatus("tradeStatus", e.message, false);
-      }
+      } catch (e) { setStatus("tradeStatus", e.message, false); }
     });
 
-    $("btnPrepareTrade")?.addEventListener("click", async () => {
-      if (!state.trade.platform || !state.trade.asset || !state.trade.sector) {
-        setStatus("tradeStatus", "Complétez plateforme, actif et secteur.", false);
-        return;
-      }
+    $("prepareTradeBtn")?.addEventListener("click", async () => {
       try {
         const result = await api(`/api/decision/users/${state.userId}/evaluate`, { method: "POST" });
         if (result.should_execute) {
-          setStatus("tradeStatus",
-            `Opportunité préparée ! ${result.direction} · ${result.sector} · ${result.probability_used} % · ${result.estimated_duration_minutes} min.`,
-            true);
+          setStatus("tradeStatus", `Opportunité préparée ! ${result.direction} · ${result.sector} · ${result.probability_used} %`, true);
+          $("executionSummary").innerHTML = `<strong>Résumé</strong><br>Direction: ${result.direction}<br>Secteur: ${result.sector}<br>Probabilité: ${result.probability_used} %<br>Durée estimée: ${result.estimated_duration_minutes} min.`;
         } else {
           setStatus("tradeStatus", result.reason || "Aucune opportunité pour le moment.", false);
         }
-      } catch (e) {
-        setStatus("tradeStatus", e.message, false);
-      }
+      } catch (e) { setStatus("tradeStatus", e.message, false); }
     });
 
-    $("btnChatSend")?.addEventListener("click", () => {
+    $("chatBtn")?.addEventListener("click", () => {
       const q = $("chatInput").value.trim();
       if (!q) return;
-      const box = $("chatBox");
-      box.innerHTML += `<div class="chat-msg">${q}</div>`;
+      const log = $("chatLog");
+      log.insertAdjacentHTML("beforeend", `<div class="message">${q.replaceAll("<", "&lt;")}</div>`);
       let reply = "Je traite votre question…";
-      if (/seuil|probabilit/i.test(q)) {
-        reply = "Le seuil de probabilité filtre les signaux IA : seuls ceux au-dessus de votre % minimum déclenchent un trade.";
-      } else if (/telegram/i.test(q)) {
-        reply = "Le canal Telegram SentiQ est en lecture seule : vous recevez les actus sans pouvoir poster.";
-      } else if (/risque/i.test(q)) {
-        reply = "En mode Paper, aucun argent réel n'est engagé. Commencez petit et ajustez le seuil selon votre tolérance.";
-      }
-      box.innerHTML += `<div class="chat-msg bot">${reply}</div>`;
+      if (/seuil|probabilit/i.test(q)) reply = "Le seuil filtre les signaux IA : seuls ceux au-dessus de votre % minimum déclenchent un trade.";
+      else if (/telegram/i.test(q)) reply = "Le canal Telegram SentiQ est en lecture seule.";
+      else if (/risque/i.test(q)) reply = "En mode Paper, aucun argent réel n'est engagé.";
+      log.insertAdjacentHTML("beforeend", `<div class="message ai">${reply}</div>`);
       $("chatInput").value = "";
-      box.scrollTop = box.scrollHeight;
+      log.scrollTop = log.scrollHeight;
     });
 
-    async function refreshAll() {
-      if (!state.token || !state.userId) return;
-      try {
-        const wallet = await api(`/api/wallets/${state.userId}`);
-        $("capitalActive").textContent = `${euro(wallet.solde_disponible)} €`;
-
-        const stats = await api(`/api/trading/users/${state.userId}/orders/stats`);
-        const pnl = Number(stats.total_pnl_simule || 0);
-        $("gainSimule").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
-        $("signalsCount").textContent = stats.total_orders || 0;
-        $("revenusSimules").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
-
-        const news = await api("/api/news/live?limit=5");
-        const nl = $("newsList");
-        nl.innerHTML = "";
-        (news.items || news || []).slice(0, 5).forEach((n) => {
-          const div = document.createElement("div");
-          div.className = "news-item";
-          div.textContent = n.headline || n.title || n.news_text || JSON.stringify(n);
-          nl.appendChild(div);
-        });
-        if (!nl.children.length) nl.innerHTML = '<div class="news-item">Aucune actualité pour le moment.</div>';
-
-        const orders = await api(`/api/trading/users/${state.userId}/orders?limit=10`);
-        renderPositions(orders || []);
-        await loadThreshold();
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const open = btn.dataset.tab === "open";
+        $("positionsOpen").classList.toggle("hidden", !open);
+        $("positionsClosed").classList.toggle("hidden", open);
+      });
+    });
 
     function renderPositions(orders) {
       const open = orders.filter((o) => o.status === "pending" || o.status === "filled");
@@ -836,34 +659,66 @@
         const el = $(elId);
         el.innerHTML = "";
         list.forEach((o) => {
-          const div = document.createElement("div");
-          div.className = "position";
+          const sym = (o.asset_symbol || "—").slice(0, 2).toUpperCase();
           const pnl = Number(o.pnl_simule || 0);
-          div.innerHTML = `
-            <div><b>${o.asset_symbol || "—"}</b><br><span class="hint">${o.direction} · ${o.confidence}%</span></div>
-            <div class="${pnl >= 0 ? "gain" : "loss"}">${pnl >= 0 ? "+" : ""}${euro(pnl)} €</div>`;
-          el.appendChild(div);
+          el.insertAdjacentHTML("beforeend", `
+            <article class="project">
+              <div class="project-icon">${sym}</div>
+              <div>
+                <h3>${o.asset_symbol || "Position"}</h3>
+                <div class="project-stats">
+                  <span>direction <b>${o.direction}</b></span>
+                  <span>confiance <b>${o.confidence}%</b></span>
+                </div>
+              </div>
+              <div class="${pnl >= 0 ? "gain" : "loss"}">${pnl >= 0 ? "+" : ""}${euro(pnl)} €</div>
+            </article>`);
         });
-        if (!list.length) el.innerHTML = '<p class="hint">Aucune position.</p>';
+        if (!list.length) el.innerHTML = '<p class="muted">Aucune position.</p>';
       };
       mk(open, "positionsOpen");
       mk(closed, "positionsClosed");
+      $("ongoingTab").textContent = `En cours (${open.length})`;
+      $("doneTab").textContent = `Fini (${closed.length})`;
     }
 
-    document.querySelectorAll("nav.bottom button").forEach((btn) => {
-      btn.addEventListener("click", () => switchScreen(btn.dataset.screen));
-    });
+    async function refreshAll() {
+      if (!state.token || !state.userId) return;
+      try {
+        const wallet = await api(`/api/wallets/${state.userId}`);
+        $("capitalActive").textContent = `${euro(wallet.solde_disponible)} €`;
+        $("topBalance").textContent = `${euro(wallet.solde_disponible)} €`;
 
-    document.querySelectorAll(".tabs button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        $("positionsOpen").classList.toggle("hidden", btn.dataset.tab !== "open");
-        $("positionsClosed").classList.toggle("hidden", btn.dataset.tab !== "closed");
-      });
-    });
+        const stats = await api(`/api/trading/users/${state.userId}/orders/stats`);
+        const pnl = Number(stats.total_pnl_simule || 0);
+        $("gainSimule").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
+        $("signalsCount").textContent = stats.total_orders || 0;
+        $("revenusSimules").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
 
-    renderPlatforms();
+        const news = await api("/api/news/live?limit=5");
+        const items = (news.items || news || []).slice(0, 5);
+        if (items.length) {
+          const first = items[0];
+          const title = first.headline || first.title || first.news_text || "Actualité SentiQ";
+          $("mainNewsTitle").textContent = title;
+          $("mainNewsBody").textContent = first.summary || first.news_text || "Signal macro analysé par SentiQ.";
+          const side = $("sideNews");
+          side.innerHTML = "";
+          items.slice(1, 5).forEach((n, i) => {
+            const div = document.createElement("div");
+            div.className = `mini-news${i % 2 ? " orange" : ""}`;
+            div.textContent = n.headline || n.title || n.news_text || "Actu";
+            side.appendChild(div);
+          });
+        }
+
+        const orders = await api(`/api/trading/users/${state.userId}/orders?limit=10`);
+        renderPositions(orders || []);
+        await loadThreshold();
+      } catch (e) { console.error(e); }
+    }
+
+    populatePlatforms();
     initAuthScreen();
     loadAuthConfig();
     if (state.token && state.userId) {
