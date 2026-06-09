@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="sentiq-version" content="3.0-orange" />
+  <meta name="sentiq-version" content="3.1-msn-news" />
   <title>SentiQ — Trading piloté par le sentiment</title>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
@@ -73,15 +73,60 @@
     .span-8 { grid-column: span 8; }
     .span-12 { grid-column: span 12; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
-    .news-layout { display: grid; grid-template-columns: 1.15fr 0.9fr; gap: 18px; align-items: stretch; }
-    .main-news { overflow: hidden; padding: 0; }
-    .news-image { min-height: 210px; background: linear-gradient(135deg, #24415f, #f3a176); position: relative; }
-    .news-image::after { content: "Macro"; position: absolute; left: 16px; top: 16px; background: #fff; color: var(--orange-dark); border-radius: 999px; padding: 7px 10px; font-weight: 900; font-size: 12px; }
-    .news-content { padding: 18px; }
-    .news-content h3 { margin: 0; font-size: 23px; line-height: 1.25; }
-    .side-news { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .mini-news { min-height: 100px; border-radius: 18px; padding: 12px; color: #fff; display: flex; align-items: end; font-size: 13px; font-weight: 820; background: linear-gradient(135deg, #1f4d7a, #7c98b5); }
-    .mini-news.orange { background: linear-gradient(135deg, #f97316, #f9c27e); }
+    .news-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 42px 0 14px; }
+    .news-header h2 { margin: 0; font-size: 21px; letter-spacing: -0.02em; }
+    .news-sync { font-size: 12px; color: var(--muted); }
+    .news-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .news-filters button {
+      background: #fff; border: 1px solid var(--line); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 700;
+    }
+    .news-filters button.active { background: #fff7ef; border-color: var(--orange); color: var(--orange-dark); }
+    .news-mosaic {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: 130px;
+      gap: 14px;
+    }
+    .news-tile {
+      position: relative; overflow: hidden; border-radius: 18px;
+      padding: 14px; color: #fff; cursor: pointer;
+      display: flex; flex-direction: column; justify-content: flex-end;
+      box-shadow: 0 10px 28px rgba(21, 34, 56, 0.14);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .news-tile:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(21, 34, 56, 0.18); }
+    .news-tile.hero { grid-column: span 2; grid-row: span 2; }
+    .news-tile.wide { grid-column: span 2; }
+    .news-tile.tall { grid-row: span 2; }
+    .news-tile::before {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 100%);
+      pointer-events: none;
+    }
+    .news-tile-inner { position: relative; z-index: 1; }
+    .news-tile-meta { font-size: 11px; font-weight: 700; opacity: 0.92; letter-spacing: 0.02em; }
+    .news-tile h3 { margin: 6px 0 0; font-size: 14px; line-height: 1.35; font-weight: 800; }
+    .news-tile.hero h3 { font-size: 22px; line-height: 1.25; }
+    .news-tile.cat-finance { background: linear-gradient(135deg, #1f4d7a, #5b8fc7); }
+    .news-tile.cat-monde { background: linear-gradient(135deg, #312e81, #7c6fd6); }
+    .news-tile.cat-marches { background: linear-gradient(135deg, #c2410c, #fb923c); }
+    .news-tile.cat-macro { background: linear-gradient(135deg, #065f46, #34d399); }
+    .news-tile.cat-default { background: linear-gradient(135deg, #183251, #f3a176); }
+    .news-tile.is-new { animation: tilePop 0.45s ease; }
+    @keyframes tilePop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+    .news-empty {
+      grid-column: 1 / -1; background: #fff; border: 1px dashed var(--line);
+      border-radius: 18px; padding: 28px; text-align: center; color: var(--muted);
+    }
+    .news-sources-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+    }
+    .news-source-pill {
+      font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 999px;
+      background: #fff; border: 1px solid var(--line); color: var(--muted);
+    }
     .metric-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 22px; }
     .metric { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 18px; }
     .metric span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -139,9 +184,15 @@
     @media (max-width: 900px) {
       .topbar { grid-template-columns: 1fr; height: auto; padding: 10px 0; }
       .nav, .account { justify-content: flex-start; flex-wrap: wrap; }
-      .grid, .news-layout, .chart, .form-grid, .steps, .metric-strip, .side-news { grid-template-columns: 1fr; }
+      .grid, .chart, .form-grid, .steps, .metric-strip { grid-template-columns: 1fr; }
+      .news-mosaic { grid-template-columns: 1fr 1fr; grid-auto-rows: 120px; }
+      .news-tile.hero, .news-tile.wide, .news-tile.tall { grid-column: span 2; grid-row: span 1; }
       .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
       .project { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .news-mosaic { grid-template-columns: 1fr; }
+      .news-tile.hero, .news-tile.wide { grid-column: span 1; }
     }
   </style>
 </head>
@@ -228,23 +279,21 @@
         <div class="metric"><span>Signaux suivis</span><b id="signalsCount">—</b></div>
         <div class="metric"><span>Mode</span><b id="modeLabel">Paper</b></div>
       </div>
-      <h2 class="section-title">Actualités</h2>
-      <div class="news-layout">
-        <article class="card main-news" id="mainNewsCard">
-          <div class="news-image"></div>
-          <div class="news-content">
-            <h3 id="mainNewsTitle">Chargement des actualités…</h3>
-            <p class="muted" id="mainNewsBody">SentiQ transforme les signaux macro en probabilités exploitables.</p>
-          </div>
-        </article>
-        <aside class="card">
-          <h3>Sources</h3>
-          <p class="muted" id="newsSourcesText">Actualités internationales en direct.</p>
-          <p class="muted" id="newsSyncHint" style="font-size:12px;margin-top:8px"></p>
-          <a id="telegramLink" class="telegram-link hidden" href="#" target="_blank" rel="noopener">📢 Voir le canal Telegram</a>
-        </aside>
+      <div class="news-header">
+        <h2>Actualités</h2>
+        <span class="news-sync" id="newsSyncHint">Synchronisation…</span>
       </div>
-      <div class="side-news" id="sideNews" style="margin-top:18px;"></div>
+      <div class="news-filters" id="newsFilters">
+        <button type="button" class="active" data-filter="all">Tout</button>
+        <button type="button" data-filter="finance">Finance</button>
+        <button type="button" data-filter="monde">Monde</button>
+        <button type="button" data-filter="marches">Marchés</button>
+        <button type="button" data-filter="macro">Macro</button>
+      </div>
+      <div class="news-mosaic" id="newsMosaic">
+        <div class="news-empty">Chargement des actualités internationales…</div>
+      </div>
+      <div class="news-sources-bar" id="newsSourcesBar"></div>
     </section>
 
     <section id="followView" class="view">
@@ -347,7 +396,6 @@
 
   <script>
     let minPasswordLength = 8;
-    let TELEGRAM_URL = "https://t.me/sentiq_actus";
     const PLATFORMS = [
       { id: "alpaca", label: "Alpaca (Actions/ETF)" },
       { id: "binance", label: "Binance (Crypto)" },
@@ -360,6 +408,9 @@
       profile: JSON.parse(localStorage.getItem("sentiq_profile") || "null"),
       authMode: "login",
       authConfig: { google_enabled: false, google_client_id: null, min_password_length: 8 },
+      newsFilter: "all",
+      newsItems: [],
+      knownNewsIds: new Set(JSON.parse(localStorage.getItem("sentiq_news_ids") || "[]")),
     };
 
     const $ = (id) => document.getElementById(id);
@@ -685,77 +736,105 @@
 
     async function loadNewsSourcesStatus() {
       try {
-        const [rss, tg] = await Promise.all([
-          fetch("/api/news/rss/status").then((r) => r.json()),
-          fetch("/api/news/telegram/status").then((r) => r.json()),
-        ]);
-        const parts = [];
-        if (rss.enabled && rss.items_cached) {
-          parts.push(`${rss.items_cached} actu(s) RSS (${rss.feeds_ok_last_run}/${rss.feeds_configured} flux)`);
-        }
-        if (tg.enabled && tg.channel) {
-          parts.push(`Telegram @${tg.channel}`);
-          TELEGRAM_URL = `https://t.me/${tg.channel}`;
-          $("telegramLink").href = TELEGRAM_URL;
-          $("telegramLink").classList.remove("hidden");
+        const rss = await fetch("/api/news/rss/status").then((r) => r.json());
+        const bar = $("newsSourcesBar");
+        bar.innerHTML = "";
+        if (rss.enabled && rss.sources?.length) {
+          rss.sources.forEach((s) => {
+            const pill = document.createElement("span");
+            pill.className = "news-source-pill";
+            pill.textContent = `${s.label} · ${categoryLabel(s.category)}`;
+            bar.appendChild(pill);
+          });
+          $("newsSyncHint").textContent = rss.last_fetch_at
+            ? `MAJ ${new Date(rss.last_fetch_at).toLocaleTimeString("fr-FR")} · ${rss.items_cached || 0} actus`
+            : "Synchronisation RSS…";
         } else {
-          $("telegramLink").classList.add("hidden");
-        }
-        if (parts.length) {
-          $("newsSourcesText").textContent = parts.join(" · ");
-          const syncAt = rss.last_fetch_at || tg.last_fetch_at;
-          $("newsSyncHint").textContent = syncAt
-            ? `Dernière synchro : ${new Date(syncAt).toLocaleString("fr-FR")}`
-            : "Synchronisation en cours…";
-        } else {
-          $("newsSourcesText").textContent =
-            "Sources RSS par défaut (BBC, CNBC, Yahoo Finance…) — activez NEWS_RSS_ENABLED sur le serveur.";
+          $("newsSyncHint").textContent = "Activez NEWS_RSS_ENABLED=true sur le serveur";
         }
       } catch (_) {
-        $("newsSourcesText").textContent = "Sources news — mettez le backend à jour.";
+        $("newsSyncHint").textContent = "Sources indisponibles";
       }
+    }
+
+    function categoryLabel(cat) {
+      const map = { finance: "Finance", monde: "Monde", marches: "Marchés", macro: "Macro" };
+      return map[cat] || "Actu";
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return "";
+      const diff = Date.now() - new Date(iso).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return `il y a ${Math.max(1, mins)} min`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `il y a ${hrs} h`;
+      return `il y a ${Math.floor(hrs / 24)} j`;
+    }
+
+    function tileSizeClass(index) {
+      if (index === 0) return "hero";
+      if (index === 3 || index === 7) return "wide";
+      if (index === 5) return "tall";
+      return "";
     }
 
     function renderNewsFeed(items) {
-      if (!items.length) {
-        $("mainNewsTitle").textContent = "Aucune actualité pour le moment";
-        $("mainNewsBody").textContent =
-          "Les flux RSS se synchronisent toutes les 5 minutes. Patientez ou vérifiez NEWS_RSS_ENABLED=true.";
-        $("sideNews").innerHTML = "";
+      const mosaic = $("newsMosaic");
+      const filtered = state.newsFilter === "all"
+        ? items
+        : items.filter((n) => (n.impact_label || n.category || "") === state.newsFilter);
+
+      if (!filtered.length) {
+        mosaic.innerHTML = '<div class="news-empty">Aucune actu pour ce filtre. Les flux RSS se mettent à jour toutes les 5 minutes.</div>';
         return;
       }
-      const first = items[0];
-      const title = first.headline || first.title || first.news_text || "Actualité";
-      const body = first.news_text || first.summary || "";
-      const isTelegram = (first.source || "").toLowerCase().includes("telegram");
-      $("mainNewsTitle").textContent = title;
-      $("mainNewsBody").textContent = isTelegram
-        ? body
-        : (first.source ? `${first.source} — ${body}` : body);
-      const tag = document.querySelector("#mainNewsCard .news-image::after");
-      const imageEl = document.querySelector("#mainNewsCard .news-image");
-      if (imageEl) {
-        imageEl.dataset.tag = isTelegram ? "Telegram" : "Macro";
-        imageEl.style.setProperty("--news-tag", `"${isTelegram ? "Telegram" : "Macro"}"`);
-      }
-      bindNewsClick($("mainNewsCard"), first);
-      const side = $("sideNews");
-      side.innerHTML = "";
-      items.slice(1, 5).forEach((n, i) => {
-        const div = document.createElement("div");
-        div.className = `mini-news${i % 2 ? " orange" : ""}`;
-        div.textContent = n.headline || n.title || n.news_text || "Actu";
-        bindNewsClick(div, n);
-        side.appendChild(div);
+
+      mosaic.innerHTML = "";
+      filtered.slice(0, 12).forEach((item, index) => {
+        const id = String(item.id || item.headline);
+        const isNew = !state.knownNewsIds.has(id);
+        const cat = item.impact_label || item.category || "finance";
+        const tile = document.createElement("article");
+        tile.className = `news-tile cat-${cat} ${tileSizeClass(index)}${isNew ? " is-new" : ""}`;
+        const source = (item.source || "RSS").split("·")[0].trim();
+        const title = item.headline || item.news_text || "Actualité";
+        tile.innerHTML = `
+          <div class="news-tile-inner">
+            <div class="news-tile-meta">${source} · ${categoryLabel(cat)} · ${timeAgo(item.generated_at)}</div>
+            <h3>${title.replace(/</g, "&lt;")}</h3>
+          </div>`;
+        if (item.url) {
+          tile.addEventListener("click", () => window.open(item.url, "_blank", "noopener"));
+        }
+        mosaic.appendChild(tile);
+        state.knownNewsIds.add(id);
       });
+
+      const ids = [...state.knownNewsIds].slice(-200);
+      localStorage.setItem("sentiq_news_ids", JSON.stringify(ids));
     }
 
-    function bindNewsClick(el, item) {
-      if (!item?.url) return;
-      el.style.cursor = "pointer";
-      el.title = "Ouvrir sur Telegram";
-      el.addEventListener("click", () => window.open(item.url, "_blank", "noopener"));
+    async function refreshNews() {
+      try {
+        const news = await api("/api/news/live?limit=20");
+        const items = news.items || news || [];
+        state.newsItems = items;
+        renderNewsFeed(items);
+        await loadNewsSourcesStatus();
+      } catch (e) {
+        console.error(e);
+      }
     }
+
+    document.querySelectorAll("#newsFilters button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#newsFilters button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.newsFilter = btn.dataset.filter;
+        renderNewsFeed(state.newsItems);
+      });
+    });
 
     async function refreshAll() {
       if (!state.token || !state.userId) return;
@@ -770,8 +849,9 @@
         $("signalsCount").textContent = stats.total_orders || 0;
         $("revenusSimules").textContent = `${pnl >= 0 ? "+" : ""}${euro(pnl)} €`;
 
-        const news = await api("/api/news/live?limit=5");
-        const items = (news.items || news || []).slice(0, 5);
+        const news = await api("/api/news/live?limit=20");
+        const items = news.items || news || [];
+        state.newsItems = items;
         renderNewsFeed(items);
 
         const orders = await api(`/api/trading/users/${state.userId}/orders?limit=10`);
@@ -789,7 +869,8 @@
       if (state.profile?.prenom) applyGreeting();
       showOnboardingIfNeeded();
       refreshAll();
-      setInterval(refreshAll, 90000);
+      setInterval(refreshNews, 60000);
+      setInterval(refreshAll, 120000);
     } else {
       showApp(false);
     }
