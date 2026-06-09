@@ -685,14 +685,60 @@
     async function loadTelegramLink() {
       try {
         const status = await fetch("/api/news/telegram/status").then((r) => r.json());
-        if (status.public_url) {
-          TELEGRAM_URL = status.public_url.replace("/s/", "/");
-          $("telegramLink").href = TELEGRAM_URL;
-        } else if (status.channel) {
+        if (status.enabled && status.channel) {
           TELEGRAM_URL = `https://t.me/${status.channel}`;
           $("telegramLink").href = TELEGRAM_URL;
+          $("telegramStatusText").textContent = `Canal connecté : @${status.channel} (lecture seule)`;
+          const sync = status.last_fetch_at
+            ? `Dernière synchro : ${new Date(status.last_fetch_at).toLocaleString("fr-FR")}`
+            : "Synchronisation en cours…";
+          const count = status.items_cached ? `${status.items_cached} message(s) en cache` : "";
+          $("telegramSyncHint").textContent = [sync, count].filter(Boolean).join(" · ");
+          if (status.last_error) {
+            $("telegramSyncHint").textContent += ` · Erreur : ${status.last_error}`;
+          }
+        } else {
+          $("telegramStatusText").textContent =
+            "Canal non connecté — configurez TELEGRAM_CHANNEL_USERNAME sur le serveur.";
+          $("telegramSyncHint").textContent = "";
         }
-      } catch (_) {}
+      } catch (_) {
+        $("telegramStatusText").textContent = "Statut Telegram indisponible (backend à mettre à jour).";
+      }
+    }
+
+    function renderNewsFeed(items) {
+      if (!items.length) {
+        $("mainNewsTitle").textContent = "Aucune actualité pour le moment";
+        $("mainNewsBody").textContent =
+          "Vérifiez que TELEGRAM_NEWS_ENABLED=true et que le canal est public, puis attendez ~90 s.";
+        $("sideNews").innerHTML = "";
+        return;
+      }
+      const first = items[0];
+      const title = first.headline || first.title || first.news_text || "Actualité";
+      const body = first.news_text || first.summary || "";
+      const isTelegram = (first.source || "").toLowerCase().includes("telegram");
+      $("mainNewsTitle").textContent = title;
+      $("mainNewsBody").textContent = isTelegram
+        ? body
+        : (first.source ? `${first.source} — ${body}` : body);
+      const tag = document.querySelector("#mainNewsCard .news-image::after");
+      const imageEl = document.querySelector("#mainNewsCard .news-image");
+      if (imageEl) {
+        imageEl.dataset.tag = isTelegram ? "Telegram" : "Macro";
+        imageEl.style.setProperty("--news-tag", `"${isTelegram ? "Telegram" : "Macro"}"`);
+      }
+      bindNewsClick($("mainNewsCard"), first);
+      const side = $("sideNews");
+      side.innerHTML = "";
+      items.slice(1, 5).forEach((n, i) => {
+        const div = document.createElement("div");
+        div.className = `mini-news${i % 2 ? " orange" : ""}`;
+        div.textContent = n.headline || n.title || n.news_text || "Actu";
+        bindNewsClick(div, n);
+        side.appendChild(div);
+      });
     }
 
     function bindNewsClick(el, item) {
