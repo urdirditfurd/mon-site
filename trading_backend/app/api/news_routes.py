@@ -26,6 +26,13 @@ async def get_live_news(
     return [SimulatedNews(**item) for item in items]
 
 
+@router.get("/rss/status")
+async def rss_news_status(request: Request) -> dict:
+    """État de l'ingestion RSS (sources configurées)."""
+
+    return _get_hub(request).rss.health_snapshot()
+
+
 @router.get("/telegram/status")
 async def telegram_news_status(request: Request) -> dict:
     """État de l'ingestion Telegram (diagnostic)."""

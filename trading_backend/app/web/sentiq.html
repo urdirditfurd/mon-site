@@ -238,9 +238,10 @@
           </div>
         </article>
         <aside class="card">
-          <h3>Telegram</h3>
-          <p class="muted">Canal lecture seule — suivez les actus SentiQ.</p>
-          <a id="telegramLink" class="telegram-link" href="https://t.me/sentiq_actus" target="_blank" rel="noopener">📢 Rejoindre le canal</a>
+          <h3>Sources</h3>
+          <p class="muted" id="newsSourcesText">Actualités internationales en direct.</p>
+          <p class="muted" id="newsSyncHint" style="font-size:12px;margin-top:8px"></p>
+          <a id="telegramLink" class="telegram-link hidden" href="#" target="_blank" rel="noopener">📢 Voir le canal Telegram</a>
         </aside>
       </div>
       <div class="side-news" id="sideNews" style="margin-top:18px;"></div>
@@ -682,28 +683,36 @@
       $("doneTab").textContent = `Fini (${closed.length})`;
     }
 
-    async function loadTelegramLink() {
+    async function loadNewsSourcesStatus() {
       try {
-        const status = await fetch("/api/news/telegram/status").then((r) => r.json());
-        if (status.enabled && status.channel) {
-          TELEGRAM_URL = `https://t.me/${status.channel}`;
+        const [rss, tg] = await Promise.all([
+          fetch("/api/news/rss/status").then((r) => r.json()),
+          fetch("/api/news/telegram/status").then((r) => r.json()),
+        ]);
+        const parts = [];
+        if (rss.enabled && rss.items_cached) {
+          parts.push(`${rss.items_cached} actu(s) RSS (${rss.feeds_ok_last_run}/${rss.feeds_configured} flux)`);
+        }
+        if (tg.enabled && tg.channel) {
+          parts.push(`Telegram @${tg.channel}`);
+          TELEGRAM_URL = `https://t.me/${tg.channel}`;
           $("telegramLink").href = TELEGRAM_URL;
-          $("telegramStatusText").textContent = `Canal connecté : @${status.channel} (lecture seule)`;
-          const sync = status.last_fetch_at
-            ? `Dernière synchro : ${new Date(status.last_fetch_at).toLocaleString("fr-FR")}`
-            : "Synchronisation en cours…";
-          const count = status.items_cached ? `${status.items_cached} message(s) en cache` : "";
-          $("telegramSyncHint").textContent = [sync, count].filter(Boolean).join(" · ");
-          if (status.last_error) {
-            $("telegramSyncHint").textContent += ` · Erreur : ${status.last_error}`;
-          }
+          $("telegramLink").classList.remove("hidden");
         } else {
-          $("telegramStatusText").textContent =
-            "Canal non connecté — configurez TELEGRAM_CHANNEL_USERNAME sur le serveur.";
-          $("telegramSyncHint").textContent = "";
+          $("telegramLink").classList.add("hidden");
+        }
+        if (parts.length) {
+          $("newsSourcesText").textContent = parts.join(" · ");
+          const syncAt = rss.last_fetch_at || tg.last_fetch_at;
+          $("newsSyncHint").textContent = syncAt
+            ? `Dernière synchro : ${new Date(syncAt).toLocaleString("fr-FR")}`
+            : "Synchronisation en cours…";
+        } else {
+          $("newsSourcesText").textContent =
+            "Sources RSS par défaut (BBC, CNBC, Yahoo Finance…) — activez NEWS_RSS_ENABLED sur le serveur.";
         }
       } catch (_) {
-        $("telegramStatusText").textContent = "Statut Telegram indisponible (backend à mettre à jour).";
+        $("newsSourcesText").textContent = "Sources news — mettez le backend à jour.";
       }
     }
 
@@ -711,7 +720,7 @@
       if (!items.length) {
         $("mainNewsTitle").textContent = "Aucune actualité pour le moment";
         $("mainNewsBody").textContent =
-          "Vérifiez que TELEGRAM_NEWS_ENABLED=true et que le canal est public, puis attendez ~90 s.";
+          "Les flux RSS se synchronisent toutes les 5 minutes. Patientez ou vérifiez NEWS_RSS_ENABLED=true.";
         $("sideNews").innerHTML = "";
         return;
       }
@@ -763,23 +772,7 @@
 
         const news = await api("/api/news/live?limit=5");
         const items = (news.items || news || []).slice(0, 5);
-        if (items.length) {
-          const first = items[0];
-          const title = first.headline || first.title || first.news_text || "Actualité SentiQ";
-          const body = first.news_text || first.summary || "Actualité en direct depuis votre canal Telegram.";
-          $("mainNewsTitle").textContent = title;
-          $("mainNewsBody").textContent = first.source ? `${first.source} — ${body}` : body;
-          bindNewsClick($("mainNewsCard"), first);
-          const side = $("sideNews");
-          side.innerHTML = "";
-          items.slice(1, 5).forEach((n, i) => {
-            const div = document.createElement("div");
-            div.className = `mini-news${i % 2 ? " orange" : ""}`;
-            div.textContent = n.headline || n.title || n.news_text || "Actu";
-            bindNewsClick(div, n);
-            side.appendChild(div);
-          });
-        }
+        renderNewsFeed(items);
 
         const orders = await api(`/api/trading/users/${state.userId}/orders?limit=10`);
         renderPositions(orders || []);
@@ -790,12 +783,13 @@
     populatePlatforms();
     initAuthScreen();
     loadAuthConfig();
-    loadTelegramLink();
+    loadNewsSourcesStatus();
     if (state.token && state.userId) {
       showApp(true);
       if (state.profile?.prenom) applyGreeting();
       showOnboardingIfNeeded();
       refreshAll();
+      setInterval(refreshAll, 90000);
     } else {
       showApp(false);
     }

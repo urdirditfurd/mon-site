@@ -30,6 +30,8 @@ FILES=(
   app/schemas/news.py
   app/services/google_oauth.py
   app/services/telegram_news.py
+  app/services/rss_news.py
+  app/services/rss_feed_catalog.py
   app/services/news_feed_hub.py
   app/web/sentiq.html
 )
@@ -50,6 +52,8 @@ sleep 20
 
 echo "--- Tests ---"
 curl -sf http://127.0.0.1:8000/api/auth/public-config
+echo ""
+curl -s http://127.0.0.1:8000/api/news/rss/status || true
 echo ""
 curl -s http://127.0.0.1:8000/api/news/telegram/status || true
 echo ""

@@ -25,6 +25,7 @@ from app.db.database import AsyncSessionLocal, check_db_connection, close_db, in
 from app.services.monitoring_hub import MonitoringHub
 from app.services.news_feed_hub import NewsFeedHub
 from app.services.news_simulator import NewsSimulator
+from app.services.rss_news import RssNewsIngester, parse_feed_specs
 from app.services.telegram_news import TelegramNewsIngester
 from app.services.trading_engine import TradingEngine
 
@@ -87,13 +88,21 @@ async def lifespan(app: FastAPI):
         poll_seconds=settings.telegram_news_poll_seconds,
         recovery_delay_seconds=settings.runtime_recovery_delay_seconds,
     )
-    news_feed_hub = NewsFeedHub(simulator=simulator, telegram=telegram_ingester)
+    rss_feeds = parse_feed_specs(settings.news_rss_feeds) if settings.news_rss_enabled else []
+    rss_ingester = RssNewsIngester(
+        feed_specs=rss_feeds,
+        poll_seconds=settings.news_rss_poll_seconds,
+        recovery_delay_seconds=settings.runtime_recovery_delay_seconds,
+    )
+    news_feed_hub = NewsFeedHub(simulator=simulator, rss=rss_ingester, telegram=telegram_ingester)
     app.state.news_feed_hub = news_feed_hub
     await news_feed_hub.start()
+    if settings.news_rss_enabled:
+        logger.info("Flux RSS activé (%s sources).", len(rss_feeds))
     if telegram_channel:
         logger.info("Flux Telegram activé pour @%s", telegram_channel)
-    else:
-        logger.info("Flux Telegram désactivé — simulateur d'actualités actif.")
+    if not settings.news_rss_enabled and not telegram_channel:
+        logger.info("RSS/Telegram désactivés — simulateur d'actualités actif.")
 
     trading_engine = TradingEngine(
         news_simulator=simulator,

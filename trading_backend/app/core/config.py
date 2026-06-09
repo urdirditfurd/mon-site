@@ -47,6 +47,9 @@ class Settings:
     telegram_channel_username: str = _env("TELEGRAM_CHANNEL_USERNAME") or _env("TELEGRAM_CHANNEL")
     telegram_news_enabled: bool = _env("TELEGRAM_NEWS_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     telegram_news_poll_seconds: int = int(_env("TELEGRAM_NEWS_POLL_SECONDS", "90"))
+    news_rss_enabled: bool = _env("NEWS_RSS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    news_rss_feeds: str = _env("NEWS_RSS_FEEDS")
+    news_rss_poll_seconds: int = int(_env("NEWS_RSS_POLL_SECONDS", "300"))
 
     @property
     def google_client_id(self) -> str:
