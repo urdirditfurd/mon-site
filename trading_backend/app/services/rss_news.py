@@ -79,15 +79,23 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalise toute date en UTC aware (évite naive vs aware au tri)."""
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _parse_date(value: str) -> datetime:
     if not value:
         return datetime.now(timezone.utc)
     try:
-        return parsedate_to_datetime(value).astimezone(timezone.utc)
+        return _ensure_utc(parsedate_to_datetime(value))
     except (TypeError, ValueError, IndexError):
         pass
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return _ensure_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError:
         return datetime.now(timezone.utc)
 
@@ -244,7 +252,7 @@ class RssNewsIngester:
                     ok += 1
                     all_entries.extend(entries)
             posts = items_from_entries(all_entries)
-            posts.sort(key=lambda p: p.generated_at, reverse=True)
+            posts.sort(key=lambda p: _ensure_utc(p.generated_at), reverse=True)
             self._items.clear()
             for post in posts:
                 self._items.append(post)

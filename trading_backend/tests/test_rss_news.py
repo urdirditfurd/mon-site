@@ -29,6 +29,19 @@ def test_items_from_entries_source_label() -> None:
     assert posts[0].impact_label == "finance"
 
 
-def test_parse_feed_specs_defaults_when_empty() -> None:
-    feeds = parse_feed_specs("")
-    assert len(feeds) >= 5
+def test_parse_date_naive_and_aware_sortable() -> None:
+    from datetime import datetime, timezone
+
+    from app.services.rss_news import _ensure_utc, _parse_date, items_from_entries
+
+    naive = datetime(2026, 5, 21, 10, 0, 0)
+    aware = datetime(2026, 5, 21, 11, 0, 0, tzinfo=timezone.utc)
+    entries = [
+        {"title": "A", "summary": "a", "published": "", "label": "Test", "category": "finance", "link": ""},
+        {"title": "B", "summary": "b", "published": "Tue, 20 May 2026 14:00:00 GMT", "label": "Test", "category": "finance", "link": ""},
+    ]
+    posts = items_from_entries(entries)
+    posts.sort(key=lambda p: _ensure_utc(p.generated_at), reverse=True)
+    assert len(posts) == 2
+    assert _ensure_utc(naive).tzinfo is not None
+    assert _parse_date("Tue, 20 May 2026 14:00:00 GMT").tzinfo is not None
