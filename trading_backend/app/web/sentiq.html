@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="sentiq-version" content="3.1-msn-news" />
+  <meta name="sentiq-version" content="3.2-google-fix" />
   <title>SentiQ — Trading piloté par le sentiment</title>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
@@ -261,6 +261,10 @@
       <h1 id="authTitle" style="margin:0 0 8px">Connexion</h1>
       <p id="authWelcome" class="auth-welcome hidden"></p>
       <div id="googleBtnContainer"></div>
+      <button type="button" class="btn-google-signin hidden" id="btnGoogleSignIn">
+        <span class="g-logo" aria-hidden="true"></span>
+        Continuer avec Google
+      </button>
       <p class="muted" style="text-align:center;margin:14px 0">— ou connexion classique —</p>
       <label>Email</label>
       <input id="loginEmail" type="email" placeholder="vous@email.com" autocomplete="email" />
@@ -585,26 +589,93 @@
       await finishAuth(login, login.user.email);
     }
 
-    function initGoogleSignIn() {
-      const container = $("googleBtnContainer");
-      if (!container) return;
+    let googleInitDone = false;
+
+    function setupGoogleCallback(clientId) {
+      if (googleInitDone || !window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (r) => {
+          try { await doGoogleLogin(r.credential); } catch (e) { setStatus("loginStatus", e.message, false); }
+        },
+      });
+      googleInitDone = true;
+    }
+
+    function waitForGsi(maxMs = 12000) {
+      return new Promise((resolve) => {
+        const start = Date.now();
+        const tick = () => {
+          if (window.google?.accounts?.id) { resolve(true); return; }
+          if (Date.now() - start >= maxMs) { resolve(false); return; }
+          setTimeout(tick, 150);
+        };
+        tick();
+      });
+    }
+
+    async function startGoogleSignIn() {
       const clientId = state.authConfig.google_client_id;
       if (!clientId) {
-        container.innerHTML = '<p class="muted" style="text-align:center;margin:0">Google non configuré.</p>';
+        setStatus("loginStatus", "Connexion Google non configurée sur le serveur.", false);
         return;
       }
-      const tryRender = () => {
-        if (!window.google?.accounts?.id) { setTimeout(tryRender, 200); return; }
+      setStatus("loginStatus", "Ouverture de Google…", true);
+      const ready = await waitForGsi();
+      if (!ready) {
+        setStatus("loginStatus", "Script Google bloqué. Désactivez le bloqueur de pub ou utilisez l'e-mail.", false);
+        return;
+      }
+      setupGoogleCallback(clientId);
+      const container = $("googleBtnContainer");
+      container.innerHTML = "";
+      window.google.accounts.id.renderButton(container, {
+        theme: "outline",
+        size: "large",
+        width: Math.min(320, container.offsetWidth || 320),
+        text: "continue_with",
+        locale: "fr",
+      });
+      window.google.accounts.id.prompt((notification) => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          setStatus("loginStatus", "Utilisez le bouton Google affiché.", true);
+        } else {
+          setStatus("loginStatus", "", true);
+        }
+      });
+    }
+
+    function initGoogleSignIn() {
+      const container = $("googleBtnContainer");
+      const fallbackBtn = $("btnGoogleSignIn");
+      if (!container) return;
+
+      const clientId = state.authConfig.google_client_id;
+      if (!clientId) {
         container.innerHTML = "";
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: async (r) => {
-            try { await doGoogleLogin(r.credential); } catch (e) { setStatus("loginStatus", e.message, false); }
-          },
+        fallbackBtn?.classList.add("hidden");
+        return;
+      }
+
+      fallbackBtn?.classList.remove("hidden");
+      if (fallbackBtn) fallbackBtn.onclick = () => startGoogleSignIn();
+
+      (async () => {
+        const ready = await waitForGsi(8000);
+        if (!ready || !clientId) return;
+        setupGoogleCallback(clientId);
+        container.innerHTML = "";
+        window.google.accounts.id.renderButton(container, {
+          theme: "outline",
+          size: "large",
+          width: Math.min(320, container.offsetWidth || 320),
+          text: "continue_with",
+          locale: "fr",
         });
-        window.google.accounts.id.renderButton(container, { theme: "outline", size: "large", width: 320, text: "continue_with", locale: "fr" });
-      };
-      tryRender();
+        if (container.children.length > 0) {
+          fallbackBtn?.classList.add("hidden");
+        }
+      })();
     }
 
     async function loadAuthConfig() {
