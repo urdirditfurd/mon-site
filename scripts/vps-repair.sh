@@ -30,7 +30,15 @@ npm install -g pm2 2>/dev/null || true
 
 echo "==> Nettoyage ancienne install"
 pm2 delete clipforge >/dev/null 2>&1 || true
+cd /root
 rm -rf "$APP_DIR"
+
+echo "==> Neutralisation Caddy (évite redirect HTTPS cassé sur IP)"
+systemctl stop caddy >/dev/null 2>&1 || true
+systemctl disable caddy >/dev/null 2>&1 || true
+if command -v docker >/dev/null 2>&1; then
+  docker ps --format '{{.Names}}' | grep -Eiq 'caddy' && docker stop "$(docker ps --format '{{.Names}}' | grep -Ei 'caddy' | head -n1)" >/dev/null 2>&1 || true
+fi
 
 echo "==> Clone propre du repo"
 git clone --branch "$GIT_BRANCH" "$REPO_URL" "$APP_DIR"
@@ -70,7 +78,8 @@ EOF
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/clipforge
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 nginx -t
-systemctl reload nginx
+systemctl enable nginx >/dev/null 2>&1 || true
+systemctl restart nginx
 
 sleep 2
 HEALTH=$(curl -sS "http://127.0.0.1:${APP_PORT}/api/health" || echo "ERREUR")
@@ -85,4 +94,6 @@ echo "   http://${PUBLIC_IP}"
 echo ""
 echo " Test santé: $HEALTH"
 echo " Logs: pm2 logs clipforge"
+echo " Test HTTP public:"
+curl -sS -I "http://${PUBLIC_IP}/" | head -n 5 || true
 echo "=========================================="

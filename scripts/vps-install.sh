@@ -34,6 +34,10 @@ if ! command -v pm2 >/dev/null 2>&1; then
 fi
 
 pm2 delete clipforge >/dev/null 2>&1 || true
+cd /root
+
+systemctl stop caddy >/dev/null 2>&1 || true
+systemctl disable caddy >/dev/null 2>&1 || true
 
 if [[ -d "$APP_DIR/.git" ]]; then
   cd "$APP_DIR"
@@ -86,7 +90,8 @@ EOF
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/clipforge
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 nginx -t
-systemctl reload nginx
+systemctl enable nginx >/dev/null 2>&1 || true
+systemctl restart nginx
 
 sleep 2
 HEALTH=$(curl -sS "http://127.0.0.1:${APP_PORT}/api/health" || echo "ERREUR")
