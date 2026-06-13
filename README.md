@@ -188,6 +188,27 @@ Notes importantes:
    - exporter JSON
    - exporter ZIP global
 
+## Dépannage — « je n'arrive pas à me connecter »
+
+### En local (sur ton PC)
+
+1. Ouvre un terminal dans le dossier du projet.
+2. Lance:
+
+```bash
+npm install
+npm start
+```
+
+3. Ouvre **exactement** `http://localhost:3000` (pas un fichier HTML ouvert directement).
+4. Le bandeau doit afficher **Backend prêt**. Si tu vois **Backend indisponible — lance: npm start**, le serveur Node n'est pas démarré.
+
+### En production
+
+- **Netlify seul ne fonctionne pas** pour ClipForge : le site affiche l'interface, mais toutes les routes `/api/*` échouent faute de serveur Node.
+- Le README mentionnait `render.yaml` : ce fichier est maintenant inclus. Déploie via **Render Blueprint** (voir section ci-dessous).
+- Vérifie que l'URL publique pointe bien vers le service Render actif (`/api/health` doit répondre `{"ok":true,...}`).
+
 ## Déploiement via GitHub + Render (lien stable)
 
 Les liens tunnels (`trycloudflare`, `loca.lt`) expirent.  

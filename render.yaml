@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: clipforge-studio
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: QUEUE_MODE
+        value: memory

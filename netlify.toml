@@ -1,2 +1,5 @@
+# ClipForge nécessite le backend Node.js (Express + FFmpeg).
+# Un déploiement statique Netlify ne suffit pas : utilise Render (render.yaml).
+
 [build]
   publish = "."
