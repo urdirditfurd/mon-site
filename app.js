@@ -122,10 +122,7 @@ const dom = {
   clipsList: document.getElementById("clipsList"),
   statusBadge: document.getElementById("statusBadge"),
   playClipBtn: document.getElementById("playClipBtn"),
-  exportClipBtn: document.getElementById("exportClipBtn"),
-  downloadJsonBtn: document.getElementById("downloadJsonBtn"),
-  downloadZipBtn: document.getElementById("downloadZipBtn"),
-  downloadSrtBtn: document.getElementById("downloadSrtBtn"),
+  downloadAllBtn: document.getElementById("downloadAllBtn"),
   backendMeta: document.getElementById("backendMeta"),
   selectedClipTitle: document.getElementById("selectedClipTitle"),
   selectedClipScore: document.getElementById("selectedClipScore"),
@@ -151,8 +148,7 @@ function updateStatus(text, ready = false) {
 }
 
 function setButtonsEnabled(enabled) {
-  if (dom.exportClipBtn) dom.exportClipBtn.disabled = !enabled;
-  if (dom.downloadZipBtn) dom.downloadZipBtn.disabled = !enabled;
+  if (dom.downloadAllBtn) dom.downloadAllBtn.disabled = !enabled;
 }
 
 function setGenerationProgress(value) {
@@ -238,15 +234,11 @@ function renderClips() {
       <div class="clip-actions">
         <button class="mini-btn" data-action="select">Voir</button>
         <button class="mini-btn" data-action="play">Lire</button>
-        <button class="mini-btn mini-btn-accent" data-action="download">Télécharger</button>
       </div>
     `;
 
     li.querySelector('[data-action="select"]').addEventListener("click", () => selectClip(idx, false));
     li.querySelector('[data-action="play"]').addEventListener("click", () => selectClip(idx, true));
-    li.querySelector('[data-action="download"]').addEventListener("click", () => {
-      triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
-    });
     dom.clipsList.appendChild(li);
   });
 }
@@ -1377,17 +1369,8 @@ function initEvents() {
     });
   }
 
-  if (dom.exportClipBtn) {
-    dom.exportClipBtn.addEventListener("click", () => {
-      if (state.selectedClipIndex < 0) return;
-      const clip = state.clips[state.selectedClipIndex];
-      if (!clip) return;
-      triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
-    });
-  }
-
-  if (dom.downloadZipBtn) {
-    dom.downloadZipBtn.addEventListener("click", () => {
+  if (dom.downloadAllBtn) {
+    dom.downloadAllBtn.addEventListener("click", () => {
       if (!state.activeJobId) return;
       triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-shorts-${state.activeJobId}.zip`);
     });
