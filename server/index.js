@@ -11,6 +11,7 @@ const { spawn, spawnSync, execSync } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
+const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
@@ -2786,12 +2787,27 @@ async function processJob(job) {
   await persistJobsDb();
 }
 
+function readDeployInfo() {
+  let indexBytes = 0;
+  let uiSimplified = false;
+  try {
+    const stat = fs.statSync(INDEX_HTML_PATH);
+    indexBytes = stat.size;
+    uiSimplified = fs.readFileSync(INDEX_HTML_PATH, "utf8").includes("downloadAllBtn");
+  } catch (_error) {
+    // ignore missing index during partial startup
+  }
+  return { rootDir: ROOT_DIR, indexBytes, uiSimplified };
+}
+
 app.get("/api/health", async (_req, res) => {
   const q = await readQueueStats();
   const cookiesMeta = getStoredYoutubeCookiesMeta();
   const scheduleConfig = readAutomationScheduleConfig();
+  const deploy = readDeployInfo();
   res.json({
     ok: true,
+    ...deploy,
     ffmpeg: ffmpegReady,
     whisperAvailable,
     ytDlpAvailable,
@@ -3339,7 +3355,8 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
 
 app.use(express.static(ROOT_DIR, { index: false }));
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(ROOT_DIR, "index.html"));
+  res.set("Cache-Control", "no-store");
+  res.sendFile(INDEX_HTML_PATH);
 });
 
 ensureDirs()
@@ -3358,7 +3375,12 @@ ensureDirs()
       scheduleNextAutomationTick(scheduleConfig);
     }
     app.listen(PORT, () => {
+      const deploy = readDeployInfo();
       console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);
+      console.log(`ROOT_DIR=${deploy.rootDir} indexBytes=${deploy.indexBytes} uiSimplified=${deploy.uiSimplified}`);
+      if (!deploy.uiSimplified) {
+        console.warn("ATTENTION: index.html servi sans downloadAllBtn — mauvais dossier ou ancienne version.");
+      }
     });
   })
   .catch((error) => {
