@@ -25,6 +25,7 @@ const state = {
   localVideoDuration: 0,
   sourceVideoUrl: "",
   activeJobId: "",
+  bundleFilename: "",
   pollTimer: null,
   clips: [],
   selectedClipIndex: -1,
@@ -1270,6 +1271,7 @@ async function createJob() {
 function applyCompletedJob(job, readyStatusText = "") {
   setGenerationProgress(100);
   state.clips = job.clips || [];
+  state.bundleFilename = job.downloads?.bundleFilename || "";
   state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
   state.burnSubtitles = Boolean(job.params?.burnSubtitles);
   state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
@@ -1372,7 +1374,8 @@ function initEvents() {
   if (dom.downloadAllBtn) {
     dom.downloadAllBtn.addEventListener("click", () => {
       if (!state.activeJobId) return;
-      triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-shorts-${state.activeJobId}.zip`);
+      const zipName = state.bundleFilename || `clipforge-shorts-${state.activeJobId}.zip`;
+      triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, zipName);
     });
   }
 
