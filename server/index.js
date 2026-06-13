@@ -2052,6 +2052,101 @@ function runCommandCapture(cmd, args) {
   });
 }
 
+function sanitizeDownloadBasename(rawName) {
+  const withoutExt = path.basename(String(rawName || ""), path.extname(String(rawName || "")));
+  const cleaned = withoutExt
+    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.+$/g, "");
+  return cleaned.slice(0, 120) || "video";
+}
+
+function looksLikeInternalDownloadName(rawName) {
+  const base = sanitizeDownloadBasename(rawName).toLowerCase();
+  return !base || /-source$/i.test(base) || /^[0-9a-f-]{20,}/i.test(base);
+}
+
+async function fetchSourceVideoTitle(sourceUrl, ytCookiesFile = "") {
+  const normalizedUrl = String(sourceUrl || "").trim();
+  if (!normalizedUrl) return "";
+
+  if (isLikelyYouTubeUrl(normalizedUrl) && YOUTUBE_API_KEY) {
+    const videoId = extractYouTubeVideoIdFromUrl(normalizedUrl);
+    if (videoId) {
+      try {
+        const params = new URLSearchParams({
+          key: YOUTUBE_API_KEY,
+          part: "snippet",
+          id: videoId
+        });
+        const response = await fetch(`${YOUTUBE_DATA_API_BASE}/videos?${params.toString()}`);
+        const json = await response.json().catch(() => ({}));
+        if (response.ok) {
+          const title = String(json?.items?.[0]?.snippet?.title || "").trim();
+          if (title) return title;
+        }
+      } catch (_error) {
+        // fallback below
+      }
+    }
+  }
+
+  if (!ytDlpAvailable) return "";
+  try {
+    const args = ["-m", "yt_dlp", "--no-playlist", "--no-warnings", "--print", "title"];
+    if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+    args.push(normalizedUrl);
+    const { stdout } = await runCommandCapture("python3", args);
+    const title = String(stdout || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean);
+    return title || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function resolveSourceDownloadBasename(job) {
+  const rawFilename = String(job?.originalFilename || "").trim();
+  if (rawFilename && !looksLikeInternalDownloadName(rawFilename)) {
+    return sanitizeDownloadBasename(rawFilename);
+  }
+  const sourceUrl = String(job?.sourceUrl || "").trim();
+  if (sourceUrl) {
+    const videoId = extractYouTubeVideoIdFromUrl(sourceUrl);
+    if (videoId) return sanitizeDownloadBasename(`youtube-${videoId}`);
+  }
+  return "video";
+}
+
+function findClipIndex(job, clipId) {
+  return (job.clips || []).findIndex((clip) => clip.id === clipId);
+}
+
+function buildClipDownloadFilename(job, clipIndex) {
+  const base = resolveSourceDownloadBasename(job);
+  const clipCount = (job.clips || []).length;
+  if (clipCount <= 1) return `${base}.mp4`;
+  return `${base} ${clipIndex + 1}.mp4`;
+}
+
+function buildClipSrtDownloadFilename(job, clipIndex) {
+  const mp4Name = buildClipDownloadFilename(job, clipIndex);
+  return mp4Name.replace(/\.mp4$/i, ".srt");
+}
+
+function buildJobBundleZipFilename(job) {
+  return `${resolveSourceDownloadBasename(job)}.zip`;
+}
+
+function buildContentDispositionAttachment(filename) {
+  const safe = String(filename || "download").replace(/[\r\n"]/g, "");
+  const asciiFallback = safe.replace(/[^\x20-\x7E]/g, "_") || "download";
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
 async function isPlayableVideoFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return false;
   try {
@@ -2483,7 +2578,7 @@ function sanitizeJobForClient(job) {
       url: job.sourceUrl || ""
     },
     params: job.params,
-    clips: (job.clips || []).map((clip) => ({
+    clips: (job.clips || []).map((clip, index) => ({
       id: clip.id,
       title: clip.title,
       start: clip.start,
@@ -2494,11 +2589,15 @@ function sanitizeJobForClient(job) {
       hasBurnedSubtitles: Boolean(clip.burnedFilePath),
       hasDubbedAudio: Boolean(clip.dubbedAudioPath),
       dubVoice: clip.dubVoice || "",
+      downloadFilename: buildClipDownloadFilename(job, index),
       streamUrl: `/api/jobs/${job.id}/clips/${clip.id}/stream`,
       downloadUrl: `/api/jobs/${job.id}/clips/${clip.id}/download`,
       srtUrl: `/api/jobs/${job.id}/clips/${clip.id}/srt`,
       captions: clip.captions
-    }))
+    })),
+    downloads: {
+      bundleFilename: buildJobBundleZipFilename(job)
+    }
   };
 }
 
@@ -2640,7 +2739,10 @@ async function processJob(job) {
     }
     job.inputPath = downloaded.videoPath;
     job.sourceSubtitlePath = downloaded.subtitlePath || "";
-    if (!job.originalFilename) {
+    const fetchedTitle = await fetchSourceVideoTitle(job.sourceUrl, ytCookiesFile);
+    if (fetchedTitle) {
+      job.originalFilename = `${sanitizeDownloadBasename(fetchedTitle)}.mp4`;
+    } else if (!job.originalFilename || looksLikeInternalDownloadName(job.originalFilename)) {
       job.originalFilename = path.basename(downloaded.videoPath);
     }
     job.progress = 14;
@@ -3306,21 +3408,23 @@ app.get("/api/jobs/:jobId/clips/:clipId/stream", (req, res) => {
 app.get("/api/jobs/:jobId/clips/:clipId/download", (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job introuvable" });
-  const clip = (job.clips || []).find((c) => c.id === req.params.clipId);
+  const clipIndex = findClipIndex(job, req.params.clipId);
+  const clip = clipIndex >= 0 ? job.clips[clipIndex] : null;
   if (!clip) return res.status(404).json({ error: "Clip introuvable" });
   const selectedPath = clip.burnedFilePath || clip.filePath;
   if (!selectedPath || !fs.existsSync(selectedPath)) return res.status(404).json({ error: "Fichier clip indisponible" });
-  return res.download(selectedPath, `${clip.id}.mp4`);
+  return res.download(selectedPath, buildClipDownloadFilename(job, clipIndex));
 });
 
 app.get("/api/jobs/:jobId/clips/:clipId/srt", (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job introuvable" });
-  const clip = (job.clips || []).find((c) => c.id === req.params.clipId);
+  const clipIndex = findClipIndex(job, req.params.clipId);
+  const clip = clipIndex >= 0 ? job.clips[clipIndex] : null;
   if (!clip || !clip.srtPath || !fs.existsSync(clip.srtPath)) {
     return res.status(404).json({ error: "Sous-titres introuvables" });
   }
-  return res.download(clip.srtPath, `${clip.id}.srt`);
+  return res.download(clip.srtPath, buildClipSrtDownloadFilename(job, clipIndex));
 });
 
 app.get("/api/jobs/:jobId/bundle", async (req, res) => {
@@ -3329,7 +3433,7 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   if (job.status !== "completed") return res.status(409).json({ error: "Job non terminé" });
 
   res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename=\"clipforge-bundle-${job.id}.zip\"`);
+  res.setHeader("Content-Disposition", buildContentDispositionAttachment(buildJobBundleZipFilename(job)));
 
   const archive = archiver("zip", { zlib: { level: 9 } });
   archive.on("error", (err) => {
@@ -3340,13 +3444,13 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   const planPath = getJobPlanPath(job.id);
   if (fs.existsSync(planPath)) archive.file(planPath, { name: "plan.json" });
 
-  for (const clip of job.clips || []) {
+  for (const [index, clip] of (job.clips || []).entries()) {
     const selectedPath = clip.burnedFilePath || clip.filePath;
     if (selectedPath && fs.existsSync(selectedPath)) {
-      archive.file(selectedPath, { name: `clips/${clip.id}.mp4` });
+      archive.file(selectedPath, { name: buildClipDownloadFilename(job, index) });
     }
     if (job.params.includeSrtInZip && clip.srtPath && fs.existsSync(clip.srtPath)) {
-      archive.file(clip.srtPath, { name: `subtitles/${clip.id}.srt` });
+      archive.file(clip.srtPath, { name: buildClipSrtDownloadFilename(job, index) });
     }
   }
 
