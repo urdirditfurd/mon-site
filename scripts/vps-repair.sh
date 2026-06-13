@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installation ClipForge sur VPS (Ubuntu/Debian) — à lancer en root
-# Usage: curl -fsSL https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/fix-clipforge-deployment-cb8f/scripts/vps-install.sh | bash
+# Réparation ClipForge sur VPS après une install interrompue
+# Usage (root): curl -fsSL https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/fix-clipforge-deployment-cb8f/scripts/vps-repair.sh | bash
 
 APP_DIR="${APP_DIR:-/opt/clipforge}"
 APP_PORT="${APP_PORT:-3000}"
 REPO_URL="${REPO_URL:-https://github.com/urdirditfurd/mon-site.git}"
 GIT_BRANCH="${GIT_BRANCH:-cursor/fix-clipforge-deployment-cb8f}"
 
-echo "==> ClipForge — installation sur VPS"
-echo "    Dossier: $APP_DIR"
-echo "    Port:    $APP_PORT"
+echo "==> Réparation ClipForge"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Lance ce script en root (sudo -i)."
@@ -19,8 +17,8 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y git curl ca-certificates nginx ffmpeg python3 python3-pip
+apt-get update -qq
+apt-get install -y git curl ca-certificates nginx ffmpeg python3 python3-pip nodejs >/dev/null 2>&1 || true
 
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//' | cut -d. -f1)" -lt 18 ]]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -28,34 +26,20 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//' | cut -d. -f
 fi
 
 pip3 install -U yt-dlp --break-system-packages 2>/dev/null || pip3 install -U yt-dlp
+npm install -g pm2 2>/dev/null || true
 
-if ! command -v pm2 >/dev/null 2>&1; then
-  npm install -g pm2
-fi
-
+echo "==> Nettoyage ancienne install"
 pm2 delete clipforge >/dev/null 2>&1 || true
+rm -rf "$APP_DIR"
 
-if [[ -d "$APP_DIR/.git" ]]; then
-  cd "$APP_DIR"
-  git fetch origin
-  git reset --hard "origin/$GIT_BRANCH" 2>/dev/null || {
-    echo "==> Repo corrompu, re-clone propre"
-    cd /
-    rm -rf "$APP_DIR"
-    git clone --branch "$GIT_BRANCH" "$REPO_URL" "$APP_DIR"
-  }
-  git checkout "$GIT_BRANCH" 2>/dev/null || git checkout -B "$GIT_BRANCH" "origin/$GIT_BRANCH"
-  git pull origin "$GIT_BRANCH" || true
-else
-  rm -rf "$APP_DIR"
-  git clone --branch "$GIT_BRANCH" "$REPO_URL" "$APP_DIR"
-fi
-
+echo "==> Clone propre du repo"
+git clone --branch "$GIT_BRANCH" "$REPO_URL" "$APP_DIR"
 cd "$APP_DIR"
 npm install
 npm run check
 mkdir -p storage/uploads storage/jobs storage/secrets
 
+echo "==> Démarrage PM2 (root)"
 export PORT="$APP_PORT"
 pm2 start server/index.js --name clipforge
 pm2 save
@@ -94,12 +78,11 @@ PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo ""
 echo "=========================================="
-echo " ClipForge installé."
+echo " ClipForge réparé."
 echo ""
 echo " Ouvre en HTTP (pas HTTPS):"
 echo "   http://${PUBLIC_IP}"
 echo ""
-echo " Health: $HEALTH"
+echo " Test santé: $HEALTH"
 echo " Logs: pm2 logs clipforge"
-echo " Maj:  cd $APP_DIR && bash scripts/vps-update.sh"
 echo "=========================================="

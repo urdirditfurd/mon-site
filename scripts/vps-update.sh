@@ -5,7 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "==> Mise à jour ClipForge depuis Git"
-git pull origin main
+BRANCH="${GIT_BRANCH:-cursor/fix-clipforge-deployment-cb8f}"
+git fetch origin
+git checkout "$BRANCH" 2>/dev/null || git checkout -B "$BRANCH" "origin/$BRANCH"
+git pull origin "$BRANCH"
 
 echo "==> Dépendances Node"
 npm install
@@ -27,6 +30,7 @@ fi
 
 if command -v pm2 >/dev/null 2>&1; then
   echo "==> Redémarrage PM2 (clipforge)"
+  export PORT="${PORT:-3000}"
   pm2 restart clipforge || pm2 start server/index.js --name clipforge
   pm2 save
 elif systemctl is-active --quiet clipforge 2>/dev/null; then
