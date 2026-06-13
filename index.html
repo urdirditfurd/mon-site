@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClipForge — Générateur de clips courts</title>
+  <title>ClipForge — Générateur de shorts</title>
   <link rel="icon" href="favicon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,17 +13,18 @@
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">Création rapide de shorts</p>
+      <p class="eyebrow">Shorts en 3 clics</p>
       <h1>ClipForge Studio</h1>
-      <p class="subtitle">Colle un lien vidéo, lance la génération, puis exporte les meilleurs clips.</p>
+      <p class="subtitle">Colle un lien YouTube, choisis la durée et le format, puis télécharge tes shorts.</p>
     </div>
   </header>
 
   <main class="layout">
     <section class="panel">
       <h2>Créer des clips</h2>
+
       <label class="field">
-        <span>Lien vidéo (YouTube ou URL directe)</span>
+        <span>Lien YouTube</span>
         <input
           type="url"
           id="videoUrlInput"
@@ -31,13 +32,30 @@
           autocomplete="off"
         >
       </label>
-      <div class="buttons-row quick-actions">
-        <button id="analyzeBtn" class="btn btn-primary" type="button">Lancer la génération</button>
-        <label class="toggle-row compact">
-          <input type="checkbox" id="quickMode" checked>
-          <span>Mode simple</span>
+
+      <div class="grid-2">
+        <label class="field">
+          <span>Durée par clip</span>
+          <select id="clipDuration">
+            <option value="15">15 secondes</option>
+            <option value="30">30 secondes</option>
+            <option value="45" selected>45 secondes</option>
+            <option value="60">60 secondes</option>
+            <option value="90">90 secondes</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Format</span>
+          <select id="aspectRatio">
+            <option value="9:16" selected>TikTok / Reels (9:16)</option>
+            <option value="1:1">Carré (1:1)</option>
+            <option value="16:9">YouTube (16:9)</option>
+          </select>
         </label>
       </div>
+
+      <button id="analyzeBtn" class="btn btn-primary btn-block" type="button">Générer mes shorts</button>
+
       <div class="progress-box">
         <div class="progress-track">
           <div id="generationProgress" class="progress-fill"></div>
@@ -46,217 +64,9 @@
       </div>
 
       <details class="details-box">
-        <summary>Version V2 — découverte auto YouTube</summary>
-        <p class="hint small no-margin">
-          L’agent recherche automatiquement des liens YouTube selon ta niche, puis prépare le batch en un clic.
-        </p>
-        <div class="grid-2">
-          <label class="field">
-            <span>Niche / mots-clés</span>
-            <input
-              type="text"
-              id="discoverQuery"
-              placeholder="funny animals, animaux drôles, fails animaux..."
-              autocomplete="off"
-            >
-          </label>
-          <label class="field">
-            <span>Nombre de liens à trouver</span>
-            <select id="discoverMaxResults">
-              <option value="5">5</option>
-              <option value="8">8</option>
-              <option value="12" selected>12</option>
-              <option value="16">16</option>
-              <option value="20">20</option>
-            </select>
-          </label>
-        </div>
-        <div class="grid-2">
-          <label class="field">
-            <span>Ordre de recherche</span>
-            <select id="discoverOrder">
-              <option value="relevance" selected>Pertinence</option>
-              <option value="date">Plus récent</option>
-              <option value="viewCount">Plus de vues</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Durée min des vidéos source</span>
-            <select id="discoverMinDurationSec">
-              <option value="180">3 min</option>
-              <option value="300" selected>5 min</option>
-              <option value="480">8 min</option>
-              <option value="600">10 min</option>
-              <option value="900">15 min</option>
-            </select>
-          </label>
-        </div>
-        <div class="grid-2">
-          <label class="field">
-            <span>Langue dominante</span>
-            <select id="discoverLanguage">
-              <option value="">Toutes</option>
-              <option value="fr">Français</option>
-              <option value="en" selected>Anglais</option>
-              <option value="es">Espagnol</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Région</span>
-            <select id="discoverRegion">
-              <option value="FR" selected>France (FR)</option>
-              <option value="US">États-Unis (US)</option>
-              <option value="CA">Canada (CA)</option>
-              <option value="GB">Royaume-Uni (GB)</option>
-            </select>
-          </label>
-        </div>
-        <label class="field">
-          <span>Période max (jours récents)</span>
-          <select id="discoverPublishedWithinDays">
-            <option value="30">30 jours</option>
-            <option value="90" selected>90 jours</option>
-            <option value="180">180 jours</option>
-            <option value="365">365 jours</option>
-            <option value="0">Sans limite</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Exclure chaînes (mots-clés, séparés par virgule)</span>
-          <input
-            type="text"
-            id="discoverExcludeChannels"
-            placeholder="compilation, shorts, replay..."
-            autocomplete="off"
-          >
-        </label>
-        <label class="toggle-row">
-          <input type="checkbox" id="discoverExcludeSeen" checked>
-          <span>Anti-doublon historique (éviter les vidéos déjà traitées)</span>
-        </label>
-        <div class="buttons-row">
-          <button id="discoverYoutubeBtn" class="btn btn-primary" type="button">Trouver des liens (V2)</button>
-          <button id="useDiscoverResultsBtn" class="btn btn-ghost" type="button">Envoyer la sélection vers batch V1</button>
-          <button id="discoverAndRunBatchBtn" class="btn btn-ghost" type="button">Trouver + lancer batch</button>
-          <button id="discoverGeneratePublishBtn" class="btn btn-primary" type="button">Trouver + générer + publier TikTok</button>
-        </div>
-        <p id="discoverStatus" class="hint small">Découverte V2 inactive.</p>
-        <ul id="discoverResultsList" class="discover-results-list">
-          <li class="empty">Aucune découverte pour le moment.</li>
-        </ul>
-        <p id="automationStatus" class="hint small">Auto-publish TikTok inactif.</p>
-        <ul id="automationItemsList" class="discover-results-list">
-          <li class="empty">Aucune automatisation lancée.</li>
-        </ul>
-      </details>
-
-      <details class="details-box">
-        <summary>Connexion TikTok (auto-publication)</summary>
-        <label class="field">
-          <span>Access Token TikTok</span>
-          <input type="password" id="tiktokAccessToken" placeholder="act....">
-        </label>
-        <label class="field">
-          <span>Open ID TikTok</span>
-          <input type="text" id="tiktokOpenId" placeholder="open_id utilisateur">
-        </label>
-        <div class="grid-2">
-          <label class="field">
-            <span>Confidentialité par défaut</span>
-            <select id="tiktokPrivacy">
-              <option value="SELF_ONLY" selected>Privé (SELF_ONLY)</option>
-              <option value="PUBLIC_TO_EVERYONE">Public</option>
-              <option value="FOLLOWER_OF_CREATOR">Abonnés</option>
-              <option value="MUTUAL_FOLLOW_FRIENDS">Amis mutuels</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Hashtags par défaut</span>
-            <input type="text" id="tiktokHashtags" placeholder="#funny #animals #fyp">
-          </label>
-        </div>
-        <div class="buttons-row">
-          <button id="saveTikTokConfigBtn" class="btn btn-primary" type="button">Enregistrer config TikTok</button>
-          <button id="clearTikTokConfigBtn" class="btn btn-ghost" type="button">Supprimer config TikTok</button>
-        </div>
-        <p id="tiktokConfigStatus" class="hint small">Configuration TikTok: vérification…</p>
-        <hr class="separator">
-        <div class="grid-2">
-          <label class="field">
-            <span>Auto-run toutes les X minutes</span>
-            <select id="automationIntervalMinutes">
-              <option value="30">30 minutes</option>
-              <option value="60">60 minutes</option>
-              <option value="120" selected>120 minutes</option>
-              <option value="180">180 minutes</option>
-              <option value="240">240 minutes</option>
-              <option value="360">360 minutes</option>
-              <option value="720">720 minutes</option>
-              <option value="1440">1440 minutes (1 jour)</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Base URL publique (optionnel)</span>
-            <input type="text" id="automationBaseUrl" placeholder="https://ton-domaine.com">
-          </label>
-        </div>
-        <div class="buttons-row">
-          <button id="saveAutomationScheduleBtn" class="btn btn-primary" type="button">Activer / mettre à jour auto-run</button>
-          <button id="runAutomationNowBtn" class="btn btn-ghost" type="button">Lancer maintenant</button>
-          <button id="disableAutomationScheduleBtn" class="btn btn-ghost" type="button">Désactiver auto-run</button>
-        </div>
-        <p id="automationScheduleStatus" class="hint small">Planification: inactive.</p>
-      </details>
-
-      <details class="details-box">
-        <summary>Auto-Pipeline V1 (batch aujourd'hui)</summary>
-        <p class="hint small no-margin">
-          Preset automatique: 2 min, sans audio ajouté, sans sous-titres brûlés, format TikTok 9:16.
-        </p>
-        <label class="field">
-          <span>Liens vidéo (1 lien par ligne)</span>
-          <textarea
-            id="batchVideoUrlsInput"
-            rows="5"
-            placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."
-          ></textarea>
-        </label>
-        <div class="grid-2">
-          <label class="field">
-            <span>Clips 2 min par source</span>
-            <select id="batchClipsCount">
-              <option value="2">2 clips</option>
-              <option value="3">3 clips</option>
-              <option value="4" selected>4 clips</option>
-              <option value="6">6 clips</option>
-              <option value="8">8 clips</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Ignorer intro auto</span>
-            <select id="batchIgnoreIntroSec">
-              <option value="10">10 secondes</option>
-              <option value="20" selected>20 secondes</option>
-              <option value="30">30 secondes</option>
-              <option value="45">45 secondes</option>
-              <option value="60">60 secondes</option>
-            </select>
-          </label>
-        </div>
-        <div class="buttons-row">
-          <button id="startBatchBtn" class="btn btn-primary" type="button">Lancer batch V1</button>
-          <button id="stopBatchBtn" class="btn btn-ghost" type="button" disabled>Arrêter après la vidéo en cours</button>
-        </div>
-        <p id="batchStatus" class="hint small">Batch inactif.</p>
-        <ul id="batchJobsList" class="batch-jobs-list">
-          <li class="empty">Aucun batch lancé.</li>
-        </ul>
-      </details>
-
-      <details class="details-box">
-        <summary>Connexion YouTube (anti-bot)</summary>
-        <label class="field">
-          <span>Cookies YouTube (format Netscape)</span>
+        <summary>Cookies YouTube (si blocage anti-bot)</summary>
+        <label class="field no-margin">
+          <span>Cookies au format Netscape</span>
           <textarea
             id="youtubeCookiesInput"
             rows="4"
@@ -264,138 +74,10 @@
           ></textarea>
         </label>
         <div class="buttons-row youtube-cookies-actions">
-          <button id="saveYoutubeCookiesBtn" class="btn btn-ghost" type="button">Enregistrer les cookies</button>
-          <button id="clearYoutubeCookiesBtn" class="btn btn-ghost" type="button">Supprimer cookies serveur</button>
+          <button id="saveYoutubeCookiesBtn" class="btn btn-ghost" type="button">Enregistrer</button>
+          <button id="clearYoutubeCookiesBtn" class="btn btn-ghost" type="button">Supprimer</button>
         </div>
-        <p class="hint small" id="youtubeCookiesStatus">État cookies YouTube: vérification…</p>
-      </details>
-
-      <details class="details-box">
-        <summary>Importer un fichier local (optionnel)</summary>
-        <label class="field no-margin">
-          <span>Uploader une vidéo locale</span>
-          <input type="file" id="videoInput" accept="video/*">
-        </label>
-      </details>
-
-      <details class="details-box">
-        <summary>Réglages avancés (optionnel)</summary>
-        <div class="grid-2">
-          <label class="field">
-            <span>Durée par clip</span>
-            <select id="clipDuration">
-              <option value="15">15 secondes</option>
-              <option value="30" selected>30 secondes</option>
-              <option value="45">45 secondes</option>
-              <option value="60">60 secondes</option>
-              <option value="90">90 secondes</option>
-              <option value="120">2 minutes</option>
-              <option value="150">2 min 30</option>
-              <option value="180">3 minutes</option>
-              <option value="240">4 minutes</option>
-              <option value="300">5 minutes</option>
-              <option value="420">7 minutes</option>
-              <option value="600">10 minutes</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Format export</span>
-            <select id="aspectRatio">
-              <option value="9:16" selected>9:16 (TikTok/Reels)</option>
-              <option value="1:1">1:1 (Square)</option>
-              <option value="16:9">16:9 (YouTube)</option>
-            </select>
-          </label>
-        </div>
-        <label class="field">
-          <span>Mise en page (sans déformation)</span>
-          <select id="frameMode">
-            <option value="full-video" selected>Plein cadre vidéo (sans flou)</option>
-            <option value="blur-fill">Fond flou (sans couper l'image)</option>
-            <option value="black-bars">Bandes noires (aucune coupe)</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>Nombre de clips: <strong id="clipsCountValue">4</strong></span>
-          <input type="range" id="clipsCount" min="1" max="8" value="4">
-        </label>
-
-        <label class="field">
-          <span>Transcript (optionnel)</span>
-          <textarea id="transcriptInput" rows="6" placeholder="Collez ici la transcription de votre vidéo."></textarea>
-        </label>
-
-        <div class="grid-2">
-          <label class="field">
-            <span>Style sous-titres</span>
-            <select id="subtitleTheme">
-              <option value="classic" selected>Classic</option>
-              <option value="bold">Bold</option>
-              <option value="cinema">Cinema</option>
-              <option value="neon">Neon</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Détection</span>
-            <select id="highlightMode">
-              <option value="balanced" selected>Balanced</option>
-              <option value="hook-first">Hook-first</option>
-              <option value="viral">Viral</option>
-            </select>
-          </label>
-        </div>
-        <label class="field">
-          <span>Ignorer l’intro (X premières secondes)</span>
-          <select id="ignoreIntroSec">
-            <option value="0">0 seconde</option>
-            <option value="10">10 secondes</option>
-            <option value="20" selected>20 secondes</option>
-            <option value="30">30 secondes</option>
-            <option value="45">45 secondes</option>
-            <option value="60">60 secondes</option>
-            <option value="90">90 secondes</option>
-            <option value="120">120 secondes</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Mode vidéo</span>
-          <select id="languageMode">
-            <option value="translate-to-french" selected>Vidéo à traduire en français</option>
-            <option value="already-french">Vidéo déjà en français (pas de traduction audio)</option>
-            <option value="no-added-audio">Vidéo sans ajout d'audio (garde l'audio original)</option>
-          </select>
-        </label>
-
-        <div class="toggles">
-          <label class="toggle-row">
-            <input type="checkbox" id="includeAutoTranscript">
-            <span>Transcription auto (si transcript vide)</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="dubFrenchAudio" checked>
-            <span>Doublage audio FR (remplace l'audio original)</span>
-          </label>
-        <label class="toggle-row">
-          <input type="checkbox" id="autoDubVoiceBySpeaker" checked>
-          <span>Voix FR auto (homme/femme selon la voix detectee)</span>
-        </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="burnSubtitles">
-            <span>Brûler les sous-titres dans les exports MP4</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="includeSrtInZip" checked>
-            <span>Inclure les fichiers .srt dans le ZIP global</span>
-          </label>
-        </div>
-
-        <label class="field">
-          <span>Écart minimum entre clips: <strong id="minGapValue">3s</strong></span>
-          <input type="range" id="minGapSecBetweenClips" min="0" max="10" value="3">
-        </label>
-
-        <button id="generateScriptBtn" class="btn btn-ghost" type="button">Générer un script exemple</button>
+        <p class="hint small" id="youtubeCookiesStatus">État cookies: vérification…</p>
       </details>
 
       <p class="hint small" id="backendMeta">Connexion serveur…</p>
@@ -405,23 +87,18 @@
       <div class="player-card">
         <div class="player-head">
           <h2>Prévisualisation</h2>
-          <div class="status" id="statusBadge">Initialisation backend...</div>
+          <div class="status" id="statusBadge">Initialisation…</div>
         </div>
         <div class="video-shell">
           <video id="player" controls playsinline></video>
-          <div id="subtitleOverlay" class="subtitle-overlay">Les sous-titres s’afficheront ici</div>
         </div>
         <div class="player-actions">
-          <button id="playClipBtn" class="btn btn-ghost" type="button" disabled>Lire le clip sélectionné</button>
-          <button id="exportClipBtn" class="btn btn-primary" type="button" disabled>Exporter le clip (.mp4)</button>
-          <button id="downloadSrtBtn" class="btn btn-ghost" type="button" disabled>Télécharger sous-titres (.srt)</button>
-          <button id="downloadZipBtn" class="btn btn-ghost" type="button" disabled>Exporter pack complet (.zip)</button>
-          <button id="downloadJsonBtn" class="btn btn-ghost" type="button" disabled>Télécharger le plan (.json)</button>
+          <button id="exportClipBtn" class="btn btn-primary" type="button" disabled>Télécharger ce clip</button>
+          <button id="downloadZipBtn" class="btn btn-ghost" type="button" disabled>Télécharger tous les clips</button>
         </div>
         <div class="clip-meta" id="selectedClipMeta">
           <h3 id="selectedClipTitle">Aucun clip sélectionné</h3>
-          <p id="selectedClipScore" class="hint small no-margin">Virality score: --</p>
-          <p id="selectedClipSummary" class="hint no-margin">Le résumé transcript du clip apparaîtra ici.</p>
+          <p id="selectedClipSummary" class="hint no-margin">Clique sur un clip ci-dessous pour le prévisualiser.</p>
         </div>
       </div>
 
@@ -436,9 +113,10 @@
 
   <script src="config.js"></script>
   <script src="app.js"></script>
-  <footer style="padding:20px;text-align:center">
-  <a href="/mon-site/terms.html">Terms of Service</a> |
-  <a href="/mon-site/privacy.html">Privacy Policy</a>
-</footer>
+  <footer class="site-footer">
+    <a href="/terms.html">Conditions</a>
+    <span>·</span>
+    <a href="/privacy.html">Confidentialité</a>
+  </footer>
 </body>
 </html>

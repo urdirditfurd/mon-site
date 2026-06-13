@@ -4,7 +4,7 @@ window.CLIPFORGE_CONFIG = {
   pollIntervalMs: 1200,
   requestTimeoutMs: 120000,
   defaults: {
-    clipDurationSec: 30,
+    clipDurationSec: 45,
     clipsCount: 4,
     minGapSecBetweenClips: 3,
     ignoreIntroSec: 20

@@ -546,3 +546,33 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 }
+
+.btn-block {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.mini-btn-accent {
+  border-color: rgba(111, 140, 255, 0.55);
+  color: #dbe4ff;
+}
+
+.site-footer {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.site-footer a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  color: var(--text);
+}
+
+.site-footer span {
+  margin: 0 8px;
+}

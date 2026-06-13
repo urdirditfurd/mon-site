@@ -18,8 +18,8 @@ const state = {
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
   quickMode: true,
-  languageMode: "translate-to-french",
-  noAddedAudio: false,
+  languageMode: "no-added-audio",
+  noAddedAudio: true,
   localVideoFile: null,
   localVideoObjectUrl: "",
   localVideoDuration: 0,
@@ -29,12 +29,12 @@ const state = {
   clips: [],
   selectedClipIndex: -1,
   subtitleTheme: "classic",
-  highlightMode: "balanced",
+  highlightMode: "viral",
   frameMode: "full-video",
   includeAutoTranscript: false,
-  dubFrenchAudio: true,
-  autoDubVoiceBySpeaker: true,
-  includeSrtInZip: true,
+  dubFrenchAudio: false,
+  autoDubVoiceBySpeaker: false,
+  includeSrtInZip: false,
   burnSubtitles: false,
   ignoreIntroSec: config.defaultIgnoreIntroSec,
   currentAspectRatio: "9:16",
@@ -151,11 +151,8 @@ function updateStatus(text, ready = false) {
 }
 
 function setButtonsEnabled(enabled) {
-  dom.playClipBtn.disabled = !enabled;
-  dom.exportClipBtn.disabled = !enabled;
-  dom.downloadJsonBtn.disabled = !enabled;
-  dom.downloadZipBtn.disabled = !enabled;
-  dom.downloadSrtBtn.disabled = !enabled;
+  if (dom.exportClipBtn) dom.exportClipBtn.disabled = !enabled;
+  if (dom.downloadZipBtn) dom.downloadZipBtn.disabled = !enabled;
 }
 
 function setGenerationProgress(value) {
@@ -194,10 +191,11 @@ function resetClipState() {
   state.selectedClipIndex = -1;
   setButtonsEnabled(false);
   renderClips();
-  dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
+  if (dom.subtitleOverlay) dom.subtitleOverlay.innerHTML = "";
   if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = "Aucun clip sélectionné";
-  if (dom.selectedClipScore) dom.selectedClipScore.textContent = "Virality score: --";
-  if (dom.selectedClipSummary) dom.selectedClipSummary.textContent = "Le résumé transcript du clip apparaîtra ici.";
+  if (dom.selectedClipSummary) {
+    dom.selectedClipSummary.textContent = "Clique sur un clip ci-dessous pour le prévisualiser.";
+  }
   setGenerationProgress(0);
 }
 
@@ -206,6 +204,7 @@ function isNoAddedAudioSelected() {
 }
 
 function applySubtitleTheme(theme) {
+  if (!dom.subtitleOverlay) return;
   dom.subtitleOverlay.classList.remove("theme-classic", "theme-bold", "theme-cinema", "theme-neon");
   dom.subtitleOverlay.classList.add(`theme-${theme}`);
 }
@@ -228,32 +227,26 @@ function renderClips() {
     li.className = "clip-item";
     if (idx === state.selectedClipIndex) li.classList.add("active");
 
-    const wordsCount = (clip.captions || []).map((c) => c.text).join(" ").split(/\s+/).filter(Boolean).length;
-    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
-    const snippet = (clip.captions || [])
-      .map((c) => c.text)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 140);
     li.innerHTML = `
       <div class="clip-top">
         <h3 class="clip-title">${clip.title}</h3>
-        <span class="chip">Virality ${viralityScore}/100</span>
+        <span class="chip">${Math.round(clip.duration)}s</span>
       </div>
       <p class="clip-times">
-        ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)}
-        (${Math.round(clip.duration)}s) · ${wordsCount} mots · ${clip.aspectRatio || "9:16"}
+        ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)} · ${clip.aspectRatio || "9:16"}
       </p>
-      <p class="clip-snippet">${snippet || "Résumé transcript indisponible."}</p>
       <div class="clip-actions">
-        <button class="mini-btn" data-action="select">Sélectionner</button>
+        <button class="mini-btn" data-action="select">Voir</button>
         <button class="mini-btn" data-action="play">Lire</button>
+        <button class="mini-btn mini-btn-accent" data-action="download">Télécharger</button>
       </div>
     `;
 
     li.querySelector('[data-action="select"]').addEventListener("click", () => selectClip(idx, false));
     li.querySelector('[data-action="play"]').addEventListener("click", () => selectClip(idx, true));
+    li.querySelector('[data-action="download"]').addEventListener("click", () => {
+      triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
+    });
     dom.clipsList.appendChild(li);
   });
 }
@@ -1014,8 +1007,9 @@ async function startBatchGeneration() {
 }
 
 function updateSubtitleOverlay() {
+  if (!dom.subtitleOverlay) return;
   if (state.selectedClipIndex < 0) {
-    dom.subtitleOverlay.innerHTML = "Les sous-titres s’afficheront ici";
+    dom.subtitleOverlay.innerHTML = "";
     return;
   }
   const clip = state.clips[state.selectedClipIndex];
@@ -1047,22 +1041,14 @@ function selectClip(index, autoplay = false) {
   dom.player.src = apiUrl(clip.streamUrl);
   dom.player.currentTime = 0;
   dom.player.load();
-  dom.subtitleOverlay.innerHTML = "";
-  dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
-  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = clip.title;
-  if (dom.selectedClipScore) {
-    const viralityScore = Math.max(1, Math.min(99, Math.round(Number(clip.score || 0) * 100)));
-    dom.selectedClipScore.textContent = `Virality score: ${viralityScore}/100 · ${clip.aspectRatio || state.currentAspectRatio}`;
+  if (dom.subtitleOverlay) {
+    dom.subtitleOverlay.innerHTML = "";
+    dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
   }
+  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = clip.title;
   if (dom.selectedClipSummary) {
-    const summary =
-      (clip.captions || [])
-        .map((c) => c.text)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 220) || "Résumé transcript indisponible.";
-    dom.selectedClipSummary.textContent = summary;
+    dom.selectedClipSummary.textContent =
+      `${secondsToClock(clip.start)} → ${secondsToClock(clip.end)} · ${Math.round(clip.duration)}s · ${clip.aspectRatio || state.currentAspectRatio}`;
   }
   updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
 
@@ -1189,25 +1175,14 @@ async function checkBackendHealth() {
     setBatchControlsDisabled(state.batchRunning);
     setDiscoverControlsDisabled(state.discoverRunning);
     setAutomationControlsDisabled(false);
-    updateStatus("Backend prêt", true);
+    updateStatus("Prêt à générer", true);
     if (serverConfig?.defaults) {
       const defaultsCfg = serverConfig.defaults;
-      if (typeof defaultsCfg.clipDuration === "number") dom.clipDuration.value = String(defaultsCfg.clipDuration);
-      if (typeof defaultsCfg.clipsCount === "number") {
-        dom.clipsCount.value = String(defaultsCfg.clipsCount);
-        dom.clipsCountValue.textContent = String(defaultsCfg.clipsCount);
+      if (typeof defaultsCfg.clipDuration === "number" && dom.clipDuration) {
+        dom.clipDuration.value = String(defaultsCfg.clipDuration);
       }
-      if (typeof defaultsCfg.minGap === "number") {
-        dom.minGapSecBetweenClips.value = String(defaultsCfg.minGap);
-        dom.minGapValue.textContent = `${defaultsCfg.minGap}s`;
-      }
-      if (typeof defaultsCfg.frameMode === "string" && dom.frameMode) {
-        state.frameMode = defaultsCfg.frameMode;
-        dom.frameMode.value = defaultsCfg.frameMode;
-      }
-      if (typeof defaultsCfg.ignoreIntroSec === "number" && dom.ignoreIntroSec) {
+      if (typeof defaultsCfg.ignoreIntroSec === "number") {
         state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
-        dom.ignoreIntroSec.value = String(defaultsCfg.ignoreIntroSec);
       }
     }
     if (serverConfig?.youtubeCookies) {
@@ -1220,10 +1195,10 @@ async function checkBackendHealth() {
       });
     }
 
-    dom.backendMeta.textContent =
-      `Queue: ${payload.queueMode} · Concurrency: ${payload.workerConcurrency} · ` +
-      `Whisper: ${payload.whisperAvailable ? "oui" : "non"} · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · ` +
-      `TTS FR: ${payload.edgeTtsAvailable ? "oui" : "non"} · Cookies YouTube: ${state.youtubeCookiesConfigured ? "oui" : "non"} · API YouTube: ${state.youtubeApiAvailable ? "oui" : "non"}`;
+    if (dom.backendMeta) {
+      dom.backendMeta.textContent =
+        `Serveur connecté · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+    }
     return;
   } catch (_error) {
     state.backendAvailable = false;
@@ -1232,17 +1207,15 @@ async function checkBackendHealth() {
     setDiscoverControlsDisabled(false);
     setAutomationControlsDisabled(true);
     updateStatus("Backend indisponible — lance: npm start", false);
-    dom.backendMeta.textContent = "Aucune connexion backend";
+    if (dom.backendMeta) dom.backendMeta.textContent = "Serveur non connecté — lance npm start";
     renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
   }
 }
 
 async function createJob() {
   const rawVideoUrl = (dom.videoUrlInput.value || "").trim();
-  const hasFile = Boolean(state.localVideoFile);
-  const hasUrl = rawVideoUrl.length > 0;
-  if (!hasFile && !hasUrl) {
-    updateStatus("Ajoute un lien vidéo ou un fichier avant de générer.", false);
+  if (!rawVideoUrl) {
+    updateStatus("Colle un lien YouTube avant de générer.", false);
     return;
   }
   if (!state.backendAvailable) {
@@ -1250,52 +1223,29 @@ async function createJob() {
     return;
   }
 
-  const useQuickMode = Boolean(state.quickMode);
   const clipDuration = Number(dom.clipDuration.value);
-  const clipsCount = Number(dom.clipsCount.value);
+  const clipsCount = config.defaultClipsCount;
   const aspectRatio = dom.aspectRatio.value;
-  const frameMode = dom.frameMode?.value || state.frameMode;
-  state.frameMode = frameMode;
-  const languageMode = dom.languageMode?.value || state.languageMode;
-  state.languageMode = languageMode;
-  state.noAddedAudio = languageMode === "no-added-audio";
-  let includeAutoTranscript = state.includeAutoTranscript;
-  let dubFrenchAudio = state.dubFrenchAudio;
-  let autoDubVoiceBySpeaker = state.autoDubVoiceBySpeaker;
-  let burnSubtitles = state.burnSubtitles;
-
-  if (isNoAddedAudioSelected() || languageMode === "already-french") {
-    dubFrenchAudio = false;
-    autoDubVoiceBySpeaker = false;
-  } else if (useQuickMode) {
-    // Quick mode applies recommended defaults without overriding chosen duration.
-    includeAutoTranscript = true;
-    dubFrenchAudio = true;
-    autoDubVoiceBySpeaker = true;
-    burnSubtitles = false;
-  }
+  state.currentAspectRatio = aspectRatio;
+  applyPreviewAspectRatio(aspectRatio);
 
   const body = new FormData();
-  if (hasUrl) {
-    body.append("videoUrl", rawVideoUrl);
-  } else if (hasFile) {
-    body.append("video", state.localVideoFile);
-  }
+  body.append("videoUrl", rawVideoUrl);
   body.append("clipDuration", String(clipDuration));
   body.append("clipsCount", String(clipsCount));
   body.append("aspectRatio", aspectRatio);
-  body.append("frameMode", frameMode);
-  body.append("languageMode", languageMode);
-  body.append("transcript", dom.transcriptInput.value.trim());
-  body.append("subtitleTheme", state.subtitleTheme);
-  body.append("highlightMode", state.highlightMode);
-  body.append("includeAutoTranscript", String(includeAutoTranscript));
-  body.append("dubFrenchAudio", String(dubFrenchAudio));
-  body.append("autoDubVoiceBySpeaker", String(autoDubVoiceBySpeaker));
-  body.append("includeSrtInZip", String(state.includeSrtInZip));
-  body.append("burnSubtitles", String(burnSubtitles));
-  body.append("minGapSecBetweenClips", String(Number(dom.minGapSecBetweenClips.value)));
-  body.append("ignoreIntroSec", String(Number(dom.ignoreIntroSec?.value || state.ignoreIntroSec || 0)));
+  body.append("frameMode", "full-video");
+  body.append("languageMode", "no-added-audio");
+  body.append("transcript", "");
+  body.append("subtitleTheme", "bold");
+  body.append("highlightMode", "viral");
+  body.append("includeAutoTranscript", "false");
+  body.append("dubFrenchAudio", "false");
+  body.append("autoDubVoiceBySpeaker", "false");
+  body.append("includeSrtInZip", "false");
+  body.append("burnSubtitles", "false");
+  body.append("minGapSecBetweenClips", String(config.defaultMinGapSec));
+  body.append("ignoreIntroSec", String(config.defaultIgnoreIntroSec));
   const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
   if (youtubeCookies) {
     body.append("youtubeCookies", youtubeCookies);
@@ -1304,7 +1254,7 @@ async function createJob() {
   dom.analyzeBtn.disabled = true;
   resetClipState();
   setGenerationProgress(5);
-  updateStatus(hasUrl ? "Analyse du lien et création du job…" : "Upload et création du job…", false);
+  updateStatus("Analyse du lien et création des shorts…", false);
 
   try {
     const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
@@ -1334,14 +1284,6 @@ function applyCompletedJob(job, readyStatusText = "") {
   state.frameMode = job.params?.frameMode || state.frameMode;
   state.noAddedAudio = state.languageMode === "no-added-audio";
   state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
-  dom.subtitleTheme.value = state.subtitleTheme;
-  if (dom.burnSubtitles) dom.burnSubtitles.checked = state.burnSubtitles;
-  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
-  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
-  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
-  if (dom.languageMode) dom.languageMode.value = state.languageMode;
-  if (dom.frameMode) dom.frameMode.value = state.frameMode;
-  applySubtitleTheme(state.subtitleTheme);
   applyPreviewAspectRatio(state.currentAspectRatio);
 
   renderClips();
@@ -1404,182 +1346,23 @@ function useSampleTranscript() {
 }
 
 function initFileInput() {
-  dom.videoInput.addEventListener("change", () => {
-    const file = dom.videoInput.files && dom.videoInput.files[0];
-    if (!file) return;
-
-    state.localVideoFile = file;
-    state.activeJobId = "";
-    resetClipState();
-
-    if (state.localVideoObjectUrl) {
-      URL.revokeObjectURL(state.localVideoObjectUrl);
-    }
-    state.localVideoObjectUrl = URL.createObjectURL(file);
-    dom.player.src = state.localVideoObjectUrl;
-    dom.player.load();
-
-    dom.player.onloadedmetadata = () => {
-      state.localVideoDuration = dom.player.duration || 0;
-      updateStatus(`Vidéo locale prête (${secondsToClock(state.localVideoDuration)})`, true);
-    };
-  });
-
   dom.videoUrlInput.addEventListener("input", () => {
     state.sourceVideoUrl = dom.videoUrlInput.value.trim();
   });
-
-  if (dom.youtubeCookiesInput) {
-    dom.youtubeCookiesInput.addEventListener("input", () => {
-      // keep latest value via DOM read in createJob
-    });
-  }
 }
 
 function initEvents() {
-  dom.clipsCount.addEventListener("input", () => {
-    dom.clipsCountValue.textContent = dom.clipsCount.value;
-  });
-
-  dom.minGapSecBetweenClips.addEventListener("input", () => {
-    dom.minGapValue.textContent = `${dom.minGapSecBetweenClips.value}s`;
-  });
-
-  dom.subtitleTheme.addEventListener("change", () => {
-    state.subtitleTheme = dom.subtitleTheme.value;
-    applySubtitleTheme(state.subtitleTheme);
-  });
-
-  dom.highlightMode.addEventListener("change", () => {
-    state.highlightMode = dom.highlightMode.value;
-  });
-
-  dom.aspectRatio.addEventListener("change", () => {
-    state.currentAspectRatio = dom.aspectRatio.value;
-    applyPreviewAspectRatio(state.currentAspectRatio);
-  });
-
-  if (dom.frameMode) {
-    dom.frameMode.addEventListener("change", () => {
-      state.frameMode = dom.frameMode.value;
+  if (dom.aspectRatio) {
+    dom.aspectRatio.addEventListener("change", () => {
+      state.currentAspectRatio = dom.aspectRatio.value;
+      applyPreviewAspectRatio(state.currentAspectRatio);
     });
   }
 
-  if (dom.ignoreIntroSec) {
-    dom.ignoreIntroSec.addEventListener("change", () => {
-      state.ignoreIntroSec = Number(dom.ignoreIntroSec.value || 0);
-    });
-  }
-
-  if (dom.quickMode) {
-    dom.quickMode.addEventListener("change", () => {
-      state.quickMode = dom.quickMode.checked;
-    });
-  }
-
-  if (dom.languageMode) {
-    dom.languageMode.addEventListener("change", () => {
-      state.languageMode = dom.languageMode.value;
-      state.noAddedAudio = state.languageMode === "no-added-audio";
-      if (state.languageMode === "already-french" || isNoAddedAudioSelected()) {
-        state.dubFrenchAudio = false;
-        state.autoDubVoiceBySpeaker = false;
-        if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = false;
-        if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = false;
-      }
-    });
-  }
-
-  dom.includeAutoTranscript.addEventListener("change", () => {
-    state.includeAutoTranscript = dom.includeAutoTranscript.checked;
-  });
-
-  if (dom.dubFrenchAudio) {
-    dom.dubFrenchAudio.addEventListener("change", () => {
-      state.dubFrenchAudio = dom.dubFrenchAudio.checked;
-    });
-  }
-
-  if (dom.autoDubVoiceBySpeaker) {
-    dom.autoDubVoiceBySpeaker.addEventListener("change", () => {
-      state.autoDubVoiceBySpeaker = dom.autoDubVoiceBySpeaker.checked;
-    });
-  }
-
-  dom.includeSrtInZip.addEventListener("change", () => {
-    state.includeSrtInZip = dom.includeSrtInZip.checked;
-  });
-
-  dom.burnSubtitles.addEventListener("change", () => {
-    state.burnSubtitles = dom.burnSubtitles.checked;
-  });
-
-  dom.generateScriptBtn.addEventListener("click", useSampleTranscript);
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
   });
-  if (dom.discoverYoutubeBtn) {
-    dom.discoverYoutubeBtn.addEventListener("click", () => {
-      void discoverYoutubeSources(false);
-    });
-  }
-  if (dom.useDiscoverResultsBtn) {
-    dom.useDiscoverResultsBtn.addEventListener("click", () => {
-      pushSelectedDiscoverUrlsToBatch();
-    });
-  }
-  if (dom.discoverAndRunBatchBtn) {
-    dom.discoverAndRunBatchBtn.addEventListener("click", () => {
-      void discoverYoutubeSources(true);
-    });
-  }
-  if (dom.discoverGeneratePublishBtn) {
-    dom.discoverGeneratePublishBtn.addEventListener("click", () => {
-      void runFullAutomation();
-    });
-  }
-  if (dom.discoverResultsList) {
-    dom.discoverResultsList.addEventListener("change", (event) => {
-      const target = event.target instanceof HTMLInputElement ? event.target : null;
-      if (!target || target.type !== "checkbox") return;
-      const videoId = target.getAttribute("data-discover-id");
-      if (!videoId) return;
-      const item = state.discoverResults.find((entry) => entry.videoId === videoId);
-      if (!item) return;
-      item.selected = target.checked;
-      setDiscoverControlsDisabled(state.discoverRunning);
-    });
-  }
-  if (dom.startBatchBtn) {
-    dom.startBatchBtn.addEventListener("click", () => {
-      void startBatchGeneration();
-    });
-  }
-  if (dom.stopBatchBtn) {
-    dom.stopBatchBtn.addEventListener("click", () => {
-      state.batchStopRequested = true;
-      setBatchStatus("Arrêt demandé: fin de la vidéo en cours puis stop.", false);
-    });
-  }
-  if (dom.batchJobsList) {
-    dom.batchJobsList.addEventListener("click", (event) => {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (!target) return;
-      const button = target.closest("button[data-action]");
-      if (!button) return;
-      const action = button.getAttribute("data-action");
-      const jobId = button.getAttribute("data-job-id");
-      if (!jobId) return;
-      if (action === "open-job") {
-        void loadJobIntoWorkspace(jobId).catch((error) => {
-          updateStatus(error instanceof Error ? error.message : "Impossible de charger ce job", false);
-        });
-      }
-      if (action === "download-bundle") {
-        triggerDownload(`/api/jobs/${jobId}/bundle`, `clipforge-bundle-${jobId}.zip`);
-      }
-    });
-  }
+
   if (dom.saveYoutubeCookiesBtn) {
     dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
       void saveYoutubeCookies();
@@ -1590,92 +1373,30 @@ function initEvents() {
       void clearYoutubeCookies();
     });
   }
-  if (dom.saveTikTokConfigBtn) {
-    dom.saveTikTokConfigBtn.addEventListener("click", () => {
-      void saveTikTokConfigFromUi();
-    });
-  }
-  if (dom.clearTikTokConfigBtn) {
-    dom.clearTikTokConfigBtn.addEventListener("click", () => {
-      void clearTikTokConfigFromUi();
-    });
-  }
-  if (dom.saveAutomationScheduleBtn) {
-    dom.saveAutomationScheduleBtn.addEventListener("click", () => {
-      void saveAutomationScheduleFromUi();
-    });
-  }
-  if (dom.disableAutomationScheduleBtn) {
-    dom.disableAutomationScheduleBtn.addEventListener("click", () => {
-      void disableAutomationScheduleFromUi();
-    });
-  }
-  if (dom.runAutomationNowBtn) {
-    dom.runAutomationNowBtn.addEventListener("click", () => {
-      void runAutomationNowFromUi();
+
+  if (dom.exportClipBtn) {
+    dom.exportClipBtn.addEventListener("click", () => {
+      if (state.selectedClipIndex < 0) return;
+      const clip = state.clips[state.selectedClipIndex];
+      if (!clip) return;
+      triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
     });
   }
 
-  dom.playClipBtn.addEventListener("click", () => {
-    if (state.selectedClipIndex < 0) return;
-    dom.player.currentTime = 0;
-    dom.player.play().catch(() => {});
-  });
-
-  dom.exportClipBtn.addEventListener("click", () => {
-    if (state.selectedClipIndex < 0) return;
-    const clip = state.clips[state.selectedClipIndex];
-    if (!clip) return;
-    triggerDownload(clip.downloadUrl, `${clip.id}.mp4`);
-  });
-
-  dom.downloadJsonBtn.addEventListener("click", () => {
-    if (!state.activeJobId) return;
-    triggerDownload(`/api/jobs/${state.activeJobId}/plan`, `clipforge-plan-${state.activeJobId}.json`);
-  });
-
-  dom.downloadZipBtn.addEventListener("click", () => {
-    if (!state.activeJobId) return;
-    triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-bundle-${state.activeJobId}.zip`);
-  });
-
-  dom.downloadSrtBtn.addEventListener("click", () => {
-    if (state.selectedClipIndex < 0 || !state.activeJobId) return;
-    const clip = state.clips[state.selectedClipIndex];
-    if (!clip) return;
-    triggerDownload(`/api/jobs/${state.activeJobId}/clips/${clip.id}/srt`, `${clip.id}.srt`);
-  });
+  if (dom.downloadZipBtn) {
+    dom.downloadZipBtn.addEventListener("click", () => {
+      if (!state.activeJobId) return;
+      triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, `clipforge-shorts-${state.activeJobId}.zip`);
+    });
+  }
 
   dom.player.addEventListener("timeupdate", updateSubtitleOverlay);
 }
 
 function initDefaults() {
-  dom.clipDuration.value = String(config.defaultClipDuration);
-  dom.clipsCount.value = String(config.defaultClipsCount);
-  dom.clipsCountValue.textContent = String(config.defaultClipsCount);
-  dom.minGapSecBetweenClips.value = String(config.defaultMinGapSec);
-  dom.minGapValue.textContent = `${config.defaultMinGapSec}s`;
-  state.ignoreIntroSec = config.defaultIgnoreIntroSec;
-  if (dom.ignoreIntroSec) dom.ignoreIntroSec.value = String(state.ignoreIntroSec);
-  dom.subtitleTheme.value = state.subtitleTheme;
-  dom.highlightMode.value = state.highlightMode;
-  if (dom.frameMode) dom.frameMode.value = state.frameMode;
-  if (dom.dubFrenchAudio) dom.dubFrenchAudio.checked = state.dubFrenchAudio;
-  if (dom.autoDubVoiceBySpeaker) dom.autoDubVoiceBySpeaker.checked = state.autoDubVoiceBySpeaker;
-  if (dom.quickMode) dom.quickMode.checked = state.quickMode;
-  if (dom.languageMode) dom.languageMode.value = state.languageMode;
-  applySubtitleTheme(state.subtitleTheme);
+  if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
+  if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;
   applyPreviewAspectRatio(state.currentAspectRatio);
-  renderDiscoverResults();
-  setDiscoverStatus("Découverte V2 inactive.", false);
-  setAutomationStatus("TikTok auto-publish inactif.", false);
-  renderAutomationItems([]);
-  renderAutomationScheduleStatus({ enabled: false });
-  setAutomationControlsDisabled(false);
-  setDiscoverControlsDisabled(false);
-  renderBatchJobs();
-  setBatchStatus("Batch inactif.", false);
-  setBatchControlsDisabled(false);
   setGenerationProgress(0);
 }
 
@@ -1684,34 +1405,12 @@ async function init() {
   initEvents();
   initFileInput();
   setButtonsEnabled(false);
-  renderDiscoverResults();
-  setDiscoverControlsDisabled(false);
-  setAutomationControlsDisabled(false);
-  renderBatchJobs();
-  setBatchControlsDisabled(false);
   await checkBackendHealth();
-  setDiscoverControlsDisabled(false);
-  setAutomationControlsDisabled(false);
-  setBatchControlsDisabled(false);
-  if (!state.backendAvailable) {
-    setDiscoverStatus("Découverte V2 inactive (backend indisponible).", true);
-    setBatchStatus("Batch inactif (backend indisponible).", true);
-  }
   if (state.backendAvailable) {
     try {
       await refreshYoutubeCookiesStatus();
     } catch (_error) {
       // ignore: status already derived from /api/config or /api/health
-    }
-    try {
-      await refreshTikTokConfigStatus();
-    } catch (_error) {
-      // ignore: UI will stay in "inactif" state on failure
-    }
-    try {
-      await refreshAutomationScheduleStatus();
-    } catch (_error) {
-      // ignore
     }
   }
 }
