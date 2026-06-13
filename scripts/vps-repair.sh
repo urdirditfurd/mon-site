@@ -7,7 +7,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/clipforge}"
 APP_PORT="${APP_PORT:-3000}"
 REPO_URL="${REPO_URL:-https://github.com/urdirditfurd/mon-site.git}"
-GIT_BRANCH="${GIT_BRANCH:-cursor/fix-clipforge-deployment-cb8f}"
+GIT_BRANCH="${GIT_BRANCH:-main}"
 
 echo "==> Réparation ClipForge"
 
@@ -49,6 +49,10 @@ mkdir -p storage/uploads storage/jobs storage/secrets
 
 echo "==> Démarrage PM2 (root)"
 export PORT="$APP_PORT"
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k "${APP_PORT}/tcp" >/dev/null 2>&1 || true
+  sleep 1
+fi
 pm2 start server/index.js --name clipforge
 pm2 save
 pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash || true

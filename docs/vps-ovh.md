@@ -155,3 +155,16 @@ curl http://127.0.0.1:3000/api/health
 pm2 status
 pm2 logs clipforge --lines 50
 ```
+
+## UI obsolète malgré `git pull` ?
+
+Un ancien processus Node peut rester sur le port 3000 (hors PM2) et servir une vieille UI.
+Symptôme : `grep downloadAllBtn /opt/clipforge/index.html` OK, mais `curl http://127.0.0.1:3000/` montre `exportClipBtn`.
+
+```bash
+cd /opt/clipforge
+git pull origin main
+bash scripts/vps-fix-all.sh
+```
+
+Le script libère le port 3000, resynchronise Git sur `main`, redémarre PM2 et vérifie `uiSimplified:true` dans `/api/health`.
