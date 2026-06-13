@@ -39,7 +39,31 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 
 - Node.js 18+
 - FFmpeg + FFprobe dans le PATH
+- **yt-dlp** (obligatoire pour les liens YouTube) : `pip install -U yt-dlp`
 - Redis recommandé pour le mode BullMQ (optionnel)
+
+## Mise à jour (local ou VPS)
+
+### Sur ton PC (Windows PowerShell)
+
+```powershell
+cd C:\chemin\vers\mon-site
+git pull origin main
+npm install
+npm start
+```
+
+Puis ouvre `http://localhost:3000`.
+
+### Sur un VPS OVH (Linux)
+
+```bash
+cd ~/mon-site
+chmod +x scripts/vps-update.sh
+./scripts/vps-update.sh
+```
+
+Guide complet (2 sites sur le même VPS, Nginx, PM2, HTTPS) : [`docs/vps-ovh.md`](docs/vps-ovh.md)
 
 ## Démarrage
 

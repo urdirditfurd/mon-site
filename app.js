@@ -1181,6 +1181,9 @@ async function checkBackendHealth() {
       if (typeof defaultsCfg.clipDuration === "number" && dom.clipDuration) {
         dom.clipDuration.value = String(defaultsCfg.clipDuration);
       }
+      if (typeof defaultsCfg.clipsCount === "number" && dom.clipsCount) {
+        dom.clipsCount.value = String(defaultsCfg.clipsCount);
+      }
       if (typeof defaultsCfg.ignoreIntroSec === "number") {
         state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
       }
@@ -1224,7 +1227,7 @@ async function createJob() {
   }
 
   const clipDuration = Number(dom.clipDuration.value);
-  const clipsCount = config.defaultClipsCount;
+  const clipsCount = Number(dom.clipsCount?.value || config.defaultClipsCount);
   const aspectRatio = dom.aspectRatio.value;
   state.currentAspectRatio = aspectRatio;
   applyPreviewAspectRatio(aspectRatio);
@@ -1395,6 +1398,7 @@ function initEvents() {
 
 function initDefaults() {
   if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
+  if (dom.clipsCount) dom.clipsCount.value = String(config.defaultClipsCount);
   if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;
   applyPreviewAspectRatio(state.currentAspectRatio);
   setGenerationProgress(0);

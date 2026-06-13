@@ -133,6 +133,12 @@ input[type="range"] {
   gap: 10px;
 }
 
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
 .toggles {
   display: grid;
   gap: 8px;
@@ -543,6 +549,10 @@ input[type="range"] {
 
 @media (max-width: 1040px) {
   .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-3 {
     grid-template-columns: 1fr;
   }
 }
