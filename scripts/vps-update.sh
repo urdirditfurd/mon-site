@@ -5,10 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "==> Mise à jour ClipForge depuis Git"
-BRANCH="${GIT_BRANCH:-cursor/fix-clipforge-deployment-cb8f}"
 git fetch origin
-git checkout "$BRANCH" 2>/dev/null || git checkout -B "$BRANCH" "origin/$BRANCH"
-git pull origin "$BRANCH"
+git checkout main
+git pull origin main
 
 echo "==> Dépendances Node"
 npm install
