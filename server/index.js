@@ -89,8 +89,36 @@ const DEFAULTS = {
   dubFrenchAudio: true,
   autoDubVoiceBySpeaker: true,
   includeSrtInZip: true,
-  burnSubtitles: false
+  burnSubtitles: false,
+  copyrightShield: true,
+  mirrorVideo: true,
+  aggressiveZoom: true,
+  visualShield: true,
+  stripOriginalAudio: true,
+  backgroundMusic: true
 };
+
+const COPYRIGHT_SHIELD_BG_MUSIC = process.env.COPYRIGHT_SHIELD_BG_MUSIC || path.join(ROOT_DIR, "assets", "shield-bg-music.mp3");
+
+function applyCopyrightShieldParams(params) {
+  if (!boolFrom(params.copyrightShield, DEFAULTS.copyrightShield)) return params;
+  return {
+    ...params,
+    mirrorVideo: true,
+    aggressiveZoom: true,
+    visualShield: true,
+    stripOriginalAudio: true,
+    backgroundMusic: true,
+    burnSubtitles: true,
+    dubFrenchAudio: true,
+    autoDubVoiceBySpeaker: true,
+    includeAutoTranscript: true,
+    subtitleTheme: "bold",
+    languageMode: params.languageMode === "no-added-audio" ? "translate-to-french" : params.languageMode,
+    highlightMode: "viral",
+    frameMode: "full-video"
+  };
+}
 
 function normalizeYouTubeErrorMessage(rawMessage) {
   const message = String(rawMessage || "");
@@ -1690,6 +1718,59 @@ async function replaceClipAudioWithFrenchDub(inputClipPath, dubAudioPath, output
   ]);
 }
 
+async function replaceClipAudioWithSilentTrack(inputClipPath, outputClipPath) {
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=r=44100:cl=stereo",
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
+async function replaceClipAudioWithVoiceAndOptionalMusic(inputClipPath, voiceAudioPath, outputClipPath, useBackgroundMusic) {
+  const hasMusic = useBackgroundMusic && fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC);
+  if (!hasMusic) {
+    await replaceClipAudioWithFrenchDub(inputClipPath, voiceAudioPath, outputClipPath);
+    return;
+  }
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-i",
+    voiceAudioPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    COPYRIGHT_SHIELD_BG_MUSIC,
+    "-filter_complex",
+    "[1:a]volume=1.0[voice];[2:a]volume=0.12[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+    "-map",
+    "0:v:0",
+    "-map",
+    "[aout]",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
 function tokenizeTranscript(transcript) {
   return String(transcript || "")
     .replace(/\s+/g, " ")
@@ -2432,24 +2513,39 @@ function ffprobeDuration(inputPath) {
   });
 }
 
-async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, aspectRatio, frameMode = DEFAULTS.frameMode) {
+async function renderClipFile(
+  inputPath,
+  outputPath,
+  clipStart,
+  clipDuration,
+  aspectRatio,
+  frameMode = DEFAULTS.frameMode,
+  renderOptions = {}
+) {
   const { width, height } = resolveOutputDimensions(aspectRatio);
+  const mirror = Boolean(renderOptions.mirrorVideo);
+  const zoom = renderOptions.aggressiveZoom ? 1.38 : 1;
+  const visualShield = Boolean(renderOptions.visualShield);
+  const stripOriginalAudio = Boolean(renderOptions.stripOriginalAudio);
   const useBlackBars = frameMode === "black-bars";
   const useFullVideo = frameMode === "full-video";
+  const mirrorFilter = mirror ? "hflip," : "";
+  const zoomFilter = zoom > 1 ? `scale=iw*${zoom}:ih*${zoom},crop=iw/${zoom}:ih/${zoom},` : "";
+  const pulseFilter = visualShield ? ",eq=saturation=1.06:contrast=1.04,hue=s=0:enable='lt(mod(t\\,3.5)\\,0.15)'" : "";
   const vf = [
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+    `${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black${pulseFilter}`,
     "format=yuv420p"
   ].join(",");
   const vComplexBlur = [
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
-    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+    `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${pulseFilter},format=yuv420p[vout]`
   ].join(";");
   const vComplexFullVideo = [
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
-    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
+    `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
+    `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${pulseFilter},format=yuv420p[vout]`
   ].join(";");
   const args = [
     "-y",
@@ -2464,16 +2560,19 @@ async function renderClipFile(inputPath, outputPath, clipStart, clipDuration, as
     "-preset",
     "veryfast",
     "-crf",
-    "22",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k"
+    "22"
   ];
+  if (!stripOriginalAudio) {
+    args.push("-c:a", "aac", "-b:a", "128k");
+  }
   if (useBlackBars) {
     args.push("-vf", vf);
   } else {
-    args.push("-filter_complex", useFullVideo ? vComplexFullVideo : vComplexBlur, "-map", "[vout]", "-map", "0:a?");
+    args.push("-filter_complex", useFullVideo ? vComplexFullVideo : vComplexBlur, "-map", "[vout]");
+    if (!stripOriginalAudio) args.push("-map", "0:a?");
+  }
+  if (stripOriginalAudio) {
+    args.push("-an");
   }
   args.push(outputPath);
   await runCommand("ffmpeg", args);
@@ -2495,7 +2594,7 @@ function captionsToSrt(captions) {
 }
 
 function subtitleForceStyle(theme) {
-  if (theme === "bold") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1";
+  if (theme === "bold") return "Fontname=Arial Black,Fontsize=26,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1,Outline=2,OutlineColour=&H00000000&";
   if (theme === "cinema") return "Fontname=Georgia,Fontsize=24,PrimaryColour=&H00F0F0F0&,BackColour=&H70000000&,Outline=2";
   if (theme === "neon") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFF00&,OutlineColour=&H00000000&,Outline=3";
   return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H80000000&";
@@ -2810,12 +2909,27 @@ async function processJob(job) {
     const captions =
       timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
     const srtPath = getJobSrtPath(job.id, clip.id);
-    await renderClipFile(job.inputPath, outputPath, clip.start, clip.duration, job.params.aspectRatio, job.params.frameMode);
+    const renderOptions = {
+      mirrorVideo: job.params.mirrorVideo,
+      aggressiveZoom: job.params.aggressiveZoom,
+      visualShield: job.params.visualShield,
+      stripOriginalAudio: job.params.stripOriginalAudio
+    };
+    await renderClipFile(
+      job.inputPath,
+      outputPath,
+      clip.start,
+      clip.duration,
+      job.params.aspectRatio,
+      job.params.frameMode,
+      renderOptions
+    );
     await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
 
     let finalClipPath = outputPath;
     let dubbedAudioPath = "";
-    if (job.params.dubFrenchAudio && edgeTtsAvailable) {
+    const shouldDub = job.params.dubFrenchAudio && edgeTtsAvailable;
+    if (shouldDub) {
       const dubText = buildDubTextFromCaptions(captions);
       if (dubText) {
         const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
@@ -2826,7 +2940,12 @@ async function processJob(job) {
             : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
           const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
           if (hasTtsAudio) {
-            await replaceClipAudioWithFrenchDub(outputPath, ttsPath, dubbedPath);
+            await replaceClipAudioWithVoiceAndOptionalMusic(
+              outputPath,
+              ttsPath,
+              dubbedPath,
+              boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic)
+            );
             finalClipPath = dubbedPath;
             dubbedAudioPath = ttsPath;
             clip.dubVoice = detectedVoice;
@@ -2835,6 +2954,15 @@ async function processJob(job) {
           finalClipPath = outputPath;
           dubbedAudioPath = "";
         }
+      }
+    }
+    if (job.params.stripOriginalAudio && finalClipPath === outputPath) {
+      const silentPath = path.join(jobDir, `${clip.id}-silent.mp4`);
+      try {
+        await replaceClipAudioWithSilentTrack(outputPath, silentPath);
+        finalClipPath = silentPath;
+      } catch (_error) {
+        finalClipPath = outputPath;
       }
     }
 
@@ -2949,7 +3077,9 @@ app.get("/api/config", (_req, res) => {
       dubFrenchAudio: edgeTtsAvailable,
       srt: true,
       zip: true,
-      burnSubtitles: true
+      burnSubtitles: true,
+      copyrightShield: true,
+      backgroundMusic: fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC)
     },
     youtubeCookies: cookiesMeta,
     automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
@@ -3314,6 +3444,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const autoDubVoiceBySpeaker = boolFrom(req.body.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker);
     const includeSrtInZip = boolFrom(req.body.includeSrtInZip, DEFAULTS.includeSrtInZip);
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
+    const copyrightShield = boolFrom(req.body.copyrightShield, DEFAULTS.copyrightShield);
     const youtubeCookies = String(req.body.youtubeCookies || "");
 
     const id = uuidv4();
@@ -3350,7 +3481,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
       originalFilename: useUrlSource ? "" : req.file.originalname,
       duration: 0,
       autoTranscriptUsed: false,
-      params: {
+      params: applyCopyrightShieldParams({
         clipDuration,
         clipsCount,
         aspectRatio,
@@ -3366,8 +3497,14 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         autoDubVoiceBySpeaker: ["already-french", "no-added-audio"].includes(languageMode) ? false : autoDubVoiceBySpeaker,
         includeSrtInZip,
         burnSubtitles,
+        copyrightShield,
+        mirrorVideo: boolFrom(req.body.mirrorVideo, DEFAULTS.mirrorVideo),
+        aggressiveZoom: boolFrom(req.body.aggressiveZoom, DEFAULTS.aggressiveZoom),
+        visualShield: boolFrom(req.body.visualShield, DEFAULTS.visualShield),
+        stripOriginalAudio: boolFrom(req.body.stripOriginalAudio, DEFAULTS.stripOriginalAudio),
+        backgroundMusic: boolFrom(req.body.backgroundMusic, DEFAULTS.backgroundMusic),
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
-      },
+      }),
       clips: [],
       error: null
     };
