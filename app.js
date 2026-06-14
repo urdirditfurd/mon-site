@@ -64,6 +64,7 @@ const dom = {
   clipsCount: document.getElementById("clipsCount"),
   clipsCountValue: document.getElementById("clipsCountValue"),
   aspectRatio: document.getElementById("aspectRatio"),
+  copyrightShield: document.getElementById("copyrightShield"),
   frameMode: document.getElementById("frameMode"),
   transcriptInput: document.getElementById("transcriptInput"),
   subtitleTheme: document.getElementById("subtitleTheme"),
@@ -1222,6 +1223,7 @@ async function createJob() {
   const clipDuration = Number(dom.clipDuration.value);
   const clipsCount = Number(dom.clipsCount?.value || config.defaultClipsCount);
   const aspectRatio = dom.aspectRatio.value;
+  const copyrightShield = dom.copyrightShield ? dom.copyrightShield.checked : true;
   state.currentAspectRatio = aspectRatio;
   applyPreviewAspectRatio(aspectRatio);
 
@@ -1230,16 +1232,17 @@ async function createJob() {
   body.append("clipDuration", String(clipDuration));
   body.append("clipsCount", String(clipsCount));
   body.append("aspectRatio", aspectRatio);
-  body.append("frameMode", "full-video");
-  body.append("languageMode", "no-added-audio");
+  body.append("copyrightShield", copyrightShield ? "true" : "false");
+  body.append("frameMode", copyrightShield ? "full-video" : "full-video");
+  body.append("languageMode", copyrightShield ? "translate-to-french" : "no-added-audio");
   body.append("transcript", "");
-  body.append("subtitleTheme", "bold");
-  body.append("highlightMode", "viral");
-  body.append("includeAutoTranscript", "false");
-  body.append("dubFrenchAudio", "false");
-  body.append("autoDubVoiceBySpeaker", "false");
+  body.append("subtitleTheme", copyrightShield ? "bold" : "bold");
+  body.append("highlightMode", copyrightShield ? "viral" : "viral");
+  body.append("includeAutoTranscript", copyrightShield ? "true" : "false");
+  body.append("dubFrenchAudio", copyrightShield ? "true" : "false");
+  body.append("autoDubVoiceBySpeaker", copyrightShield ? "true" : "false");
   body.append("includeSrtInZip", "false");
-  body.append("burnSubtitles", "false");
+  body.append("burnSubtitles", copyrightShield ? "true" : "false");
   body.append("minGapSecBetweenClips", String(config.defaultMinGapSec));
   body.append("ignoreIntroSec", String(config.defaultIgnoreIntroSec));
   const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
@@ -1329,6 +1332,9 @@ async function pollJob() {
     }
     if (job.status === "completed") {
       applyCompletedJob(job);
+      if (job.params?.copyrightShield && dom.backendMeta && !dom.backendMeta.textContent.includes("mode Shorts foot")) {
+        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · mode Shorts foot actif`;
+      }
       return;
     }
     scheduleJobPolling();
