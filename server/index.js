@@ -110,11 +110,11 @@ function applyCopyrightShieldParams(params) {
     stripOriginalAudio: true,
     backgroundMusic: true,
     burnSubtitles: true,
-    dubFrenchAudio: true,
-    autoDubVoiceBySpeaker: true,
+    dubFrenchAudio: false,
+    autoDubVoiceBySpeaker: false,
     includeAutoTranscript: true,
-    subtitleTheme: "bold",
-    languageMode: params.languageMode === "no-added-audio" ? "translate-to-french" : params.languageMode,
+    subtitleTheme: "shorts",
+    languageMode: "no-added-audio",
     highlightMode: "viral",
     frameMode: "full-video"
   };
@@ -1740,6 +1740,34 @@ async function replaceClipAudioWithSilentTrack(inputClipPath, outputClipPath) {
   ]);
 }
 
+async function replaceClipAudioWithBackgroundMusic(inputClipPath, outputClipPath, volume = 0.42) {
+  if (!fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC)) {
+    await replaceClipAudioWithSilentTrack(inputClipPath, outputClipPath);
+    return;
+  }
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    inputClipPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    COPYRIGHT_SHIELD_BG_MUSIC,
+    "-filter_complex",
+    `[1:a]volume=${volume}[music]`,
+    "-map",
+    "0:v:0",
+    "-map",
+    "[music]",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-shortest",
+    outputClipPath
+  ]);
+}
+
 async function replaceClipAudioWithVoiceAndOptionalMusic(inputClipPath, voiceAudioPath, outputClipPath, useBackgroundMusic) {
   const hasMusic = useBackgroundMusic && fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC);
   if (!hasMusic) {
@@ -2594,7 +2622,10 @@ function captionsToSrt(captions) {
 }
 
 function subtitleForceStyle(theme) {
-  if (theme === "bold") return "Fontname=Arial Black,Fontsize=26,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1,Outline=2,OutlineColour=&H00000000&";
+  if (theme === "shorts") {
+    return "Fontname=Arial,Fontsize=16,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,Outline=1,Shadow=0,BackColour=&H64000000&,Bold=0,MarginV=72";
+  }
+  if (theme === "bold") return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1";
   if (theme === "cinema") return "Fontname=Georgia,Fontsize=24,PrimaryColour=&H00F0F0F0&,BackColour=&H70000000&,Outline=2";
   if (theme === "neon") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFF00&,OutlineColour=&H00000000&,Outline=3";
   return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H80000000&";
@@ -2957,10 +2988,18 @@ async function processJob(job) {
       }
     }
     if (job.params.stripOriginalAudio && finalClipPath === outputPath) {
-      const silentPath = path.join(jobDir, `${clip.id}-silent.mp4`);
+      const musicPath = path.join(jobDir, `${clip.id}-music.mp4`);
+      const wantsMusic =
+        boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic) && fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC);
       try {
-        await replaceClipAudioWithSilentTrack(outputPath, silentPath);
-        finalClipPath = silentPath;
+        if (wantsMusic && !shouldDub) {
+          await replaceClipAudioWithBackgroundMusic(outputPath, musicPath);
+          finalClipPath = musicPath;
+        } else {
+          const silentPath = path.join(jobDir, `${clip.id}-silent.mp4`);
+          await replaceClipAudioWithSilentTrack(outputPath, silentPath);
+          finalClipPath = silentPath;
+        }
       } catch (_error) {
         finalClipPath = outputPath;
       }
@@ -3430,7 +3469,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const transcript = String(req.body.transcript || "");
     const minGapSecBetweenClips = Math.max(0, toNumber(req.body.minGapSecBetweenClips, DEFAULTS.minGap));
     const ignoreIntroSec = Math.max(0, Math.min(600, toNumber(req.body.ignoreIntroSec, DEFAULTS.ignoreIntroSec)));
-    const subtitleTheme = ["classic", "bold", "cinema", "neon"].includes(req.body.subtitleTheme)
+    const subtitleTheme = ["classic", "bold", "cinema", "neon", "shorts"].includes(req.body.subtitleTheme)
       ? req.body.subtitleTheme
       : DEFAULTS.subtitleTheme;
     const highlightMode = ["balanced", "hook-first", "viral"].includes(req.body.highlightMode)
