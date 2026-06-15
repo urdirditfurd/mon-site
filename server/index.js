@@ -2621,11 +2621,100 @@ function captionsToSrt(captions) {
     .join("\n");
 }
 
+function mergeOverlappingCaptions(captions) {
+  const sorted = [...(captions || [])].sort((a, b) => a.start - b.start);
+  if (!sorted.length) return [];
+  const merged = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = merged[merged.length - 1];
+    const cur = sorted[i];
+    if (cur.start < prev.end + 0.05) {
+      prev.end = Math.max(prev.end, cur.end);
+      const extra = String(cur.text || "").trim();
+      if (extra && !prev.text.includes(extra)) {
+        prev.text = `${prev.text} ${extra}`.replace(/\s+/g, " ").trim();
+      }
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+  return merged;
+}
+
+function compactCaptionsForShorts(captions, maxWords = 6) {
+  const out = [];
+  for (const cue of captions || []) {
+    const words = String(cue.text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean);
+    if (!words.length) continue;
+    const duration = Math.max(0.8, cue.end - cue.start);
+    const chunks = [];
+    for (let i = 0; i < words.length; i += maxWords) {
+      chunks.push(words.slice(i, i + maxWords).join(" "));
+    }
+    const chunkDur = duration / chunks.length;
+    chunks.forEach((text, idx) => {
+      out.push({
+        start: Number((cue.start + chunkDur * idx).toFixed(3)),
+        end: Number((cue.start + chunkDur * (idx + 1)).toFixed(3)),
+        text
+      });
+    });
+  }
+  return out;
+}
+
+function prepareCaptionsForBurn(captions, theme) {
+  let prepared = (captions || [])
+    .map((cue) => ({
+      ...cue,
+      text: stripSubtitleMarkup(cue.text).replace(/\s+/g, " ").trim()
+    }))
+    .filter((cue) => cue.text && cue.end > cue.start);
+
+  if (theme === "shorts") {
+    prepared = mergeOverlappingCaptions(prepared);
+    prepared = compactCaptionsForShorts(prepared, 6);
+  }
+  return prepared;
+}
+
+async function probeVideoDimensions(inputPath) {
+  try {
+    const { stdout } = await runCommandCapture("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "csv=p=0:s=x",
+      inputPath
+    ]);
+    const [width, height] = String(stdout || "")
+      .trim()
+      .split("x")
+      .map((value) => Number(value));
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      return { width, height };
+    }
+  } catch (_error) {
+    // fallback below
+  }
+  return { width: 1080, height: 1920 };
+}
+
 function subtitleForceStyle(theme) {
   if (theme === "shorts") {
-    return "Fontname=Arial,Fontsize=16,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,Outline=1,Shadow=0,BackColour=&H64000000&,Bold=0,MarginV=72";
+    return "Fontname=Arial,Fontsize=28,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,Outline=1,Shadow=0,BackColour=&H50000000&,Bold=0,Alignment=2,MarginV=48,MarginL=48,MarginR=48,WrapStyle=2";
   }
-  if (theme === "bold") return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1";
+  if (theme === "bold") {
+    return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H90000000&,Bold=1,Alignment=2,MarginV=40";
+  }
   if (theme === "cinema") return "Fontname=Georgia,Fontsize=24,PrimaryColour=&H00F0F0F0&,BackColour=&H70000000&,Outline=2";
   if (theme === "neon") return "Fontname=Arial,Fontsize=22,PrimaryColour=&H00FFFF00&,OutlineColour=&H00000000&,Outline=3";
   return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H80000000&";
@@ -2633,12 +2722,13 @@ function subtitleForceStyle(theme) {
 
 async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
   const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+  const { width, height } = await probeVideoDimensions(inputClipPath);
   const args = [
     "-y",
     "-i",
     inputClipPath,
     "-vf",
-    `subtitles='${escapedSrt}':force_style='${subtitleForceStyle(theme)}'`,
+    `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`,
     "-c:v",
     "libx264",
     "-preset",
@@ -2939,6 +3029,7 @@ async function processJob(job) {
       : [];
     const captions =
       timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
+    const displayCaptions = prepareCaptionsForBurn(captions, job.params.subtitleTheme);
     const srtPath = getJobSrtPath(job.id, clip.id);
     const renderOptions = {
       mirrorVideo: job.params.mirrorVideo,
@@ -2955,7 +3046,7 @@ async function processJob(job) {
       job.params.frameMode,
       renderOptions
     );
-    await fsp.writeFile(srtPath, captionsToSrt(captions), "utf8");
+    await fsp.writeFile(srtPath, captionsToSrt(displayCaptions), "utf8");
 
     let finalClipPath = outputPath;
     let dubbedAudioPath = "";
@@ -3023,7 +3114,7 @@ async function processJob(job) {
       dubVoice: clip.dubVoice || "",
       burnedFilePath,
       srtPath,
-      captions,
+      captions: displayCaptions,
       aspectRatio: job.params.aspectRatio
     });
     job.progress = Math.round(25 + ((i + 1) / total) * 70);
