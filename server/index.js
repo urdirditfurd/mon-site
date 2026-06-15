@@ -22,6 +22,10 @@ const TIKTOK_CONFIG_STORE_PATH = path.join(SECRETS_DIR, "tiktok-config.json");
 const AUTOMATION_SCHEDULE_STORE_PATH = path.join(SECRETS_DIR, "automation-schedule.json");
 const PORT = Number(process.env.PORT) || 3000;
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2);
+const CLIP_RENDER_CONCURRENCY = Math.max(1, Number(process.env.CLIP_RENDER_CONCURRENCY) || 2);
+const FFMPEG_PRESET = String(process.env.FFMPEG_PRESET || "ultrafast");
+const FFMPEG_CRF = Number(process.env.FFMPEG_CRF) || 24;
+const ZIP_COMPRESSION_LEVEL = Math.min(9, Math.max(0, Number(process.env.ZIP_COMPRESSION_LEVEL) || 1));
 const QUEUE_MODE = (process.env.QUEUE_MODE || "auto").toLowerCase();
 const REDIS_URL = process.env.REDIS_URL || "";
 const YOUTUBE_API_KEY = String(process.env.YOUTUBE_API_KEY || "").trim();
@@ -153,9 +157,81 @@ function getJobDir(jobId) {
   return path.join(JOBS_DIR, jobId);
 }
 
+function getJobBundlePath(jobId) {
+  return path.join(getJobDir(jobId), "bundle.zip");
+}
+
 function getJobPlanPath(jobId) {
   return path.join(getJobDir(jobId), "plan.json");
 }
+
+function appendFfmpegVideoEncodeArgs(args) {
+  args.push(
+    "-c:v",
+    "libx264",
+    "-preset",
+    FFMPEG_PRESET,
+    "-crf",
+    String(FFMPEG_CRF),
+    "-threads",
+    "0",
+    "-movflags",
+    "+faststart"
+  );
+}
+
+function buildSubtitleFilter(srtPath, theme, width, height) {
+  const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+  return `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`;
+}
+
+async function mapWithConcurrency(items, limit, iterator) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      results[current] = await iterator(items[current], current);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function addClipsToBundleArchive(archive, job) {
+  for (const [index, clip] of (job.clips || []).entries()) {
+    const selectedPath = clip.burnedFilePath || clip.filePath;
+    if (selectedPath && fs.existsSync(selectedPath)) {
+      archive.file(selectedPath, { name: buildClipDownloadFilename(job, index) });
+    }
+    if (job.params.includeSrtInZip && clip.srtPath && fs.existsSync(clip.srtPath)) {
+      archive.file(clip.srtPath, { name: buildClipSrtDownloadFilename(job, index) });
+    }
+  }
+}
+
+async function writeJobBundleZip(job) {
+  const bundlePath = getJobBundlePath(job.id);
+  await fsp.mkdir(getJobDir(job.id), { recursive: true });
+  if (fs.existsSync(bundlePath)) {
+    await fsp.unlink(bundlePath).catch(() => {});
+  }
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(bundlePath);
+    const archive = archiver("zip", { zlib: { level: ZIP_COMPRESSION_LEVEL } });
+    output.on("close", () => resolve(bundlePath));
+    output.on("error", reject);
+    archive.on("error", reject);
+    archive.pipe(output);
+    const planPath = getJobPlanPath(job.id);
+    if (fs.existsSync(planPath)) archive.file(planPath, { name: "plan.json" });
+    addClipsToBundleArchive(archive, job);
+    archive.finalize();
+  });
+}
+
 
 function getJobSrtPath(jobId, clipId) {
   return path.join(getJobDir(jobId), `${clipId}.srt`);
@@ -2555,25 +2631,35 @@ async function renderClipFile(
   const zoom = renderOptions.aggressiveZoom ? 1.38 : 1;
   const visualShield = Boolean(renderOptions.visualShield);
   const stripOriginalAudio = Boolean(renderOptions.stripOriginalAudio);
+  const burnSrtPath = renderOptions.burnSrtPath || "";
+  const subtitleTheme = renderOptions.subtitleTheme || "shorts";
   const useBlackBars = frameMode === "black-bars";
   const useFullVideo = frameMode === "full-video";
   const mirrorFilter = mirror ? "hflip," : "";
   const zoomFilter = zoom > 1 ? `scale=iw*${zoom}:ih*${zoom},crop=iw/${zoom}:ih/${zoom},` : "";
   const pulseFilter = visualShield ? ",eq=saturation=1.06:contrast=1.04,hue=s=0:enable='lt(mod(t\\,3.5)\\,0.15)'" : "";
+  const subtitleFilter =
+    burnSrtPath && fs.existsSync(burnSrtPath) ? buildSubtitleFilter(burnSrtPath, subtitleTheme, width, height) : "";
+  const complexTail = subtitleFilter
+    ? `${pulseFilter},format=yuv420p[vpre];[vpre]${subtitleFilter}[vout]`
+    : `${pulseFilter},format=yuv420p[vout]`;
   const vf = [
     `${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black${pulseFilter}`,
-    "format=yuv420p"
-  ].join(",");
+    "format=yuv420p",
+    subtitleFilter
+  ]
+    .filter(Boolean)
+    .join(",");
   const vComplexBlur = [
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
-    `[bg][fg]overlay=(W-w)/2:(H-h)/2${pulseFilter},format=yuv420p[vout]`
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${complexTail}`
   ].join(";");
   const vComplexFullVideo = [
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
-    `[bg][fg]overlay=(W-w)/2:(H-h)/2${pulseFilter},format=yuv420p[vout]`
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${complexTail}`
   ].join(";");
   const args = [
     "-y",
@@ -2582,22 +2668,17 @@ async function renderClipFile(
     "-t",
     String(clipDuration),
     "-i",
-    inputPath,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "22"
+    inputPath
   ];
-  if (!stripOriginalAudio) {
-    args.push("-c:a", "aac", "-b:a", "128k");
-  }
   if (useBlackBars) {
     args.push("-vf", vf);
   } else {
     args.push("-filter_complex", useFullVideo ? vComplexFullVideo : vComplexBlur, "-map", "[vout]");
     if (!stripOriginalAudio) args.push("-map", "0:a?");
+  }
+  appendFfmpegVideoEncodeArgs(args);
+  if (!stripOriginalAudio && useBlackBars) {
+    args.push("-c:a", "aac", "-b:a", "128k");
   }
   if (stripOriginalAudio) {
     args.push("-an");
@@ -2728,17 +2809,10 @@ async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
     "-i",
     inputClipPath,
     "-vf",
-    `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "22",
-    "-c:a",
-    "copy",
-    outputPath
+    `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`
   ];
+  appendFfmpegVideoEncodeArgs(args);
+  args.push("-c:a", "copy", outputPath);
   await runCommand("ffmpeg", args);
 }
 
@@ -2924,6 +2998,109 @@ async function readQueueStats() {
   return { waiting: pendingJobIds.length, active: activeMemoryJobs, delayed: 0 };
 }
 
+async function renderSingleJobClip(job, jobDir, clip, clipIndex, transcriptParts, sourceTimedCaptions) {
+  const outputPath = path.join(jobDir, `${clip.id}.mp4`);
+  const timedCaptionsForClip = sourceTimedCaptions.length
+    ? buildCaptionsFromSourceTimedCaptions(clip.start, clip.end, sourceTimedCaptions)
+    : [];
+  const captions =
+    timedCaptionsForClip.length > 0
+      ? timedCaptionsForClip
+      : buildCaptionsForClip(clip.duration, transcriptParts[clipIndex] || "");
+  const displayCaptions = prepareCaptionsForBurn(captions, job.params.subtitleTheme);
+  const srtPath = getJobSrtPath(job.id, clip.id);
+  await fsp.writeFile(srtPath, captionsToSrt(displayCaptions), "utf8");
+
+  const subsBurnedInRender = Boolean(job.params.burnSubtitles);
+  const renderOptions = {
+    mirrorVideo: job.params.mirrorVideo,
+    aggressiveZoom: job.params.aggressiveZoom,
+    visualShield: job.params.visualShield,
+    stripOriginalAudio: job.params.stripOriginalAudio,
+    burnSrtPath: subsBurnedInRender ? srtPath : "",
+    subtitleTheme: job.params.subtitleTheme
+  };
+  await renderClipFile(
+    job.inputPath,
+    outputPath,
+    clip.start,
+    clip.duration,
+    job.params.aspectRatio,
+    job.params.frameMode,
+    renderOptions
+  );
+
+  let finalClipPath = outputPath;
+  let dubbedAudioPath = "";
+  const shouldDub = job.params.dubFrenchAudio && edgeTtsAvailable;
+  if (shouldDub) {
+    const dubText = buildDubTextFromCaptions(captions);
+    if (dubText) {
+      const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
+      const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
+      try {
+        const detectedVoice = boolFrom(job.params.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker)
+          ? await detectLikelyFrenchVoiceForClip(outputPath)
+          : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
+        const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
+        if (hasTtsAudio) {
+          await replaceClipAudioWithVoiceAndOptionalMusic(
+            outputPath,
+            ttsPath,
+            dubbedPath,
+            boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic)
+          );
+          finalClipPath = dubbedPath;
+          dubbedAudioPath = ttsPath;
+          clip.dubVoice = detectedVoice;
+        }
+      } catch (_error) {
+        finalClipPath = outputPath;
+        dubbedAudioPath = "";
+      }
+    }
+  }
+  if (job.params.stripOriginalAudio && finalClipPath === outputPath) {
+    const musicPath = path.join(jobDir, `${clip.id}-music.mp4`);
+    const wantsMusic =
+      boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic) && fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC);
+    try {
+      if (wantsMusic && !shouldDub) {
+        await replaceClipAudioWithBackgroundMusic(outputPath, musicPath);
+        finalClipPath = musicPath;
+      } else {
+        const silentPath = path.join(jobDir, `${clip.id}-silent.mp4`);
+        await replaceClipAudioWithSilentTrack(outputPath, silentPath);
+        finalClipPath = silentPath;
+      }
+    } catch (_error) {
+      finalClipPath = outputPath;
+    }
+  }
+
+  let burnedFilePath = subsBurnedInRender ? finalClipPath : null;
+  if (job.params.burnSubtitles && !subsBurnedInRender) {
+    const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
+    try {
+      await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
+      burnedFilePath = burnPath;
+    } catch (_error) {
+      burnedFilePath = null;
+    }
+  }
+
+  return {
+    ...clip,
+    filePath: finalClipPath,
+    dubbedAudioPath,
+    dubVoice: clip.dubVoice || "",
+    burnedFilePath,
+    srtPath,
+    captions: displayCaptions,
+    aspectRatio: job.params.aspectRatio
+  };
+}
+
 async function processJob(job) {
   job.status = "processing";
   job.progress = 5;
@@ -3020,107 +3197,17 @@ async function processJob(job) {
   await persistJobsDb();
 
   const total = clips.length || 1;
-  const rendered = [];
-  for (let i = 0; i < clips.length; i += 1) {
-    const clip = clips[i];
-    const outputPath = path.join(jobDir, `${clip.id}.mp4`);
-    const timedCaptionsForClip = sourceTimedCaptions.length
-      ? buildCaptionsFromSourceTimedCaptions(clip.start, clip.end, sourceTimedCaptions)
-      : [];
-    const captions =
-      timedCaptionsForClip.length > 0 ? timedCaptionsForClip : buildCaptionsForClip(clip.duration, transcriptParts[i] || "");
-    const displayCaptions = prepareCaptionsForBurn(captions, job.params.subtitleTheme);
-    const srtPath = getJobSrtPath(job.id, clip.id);
-    const renderOptions = {
-      mirrorVideo: job.params.mirrorVideo,
-      aggressiveZoom: job.params.aggressiveZoom,
-      visualShield: job.params.visualShield,
-      stripOriginalAudio: job.params.stripOriginalAudio
-    };
-    await renderClipFile(
-      job.inputPath,
-      outputPath,
-      clip.start,
-      clip.duration,
-      job.params.aspectRatio,
-      job.params.frameMode,
-      renderOptions
-    );
-    await fsp.writeFile(srtPath, captionsToSrt(displayCaptions), "utf8");
-
-    let finalClipPath = outputPath;
-    let dubbedAudioPath = "";
-    const shouldDub = job.params.dubFrenchAudio && edgeTtsAvailable;
-    if (shouldDub) {
-      const dubText = buildDubTextFromCaptions(captions);
-      if (dubText) {
-        const ttsPath = path.join(jobDir, `${clip.id}-fr-tts.mp3`);
-        const dubbedPath = path.join(jobDir, `${clip.id}-fr-dub.mp4`);
-        try {
-          const detectedVoice = boolFrom(job.params.autoDubVoiceBySpeaker, DEFAULTS.autoDubVoiceBySpeaker)
-            ? await detectLikelyFrenchVoiceForClip(outputPath)
-            : process.env.EDGE_TTS_VOICE || process.env.EDGE_TTS_DEFAULT_MALE_VOICE || "fr-FR-HenriNeural";
-          const hasTtsAudio = await synthesizeFrenchSpeech(dubText, ttsPath, detectedVoice);
-          if (hasTtsAudio) {
-            await replaceClipAudioWithVoiceAndOptionalMusic(
-              outputPath,
-              ttsPath,
-              dubbedPath,
-              boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic)
-            );
-            finalClipPath = dubbedPath;
-            dubbedAudioPath = ttsPath;
-            clip.dubVoice = detectedVoice;
-          }
-        } catch (_error) {
-          finalClipPath = outputPath;
-          dubbedAudioPath = "";
-        }
-      }
-    }
-    if (job.params.stripOriginalAudio && finalClipPath === outputPath) {
-      const musicPath = path.join(jobDir, `${clip.id}-music.mp4`);
-      const wantsMusic =
-        boolFrom(job.params.backgroundMusic, DEFAULTS.backgroundMusic) && fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC);
-      try {
-        if (wantsMusic && !shouldDub) {
-          await replaceClipAudioWithBackgroundMusic(outputPath, musicPath);
-          finalClipPath = musicPath;
-        } else {
-          const silentPath = path.join(jobDir, `${clip.id}-silent.mp4`);
-          await replaceClipAudioWithSilentTrack(outputPath, silentPath);
-          finalClipPath = silentPath;
-        }
-      } catch (_error) {
-        finalClipPath = outputPath;
-      }
-    }
-
-    let burnedFilePath = null;
-    if (job.params.burnSubtitles) {
-      const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
-      try {
-        await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
-        burnedFilePath = burnPath;
-      } catch (_error) {
-        burnedFilePath = null;
-      }
-    }
-
-    rendered.push({
-      ...clip,
-      filePath: finalClipPath,
-      dubbedAudioPath,
-      dubVoice: clip.dubVoice || "",
-      burnedFilePath,
-      srtPath,
-      captions: displayCaptions,
-      aspectRatio: job.params.aspectRatio
-    });
-    job.progress = Math.round(25 + ((i + 1) / total) * 70);
+  let completedClips = 0;
+  const rendered = await mapWithConcurrency(clips, CLIP_RENDER_CONCURRENCY, async (clip, i) => {
+    const result = await renderSingleJobClip(job, jobDir, clip, i, transcriptParts, sourceTimedCaptions);
+    completedClips += 1;
+    job.progress = Math.round(25 + (completedClips / total) * 70);
     job.updatedAt = new Date().toISOString();
-    await persistJobsDb();
-  }
+    if (completedClips === total || completedClips % CLIP_RENDER_CONCURRENCY === 0) {
+      await persistJobsDb();
+    }
+    return result;
+  });
 
   job.clips = rendered;
   const plan = {
@@ -3140,6 +3227,12 @@ async function processJob(job) {
     }))
   };
   await fsp.writeFile(getJobPlanPath(job.id), JSON.stringify(plan, null, 2), "utf8");
+
+  try {
+    await writeJobBundleZip(job);
+  } catch (_error) {
+    // ZIP pré-généré non bloquant
+  }
 
   job.status = "completed";
   job.progress = 100;
@@ -3699,29 +3792,19 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   if (!job) return res.status(404).json({ error: "Job introuvable" });
   if (job.status !== "completed") return res.status(409).json({ error: "Job non terminé" });
 
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", buildContentDispositionAttachment(buildJobBundleZipFilename(job)));
-
-  const archive = archiver("zip", { zlib: { level: 9 } });
-  archive.on("error", (err) => {
-    res.status(500).end(err.message);
-  });
-  archive.pipe(res);
-
-  const planPath = getJobPlanPath(job.id);
-  if (fs.existsSync(planPath)) archive.file(planPath, { name: "plan.json" });
-
-  for (const [index, clip] of (job.clips || []).entries()) {
-    const selectedPath = clip.burnedFilePath || clip.filePath;
-    if (selectedPath && fs.existsSync(selectedPath)) {
-      archive.file(selectedPath, { name: buildClipDownloadFilename(job, index) });
+  try {
+    const bundlePath = getJobBundlePath(job.id);
+    if (!fs.existsSync(bundlePath)) {
+      await writeJobBundleZip(job);
     }
-    if (job.params.includeSrtInZip && clip.srtPath && fs.existsSync(clip.srtPath)) {
-      archive.file(clip.srtPath, { name: buildClipSrtDownloadFilename(job, index) });
-    }
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", buildContentDispositionAttachment(buildJobBundleZipFilename(job)));
+    return res.sendFile(bundlePath);
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Impossible de préparer le ZIP"
+    });
   }
-
-  await archive.finalize();
 });
 
 app.use(express.static(ROOT_DIR, { index: false }));

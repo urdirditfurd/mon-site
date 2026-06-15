@@ -1382,6 +1382,7 @@ function initEvents() {
     dom.downloadAllBtn.addEventListener("click", () => {
       if (!state.activeJobId) return;
       const zipName = state.bundleFilename || `clipforge-shorts-${state.activeJobId}.zip`;
+      updateStatus("Téléchargement du ZIP…", false);
       triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, zipName);
     });
   }
