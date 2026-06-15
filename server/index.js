@@ -180,11 +180,6 @@ function appendFfmpegVideoEncodeArgs(args) {
   );
 }
 
-function buildSubtitleFilter(srtPath, theme, width, height) {
-  const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
-  return `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`;
-}
-
 async function mapWithConcurrency(items, limit, iterator) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -2631,26 +2626,17 @@ async function renderClipFile(
   const zoom = renderOptions.aggressiveZoom ? 1.38 : 1;
   const visualShield = Boolean(renderOptions.visualShield);
   const stripOriginalAudio = Boolean(renderOptions.stripOriginalAudio);
-  const burnSrtPath = renderOptions.burnSrtPath || "";
-  const subtitleTheme = renderOptions.subtitleTheme || "shorts";
   const useBlackBars = frameMode === "black-bars";
   const useFullVideo = frameMode === "full-video";
   const mirrorFilter = mirror ? "hflip," : "";
   const zoomFilter = zoom > 1 ? `scale=iw*${zoom}:ih*${zoom},crop=iw/${zoom}:ih/${zoom},` : "";
   const pulseFilter = visualShield ? ",eq=saturation=1.06:contrast=1.04,hue=s=0:enable='lt(mod(t\\,3.5)\\,0.15)'" : "";
-  const subtitleFilter =
-    burnSrtPath && fs.existsSync(burnSrtPath) ? buildSubtitleFilter(burnSrtPath, subtitleTheme, width, height) : "";
-  const complexTail = subtitleFilter
-    ? `${pulseFilter},format=yuv420p[vpre];[vpre]${subtitleFilter}[vout]`
-    : `${pulseFilter},format=yuv420p[vout]`;
   const vf = [
     `${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black${pulseFilter}`,
-    "format=yuv420p",
-    subtitleFilter
-  ]
-    .filter(Boolean)
-    .join(",");
+    "format=yuv420p"
+  ].join(",");
+  const complexTail = `${pulseFilter},format=yuv420p[vout]`;
   const vComplexBlur = [
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[0:v]${mirrorFilter}${zoomFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,boxblur=20:2,crop=${width}:${height}[bg]`,
@@ -2801,15 +2787,22 @@ function subtitleForceStyle(theme) {
   return "Fontname=Arial,Fontsize=20,PrimaryColour=&H00FFFFFF&,BackColour=&H80000000&";
 }
 
-async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
+function buildSubtitleFilter(srtPath, theme, width, height) {
   const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+  return `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`;
+}
+
+async function burnCaptionsIntoClip(inputClipPath, srtPath, outputPath, theme) {
+  if (!fs.existsSync(srtPath)) {
+    throw new Error(`Fichier SRT introuvable: ${srtPath}`);
+  }
   const { width, height } = await probeVideoDimensions(inputClipPath);
   const args = [
     "-y",
     "-i",
     inputClipPath,
     "-vf",
-    `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${subtitleForceStyle(theme)}'`
+    buildSubtitleFilter(srtPath, theme, width, height)
   ];
   appendFfmpegVideoEncodeArgs(args);
   args.push("-c:a", "copy", outputPath);
@@ -3009,16 +3002,14 @@ async function renderSingleJobClip(job, jobDir, clip, clipIndex, transcriptParts
       : buildCaptionsForClip(clip.duration, transcriptParts[clipIndex] || "");
   const displayCaptions = prepareCaptionsForBurn(captions, job.params.subtitleTheme);
   const srtPath = getJobSrtPath(job.id, clip.id);
+  await fsp.mkdir(jobDir, { recursive: true });
   await fsp.writeFile(srtPath, captionsToSrt(displayCaptions), "utf8");
 
-  const subsBurnedInRender = Boolean(job.params.burnSubtitles);
   const renderOptions = {
     mirrorVideo: job.params.mirrorVideo,
     aggressiveZoom: job.params.aggressiveZoom,
     visualShield: job.params.visualShield,
-    stripOriginalAudio: job.params.stripOriginalAudio,
-    burnSrtPath: subsBurnedInRender ? srtPath : "",
-    subtitleTheme: job.params.subtitleTheme
+    stripOriginalAudio: job.params.stripOriginalAudio
   };
   await renderClipFile(
     job.inputPath,
@@ -3078,10 +3069,13 @@ async function renderSingleJobClip(job, jobDir, clip, clipIndex, transcriptParts
     }
   }
 
-  let burnedFilePath = subsBurnedInRender ? finalClipPath : null;
-  if (job.params.burnSubtitles && !subsBurnedInRender) {
+  let burnedFilePath = null;
+  if (job.params.burnSubtitles) {
     const burnPath = getJobCaptionsBurnPath(job.id, clip.id);
     try {
+      if (!fs.existsSync(srtPath)) {
+        throw new Error(`Sous-titres introuvables: ${srtPath}`);
+      }
       await burnCaptionsIntoClip(finalClipPath, srtPath, burnPath, job.params.subtitleTheme);
       burnedFilePath = burnPath;
     } catch (_error) {
