@@ -1469,9 +1469,11 @@ function initEvents() {
     dom.falApiKey.addEventListener("change", saveAiKeysToStorage);
   }
 
-  dom.analyzeBtn.addEventListener("click", () => {
-    void createJob();
-  });
+  if (dom.analyzeBtn) {
+    dom.analyzeBtn.addEventListener("click", () => {
+      void createJob();
+    });
+  }
 
   if (dom.saveYoutubeCookiesBtn) {
     dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
