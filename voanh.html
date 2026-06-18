@@ -2016,6 +2016,17 @@ body::before {
         <div class="field-hint"><a href="https://creatomate.com" target="_blank" rel="noopener" style="color:var(--cyan)">creatomate.com</a> — assemblage cloud si pas de serveur local.</div>
       </div>
 
+      <div class="info-block" style="margin-top:0;border-left-color:var(--neon)">
+        <strong style="color:var(--neon)">Mode automatique (chat)</strong><br>
+        Tapez dans le chat : <code>/video 10min Coupe du monde 2026 polémique VAR</code><br>
+        Ou activez l'agent <strong>VideoForge Auto</strong> puis décrivez votre vidéo — tout se lance en arrière-plan.
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-family:var(--font-mono);font-size:11px;color:var(--text)">
+        <input type="checkbox" id="video-auto-mode" checked style="accent-color:var(--cyan)">
+        Production 100 % automatique (serveur en arrière-plan)
+      </label>
+
       <div class="video-progress-track"><div class="video-progress-fill" id="video-progress-bar"></div></div>
       <div style="display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">
         <span id="video-progress-label">En attente…</span>
@@ -2962,6 +2973,52 @@ async function sendMessage() {
     return;
   }
 
+  if (txt && !state.attachedFile && window.VoanhVideoStudio?.handleChatVideoCommand) {
+    const handled = await window.VoanhVideoStudio.handleChatVideoCommand(txt, {
+      onJobStarted: async (job) => {
+        state.messages.push({ role: "user", content: txt, ts: now() });
+        state.messages.push({
+          role: "assistant",
+          content: `▶ Production vidéo automatique lancée.\n\n• Job : ${job.id}\n• Durée cible : ~${job.sceneCount ? Math.round((job.sceneCount * (Number(document.getElementById('video-clip-sec')?.value)||10))/60) : '?'} min\n• Statut : ${job.status}\n\nJe vous préviens quand le MP4 est prêt.`,
+          ts: now()
+        });
+        document.getElementById('user-input').value = "";
+        autoResizeTextarea();
+        renderMessages();
+        await saveChat();
+      },
+      onJobUpdate: (status) => {
+        const last = state.messages[state.messages.length - 1];
+        if (last?.role === "assistant" && String(last.content).includes("Production vidéo automatique")) {
+          last.content = `▶ Production vidéo en cours…\n\n• Job : ${status.id}\n• Progression : ${status.progress || 0}%\n• Scènes : ${status.scenesDone || 0}/${status.sceneCount || "?"}\n• Statut : ${status.status}`;
+          renderMessages();
+        }
+      },
+      onJobDone: async (finalJob) => {
+        const url = finalJob.downloadUrl?.startsWith("http")
+          ? finalJob.downloadUrl
+          : `${location.origin}${finalJob.downloadUrl}`;
+        const msg = finalJob.status === "completed"
+          ? `✓ Vidéo longue prête !\n\n• Titre : ${finalJob.title || "—"}\n• Téléchargement : ${url}`
+          : `⚠ Échec production vidéo : ${finalJob.error || "erreur inconnue"}`;
+        state.messages.push({ role: "assistant", content: msg, ts: now() });
+        renderMessages();
+        await saveChat();
+        toast(finalJob.status === "completed" ? "Vidéo automatique prête !" : "Échec vidéo auto", finalJob.status === "completed" ? "success" : "error");
+      },
+      onJobError: async (err) => {
+        state.messages.push({
+          role: "assistant",
+          content: `⚠ Erreur pipeline vidéo : ${err?.message || String(err)}`,
+          ts: now()
+        });
+        renderMessages();
+        await saveChat();
+      }
+    });
+    if (handled) return;
+  }
+
   const model = MODELS.find(m => m.id === state.model) || MODELS[0];
   const isVision = state.model.includes('pixtral');
   const isAudio = state.model.includes('voxtral');
@@ -3173,6 +3230,7 @@ L'utilisateur veut créer une IA personnelle nommée "${aiName}" avec l'objectif
 "${aiGoal}"
 
 Génère EXACTEMENT 20 agents spécialisés parfaitement adaptés à ce contexte.
+Si l'objectif mentionne YouTube, vidéo, contenu, création ou monétisation, inclure OBLIGATOIREMENT un agent "VideoForge Auto" avec tags ["video","video-auto","youtube"] et videoAutomation:true dans le JSON (champ supplémentaire autorisé).
 Chaque agent doit avoir une spécialité unique et complémentaire des autres.
 
 Réponds UNIQUEMENT avec un JSON valide, sans markdown, sans texte avant ou après :
@@ -3501,6 +3559,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Memories & agents
   await memory.getAll();
   await loadAgents();
+  if (window.VoanhVideoStudio?.ensureVideoProducerAgent) {
+    await window.VoanhVideoStudio.ensureVideoProducerAgent(db, uuid, now);
+    await loadAgents();
+  }
   await renderArchives();
 
   // Chat

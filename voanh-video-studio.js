@@ -483,7 +483,47 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Clé FAL.ai enregistrée", "success");
     });
 
-    document.getElementById("video-generate-btn")?.addEventListener("click", runVideoGeneration);
+    document.getElementById("video-generate-btn")?.addEventListener("click", async () => {
+      const auto = document.getElementById("video-auto-mode")?.checked;
+      if (auto) {
+        const topic = document.getElementById("video-topic")?.value?.trim();
+        const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
+        const mistralKey = global.state?.apiKey;
+        if (!topic || !mistralKey) {
+          global.toast?.("Sujet et clé Mistral requis", "error");
+          return;
+        }
+        try {
+          const job = await startAutoJob({ topic, durationMin, mistralKey, mistralModel: global.state?.model });
+          appendVideoLog(`Job auto #${job.id} lancé en arrière-plan`);
+          setProgress(5, "Production auto…", `Job ${job.id}`);
+          pollAutoJob(job.id, (status) => {
+            setProgress(status.progress || 0, status.status, `${status.scenesDone || 0}/${status.sceneCount || "?"} scènes`);
+            if (status.logs?.length) {
+              const last = status.logs[status.logs.length - 1];
+              appendVideoLog(last.message);
+            }
+          }).then((finalJob) => {
+            if (finalJob.status === "completed") {
+              const url = `${global.location.origin}${finalJob.downloadUrl}`;
+              document.getElementById("video-result").style.display = "block";
+              document.getElementById("video-result").innerHTML = `
+                <div class="success-block">
+                  <strong>✓ Vidéo auto générée</strong><br>
+                  <a href="${url}" target="_blank" rel="noopener" style="color:var(--cyan)">⬇ Télécharger MP4</a>
+                </div>`;
+              global.toast?.("Vidéo automatique prête !", "success");
+            } else {
+              global.toast?.(finalJob.error || "Échec production auto", "error");
+            }
+          });
+        } catch (err) {
+          global.toast?.(err.message || String(err), "error");
+        }
+        return;
+      }
+      runVideoGeneration();
+    });
     document.getElementById("video-cancel-btn")?.addEventListener("click", () => {
       videoState.cancelRequested = true;
       appendVideoLog("Annulation demandée…");
@@ -506,5 +546,159 @@ Réponds UNIQUEMENT en JSON valide :
     }
   }
 
-  global.VoanhVideoStudio = { bindVideoStudio, getFalKey, setFalKey };
+  global.VoanhVideoStudio = {
+    bindVideoStudio,
+    getFalKey,
+    setFalKey,
+    parseVideoCommand,
+    startAutoJob,
+    pollAutoJob,
+    handleChatVideoCommand,
+    ensureVideoProducerAgent,
+    VIDEO_AGENT_ID: "voanh-video-forge-agent"
+  };
+
+  function parseVideoCommand(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return null;
+
+    const slash = raw.match(/^\/video(?:@auto)?\s+(\d{1,2})\s*(?:min(?:utes?)?)?\s*[:\-]?\s*(.+)$/i);
+    if (slash) {
+      return { topic: slash[2].trim(), durationMin: Number(slash[1]), auto: true };
+    }
+
+    const fr = raw.match(
+      /(?:g[ée]n[èe]re|cr[ée]e|produis|lance)\s+(?:moi\s+)?(?:une\s+)?vid[ée]o(?:\s+de)?\s+(\d{1,2})\s*(?:min(?:utes?)?)?\s+(?:sur|about|au sujet de)\s+(.+)$/i
+    );
+    if (fr) {
+      return { topic: fr[2].trim(), durationMin: Number(fr[1]), auto: true };
+    }
+
+    if (/^\/video\s+(.+)$/i.test(raw)) {
+      return { topic: raw.replace(/^\/video\s+/i, "").trim(), durationMin: 10, auto: true };
+    }
+
+    return null;
+  }
+
+  function isVideoAutomationAgent(agent) {
+    if (!agent) return false;
+    const tags = (agent.tags || []).map((t) => String(t).toLowerCase());
+    return (
+      agent.videoAutomation === true ||
+      tags.includes("video") ||
+      tags.includes("video-auto") ||
+      /videoforge|video forge|producteur vid/i.test(agent.name || "")
+    );
+  }
+
+  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+    const falKey = getFalKey();
+    if (!mistralKey) throw new Error("Clé Mistral requise");
+    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+
+    const payload = {
+      topic,
+      durationMin,
+      clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
+      aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
+      modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
+      mistralModel: mistralModel || global.state?.model,
+      mistralKey,
+      falKey
+    };
+
+    return apiFetch("/jobs/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async function pollAutoJob(jobId, onUpdate) {
+    for (let i = 0; i < 3600; i += 1) {
+      const job = await apiFetch(`/jobs/${encodeURIComponent(jobId)}`);
+      if (onUpdate) onUpdate(job);
+      if (job.status === "completed" || job.status === "failed") return job;
+      await sleep(5000);
+    }
+    throw new Error("Timeout suivi job vidéo");
+  }
+
+  async function handleChatVideoCommand(text, hooks = {}) {
+    const agent = global.state?.agent;
+    let parsed = parseVideoCommand(text);
+    const agentVideoMode = isVideoAutomationAgent(agent);
+
+    if (!parsed && agentVideoMode) {
+      const wantsVideo = /vid[ée]o|youtube|shorts?|script|sc[èe]ne|moneti|cm\s*2026|coupe du monde/i.test(text);
+      if (wantsVideo) {
+        const dur = text.match(/(\d{1,2})\s*min/i);
+        parsed = { topic: text.trim(), durationMin: dur ? Number(dur[1]) : 10, auto: true };
+      }
+    }
+
+    if (!parsed?.topic) return false;
+
+    const mistralKey = global.state?.apiKey;
+    if (!mistralKey) {
+      global.toast?.("Configurez votre clé Mistral", "error");
+      return true;
+    }
+
+    try {
+      const job = await startAutoJob({
+        topic: parsed.topic,
+        durationMin: parsed.durationMin,
+        mistralKey,
+        mistralModel: global.state?.model
+      });
+
+      hooks.onJobStarted?.(job);
+      global.toast?.(`Production vidéo lancée (${parsed.durationMin} min)`, "success");
+
+      pollAutoJob(job.id, (status) => hooks.onJobUpdate?.(status))
+        .then((finalJob) => hooks.onJobDone?.(finalJob))
+        .catch((err) => hooks.onJobError?.(err));
+
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      global.toast?.(msg, "error");
+      hooks.onJobError?.(error);
+      return true;
+    }
+  }
+
+  async function ensureVideoProducerAgent(db, uuidFn, nowFn) {
+    if (!db?.get || !db?.put) return null;
+    const id = "voanh-video-forge-agent";
+    const existing = await db.get("agents", id).catch(() => null);
+    if (existing) return existing;
+
+    const agent = {
+      id,
+      name: "VideoForge Auto",
+      desc: "Producteur vidéo IA — génère des vidéos longues (10+ min) en automatique via le chat",
+      instructions: [
+        "Tu es VideoForge, producteur vidéo IA intégré à VOANH.",
+        "Quand l'utilisateur demande une vidéo, guide-le vers la commande : /video 10min sujet",
+        "Ou reformule sa demande et confirme : durée cible, angle, public.",
+        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral + FAL + FFmpeg s'en charge.",
+        "Rappelle : contenu original uniquement, pas de logos ni célébrités."
+      ].join("\n"),
+      primer: "Je transforme vos idées en vidéos longues prêtes pour YouTube.",
+      tags: ["video", "video-auto", "youtube", "automation"],
+      videoAutomation: true,
+      style: "creatif",
+      temperature: 0.65,
+      memPrio: 3,
+      maxTokens: 4096,
+      modelPref: "mistral-small-2506",
+      created: nowFn ? nowFn() : Date.now()
+    };
+
+    await db.put("agents", agent);
+    return agent;
+  }
 })(window);

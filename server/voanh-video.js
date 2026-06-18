@@ -3,6 +3,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
+const { createVideoJobManager } = require("./voanh-video-pipeline");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
@@ -16,6 +17,7 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
   const router = require("express").Router();
   const videoJobsDir = path.join(storageDir, "voanh-videos");
   const videoJobs = new Map();
+  const autoJobs = createVideoJobManager({ storageDir, getFfmpegReady });
 
   async function ensureVideoDirs() {
     await fsp.mkdir(videoJobsDir, { recursive: true });
@@ -249,7 +251,7 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         id: jobId,
         status: "completed",
         clipCount: localClips.length,
-        downloadUrl: `/api/voanh/video/download/${jobId}`,
+        downloadUrl: `/api/voanh/download/${jobId}`,
         size: stats.size
       });
     } catch (error) {
@@ -258,11 +260,53 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
   });
 
   router.get("/download/:jobId", (req, res) => {
+    const autoPath = autoJobs.getJobOutputPath(req.params.jobId);
+    if (autoPath && fs.existsSync(autoPath)) {
+      return res.download(autoPath, `voanh-long-${req.params.jobId}.mp4`);
+    }
+
     const job = videoJobs.get(req.params.jobId);
     if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
       return res.status(404).json({ error: "Vidéo introuvable" });
     }
     return res.download(job.outputPath, `voanh-long-${req.params.jobId}.mp4`);
+  });
+
+  router.post("/jobs/auto", async (req, res) => {
+    try {
+      const job = await autoJobs.createAutoJob({
+        topic: req.body?.topic,
+        durationMin: req.body?.durationMin,
+        clipSec: req.body?.clipSec,
+        aspectRatio: req.body?.aspectRatio,
+        modelPath: req.body?.modelPath,
+        mistralModel: req.body?.mistralModel,
+        mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
+        falKey: req.body?.falKey || req.headers["x-fal-key"]
+      });
+      return res.status(202).json(job);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Erreur job auto" });
+    }
+  });
+
+  router.get("/jobs", async (_req, res) => {
+    try {
+      const items = await autoJobs.listJobs();
+      return res.json({ jobs: items });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur liste jobs" });
+    }
+  });
+
+  router.get("/jobs/:jobId", async (req, res) => {
+    try {
+      const job = await autoJobs.getJob(req.params.jobId);
+      if (!job) return res.status(404).json({ error: "Job introuvable" });
+      return res.json(job);
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur job" });
+    }
   });
 
   router.get("/health", (_req, res) => {
