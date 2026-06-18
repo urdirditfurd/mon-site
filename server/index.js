@@ -12,6 +12,8 @@ const { v4: uuidv4 } = require("uuid");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
+const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
+const { createVoanhVideoRouter } = require("./voanh-video");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
@@ -3806,10 +3808,18 @@ app.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
   res.sendFile(INDEX_HTML_PATH);
 });
+app.get("/voanh", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(VOANH_HTML_PATH)) {
+    return res.status(404).send("voanh.html introuvable");
+  }
+  return res.sendFile(VOANH_HTML_PATH);
+});
 
 ensureDirs()
   .then(async () => {
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
+    app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
