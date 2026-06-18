@@ -310,6 +310,22 @@ function checkBinary(binaryName, testArg = "-version") {
   return result.status === 0;
 }
 
+function resolveYtDlpAvailable() {
+  if (checkBinary("yt-dlp", "--version")) return true;
+  if (checkPythonModule("yt_dlp", ["--version"])) return true;
+  const localBin = path.join(process.env.HOME || "", ".local", "bin", "yt-dlp");
+  if (localBin && fs.existsSync(localBin)) return true;
+  try {
+    const candidate = execSync("python3 -m site --user-base", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    if (candidate && fs.existsSync(path.join(candidate, "bin", "yt-dlp"))) return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function resolveYtDlpBinary() {
   if (checkBinary("yt-dlp", "--version")) return "yt-dlp";
   try {
@@ -3663,7 +3679,8 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
   }
   if (hasVideoUrl && isLikelyYouTubeUrl(rawVideoUrl) && !ytDlpAvailable) {
     return res.status(400).json({
-      error: "Le serveur ne peut pas traiter les liens YouTube (yt-dlp indisponible)"
+      error:
+        "yt-dlp est indisponible sur ce serveur. Installe-le puis relance npm start : pip3 install -U yt-dlp"
     });
   }
 
@@ -3868,7 +3885,7 @@ ensureDirs()
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     whisperAvailable = checkBinary("whisper", "--help");
-    ytDlpAvailable = checkPythonModule("yt_dlp", ["--version"]);
+    ytDlpAvailable = resolveYtDlpAvailable();
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
     await restoreJobsDb();
     await initBullQueue();

@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "start:v4": "QUEUE_MODE=bullmq node server/index.js",
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
-    "check": "node --check app.js && node --check server/index.js"
+    "check": "node --check app.js && node --check server/index.js",
+    "setup": "pip3 install -U yt-dlp --break-system-packages 2>/dev/null || pip3 install -U yt-dlp"
   },
   "repository": {
     "type": "git",

@@ -17,6 +17,7 @@ const state = {
   tiktokConfigured: false,
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
+  ytDlpAvailable: false,
   quickMode: true,
   languageMode: "no-added-audio",
   noAddedAudio: true,
@@ -138,9 +139,37 @@ const dom = {
   copyrightShieldHint: document.getElementById("copyrightShieldHint"),
   aiKeysDetails: document.getElementById("aiKeysDetails"),
   mistralApiKey: document.getElementById("mistralApiKey"),
-  falApiKey: document.getElementById("falApiKey")
+  falApiKey: document.getElementById("falApiKey"),
+  ytDlpWarning: document.getElementById("ytDlpWarning")
 };
 
+function isLikelyYouTubeUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.includes("youtube.com") || host.includes("youtu.be");
+  } catch {
+    return false;
+  }
+}
+
+function renderBackendMeta() {
+  if (!dom.backendMeta) return;
+  dom.backendMeta.textContent =
+    `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+  if (!state.ytDlpAvailable) {
+    dom.backendMeta.textContent += " — installe: pip3 install -U yt-dlp puis relance npm start";
+  }
+}
+
+function renderYtDlpWarning() {
+  if (!dom.ytDlpWarning) return;
+  const show = state.backendAvailable && !state.ytDlpAvailable;
+  dom.ytDlpWarning.hidden = !show;
+  if (show) {
+    dom.ytDlpWarning.textContent =
+      "yt-dlp manquant : les liens YouTube ne fonctionneront pas. Dans un terminal : pip3 install -U yt-dlp (ou pip3 install -U yt-dlp --break-system-packages sur Linux récent), puis npm start.";
+  }
+}
 function apiUrl(path) {
   return `${config.apiBase.trim()}${path}`;
 }
@@ -1154,11 +1183,13 @@ function renderYoutubeCookiesStatus(meta = {}) {
     const details = updatedAt ? ` · MAJ ${updatedAt}` : "";
     dom.youtubeCookiesStatus.textContent = `Cookies serveur: configurés (${sizeBytes} octets${details})`;
     dom.youtubeCookiesStatus.classList.remove("note-error");
+    renderBackendMeta();
     return;
   }
 
   dom.youtubeCookiesStatus.textContent = "Cookies serveur: non configurés";
   dom.youtubeCookiesStatus.classList.add("note-error");
+  renderBackendMeta();
 }
 
 async function refreshYoutubeCookiesStatus() {
@@ -1232,13 +1263,13 @@ async function checkBackendHealth() {
     const payload = await healthRes.json();
     const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
+    state.ytDlpAvailable = Boolean(payload.ytDlpAvailable);
     state.youtubeApiAvailable = Boolean(
       serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
     );
     setBatchControlsDisabled(state.batchRunning);
     setDiscoverControlsDisabled(state.discoverRunning);
     setAutomationControlsDisabled(false);
-    updateStatus("Prêt à générer", true);
     if (serverConfig?.defaults) {
       const defaultsCfg = serverConfig.defaults;
       if (typeof defaultsCfg.clipDuration === "number" && dom.clipDuration) {
@@ -1260,10 +1291,12 @@ async function checkBackendHealth() {
         updatedAt: null
       });
     }
-
-    if (dom.backendMeta) {
-      dom.backendMeta.textContent =
-        `Serveur connecté · yt-dlp: ${payload.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+    renderBackendMeta();
+    renderYtDlpWarning();
+    if (!state.ytDlpAvailable) {
+      updateStatus("Installe yt-dlp pour traiter les liens YouTube (voir bandeau orange).", false);
+    } else {
+      updateStatus("Prêt à générer", true);
     }
     return;
   } catch (_error) {
@@ -1286,6 +1319,10 @@ async function createJob() {
   }
   if (!state.backendAvailable) {
     updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+  if (isLikelyYouTubeUrl(rawVideoUrl) && !state.ytDlpAvailable) {
+    updateStatus("Installe yt-dlp : pip3 install -U yt-dlp puis relance npm start", false);
     return;
   }
 

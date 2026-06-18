@@ -358,6 +358,17 @@ input[type="range"] {
   color: #ffb3b3;
 }
 
+.warning-banner {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #b45309;
+  background: rgba(180, 83, 9, 0.15);
+  color: #fcd34d;
+  font-size: .84rem;
+  line-height: 1.45;
+}
+
 .player-card {
   padding: 14px;
 }
