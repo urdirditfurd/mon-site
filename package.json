@@ -9,7 +9,7 @@
     "start:v4": "QUEUE_MODE=bullmq node server/index.js",
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
     "check": "node --check app.js && node --check server/index.js",
-    "setup": "pip3 install -U yt-dlp --break-system-packages 2>/dev/null || pip3 install -U yt-dlp"
+    "setup": "npm install",
   },
   "repository": {
     "type": "git",
@@ -29,6 +29,7 @@
     "express": "^5.2.1",
     "ioredis": "^5.10.1",
     "multer": "^2.1.1",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "youtube-dl-exec": "^3.1.7"
   }
 }

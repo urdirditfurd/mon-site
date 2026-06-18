@@ -15,6 +15,7 @@ const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
+const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
@@ -310,38 +311,24 @@ function checkBinary(binaryName, testArg = "-version") {
   return result.status === 0;
 }
 
+async function runYtDlpCommand(baseArgs) {
+  const { executable, args } = buildYtDlpArgs(baseArgs);
+  await runCommand(executable, args);
+}
+
+async function runYtDlpCommandCapture(baseArgs) {
+  const { executable, args } = buildYtDlpArgs(baseArgs);
+  return runCommandCapture(executable, args);
+}
+
 function resolveYtDlpAvailable() {
-  if (checkBinary("yt-dlp", "--version")) return true;
-  if (checkPythonModule("yt_dlp", ["--version"])) return true;
-  const localBin = path.join(process.env.HOME || "", ".local", "bin", "yt-dlp");
-  if (localBin && fs.existsSync(localBin)) return true;
-  try {
-    const candidate = execSync("python3 -m site --user-base", { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .trim();
-    if (candidate && fs.existsSync(path.join(candidate, "bin", "yt-dlp"))) return true;
-  } catch {
-    // ignore
-  }
-  return false;
+  return isYtDlpAvailable();
 }
 
 function resolveYtDlpBinary() {
-  if (checkBinary("yt-dlp", "--version")) return "yt-dlp";
-  try {
-    const candidate = execSync("python3 -m site --user-base", { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .trim();
-    if (candidate) {
-      const localBin = path.join(candidate, "bin", "yt-dlp");
-      if (fs.existsSync(localBin)) return localBin;
-    }
-  } catch (_error) {
-    // ignore
-  }
-  const fallback = path.join(process.env.HOME || "", ".local", "bin", "yt-dlp");
-  if (fallback && fs.existsSync(fallback)) return fallback;
-  return "yt-dlp";
+  const invocation = resolveYtDlpInvocation();
+  if (!invocation.executable) return "yt-dlp";
+  return invocation.viaPython ? "python3" : invocation.executable;
 }
 
 function checkPythonModule(moduleName, testArgs = ["--version"]) {
@@ -2293,10 +2280,10 @@ async function fetchSourceVideoTitle(sourceUrl, ytCookiesFile = "") {
 
   if (!ytDlpAvailable) return "";
   try {
-    const args = ["-m", "yt_dlp", "--no-playlist", "--no-warnings", "--print", "title"];
+    const args = ["--no-playlist", "--no-warnings", "--print", "title"];
     if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
     args.push(normalizedUrl);
-    const { stdout } = await runCommandCapture("python3", args);
+    const { stdout } = await runYtDlpCommandCapture(args);
     const title = String(stdout || "")
       .split("\n")
       .map((line) => line.trim())
@@ -2437,8 +2424,6 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     if (!ytDlpAvailable) return null;
     const template = `${outputPrefix}.%(ext)s`;
     const commonArgs = [
-      "-m",
-      "yt_dlp",
       "--no-playlist",
       "--no-progress",
       "--restrict-filenames",
@@ -2477,7 +2462,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
       try {
         await cleanupDownloadedArtifactsByPrefix(outputPrefix);
         const args = [...commonArgs, ...profileArgs, sourceUrl];
-        await runCommand("python3", args);
+        await runYtDlpCommand(args);
         const downloaded = await resolveDownloadedVideoByPrefix(outputPrefix);
         if (await isPlayableVideoFile(downloaded)) return downloaded;
       } catch (error) {
@@ -2492,8 +2477,6 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     const template = `${subtitlesPrefix}.%(ext)s`;
     await cleanupDownloadedArtifactsByPrefix(subtitlesPrefix);
     const args = [
-      "-m",
-      "yt_dlp",
       "--skip-download",
       "--no-playlist",
       "--no-progress",
@@ -2518,7 +2501,7 @@ async function downloadVideoFromUrl(sourceUrl, outputPrefix) {
     ];
     if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
     try {
-      await runCommand("python3", args.concat([sourceUrl]));
+      await runYtDlpCommand(args.concat([sourceUrl]));
     } catch (_error) {
       return null;
     }
@@ -3301,6 +3284,7 @@ app.get("/api/health", async (_req, res) => {
     ffmpeg: ffmpegReady,
     whisperAvailable,
     ytDlpAvailable,
+    ytDlpSource: getYtDlpSource(),
     edgeTtsAvailable,
     youtubeApiAvailable: Boolean(YOUTUBE_API_KEY),
     youtubeCookiesConfigured: cookiesMeta.configured,
@@ -3327,6 +3311,7 @@ app.get("/api/config", (_req, res) => {
       ffmpeg: ffmpegReady,
       whisperAvailable,
       ytDlpAvailable,
+    ytDlpSource: getYtDlpSource(),
       edgeTtsAvailable,
       youtubeDiscovery: Boolean(YOUTUBE_API_KEY),
       urlIngestion: true,
@@ -3680,7 +3665,7 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
   if (hasVideoUrl && isLikelyYouTubeUrl(rawVideoUrl) && !ytDlpAvailable) {
     return res.status(400).json({
       error:
-        "yt-dlp est indisponible sur ce serveur. Installe-le puis relance npm start : pip3 install -U yt-dlp"
+        "yt-dlp est indisponible. Lance npm install puis npm start dans le dossier du projet."
     });
   }
 

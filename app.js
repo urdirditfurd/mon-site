@@ -157,7 +157,7 @@ function renderBackendMeta() {
   dom.backendMeta.textContent =
     `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
   if (!state.ytDlpAvailable) {
-    dom.backendMeta.textContent += " — installe: pip3 install -U yt-dlp puis relance npm start";
+    dom.backendMeta.textContent += " — lance: npm install puis npm start";
   }
 }
 
@@ -167,7 +167,7 @@ function renderYtDlpWarning() {
   dom.ytDlpWarning.hidden = !show;
   if (show) {
     dom.ytDlpWarning.textContent =
-      "yt-dlp manquant : les liens YouTube ne fonctionneront pas. Dans un terminal : pip3 install -U yt-dlp (ou pip3 install -U yt-dlp --break-system-packages sur Linux récent), puis npm start.";
+      "yt-dlp manquant. Dans le dossier du projet : npm install puis npm start (le binaire est inclus automatiquement).";
   }
 }
 function apiUrl(path) {
@@ -1294,7 +1294,7 @@ async function checkBackendHealth() {
     renderBackendMeta();
     renderYtDlpWarning();
     if (!state.ytDlpAvailable) {
-      updateStatus("Installe yt-dlp pour traiter les liens YouTube (voir bandeau orange).", false);
+      updateStatus("Installe les dépendances : npm install puis npm start (voir bandeau orange).", false);
     } else {
       updateStatus("Prêt à générer", true);
     }
@@ -1322,7 +1322,7 @@ async function createJob() {
     return;
   }
   if (isLikelyYouTubeUrl(rawVideoUrl) && !state.ytDlpAvailable) {
-    updateStatus("Installe yt-dlp : pip3 install -U yt-dlp puis relance npm start", false);
+    updateStatus("Installe les dépendances : npm install puis npm start", false);
     return;
   }
 
