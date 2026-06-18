@@ -415,5 +415,10 @@ module.exports = {
   createVideoJobManager,
   planScenesWithMistral,
   resolveFalModel,
+  falFetch,
+  pollFalClip,
+  downloadFile,
+  runFfmpegConcat,
+  FAL_QUEUE_BASE,
   DEFAULT_FAL_MODEL
 };

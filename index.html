@@ -15,13 +15,22 @@
     <div>
       <p class="eyebrow">Shorts en 3 clics</p>
       <h1>ClipForge Studio</h1>
-      <p class="subtitle">Colle un lien YouTube, choisis la durée et le format, puis télécharge tes shorts.</p>
+      <p class="subtitle">Colle un lien YouTube, choisis la durée et le format, puis télécharge tes shorts — ou laisse l'IA VOANH créer des remix viraux.</p>
     </div>
   </header>
 
   <main class="layout">
     <section class="panel">
       <h2>Créer des clips</h2>
+
+      <label class="field">
+        <span>Mode de génération</span>
+        <select id="generationMode">
+          <option value="classic">Découpe classique (extraits de la vidéo)</option>
+          <option value="ai-remix" selected>Remix IA viral (Mistral + FAL — style Cortisia)</option>
+        </select>
+      </label>
+      <p class="hint small" id="generationModeHint">L'IA analyse la vidéo source, écrit des scripts viraux originaux, puis génère des shorts IA avec sous-titres.</p>
 
       <label class="field">
         <span>Lien YouTube</span>
@@ -63,11 +72,24 @@
         </label>
       </div>
 
-      <label class="field checkbox-field">
+      <label class="field checkbox-field" id="copyrightShieldRow">
         <input type="checkbox" id="copyrightShield" checked>
         <span>Mode Shorts foot — miroir, zoom, musique de fond, sous-titres discrets</span>
       </label>
-      <p class="hint small">Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.</p>
+      <p class="hint small" id="copyrightShieldHint">Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.</p>
+
+      <details class="details-box" id="aiKeysDetails" open>
+        <summary>Clés API IA (VOANH — Mistral + FAL)</summary>
+        <label class="field no-margin">
+          <span>Clé API Mistral</span>
+          <input type="password" id="mistralApiKey" placeholder="mistral-..." autocomplete="off">
+        </label>
+        <label class="field no-margin">
+          <span>Clé API FAL.ai</span>
+          <input type="password" id="falApiKey" placeholder="fal-..." autocomplete="off">
+        </label>
+        <p class="hint small">Les clés restent dans ton navigateur (localStorage) et sont envoyées au serveur uniquement pour la génération.</p>
+      </details>
 
       <button id="analyzeBtn" class="btn btn-primary btn-block" type="button">Générer mes shorts</button>
 

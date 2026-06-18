@@ -14,6 +14,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
+const { processAiRemixJob } = require("./clipforge-ai-remix");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
@@ -2860,6 +2861,7 @@ function sanitizeJobForClient(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     autoTranscriptUsed: !!job.autoTranscriptUsed,
+    aiRemixStage: job.aiRemixStage || "",
     source: {
       filename: job.originalFilename,
       duration: job.duration,
@@ -2895,6 +2897,7 @@ async function failJob(job, err) {
   job.progress = 100;
   job.error = err instanceof Error ? err.message : String(err);
   job.updatedAt = new Date().toISOString();
+  delete job.aiSecrets;
   await persistJobsDb();
 }
 
@@ -3167,6 +3170,28 @@ async function processJob(job) {
     job.autoTranscriptUsed = generated.autoTranscriptUsed;
   }
 
+  if (boolFrom(job.params.aiRemixMode, false)) {
+    await processAiRemixJob(job, {
+      jobDir,
+      persistJobsDb,
+      getJobSrtPath,
+      getJobCaptionsBurnPath,
+      getJobPlanPath,
+      writeJobBundleZip,
+      buildCaptionsForClip,
+      prepareCaptionsForBurn,
+      captionsToSrt,
+      burnCaptionsIntoClip,
+      replaceClipAudioWithBackgroundMusic,
+      transcribeVideoMaybe,
+      parseSubtitleFileToTimedCaptions,
+      COPYRIGHT_SHIELD_BG_MUSIC,
+      boolFrom,
+      DEFAULTS
+    });
+    return;
+  }
+
   let effectiveClipDuration = job.params.clipDuration;
   const uniquenessBudget = duration / Math.max(1, job.params.clipsCount);
   const isLongClipRequest = job.params.clipDuration >= 120;
@@ -3298,7 +3323,8 @@ app.get("/api/config", (_req, res) => {
       zip: true,
       burnSubtitles: true,
       copyrightShield: true,
-      backgroundMusic: fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC)
+      backgroundMusic: fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC),
+      aiRemixViral: true
     },
     youtubeCookies: cookiesMeta,
     automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
@@ -3665,6 +3691,23 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const burnSubtitles = boolFrom(req.body.burnSubtitles, DEFAULTS.burnSubtitles);
     const copyrightShield = boolFrom(req.body.copyrightShield, DEFAULTS.copyrightShield);
     const youtubeCookies = String(req.body.youtubeCookies || "");
+    const aiRemixMode = boolFrom(req.body.aiRemixMode, false);
+    const mistralApiKey = String(req.body.mistralApiKey || "").trim();
+    const falApiKey = String(req.body.falApiKey || "").trim();
+    const mistralModel = String(req.body.mistralModel || "mistral-small-2506").trim();
+    const falModel = String(req.body.falModel || "").trim();
+
+    if (aiRemixMode) {
+      if (!mistralApiKey) {
+        return res.status(400).json({ error: "Clé API Mistral requise pour le mode Remix IA viral." });
+      }
+      if (!falApiKey) {
+        return res.status(400).json({ error: "Clé API FAL requise pour le mode Remix IA viral." });
+      }
+      if (!hasVideoUrl) {
+        return res.status(400).json({ error: "Le mode Remix IA nécessite un lien YouTube." });
+      }
+    }
 
     const id = uuidv4();
     const useUrlSource = hasVideoUrl;
@@ -3722,8 +3765,12 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         visualShield: boolFrom(req.body.visualShield, DEFAULTS.visualShield),
         stripOriginalAudio: boolFrom(req.body.stripOriginalAudio, DEFAULTS.stripOriginalAudio),
         backgroundMusic: boolFrom(req.body.backgroundMusic, DEFAULTS.backgroundMusic),
-        hasYoutubeCookies: Boolean(youtubeCookiesFilePath)
+        hasYoutubeCookies: Boolean(youtubeCookiesFilePath),
+        aiRemixMode,
+        mistralModel: mistralModel || "mistral-small-2506",
+        falModel: falModel || undefined
       }),
+      aiSecrets: aiRemixMode ? { mistralApiKey, falApiKey } : undefined,
       clips: [],
       error: null
     };

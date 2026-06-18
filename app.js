@@ -48,8 +48,11 @@ const state = {
   automationRunId: "",
   automationPollTimer: null,
   automationItems: [],
-  automationScheduleEnabled: false
+  automationScheduleEnabled: false,
+  generationMode: "ai-remix"
 };
+
+const AI_KEYS_STORAGE = "clipforge-ai-keys";
 
 const dom = {
   videoUrlInput: document.getElementById("videoUrlInput"),
@@ -128,7 +131,14 @@ const dom = {
   backendMeta: document.getElementById("backendMeta"),
   selectedClipTitle: document.getElementById("selectedClipTitle"),
   selectedClipScore: document.getElementById("selectedClipScore"),
-  selectedClipSummary: document.getElementById("selectedClipSummary")
+  selectedClipSummary: document.getElementById("selectedClipSummary"),
+  generationMode: document.getElementById("generationMode"),
+  generationModeHint: document.getElementById("generationModeHint"),
+  copyrightShieldRow: document.getElementById("copyrightShieldRow"),
+  copyrightShieldHint: document.getElementById("copyrightShieldHint"),
+  aiKeysDetails: document.getElementById("aiKeysDetails"),
+  mistralApiKey: document.getElementById("mistralApiKey"),
+  falApiKey: document.getElementById("falApiKey")
 };
 
 function apiUrl(path) {
@@ -153,13 +163,72 @@ function setButtonsEnabled(enabled) {
   if (dom.downloadAllBtn) dom.downloadAllBtn.disabled = !enabled;
 }
 
-function setGenerationProgress(value) {
+function setGenerationProgress(value, stageText = "") {
   const progress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
   if (dom.generationProgress) {
     dom.generationProgress.style.width = `${progress}%`;
   }
   if (dom.generationProgressText) {
-    dom.generationProgressText.textContent = `Progression: ${progress}%`;
+    const stage = String(stageText || "").trim();
+    dom.generationProgressText.textContent = stage
+      ? `Progression: ${progress}% — ${stage}`
+      : `Progression: ${progress}%`;
+  }
+}
+
+function loadAiKeysFromStorage() {
+  try {
+    const raw = localStorage.getItem(AI_KEYS_STORAGE);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
+    if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
+  } catch {
+    // ignore corrupt storage
+  }
+}
+
+function saveAiKeysToStorage() {
+  try {
+    localStorage.setItem(
+      AI_KEYS_STORAGE,
+      JSON.stringify({
+        mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
+        falApiKey: (dom.falApiKey?.value || "").trim()
+      })
+    );
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function isAiRemixMode() {
+  return state.generationMode === "ai-remix";
+}
+
+function applyGenerationModeUi() {
+  const aiMode = isAiRemixMode();
+  if (dom.aiKeysDetails) dom.aiKeysDetails.open = aiMode;
+  if (dom.generationModeHint) {
+    dom.generationModeHint.textContent = aiMode
+      ? "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres."
+      : "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
+  }
+  if (dom.copyrightShieldRow) {
+    const label = dom.copyrightShieldRow.querySelector("span");
+    if (label) {
+      label.textContent = aiMode
+        ? "Musique de fond + sous-titres viraux (recommandé pour YouTube Shorts)"
+        : "Mode Shorts foot — miroir, zoom, musique de fond, sous-titres discrets";
+    }
+  }
+  if (dom.copyrightShieldHint) {
+    dom.copyrightShieldHint.textContent = aiMode
+      ? "Les vidéos sont 100 % générées par IA à partir du script — prêtes à publier en Short."
+      : "Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.";
+  }
+  if (dom.analyzeBtn) {
+    dom.analyzeBtn.textContent = aiMode ? "Générer mes shorts IA" : "Générer mes shorts";
   }
 }
 
@@ -1224,8 +1293,23 @@ async function createJob() {
   const clipsCount = Number(dom.clipsCount?.value || config.defaultClipsCount);
   const aspectRatio = dom.aspectRatio.value;
   const copyrightShield = dom.copyrightShield ? dom.copyrightShield.checked : true;
+  const aiRemixMode = isAiRemixMode();
   state.currentAspectRatio = aspectRatio;
   applyPreviewAspectRatio(aspectRatio);
+
+  if (aiRemixMode) {
+    const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
+    const falApiKey = (dom.falApiKey?.value || "").trim();
+    if (!mistralApiKey) {
+      updateStatus("Ajoute ta clé API Mistral pour le mode Remix IA.", false);
+      return;
+    }
+    if (!falApiKey) {
+      updateStatus("Ajoute ta clé API FAL pour le mode Remix IA.", false);
+      return;
+    }
+    saveAiKeysToStorage();
+  }
 
   const body = new FormData();
   body.append("videoUrl", rawVideoUrl);
@@ -1233,6 +1317,11 @@ async function createJob() {
   body.append("clipsCount", String(clipsCount));
   body.append("aspectRatio", aspectRatio);
   body.append("copyrightShield", copyrightShield ? "true" : "false");
+  body.append("aiRemixMode", aiRemixMode ? "true" : "false");
+  if (aiRemixMode) {
+    body.append("mistralApiKey", (dom.mistralApiKey?.value || "").trim());
+    body.append("falApiKey", (dom.falApiKey?.value || "").trim());
+  }
   body.append("frameMode", "full-video");
   body.append("languageMode", "no-added-audio");
   body.append("transcript", "");
@@ -1254,7 +1343,7 @@ async function createJob() {
   dom.analyzeBtn.disabled = true;
   resetClipState();
   setGenerationProgress(5);
-  updateStatus("Analyse du lien et création des shorts…", false);
+  updateStatus(aiRemixMode ? "Analyse YouTube + scripts IA viraux…" : "Analyse du lien et création des shorts…", false);
 
   try {
     const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
@@ -1320,8 +1409,9 @@ async function pollJob() {
       return;
     }
     if (job.status === "processing") {
-      setGenerationProgress(job.progress || 0);
-      updateStatus(`Traitement en cours… ${job.progress || 0}%`, false);
+      setGenerationProgress(job.progress || 0, job.aiRemixStage || "");
+      const stage = job.aiRemixStage ? ` — ${job.aiRemixStage}` : "";
+      updateStatus(`Traitement en cours… ${job.progress || 0}%${stage}`, false);
       scheduleJobPolling();
       return;
     }
@@ -1332,7 +1422,10 @@ async function pollJob() {
       return;
     }
     if (job.status === "completed") {
-      applyCompletedJob(job);
+      applyCompletedJob(job, job.params?.aiRemixMode ? "Shorts IA viraux prêts pour YouTube" : "");
+      if (job.params?.aiRemixMode && dom.backendMeta && !dom.backendMeta.textContent.includes("mode Remix IA")) {
+        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · mode Remix IA VOANH`;
+      }
       if (job.params?.copyrightShield && dom.backendMeta && !dom.backendMeta.textContent.includes("mode Shorts foot")) {
         dom.backendMeta.textContent = `${dom.backendMeta.textContent} · mode Shorts foot actif`;
       }
@@ -1363,6 +1456,19 @@ function initEvents() {
     });
   }
 
+  if (dom.generationMode) {
+    dom.generationMode.addEventListener("change", () => {
+      state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
+      applyGenerationModeUi();
+    });
+  }
+  if (dom.mistralApiKey) {
+    dom.mistralApiKey.addEventListener("change", saveAiKeysToStorage);
+  }
+  if (dom.falApiKey) {
+    dom.falApiKey.addEventListener("change", saveAiKeysToStorage);
+  }
+
   dom.analyzeBtn.addEventListener("click", () => {
     void createJob();
   });
@@ -1391,6 +1497,11 @@ function initEvents() {
 }
 
 function initDefaults() {
+  if (dom.generationMode) {
+    state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
+    applyGenerationModeUi();
+  }
+  loadAiKeysFromStorage();
   if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
   if (dom.clipsCount) dom.clipsCount.value = String(config.defaultClipsCount);
   if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;
