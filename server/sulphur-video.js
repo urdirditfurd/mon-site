@@ -24,7 +24,10 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         model: "mistral-small-2506",
         cost: "0€"
       },
-      cost: "0€ — 100% gratuit (GPU local + Mistral Free Tier ou templates/Ollama)",
+      cost: "0€ — GPU local gratuit, ou FAL cloud (crédits offerts)",
+      recommendedMode: engine.cuda ? "gpu-local" : "fal-cloud",
+      canGenerateLocal: Boolean(engine.cuda),
+      canGenerateCloud: true,
       concurrency: Number(process.env.SULPHUR_WORKER_CONCURRENCY || 2)
     });
   });

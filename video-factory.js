@@ -1,17 +1,20 @@
 /**
- * ClipForge Video Factory — interface surface (script, durée, format)
+ * ClipForge Video Factory — génération interne automatique (sans Colab)
  */
 (function initVideoFactory(global) {
   const COLAB_URL =
     "https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb";
+  const FAL_MODEL_ECO = "fal-ai/kling-video/v1.6/standard/text-to-video";
   const STORAGE_KEY = "vf_settings_v1";
 
   const state = {
     aspectRatio: "9:16",
-    engine: "colab",
+    engine: "auto",
     running: false,
     cancelRequested: false,
-    jobId: null
+    jobId: null,
+    lastLogCount: 0,
+    serverHealth: null
   };
 
   function loadSettings() {
@@ -91,6 +94,10 @@
     return String($("vf-mistral-key")?.value || loadSettings().mistralKey || "").trim();
   }
 
+  function getFalKey() {
+    return String($("vf-fal-key")?.value || loadSettings().falKey || "").trim();
+  }
+
   function updateDurationLabel() {
     const min = getDurationMin();
     const clip = getClipSec();
@@ -98,32 +105,29 @@
     const label = $("vf-duration-label");
     const scenesEl = $("vf-scenes-estimate");
     if (label) {
-      if (min < 1) {
-        label.textContent = `${Math.round(min * 60)} s`;
-      } else {
-        label.textContent = `${min} min`;
-      }
+      label.textContent = min < 1 ? `${Math.round(min * 60)} s` : `${min} min`;
     }
     if (scenesEl) scenesEl.textContent = String(scenes);
   }
 
+  function engineLabel(engine, provider) {
+    if (engine === "gpu") return "GPU local (0 €)";
+    if (engine === "fal" || provider === "fal") return "Cloud FAL";
+    if (engine === "auto") return "Automatique";
+    return "Automatique";
+  }
+
   function updateMetrics() {
     updateDurationLabel();
-    const engine = state.engine;
-    const min = getDurationMin();
-    const scenes = Math.max(1, Math.ceil((min * 60) / getClipSec()));
-    const durLabel = $("vf-duration-label")?.textContent || `${min} min`;
+    const scenes = Math.max(1, Math.ceil((getDurationMin() * 60) / getClipSec()));
+    const durLabel = $("vf-duration-label")?.textContent || "1 min";
     $("vf-metric-duration").textContent = durLabel;
     $("vf-metric-scenes").textContent = String(scenes);
     $("vf-metric-format").textContent = state.aspectRatio;
+    const resolved = resolveProvider(state.serverHealth);
+    $("vf-metric-engine").textContent = engineLabel(state.engine, resolved.provider);
     $("vf-metric-cost").textContent =
-      engine === "fal" ? `~${(scenes * 0.5).toFixed(1)} €` : "0 €";
-    $("vf-metric-engine").textContent =
-      engine === "colab"
-        ? "Google Colab"
-        : engine === "server"
-          ? "Serveur local"
-          : "FAL cloud";
+      resolved.provider === "fal" ? `~${(scenes * 0.08).toFixed(1)} €` : "0 €";
   }
 
   function bindFormatCards() {
@@ -142,93 +146,100 @@
       tab.addEventListener("click", () => {
         document.querySelectorAll("[data-engine]").forEach((t) => t.classList.remove("active"));
         tab.classList.add("active");
-        state.engine = tab.getAttribute("data-engine") || "colab";
-        $("vf-server-fields")?.classList.toggle("hidden", state.engine !== "server");
-        $("vf-fal-fields")?.classList.toggle("hidden", state.engine !== "fal");
-        $("vf-colab-note")?.classList.toggle("hidden", state.engine !== "colab");
+        state.engine = tab.getAttribute("data-engine") || "auto";
+        $("vf-fal-fields")?.classList.toggle("hidden", state.engine === "gpu");
         updateMetrics();
       });
     });
+  }
+
+  function resolveProvider(health) {
+    const falKey = getFalKey();
+    const engine = state.engine;
+
+    if (engine === "gpu") {
+      if (!health?.engine?.cuda) {
+        return { provider: null, error: "GPU NVIDIA requis pour ce mode. Utilisez Automatique + clé FAL." };
+      }
+      return { provider: "sulphur", hfModel: "wan21lite", label: "GPU local" };
+    }
+
+    if (engine === "fal") {
+      if (!falKey || falKey.length < 20) {
+        return { provider: null, error: "Clé FAL.ai requise (fal.ai — crédits offerts à l'inscription)." };
+      }
+      return { provider: "fal", modelPath: FAL_MODEL_ECO, label: "Cloud FAL" };
+    }
+
+    // auto
+    if (health?.engine?.cuda) {
+      return { provider: "sulphur", hfModel: "wan21lite", label: "GPU détecté" };
+    }
+    if (falKey && falKey.length >= 20) {
+      return { provider: "fal", modelPath: FAL_MODEL_ECO, label: "Cloud FAL (sans GPU)" };
+    }
+    return {
+      provider: null,
+      error:
+        "Pas de GPU détecté. Ajoutez une clé FAL gratuite (fal.ai) pour générer automatiquement sans Colab, ou lancez le serveur sur un PC avec GPU NVIDIA."
+    };
   }
 
   async function checkServerHealth() {
     try {
       const res = await fetch(sulphurUrl("/health"));
       const data = await res.json();
+      state.serverHealth = data;
       const pill = $("vf-server-pill");
+      const statusEl = $("vf-auto-status");
+      const resolved = resolveProvider(data);
+
       if (pill) {
-        const gpu = data.engine?.cuda ? "GPU OK" : "Sans GPU local";
-        pill.textContent = `Serveur connecté · ${gpu}`;
+        if (data.engine?.cuda) {
+          pill.textContent = "Serveur · GPU NVIDIA OK";
+        } else if (getFalKey().length >= 20) {
+          pill.textContent = "Serveur · Cloud FAL prêt";
+        } else {
+          pill.textContent = "Serveur · ajoutez clé FAL";
+        }
         pill.classList.add("live");
       }
+
+      if (statusEl) {
+        if (resolved.provider === "sulphur") {
+          statusEl.textContent =
+            "Génération 100 % automatique en interne via GPU local. Cliquez sur Générer — aucune action Colab.";
+        } else if (resolved.provider === "fal") {
+          statusEl.textContent =
+            "Génération automatique via le serveur + FAL.ai (cloud). Votre script, durée et format sont envoyés en interne.";
+        } else {
+          statusEl.textContent = resolved.error || "Configurez le serveur pour générer.";
+        }
+      }
+
+      updateMetrics();
       return data;
     } catch {
+      state.serverHealth = null;
       const pill = $("vf-server-pill");
       if (pill) {
-        pill.textContent = "Serveur hors ligne";
+        pill.textContent = "Serveur hors ligne — lancez npm start";
         pill.classList.remove("live");
       }
+      const statusEl = $("vf-auto-status");
+      if (statusEl) {
+        statusEl.textContent =
+          "Lancez le serveur : ouvrez un terminal dans le dossier mon-site, tapez npm start, puis recliquez Générer.";
+      }
+      updateMetrics();
       return null;
     }
-  }
-
-  function escapePythonTriple(text) {
-    return String(text || "").replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"');
-  }
-
-  function buildColabSnippet() {
-    const script = getScript();
-    const firstLine = script.split("\n")[0]?.trim() || "Ma vidéo IA";
-    return `# Collez dans la cellule Configuration du notebook Colab (Video Factory)
-TOPIC = """${escapePythonTriple(firstLine)}"""
-SCRIPT = """${escapePythonTriple(script)}"""
-DURATION_MIN = ${getDurationMin()}
-CLIP_SEC = ${getClipSec()}
-ASPECT = "${state.aspectRatio}"
-BATCH_COUNT = 1
-FPS = 16
-MISTRAL_API_KEY = "${getMistralKey().replace(/"/g, '\\"')}"
-HF_TOKEN = ""
-`;
-  }
-
-  function downloadColabConfig() {
-    const snippet = buildColabSnippet();
-    const blob = new Blob([snippet], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "colab-video-config.py";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function launchColab() {
-    const script = getScript();
-    if (!script) {
-      toast("Collez votre script avant de lancer Colab.", "warn");
-      return;
-    }
-    const snippet = buildColabSnippet();
-    try {
-      await navigator.clipboard.writeText(snippet);
-      toast("Configuration copiée ! Collez-la dans la cellule Configuration du notebook Colab.", "info");
-    } catch {
-      downloadColabConfig();
-      toast("Téléchargement de colab-video-config.py — copiez son contenu dans Colab.", "info");
-    }
-    log("Ouverture Google Colab…");
-    log("1. GPU T4 activé  2. Coller la config  3. Tout exécuter  4. Télécharger final.mp4");
-    global.open(COLAB_URL, "_blank", "noopener");
   }
 
   async function apiPost(path, body, headers = {}) {
     const res = await fetch(sulphurUrl(path), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...headers
-      },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body)
     });
     const text = await res.text();
@@ -245,44 +256,73 @@ HF_TOKEN = ""
   }
 
   async function pollJob(jobId) {
+    state.lastLogCount = 0;
     for (let i = 0; i < 7200; i += 1) {
       if (state.cancelRequested) throw new Error("Génération annulée");
       const res = await fetch(sulphurUrl(`/jobs/${encodeURIComponent(jobId)}`));
       const job = await res.json();
-      setProgress(job.progress || 0, job.status || "…", `${job.scenesDone || 0}/${job.sceneCount || "?"}`);
-      const lastLog = job.logs?.[job.logs.length - 1];
-      if (lastLog?.message) log(lastLog.message);
+
+      const statusLabels = {
+        queued: "En file d'attente",
+        planning: "Découpage du script…",
+        generating: "Génération des scènes…",
+        assembling: "Assemblage MP4…",
+        completed: "Terminé",
+        failed: "Échec"
+      };
+      setProgress(
+        job.progress || 0,
+        statusLabels[job.status] || job.status || "…",
+        `${job.scenesDone || 0}/${job.sceneCount || "?"} scènes`
+      );
+
+      const logs = job.logs || [];
+      for (let j = state.lastLogCount; j < logs.length; j += 1) {
+        if (logs[j]?.message) log(logs[j].message);
+      }
+      state.lastLogCount = logs.length;
+
       if (job.status === "completed") return job;
       if (job.status === "failed") throw new Error(job.error || "Échec génération");
-      await new Promise((r) => setTimeout(r, 4000));
+      await new Promise((r) => setTimeout(r, 3500));
     }
     throw new Error("Timeout — la génération prend trop de temps");
   }
 
-  async function runServerGeneration() {
+  async function runInternalGeneration() {
+    if (state.running) return;
+
     const script = getScript();
     if (!script) {
-      toast("Collez votre script.", "warn");
+      toast("Collez votre script avant de générer.", "warn");
       return;
     }
 
     const health = await checkServerHealth();
     if (!health) {
-      toast("Serveur inaccessible. Lancez npm start ou utilisez le mode Colab.", "error");
+      toast("Serveur inaccessible. Ouvrez un terminal : cd mon-site puis npm start", "error");
+      log("ERREUR : impossible de joindre http://localhost:3000 — lancez npm start");
       return;
     }
-    if (!health.engine?.cuda && !health.engine?.ready) {
-      toast(
-        "Pas de GPU NVIDIA sur le serveur. Utilisez le mode Colab gratuit ou installez CUDA.",
-        "warn"
-      );
+    if (!health.ffmpegReady) {
+      toast("FFmpeg manquant sur le serveur. Installez FFmpeg puis relancez npm start.", "error");
+      return;
+    }
+
+    const resolved = resolveProvider(health);
+    if (!resolved.provider) {
+      toast(resolved.error || "Configuration insuffisante", "error");
+      log(resolved.error || "Configuration insuffisante");
       return;
     }
 
     const mistralKey = getMistralKey();
+    const falKey = getFalKey();
     saveSettings({
       apiBase: getApiBase(),
-      mistralKey
+      mistralKey,
+      falKey,
+      script
     });
 
     state.running = true;
@@ -293,37 +333,44 @@ HF_TOKEN = ""
     $("vf-log").innerHTML = "";
 
     try {
-      setProgress(2, "Envoi au studio…", "");
-      log("Création du job Sulphur…");
+      log(`Pipeline interne : ${resolved.label}`);
+      log(`Script ${script.length} car. · ${getDurationMin()} min · ${state.aspectRatio}`);
+      setProgress(2, "Envoi au studio…", resolved.label);
 
-      const job = await apiPost(
-        "/jobs/auto",
-        {
-          provider: "sulphur",
-          script,
-          durationMin: getDurationMin(),
-          clipSec: getClipSec(),
-          aspectRatio: state.aspectRatio,
-          hfModel: "wan21lite",
-          plannerMode: mistralKey ? "mistral" : "free",
-          mistralKey: mistralKey || undefined
-        },
-        mistralKey ? { "x-mistral-key": mistralKey } : {}
-      );
+      const payload = {
+        provider: resolved.provider,
+        script,
+        durationMin: getDurationMin(),
+        clipSec: getClipSec(),
+        aspectRatio: state.aspectRatio,
+        plannerMode: mistralKey ? "mistral" : "free",
+        mistralKey: mistralKey || undefined,
+        falKey: resolved.provider === "fal" ? falKey : undefined,
+        hfModel: resolved.hfModel || "wan21lite",
+        modelPath: resolved.modelPath || FAL_MODEL_ECO
+      };
 
+      const headers = {};
+      if (mistralKey) headers["x-mistral-key"] = mistralKey;
+      if (falKey) headers["x-fal-key"] = falKey;
+
+      const job = await apiPost("/jobs/auto", payload, headers);
       state.jobId = job.id;
-      log(`Job #${job.id} en file d'attente`);
+      log(`Job #${job.id} créé — génération en arrière-plan`);
+
       const finalJob = await pollJob(job.id);
       const url = `${getApiBase()}${finalJob.downloadUrl}`;
+
       setProgress(100, "Terminé", "MP4 prêt");
       const result = $("vf-result");
       result.classList.remove("hidden");
       result.innerHTML = `
-        <strong>✓ Vidéo générée</strong><br>
-        ${finalJob.title || "Votre vidéo"}<br>
+        <strong>✓ Vidéo générée automatiquement</strong><br>
+        ${finalJob.title || "Votre vidéo"} · ${finalJob.scenesDone || "?"} scènes<br>
         <a href="${url}" target="_blank" rel="noopener">⬇ Télécharger le MP4</a>
+        <br><video src="${url}" controls style="width:100%;max-height:320px;margin-top:12px;border-radius:10px"></video>
       `;
-      toast("Vidéo prête !", "info");
+      toast("Vidéo prête — téléchargement disponible ci-dessous.", "info");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`ERREUR : ${msg}`);
@@ -336,53 +383,53 @@ HF_TOKEN = ""
     }
   }
 
-  async function runGeneration() {
-    if (state.running) return;
-    if (state.engine === "colab") {
-      await launchColab();
-      return;
-    }
-    if (state.engine === "server") {
-      await runServerGeneration();
-      return;
-    }
-    toast("Mode FAL cloud : utilisez VOANH /voanh pour l'instant.", "warn");
+  function openColabFallback() {
+    global.open(COLAB_URL, "_blank", "noopener");
+    log("Colab ouvert en secours manuel uniquement.");
   }
 
   function restoreSettings() {
     const saved = loadSettings();
     if (saved.apiBase && $("vf-api-base")) $("vf-api-base").value = saved.apiBase;
     if (saved.mistralKey && $("vf-mistral-key")) $("vf-mistral-key").value = saved.mistralKey;
+    if (saved.falKey && $("vf-fal-key")) $("vf-fal-key").value = saved.falKey;
     if (saved.script && $("vf-script")) $("vf-script").value = saved.script;
+    if (saved.engine) {
+      document.querySelector(`[data-engine="${saved.engine}"]`)?.click();
+    }
   }
 
   function bindUi() {
     const isFile = global.location?.protocol === "file:";
     const banner = $("vf-file-banner");
-    if (banner && isFile) {
-      banner.classList.add("visible");
-    }
+    if (banner && isFile) banner.classList.add("visible");
 
     $("vf-duration")?.addEventListener("input", updateMetrics);
     $("vf-clip-sec")?.addEventListener("change", updateMetrics);
-    $("vf-script")?.addEventListener("input", () => {
-      saveSettings({ script: getScript() });
-    });
+    $("vf-script")?.addEventListener("input", () => saveSettings({ script: getScript() }));
     $("vf-api-base")?.addEventListener("change", () => {
       saveSettings({ apiBase: getApiBase() });
       checkServerHealth();
     });
     $("vf-mistral-key")?.addEventListener("change", () => {
       saveSettings({ mistralKey: getMistralKey() });
+      checkServerHealth();
+    });
+    $("vf-fal-key")?.addEventListener("change", () => {
+      saveSettings({ falKey: getFalKey() });
+      checkServerHealth();
     });
 
-    $("vf-generate-btn")?.addEventListener("click", runGeneration);
+    $("vf-generate-btn")?.addEventListener("click", () => {
+      saveSettings({ engine: state.engine });
+      runInternalGeneration();
+    });
     $("vf-cancel-btn")?.addEventListener("click", () => {
       state.cancelRequested = true;
       log("Annulation demandée…");
     });
     $("vf-check-server")?.addEventListener("click", checkServerHealth);
-    $("vf-download-colab")?.addEventListener("click", downloadColabConfig);
+    $("vf-colab-fallback")?.addEventListener("click", openColabFallback);
 
     bindFormatCards();
     bindEngineTabs();
@@ -397,5 +444,5 @@ HF_TOKEN = ""
     bindUi();
   }
 
-  global.VideoFactory = { runGeneration, launchColab, checkServerHealth, downloadColabConfig };
+  global.VideoFactory = { runInternalGeneration, checkServerHealth, openColabFallback };
 })(window);

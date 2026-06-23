@@ -26,9 +26,8 @@
     </header>
 
     <div class="alert alert-warn file-banner" id="vf-file-banner">
-      Fichier local détecté. Pour générer via le serveur, lancez <strong>npm start</strong> puis ouvrez
-      <a href="http://localhost:3000/studio">http://localhost:3000/studio</a>
-      — ou utilisez le mode <strong>Colab gratuit</strong> ci-dessous.
+      Fichier local détecté. <strong>Étape 1 :</strong> ouvrez un terminal dans le dossier <code>mon-site</code> et lancez
+      <code>npm start</code>. <strong>Étape 2 :</strong> recliquez <strong>Générer</strong> — tout se fait en interne, sans Colab.
     </div>
 
     <div id="vf-toast" class="alert alert-info hidden"></div>
@@ -131,33 +130,39 @@ Chaque matin, les plus performants appliquent une règle simple...
           </div>
 
           <div class="engine-tabs">
-            <button type="button" class="engine-tab active" data-engine="colab">
-              <div class="title">☁ Colab gratuit</div>
-              <div class="price">0 € — sans GPU chez vous</div>
-              <div class="desc">Recommandé sans carte NVIDIA</div>
+            <button type="button" class="engine-tab active" data-engine="auto" id="vf-engine-auto">
+              <div class="title">⚡ Automatique</div>
+              <div class="price">Recommandé — tout en interne</div>
+              <div class="desc">GPU local ou cloud FAL</div>
             </button>
-            <button type="button" class="engine-tab" data-engine="server">
-              <div class="title">🖥 Serveur local</div>
-              <div class="price">0 € — GPU NVIDIA requis</div>
+            <button type="button" class="engine-tab" data-engine="gpu" id="vf-engine-gpu">
+              <div class="title">🖥 GPU NVIDIA</div>
+              <div class="price">0 € — 100 % local</div>
               <div class="desc">npm start + CUDA</div>
             </button>
-            <button type="button" class="engine-tab" data-engine="fal">
-              <div class="title">⚡ Cloud Pro</div>
-              <div class="price">Payant (FAL.ai)</div>
-              <div class="desc">Qualité premium</div>
+            <button type="button" class="engine-tab" data-engine="fal" id="vf-engine-fal">
+              <div class="title">☁ Cloud FAL</div>
+              <div class="price">Crédits offerts fal.ai</div>
+              <div class="desc">Sans GPU chez vous</div>
             </button>
           </div>
 
-          <div class="alert alert-info" id="vf-colab-note">
-            Mode Colab : cliquez sur Générer → la config est copiée → Colab s'ouvre → collez dans la cellule Configuration → Tout exécuter → téléchargez le MP4.
+          <div class="alert alert-info" id="vf-auto-status">
+            Génération 100 % automatique : votre script, durée et format sont envoyés au serveur local. Aucune redirection Colab.
           </div>
 
-          <div id="vf-server-fields" class="hidden">
+          <div class="field">
+            <label for="vf-api-base">URL du serveur ClipForge</label>
+            <input type="url" id="vf-api-base" value="http://localhost:3000" placeholder="http://localhost:3000">
+            <button type="button" class="btn btn-ghost" id="vf-check-server" style="margin-top:8px">Tester la connexion</button>
+          </div>
+
+          <div id="vf-fal-fields">
             <div class="field">
-              <label for="vf-api-base">URL du serveur ClipForge</label>
-              <input type="url" id="vf-api-base" value="http://localhost:3000" placeholder="http://localhost:3000">
+              <label for="vf-fal-key">Clé FAL.ai <span style="color:var(--accent-3)">(requis sans GPU NVIDIA)</span></label>
+              <input type="password" id="vf-fal-key" placeholder="fal_xxxxxxxx… — crédits gratuits sur fal.ai">
+              <span class="field-hint">Sans GPU, l'app génère quand même en interne via FAL (cloud). Inscription gratuite avec crédits.</span>
             </div>
-            <button type="button" class="btn btn-ghost" id="vf-check-server">Tester la connexion</button>
           </div>
 
           <div class="field">
@@ -179,9 +184,12 @@ Chaque matin, les plus performants appliquent une règle simple...
 
           <div class="cta-row">
             <button type="button" class="btn btn-primary" id="vf-generate-btn">▶ Générer ma vidéo</button>
-            <button type="button" class="btn btn-secondary" id="vf-download-colab">⬇ Config Colab</button>
             <button type="button" class="btn btn-secondary" id="vf-cancel-btn" disabled>Annuler</button>
           </div>
+          <p class="field-hint" style="margin-top:12px">
+            Secours manuel uniquement :
+            <button type="button" class="btn btn-ghost" id="vf-colab-fallback" style="padding:6px 10px;font-size:0.78rem">Ouvrir Colab</button>
+          </p>
         </section>
       </main>
 
@@ -191,7 +199,7 @@ Chaque matin, les plus performants appliquent une règle simple...
           <div class="metric"><span>Durée cible</span><span id="vf-metric-duration">1 min</span></div>
           <div class="metric"><span>Scènes IA</span><span id="vf-metric-scenes">15</span></div>
           <div class="metric"><span>Format</span><span id="vf-metric-format">9:16</span></div>
-          <div class="metric"><span>Moteur</span><span id="vf-metric-engine">Google Colab</span></div>
+          <div class="metric"><span>Moteur</span><span id="vf-metric-engine">Automatique</span></div>
           <div class="metric"><span>Coût estimé</span><span id="vf-metric-cost">0 €</span></div>
         </section>
 
