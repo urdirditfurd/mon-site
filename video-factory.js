@@ -9,12 +9,13 @@
 
   const state = {
     aspectRatio: "9:16",
-    engine: "auto",
+    engine: "fiction",
     running: false,
     cancelRequested: false,
     jobId: null,
     lastLogCount: 0,
-    serverHealth: null
+    serverHealth: null,
+    fictionHealth: null
   };
 
   function loadSettings() {
@@ -45,6 +46,14 @@
 
   function sulphurUrl(path) {
     return `${getApiBase()}/api/sulphur${path}`;
+  }
+
+  function fictionUrl(path) {
+    return `${getApiBase()}/api/fiction${path}`;
+  }
+
+  function isFictionEngine() {
+    return state.engine === "fiction";
   }
 
   function $(id) {
@@ -87,7 +96,18 @@
   }
 
   function getClipSec() {
+    if (isFictionEngine()) {
+      return Number($("vf-clip-sec-fiction")?.value || 5);
+    }
     return Number($("vf-clip-sec")?.value || 4);
+  }
+
+  function getHfToken() {
+    return String($("vf-hf-token")?.value || loadSettings().hfToken || "").trim();
+  }
+
+  function getVisualStyle() {
+    return $("vf-visual-style")?.value || "cinematic";
   }
 
   function getMistralKey() {
@@ -148,10 +168,11 @@
   }
 
   function engineLabel(engine, provider) {
+    if (engine === "fiction") return "Fiction Studio (images)";
     if (engine === "gpu") return "GPU local (0 €)";
     if (engine === "fal" || provider === "fal") return "Cloud FAL";
-    if (engine === "auto") return "Automatique";
-    return "Automatique";
+    if (engine === "auto") return "Video IA auto";
+    return "Fiction Studio";
   }
 
   function updateMetrics() {
@@ -161,10 +182,19 @@
     $("vf-metric-duration").textContent = durLabel;
     $("vf-metric-scenes").textContent = String(scenes);
     $("vf-metric-format").textContent = state.aspectRatio;
-    const resolved = resolveProvider(state.serverHealth);
+    const resolved = isFictionEngine()
+      ? { provider: "fiction", label: "Fiction Studio" }
+      : resolveProvider(state.serverHealth);
     $("vf-metric-engine").textContent = engineLabel(state.engine, resolved.provider);
     $("vf-metric-cost").textContent =
-      resolved.provider === "fal" ? `~${(scenes * 0.08).toFixed(1)} €` : "0 €";
+      isFictionEngine() ? "0 € (HF free tier)" : resolved.provider === "fal" ? `~${(scenes * 0.08).toFixed(1)} €` : "0 €";
+  }
+
+  function updateEnginePanels() {
+    const fiction = isFictionEngine();
+    $("vf-fiction-fields")?.classList.toggle("hidden", !fiction);
+    $("vf-t2v-fields")?.classList.toggle("hidden", fiction);
+    $("vf-t2v-clip-row")?.classList.toggle("hidden", fiction);
   }
 
   function bindFormatCards() {
@@ -183,8 +213,9 @@
       tab.addEventListener("click", () => {
         document.querySelectorAll("[data-engine]").forEach((t) => t.classList.remove("active"));
         tab.classList.add("active");
-        state.engine = tab.getAttribute("data-engine") || "auto";
-        $("vf-fal-fields")?.classList.toggle("hidden", state.engine === "gpu");
+        state.engine = tab.getAttribute("data-engine") || "fiction";
+        $("vf-fal-fields")?.classList.toggle("hidden", state.engine === "gpu" || state.engine === "fiction");
+        updateEnginePanels();
         updateMetrics();
         updateWanExtendHint();
       });
@@ -260,15 +291,28 @@
 
   async function checkServerHealth() {
     try {
-      const res = await fetch(sulphurUrl("/health"));
-      const data = await res.json();
+      const [sulphurRes, fictionRes] = await Promise.all([
+        fetch(sulphurUrl("/health")),
+        fetch(fictionUrl("/health"))
+      ]);
+      const data = await sulphurRes.json();
+      const fictionData = fictionRes.ok ? await fictionRes.json() : null;
       state.serverHealth = data;
+      state.fictionHealth = fictionData;
       const pill = $("vf-server-pill");
       const statusEl = $("vf-auto-status");
-      const resolved = resolveProvider(data);
+      const resolved = isFictionEngine()
+        ? { provider: "fiction", label: "Fiction Studio" }
+        : resolveProvider(data);
 
       if (pill) {
-        if (data.snapdragon) {
+        if (isFictionEngine() && fictionData?.ok) {
+          pill.textContent = fictionData.hasServerHfToken
+            ? "Fiction Studio · HF serveur OK"
+            : getHfToken().length >= 10
+              ? "Fiction Studio · HF prêt"
+              : "Fiction Studio · token HF requis";
+        } else if (data.snapdragon) {
           pill.textContent = data.engine?.cuda
             ? "Snapdragon · GPU OK"
             : getFalKey().length >= 20
@@ -290,7 +334,14 @@
       }
 
       if (statusEl) {
-        if (data.snapdragon) {
+        if (isFictionEngine()) {
+          if (fictionData?.ok) {
+            statusEl.textContent =
+              "Fiction Studio : 1 image par plan → montage Ken Burns → musique + sous-titres → MP4. Token HF gratuit requis.";
+          } else {
+            statusEl.textContent = "Fiction Studio indisponible — lancez npm start.";
+          }
+        } else if (data.snapdragon) {
           if (resolved.provider === "fal") {
             statusEl.textContent =
               "Snapdragon X Elite : génération rapide en interne via FAL cloud (recommandé). Votre NPU reste libre pour Cursor.";
@@ -332,8 +383,9 @@
     }
   }
 
-  async function apiPost(path, body, headers = {}) {
-    const res = await fetch(sulphurUrl(path), {
+  async function apiPost(path, body, headers = {}, base = "sulphur") {
+    const url = base === "fiction" ? fictionUrl(path) : sulphurUrl(path);
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body)
@@ -351,25 +403,39 @@
     return data;
   }
 
-  async function pollJob(jobId) {
+  async function pollJob(jobId, base = "sulphur") {
     state.lastLogCount = 0;
+    const jobUrl =
+      base === "fiction"
+        ? fictionUrl(`/jobs/${encodeURIComponent(jobId)}`)
+        : sulphurUrl(`/jobs/${encodeURIComponent(jobId)}`);
+    const statusLabels =
+      base === "fiction"
+        ? {
+            queued: "En file d'attente",
+            planning: "Découpage en plans…",
+            generating_images: "Génération des images…",
+            assembling: "Montage vidéo…",
+            completed: "Terminé",
+            failed: "Échec"
+          }
+        : {
+            queued: "En file d'attente",
+            planning: "Découpage du script…",
+            generating: "Génération des scènes…",
+            assembling: "Assemblage MP4…",
+            completed: "Terminé",
+            failed: "Échec"
+          };
     for (let i = 0; i < 7200; i += 1) {
       if (state.cancelRequested) throw new Error("Génération annulée");
-      const res = await fetch(sulphurUrl(`/jobs/${encodeURIComponent(jobId)}`));
+      const res = await fetch(jobUrl);
       const job = await res.json();
 
-      const statusLabels = {
-        queued: "En file d'attente",
-        planning: "Découpage du script…",
-        generating: "Génération des scènes…",
-        assembling: "Assemblage MP4…",
-        completed: "Terminé",
-        failed: "Échec"
-      };
       setProgress(
         job.progress || 0,
         statusLabels[job.status] || job.status || "…",
-        `${job.scenesDone || 0}/${job.sceneCount || "?"} scènes`
+        `${job.scenesDone || 0}/${job.sceneCount || "?"} plans`
       );
 
       const logs = job.logs || [];
@@ -383,6 +449,71 @@
       await new Promise((r) => setTimeout(r, 3500));
     }
     throw new Error("Timeout — la génération prend trop de temps");
+  }
+
+  async function runFictionGeneration() {
+    const script = getScript();
+    const hfToken = getHfToken();
+    const mistralKey = getMistralKey();
+
+    if (!hfToken && !state.fictionHealth?.hasServerHfToken) {
+      toast("Token Hugging Face requis (gratuit sur huggingface.co/settings/tokens)", "warn");
+      return;
+    }
+
+    saveSettings({
+      apiBase: getApiBase(),
+      hfToken,
+      mistralKey,
+      script,
+      visualStyle: getVisualStyle()
+    });
+
+    log("Pipeline Fiction Studio : images HF → montage");
+    log(`Script ${script.length} car. · ${getDurationMin()} min · ${state.aspectRatio} · style ${getVisualStyle()}`);
+    setProgress(2, "Envoi au studio fiction…", "HF + montage");
+
+    const payload = {
+      script,
+      durationMin: getDurationMin(),
+      clipSec: getClipSec(),
+      aspectRatio: state.aspectRatio,
+      visualStyle: getVisualStyle(),
+      imageProvider: "huggingface",
+      hfImageModel: "fluxSchnell",
+      hfToken: hfToken || undefined,
+      plannerMode: mistralKey ? "mistral" : "free",
+      mistralKey: mistralKey || undefined,
+      burnSubtitles: $("vf-burn-subtitles")?.checked !== false,
+      backgroundMusic: $("vf-background-music")?.checked !== false,
+      voiceNarration: $("vf-voice-narration")?.checked === true,
+      subtitleTheme: "cinema",
+      fps: 24
+    };
+
+    const headers = {};
+    if (mistralKey) headers["x-mistral-key"] = mistralKey;
+    if (hfToken) headers["x-hf-token"] = hfToken;
+
+    const job = await apiPost("/jobs", payload, headers, "fiction");
+    state.jobId = job.id;
+    log(`Job fiction #${job.id} créé`);
+
+    const finalJob = await pollJob(job.id, "fiction");
+    const url = `${getApiBase()}${finalJob.downloadUrl}`;
+    const srtUrl = finalJob.srtDownloadUrl ? `${getApiBase()}${finalJob.srtDownloadUrl}` : "";
+
+    setProgress(100, "Terminé", "MP4 prêt");
+    const result = $("vf-result");
+    result.classList.remove("hidden");
+    result.innerHTML = `
+      <strong>✓ Vidéo fiction montée</strong><br>
+      ${finalJob.title || "Votre vidéo"} · ${finalJob.scenesDone || "?"} plans<br>
+      <a href="${url}" target="_blank" rel="noopener">⬇ Télécharger le MP4</a>
+      ${srtUrl ? `<br><a href="${srtUrl}" target="_blank" rel="noopener">⬇ Télécharger les sous-titres (SRT)</a>` : ""}
+      <br><video src="${url}" controls style="width:100%;max-height:320px;margin-top:12px;border-radius:10px"></video>
+    `;
+    toast("Vidéo fiction prête.", "info");
   }
 
   async function runInternalGeneration() {
@@ -405,8 +536,15 @@
       return;
     }
 
-    const resolved = resolveProvider(health);
-    if (!resolved.provider) {
+    if (isFictionEngine()) {
+      if (!state.fictionHealth?.ok) {
+        toast("Fiction Studio indisponible — relancez npm start", "error");
+        return;
+      }
+    }
+
+    const resolved = isFictionEngine() ? { provider: "fiction" } : resolveProvider(health);
+    if (!isFictionEngine() && !resolved.provider) {
       toast(resolved.error || "Configuration insuffisante", "error");
       log(resolved.error || "Configuration insuffisante");
       return;
@@ -418,12 +556,17 @@
       apiBase: getApiBase(),
       mistralKey,
       falKey,
+      hfToken: getHfToken(),
       script
     });
     try {
       localStorage.setItem(
         "clipforge-ai-keys",
-        JSON.stringify({ mistralApiKey: mistralKey, falApiKey: falKey })
+        JSON.stringify({
+          mistralApiKey: mistralKey,
+          falApiKey: falKey,
+          hfToken: getHfToken()
+        })
       );
     } catch {
       /* ignore */
@@ -437,6 +580,11 @@
     $("vf-log").innerHTML = "";
 
     try {
+      if (isFictionEngine()) {
+        await runFictionGeneration();
+        return;
+      }
+
       log(`Pipeline interne : ${resolved.label}`);
       log(`Script ${script.length} car. · ${getDurationMin()} min · ${state.aspectRatio}`);
       setProgress(2, "Envoi au studio…", resolved.label);
@@ -499,6 +647,7 @@
       const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
       if (shared.mistralApiKey && $("vf-mistral-key")) $("vf-mistral-key").value = shared.mistralApiKey;
       if (shared.falApiKey && $("vf-fal-key")) $("vf-fal-key").value = shared.falApiKey;
+      if (shared.hfToken && $("vf-hf-token")) $("vf-hf-token").value = shared.hfToken;
       if ($("vf-wan-prompt-extend") && shared.wanPromptExtend !== undefined) {
         $("vf-wan-prompt-extend").checked = shared.wanPromptExtend !== false;
       }
@@ -512,9 +661,14 @@
     if ($("vf-wan-prompt-extend")) {
       $("vf-wan-prompt-extend").checked = saved.wanPromptExtend !== false;
     }
+    if (saved.hfToken && $("vf-hf-token")) $("vf-hf-token").value = saved.hfToken;
+    if (saved.visualStyle && $("vf-visual-style")) $("vf-visual-style").value = saved.visualStyle;
     if (saved.engine) {
       document.querySelector(`[data-engine="${saved.engine}"]`)?.click();
+    } else {
+      document.querySelector('[data-engine="fiction"]')?.click();
     }
+    updateEnginePanels();
     updateWanExtendHint();
   }
 
@@ -562,9 +716,17 @@
     $("vf-check-server")?.addEventListener("click", checkServerHealth);
     $("vf-colab-fallback")?.addEventListener("click", openColabFallback);
 
+    $("vf-hf-token")?.addEventListener("change", () => {
+      saveSettings({ hfToken: getHfToken() });
+      checkServerHealth();
+    });
+    $("vf-visual-style")?.addEventListener("change", () => saveSettings({ visualStyle: getVisualStyle() }));
+    $("vf-clip-sec-fiction")?.addEventListener("change", updateMetrics);
+
     bindFormatCards();
     bindEngineTabs();
     restoreSettings();
+    updateEnginePanels();
     updateMetrics();
     checkServerHealth();
   }

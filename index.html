@@ -26,12 +26,36 @@
       <label class="field">
         <span>Mode de génération</span>
         <select id="generationMode">
+          <option value="fiction-studio" selected>Fiction Studio (images HF + montage — recommandé)</option>
           <option value="classic">Découpe classique (extraits de la vidéo)</option>
-          <option value="ai-remix" selected>Remix IA viral (Mistral + FAL — YouTube → shorts)</option>
-          <option value="script-video">Vidéo depuis script (Mistral + FAL — text-to-video)</option>
+          <option value="ai-remix">Remix IA viral (Mistral + FAL — YouTube → shorts)</option>
+          <option value="script-video">Vidéo depuis script (legacy text-to-video FAL)</option>
         </select>
       </label>
       <p class="hint small" id="generationModeHint">L'IA analyse la vidéo source, écrit des scripts viraux originaux, puis génère des shorts IA avec sous-titres.</p>
+
+      <label class="field" id="fictionStyleRow" hidden>
+        <span>Style visuel (Fiction Studio)</span>
+        <select id="fictionVisualStyle">
+          <option value="cinematic" selected>Cinéma / fiction</option>
+          <option value="anime">Anime</option>
+          <option value="illustration">Illustration</option>
+          <option value="documentary">Documentaire</option>
+          <option value="noir">Film noir</option>
+          <option value="fantasy">Fantasy</option>
+        </select>
+      </label>
+
+      <label class="field" id="fictionClipSecRow" hidden>
+        <span>Durée par plan (secondes)</span>
+        <select id="fictionClipSec">
+          <option value="4">4 s</option>
+          <option value="5" selected>5 s</option>
+          <option value="6">6 s</option>
+          <option value="8">8 s</option>
+          <option value="10">10 s</option>
+        </select>
+      </label>
 
       <label class="field" id="scriptVideoRow" hidden>
         <span>Script / narration complète</span>
@@ -98,6 +122,10 @@
 
       <details class="details-box" id="aiKeysDetails" open>
         <summary>Clés API IA (VOANH — Mistral + FAL)</summary>
+        <label class="field no-margin">
+          <span>Token Hugging Face (Fiction Studio)</span>
+          <input type="password" id="hfApiToken" placeholder="hf_… — gratuit sur huggingface.co" autocomplete="off">
+        </label>
         <label class="field no-margin">
           <span>Clé API Mistral</span>
           <input type="password" id="mistralApiKey" placeholder="mistral-..." autocomplete="off">

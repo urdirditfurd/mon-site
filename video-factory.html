@@ -35,22 +35,22 @@
     <section class="hero">
       <div class="hero-copy">
         <h2>Transformez votre <span>script</span> en vidéo prête à publier</h2>
-        <p class="lead">
-          Collez votre narration, choisissez la durée et le format TikTok / YouTube / Carré.
-          Le studio découpe votre script en scènes et assemble un MP4 final.
-        </p>
-        <div class="hero-stats">
-          <div class="stat-chip"><strong>0 €</strong> avec Google Colab</div>
-          <div class="stat-chip"><strong>30 s → 10 min</strong> durée libre</div>
-          <div class="stat-chip"><strong>9:16 · 16:9 · 1:1</strong> formats sociaux</div>
-        </div>
+          <p class="lead">
+            Collez votre narration, choisissez la durée, le format et le style visuel.
+            Le studio découpe en plans, génère les images (Hugging Face gratuit) et monte le MP4 final.
+          </p>
+          <div class="hero-stats">
+            <div class="stat-chip"><strong>0 €</strong> HF + Mistral free tier</div>
+            <div class="stat-chip"><strong>30 s → 10 min</strong> durée libre</div>
+            <div class="stat-chip"><strong>Images → montage</strong> méthode cinéma IA</div>
+          </div>
       </div>
       <aside class="hero-card">
-        <h3>Ce n'est pas « illimité » — mais c'est gratuit</h3>
+        <h3>Fiction Studio — images + montage</h3>
         <ul>
-          <li><strong>Colab</strong> : GPU Google gratuit, sessions ~12 h, quotas journaliers.</li>
-          <li><strong>Serveur local</strong> : illimité si vous avez un GPU NVIDIA.</li>
-          <li><strong>Mistral</strong> : planification de scènes gratuite (console.mistral.ai).</li>
+          <li><strong>Hugging Face</strong> : FLUX Schnell avec crédits gratuits mensuels.</li>
+          <li><strong>Mistral</strong> : découpage script → plans cinéma (gratuit).</li>
+          <li><strong>Montage local</strong> : Ken Burns, musique, sous-titres, export MP4.</li>
         </ul>
       </aside>
     </section>
@@ -90,8 +90,8 @@ Chaque matin, les plus performants appliquent une règle simple...
           </div>
 
           <div class="grid-2">
-            <div class="field">
-              <label for="vf-clip-sec">Durée par scène IA</label>
+            <div class="field" id="vf-t2v-clip-row">
+              <label for="vf-clip-sec">Durée par scène IA (text-to-video)</label>
               <select id="vf-clip-sec">
                 <option value="3">3 secondes (rapide)</option>
                 <option value="4" selected>4 secondes (recommandé)</option>
@@ -130,25 +130,73 @@ Chaque matin, les plus performants appliquent une règle simple...
           </div>
 
           <div class="engine-tabs">
-            <button type="button" class="engine-tab active" data-engine="auto" id="vf-engine-auto">
-              <div class="title">⚡ Automatique</div>
-              <div class="price">Recommandé — tout en interne</div>
-              <div class="desc">GPU local ou cloud FAL</div>
+            <button type="button" class="engine-tab active" data-engine="fiction" id="vf-engine-fiction">
+              <div class="title">🎬 Fiction Studio</div>
+              <div class="price">Recommandé — images + montage</div>
+              <div class="desc">HF gratuit · musique · sous-titres</div>
+            </button>
+            <button type="button" class="engine-tab" data-engine="auto" id="vf-engine-auto">
+              <div class="title">⚡ Video IA (legacy)</div>
+              <div class="price">Text-to-video</div>
+              <div class="desc">GPU local ou FAL</div>
             </button>
             <button type="button" class="engine-tab" data-engine="gpu" id="vf-engine-gpu">
               <div class="title">🖥 GPU NVIDIA</div>
-              <div class="price">0 € — 100 % local</div>
-              <div class="desc">npm start + CUDA</div>
+              <div class="price">0 € — T2V local</div>
+              <div class="desc">Wan / Sulphur</div>
             </button>
             <button type="button" class="engine-tab" data-engine="fal" id="vf-engine-fal">
               <div class="title">☁ Cloud FAL</div>
-              <div class="price">Crédits offerts fal.ai</div>
-              <div class="desc">Sans GPU chez vous</div>
+              <div class="price">Crédits fal.ai</div>
+              <div class="desc">Text-to-video cloud</div>
             </button>
           </div>
 
           <div class="alert alert-info" id="vf-auto-status">
-            Génération 100 % automatique : votre script, durée et format sont envoyés au serveur local. Aucune redirection Colab.
+            Fiction Studio : script → images Hugging Face → montage automatique. Aucune vidéo IA lourde requise.
+          </div>
+
+          <div id="vf-fiction-fields">
+            <div class="field">
+              <label for="vf-hf-token">Token Hugging Face <span style="color:var(--accent-3)">(gratuit)</span></label>
+              <input type="password" id="vf-hf-token" placeholder="hf_… — huggingface.co/settings/tokens">
+              <span class="field-hint">Crédits mensuels gratuits (~0,10 $/mois). FLUX Schnell + fallback SDXL.</span>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label for="vf-visual-style">Style visuel</label>
+                <select id="vf-visual-style">
+                  <option value="cinematic" selected>Cinéma / fiction</option>
+                  <option value="anime">Anime</option>
+                  <option value="illustration">Illustration</option>
+                  <option value="documentary">Documentaire</option>
+                  <option value="noir">Film noir</option>
+                  <option value="fantasy">Fantasy</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="vf-clip-sec-fiction">Durée par plan</label>
+                <select id="vf-clip-sec-fiction">
+                  <option value="4">4 secondes</option>
+                  <option value="5" selected>5 secondes</option>
+                  <option value="6">6 secondes</option>
+                  <option value="8">8 secondes</option>
+                  <option value="10">10 secondes</option>
+                </select>
+              </div>
+            </div>
+            <label class="field checkbox-field">
+              <input type="checkbox" id="vf-burn-subtitles" checked>
+              <span>Sous-titres incrustés (depuis la narration du script)</span>
+            </label>
+            <label class="field checkbox-field">
+              <input type="checkbox" id="vf-background-music" checked>
+              <span>Musique libre de droit en fond</span>
+            </label>
+            <label class="field checkbox-field">
+              <input type="checkbox" id="vf-voice-narration">
+              <span>Voix-off IA (edge-tts — si installé sur le serveur)</span>
+            </label>
           </div>
 
           <div class="field">
@@ -157,6 +205,7 @@ Chaque matin, les plus performants appliquent une règle simple...
             <button type="button" class="btn btn-ghost" id="vf-check-server" style="margin-top:8px">Tester la connexion</button>
           </div>
 
+          <div id="vf-t2v-fields">
           <div id="vf-fal-fields">
             <div class="field">
               <label for="vf-fal-key">Clé FAL.ai <span style="color:var(--accent-3)">(requis sans GPU NVIDIA)</span></label>
@@ -178,6 +227,7 @@ Chaque matin, les plus performants appliquent une règle simple...
           <p class="field-hint" id="vf-wan-extend-hint" style="margin-top:-8px;margin-bottom:12px">
             Améliore la qualité visuelle Wan local/Colab. Nécessite une clé Mistral. Inactif avec FAL cloud.
           </p>
+          </div>
 
           <div class="progress-wrap">
             <div class="progress-track"><div class="progress-fill" id="vf-progress-fill"></div></div>

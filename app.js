@@ -52,6 +52,7 @@ const state = {
   automationScheduleEnabled: false,
   generationMode: "ai-remix",
   sulphurJobId: "",
+  fictionJobId: "",
   falLimitsLoaded: false
 };
 
@@ -147,6 +148,11 @@ const dom = {
   wanPromptExtend: document.getElementById("wanPromptExtend"),
   wanPromptExtendRow: document.getElementById("wanPromptExtendRow"),
   wanPromptExtendHint: document.getElementById("wanPromptExtendHint"),
+  hfApiToken: document.getElementById("hfApiToken"),
+  fictionVisualStyle: document.getElementById("fictionVisualStyle"),
+  fictionClipSec: document.getElementById("fictionClipSec"),
+  fictionStyleRow: document.getElementById("fictionStyleRow"),
+  fictionClipSecRow: document.getElementById("fictionClipSecRow"),
   scriptVideoRow: document.getElementById("scriptVideoRow"),
   scriptVideoInput: document.getElementById("scriptVideoInput"),
   videoDurationRow: document.getElementById("videoDurationRow"),
@@ -225,6 +231,7 @@ function loadAiKeysFromStorage() {
     const parsed = JSON.parse(raw);
     if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
     if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
+    if (dom.hfApiToken && parsed.hfToken) dom.hfApiToken.value = parsed.hfToken;
     if (dom.wanPromptExtend && parsed.wanPromptExtend !== undefined) {
       dom.wanPromptExtend.checked = parsed.wanPromptExtend !== false;
     }
@@ -240,6 +247,7 @@ function saveAiKeysToStorage() {
       JSON.stringify({
         mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
         falApiKey: (dom.falApiKey?.value || "").trim(),
+        hfToken: (dom.hfApiToken?.value || "").trim(),
         wanPromptExtend: dom.wanPromptExtend?.checked !== false
       })
     );
@@ -252,8 +260,16 @@ function isAiRemixMode() {
   return state.generationMode === "ai-remix";
 }
 
+function isFictionStudioMode() {
+  return state.generationMode === "fiction-studio";
+}
+
 function isScriptVideoMode() {
   return state.generationMode === "script-video";
+}
+
+function isScriptLikeMode() {
+  return isScriptVideoMode() || isFictionStudioMode();
 }
 
 function usesFalApi() {
@@ -261,6 +277,7 @@ function usesFalApi() {
 }
 
 function resolveGenerationMode(value) {
+  if (value === "fiction-studio") return "fiction-studio";
   if (value === "script-video") return "script-video";
   if (value === "ai-remix") return "ai-remix";
   return "classic";
@@ -345,19 +362,26 @@ function updateWanPromptExtendHint() {
 function applyGenerationModeUi() {
   const aiMode = isAiRemixMode();
   const scriptMode = isScriptVideoMode();
-  const falMode = usesFalApi();
+  const fictionMode = isFictionStudioMode();
+  const scriptLike = isScriptLikeMode();
+  const falMode = usesFalApi() || fictionMode;
 
   if (dom.aiKeysDetails) dom.aiKeysDetails.open = falMode;
-  if (dom.scriptVideoRow) dom.scriptVideoRow.hidden = !scriptMode;
-  if (dom.videoDurationRow) dom.videoDurationRow.hidden = !scriptMode;
-  if (dom.youtubeUrlRow) dom.youtubeUrlRow.hidden = scriptMode;
-  if (dom.clipSettingsGrid) dom.clipSettingsGrid.hidden = scriptMode;
-  if (dom.copyrightShieldRow) dom.copyrightShieldRow.hidden = scriptMode;
+  if (dom.scriptVideoRow) dom.scriptVideoRow.hidden = !scriptLike;
+  if (dom.videoDurationRow) dom.videoDurationRow.hidden = !scriptLike;
+  if (dom.fictionStyleRow) dom.fictionStyleRow.hidden = !fictionMode;
+  if (dom.fictionClipSecRow) dom.fictionClipSecRow.hidden = !fictionMode;
+  if (dom.youtubeUrlRow) dom.youtubeUrlRow.hidden = scriptLike;
+  if (dom.clipSettingsGrid) dom.clipSettingsGrid.hidden = scriptLike;
+  if (dom.copyrightShieldRow) dom.copyrightShieldRow.hidden = scriptLike;
 
   if (dom.generationModeHint) {
-    if (scriptMode) {
+    if (fictionMode) {
       dom.generationModeHint.textContent =
-        "Mistral découpe votre script en scènes, FAL génère les clips, le serveur assemble le MP4 — tout en interne.";
+        "Fiction Studio : Mistral découpe le script en plans, Hugging Face génère les images (gratuit), montage + musique + sous-titres.";
+    } else if (scriptMode) {
+      dom.generationModeHint.textContent =
+        "Legacy text-to-video FAL — préférez Fiction Studio pour un flux gratuit et plus fiable.";
     } else if (aiMode) {
       dom.generationModeHint.textContent =
         "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres.";
@@ -365,7 +389,7 @@ function applyGenerationModeUi() {
       dom.generationModeHint.textContent = "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
     }
   }
-  if (dom.copyrightShieldRow && !scriptMode) {
+  if (dom.copyrightShieldRow && !scriptLike) {
     const label = dom.copyrightShieldRow.querySelector("span");
     if (label) {
       label.textContent = aiMode
@@ -373,15 +397,17 @@ function applyGenerationModeUi() {
         : "Mode Shorts foot — miroir, zoom, musique de fond, sous-titres discrets";
     }
   }
-  if (dom.copyrightShieldHint && !scriptMode) {
+  if (dom.copyrightShieldHint && !scriptLike) {
     dom.copyrightShieldHint.textContent = aiMode
       ? "Les vidéos sont 100 % générées par IA à partir du script — prêtes à publier en Short."
       : "Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.";
   }
   if (dom.analyzeBtn) {
-    dom.analyzeBtn.textContent = scriptMode
-      ? "Générer ma vidéo IA"
-      : aiMode
+    dom.analyzeBtn.textContent = fictionMode
+      ? "Générer ma fiction IA"
+      : scriptMode
+        ? "Générer ma vidéo IA"
+        : aiMode
         ? "Générer mes shorts IA"
         : "Générer mes shorts";
   }
@@ -1440,6 +1466,132 @@ async function checkBackendHealth() {
   }
 }
 
+async function createFictionVideoJob() {
+  const script = (dom.scriptVideoInput?.value || "").trim();
+  const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
+  const hfToken = (dom.hfApiToken?.value || "").trim();
+  const aspectRatio = dom.aspectRatio?.value || "9:16";
+  const durationMin = Number(dom.videoDurationMin?.value || 1);
+  const clipSec = Number(dom.fictionClipSec?.value || 5);
+  const visualStyle = dom.fictionVisualStyle?.value || "cinematic";
+
+  if (!script) {
+    updateStatus("Collez votre script avant de générer.", false);
+    return;
+  }
+  if (!hfToken) {
+    updateStatus("Ajoutez votre token Hugging Face (gratuit sur huggingface.co).", false);
+    return;
+  }
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+
+  saveAiKeysToStorage();
+  dom.analyzeBtn.disabled = true;
+  resetClipState();
+  state.fictionJobId = "";
+  setGenerationProgress(5);
+  updateStatus("Envoi du script au Fiction Studio…", false);
+
+  try {
+    const response = await fetch(apiUrl("/api/fiction/jobs"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(mistralApiKey ? { "x-mistral-key": mistralApiKey } : {}),
+        "x-hf-token": hfToken
+      },
+      body: JSON.stringify({
+        script,
+        durationMin,
+        clipSec,
+        aspectRatio,
+        visualStyle,
+        imageProvider: "huggingface",
+        hfImageModel: "fluxSchnell",
+        hfToken,
+        plannerMode: mistralApiKey ? "mistral" : "free",
+        mistralKey: mistralApiKey || undefined,
+        burnSubtitles: true,
+        backgroundMusic: true,
+        voiceNarration: false,
+        fps: 24
+      })
+    });
+    if (!response.ok) {
+      const details = await response.json().catch(() => ({}));
+      throw new Error(details.error || "Impossible de créer le job fiction");
+    }
+    const job = await response.json();
+    state.fictionJobId = job.id;
+    updateStatus(`Fiction #${job.id.slice(0, 8)}… génération images + montage`, false);
+    scheduleFictionPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
+
+function scheduleFictionPolling() {
+  clearPolling();
+  state.pollTimer = setTimeout(() => {
+    void pollFictionJob();
+  }, config.pollIntervalMs);
+}
+
+async function pollFictionJob() {
+  if (!state.fictionJobId) return;
+  try {
+    const response = await fetch(apiUrl(`/api/fiction/jobs/${state.fictionJobId}`));
+    if (!response.ok) throw new Error("Job fiction introuvable");
+    const job = await response.json();
+
+    if (job.status === "queued" || job.status === "planning") {
+      setGenerationProgress(Math.max(8, Number(job.progress) || 0), job.status);
+      updateStatus(`Découpage en plans… ${job.progress || 0}%`, false);
+      scheduleFictionPolling();
+      return;
+    }
+    if (job.status === "generating_images" || job.status === "assembling") {
+      setGenerationProgress(job.progress || 0, job.status);
+      updateStatus(
+        `${job.status === "generating_images" ? "Images HF" : "Montage"}… ${job.scenesDone || 0}/${job.sceneCount || "?"}`,
+        false
+      );
+      scheduleFictionPolling();
+      return;
+    }
+    if (job.status === "failed") {
+      setGenerationProgress(100);
+      updateStatus(job.error || "Fiction Studio échoué", false);
+      dom.analyzeBtn.disabled = false;
+      return;
+    }
+    if (job.status === "completed") {
+      const downloadUrl = apiUrl(job.downloadUrl || `/api/fiction/download/${job.id}`);
+      const srtUrl = job.srtDownloadUrl ? apiUrl(job.srtDownloadUrl) : "";
+      setGenerationProgress(100, "terminé");
+      dom.player.src = downloadUrl;
+      if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = job.title || "Fiction montée";
+      if (dom.selectedClipSummary) {
+        dom.selectedClipSummary.innerHTML = `MP4 prêt · <a href="${downloadUrl}" download>Télécharger</a>${srtUrl ? ` · <a href="${srtUrl}" download>SRT</a>` : ""}`;
+      }
+      dom.downloadAllBtn.disabled = false;
+      dom.downloadAllBtn.onclick = () =>
+        triggerDownload(job.downloadUrl || `/api/fiction/download/${job.id}`, `fiction-${job.id}.mp4`);
+      dom.analyzeBtn.disabled = false;
+      updateStatus("Vidéo fiction prête — images + montage terminés", true);
+      return;
+    }
+    scheduleFictionPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur polling fiction", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
+
 async function createScriptVideoJob() {
   const script = (dom.scriptVideoInput?.value || "").trim();
   const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
@@ -1559,6 +1711,9 @@ async function pollSulphurJob() {
 }
 
 async function createJob() {
+  if (isFictionStudioMode()) {
+    return createFictionVideoJob();
+  }
   if (isScriptVideoMode()) {
     return createScriptVideoJob();
   }
@@ -1754,6 +1909,9 @@ function initEvents() {
     el?.addEventListener("change", () => {
       void updateFalCostEstimate();
     });
+  }
+  if (dom.hfApiToken) {
+    dom.hfApiToken.addEventListener("change", saveAiKeysToStorage);
   }
   if (dom.mistralApiKey) {
     dom.mistralApiKey.addEventListener("change", () => {
