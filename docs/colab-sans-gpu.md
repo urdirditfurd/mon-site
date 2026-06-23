@@ -23,12 +23,20 @@ Pas besoin d'installer Python, CUDA ni `npm` sur votre PC : tout tourne dans le 
 
 ### 2. Ouvrir le notebook
 
+**Méthode la plus simple (lien direct) :**
+
+👉 **[Ouvrir dans Google Colab](https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb)**
+
+**Alternative via l'interface Colab :**
+
 1. Dans Colab : **Fichier → Ouvrir un notebook**
 2. Onglet **GitHub**
 3. Collez : `urdirditfurd/mon-site`
 4. Ouvrez : `colab/text-to-video-gratuit.ipynb`
 
-*(Ou téléchargez le fichier `.ipynb` depuis le repo et uploadez-le dans Colab.)*
+**Si GitHub ne trouve rien :** téléchargez le fichier depuis  
+https://github.com/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb  
+puis **Fichier → Importer un notebook** dans Colab.
 
 ### 3. Activer le GPU
 
