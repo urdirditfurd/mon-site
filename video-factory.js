@@ -172,19 +172,35 @@
     }
   }
 
+  function escapePythonTriple(text) {
+    return String(text || "").replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"');
+  }
+
   function buildColabSnippet() {
     const script = getScript();
     const firstLine = script.split("\n")[0]?.trim() || "Ma vidéo IA";
-    return `# Collez dans la cellule Configuration du notebook Colab
-TOPIC = """${firstLine}"""
-# Script complet (pour référence) :
-SCRIPT = """${script.replace(/"""/g, '"""')}"""
+    return `# Collez dans la cellule Configuration du notebook Colab (Video Factory)
+TOPIC = """${escapePythonTriple(firstLine)}"""
+SCRIPT = """${escapePythonTriple(script)}"""
 DURATION_MIN = ${getDurationMin()}
 CLIP_SEC = ${getClipSec()}
 ASPECT = "${state.aspectRatio}"
 BATCH_COUNT = 1
-MISTRAL_API_KEY = "${getMistralKey()}"
+FPS = 16
+MISTRAL_API_KEY = "${getMistralKey().replace(/"/g, '\\"')}"
+HF_TOKEN = ""
 `;
+  }
+
+  function downloadColabConfig() {
+    const snippet = buildColabSnippet();
+    const blob = new Blob([snippet], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "colab-video-config.py";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function launchColab() {
@@ -198,10 +214,11 @@ MISTRAL_API_KEY = "${getMistralKey()}"
       await navigator.clipboard.writeText(snippet);
       toast("Configuration copiée ! Collez-la dans la cellule Configuration du notebook Colab.", "info");
     } catch {
-      toast("Copiez manuellement la configuration affichée dans les logs.", "warn");
-      log(snippet);
+      downloadColabConfig();
+      toast("Téléchargement de colab-video-config.py — copiez son contenu dans Colab.", "info");
     }
     log("Ouverture Google Colab…");
+    log("1. GPU T4 activé  2. Coller la config  3. Tout exécuter  4. Télécharger final.mp4");
     global.open(COLAB_URL, "_blank", "noopener");
   }
 
@@ -365,6 +382,7 @@ MISTRAL_API_KEY = "${getMistralKey()}"
       log("Annulation demandée…");
     });
     $("vf-check-server")?.addEventListener("click", checkServerHealth);
+    $("vf-download-colab")?.addEventListener("click", downloadColabConfig);
 
     bindFormatCards();
     bindEngineTabs();
@@ -379,5 +397,5 @@ MISTRAL_API_KEY = "${getMistralKey()}"
     bindUi();
   }
 
-  global.VideoFactory = { runGeneration, launchColab, checkServerHealth };
+  global.VideoFactory = { runGeneration, launchColab, checkServerHealth, downloadColabConfig };
 })(window);

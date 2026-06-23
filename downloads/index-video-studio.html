@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClipForge Video Factory — Script vers vidéo IA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+/* ClipForge Video Factory — surface commerciale */
+:root {
+  --bg: #070b14;
+  --bg-elevated: #0d1526;
+  --bg-card: #111c32;
+  --border: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(99, 179, 237, 0.35);
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --accent: #38bdf8;
+  --accent-2: #818cf8;
+  --accent-3: #34d399;
+  --gold: #fbbf24;
+  --danger: #fb7185;
+  --gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --font: "Inter", system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+body {
+  background-image:
+    radial-gradient(ellipse 70% 50% at 15% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 90% 10%, rgba(129, 140, 248, 0.14), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 50% 100%, rgba(52, 211, 153, 0.08), transparent 50%);
+}
+
+a {
+  color: var(--accent);
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--gradient);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: #0f172a;
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.nav-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.pill.live {
+  border-color: rgba(52, 211, 153, 0.35);
+  color: var(--accent-3);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 28px;
+  margin-bottom: 28px;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hero-copy h2 {
+  margin: 0 0 12px;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.hero-copy h2 span {
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-copy .lead {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  font-size: 1.02rem;
+  max-width: 52ch;
+}
+
+.hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stat-chip {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 0.82rem;
+}
+
+.stat-chip strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.hero-card {
+  background: rgba(17, 28, 50, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.hero-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.hero-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.hero-card li + li {
+  margin-top: 6px;
+}
+
+.layout-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 0.9fr;
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: rgba(13, 21, 38, 0.92);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  box-shadow: var(--shadow);
+}
+
+.panel + .panel {
+  margin-top: 18px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.panel-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.step-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 20, 0.8);
+  color: var(--text);
+  padding: 12px 14px;
+  font: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field textarea {
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+}
+
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.format-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .format-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.format-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(7, 11, 20, 0.65);
+  padding: 14px 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+
+.format-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+}
+
+.format-card.active {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.2);
+}
+
+.format-card .ratio {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.format-card .label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.engine-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .engine-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.engine-tab {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(7, 11, 20, 0.65);
+  padding: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.engine-tab.active {
+  border-color: rgba(129, 140, 248, 0.55);
+  background: rgba(129, 140, 248, 0.1);
+}
+
+.engine-tab .title {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.engine-tab .price {
+  font-size: 0.75rem;
+  color: var(--accent-3);
+  margin-top: 4px;
+}
+
+.engine-tab .desc {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.duration-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.duration-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.duration-value {
+  min-width: 88px;
+  text-align: right;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn {
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 13px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: var(--gradient);
+  color: #0f172a;
+  flex: 1;
+  min-width: 200px;
+}
+
+.btn-secondary {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.alert {
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  margin-bottom: 14px;
+}
+
+.alert-info {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #bae6fd;
+}
+
+.alert-warn {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: #fde68a;
+}
+
+.alert-error {
+  background: rgba(251, 113, 133, 0.08);
+  border: 1px solid rgba(251, 113, 133, 0.25);
+  color: #fecdd3;
+}
+
+.progress-wrap {
+  margin-top: 16px;
+}
+
+.progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--gradient);
+  transition: width 0.35s ease;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.log-box {
+  margin-top: 14px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 20, 0.85);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  color: #cbd5e1;
+}
+
+.log-line + .log-line {
+  margin-top: 4px;
+}
+
+.result-card {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.result-card a {
+  font-weight: 700;
+}
+
+.sidebar-card .metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+
+.sidebar-card .metric:last-child {
+  border-bottom: none;
+}
+
+.sidebar-card .metric span:last-child {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.file-banner {
+  display: none;
+  margin-bottom: 18px;
+}
+
+.file-banner.visible {
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+</style>
+</head>
+<body>
+  <div class="shell">
+    <header class="top-nav">
+      <div class="brand">
+        <div class="brand-mark">VF</div>
+        <div>
+          <h1>ClipForge Video Factory</h1>
+          <p>Script → vidéo IA · production courte &amp; longue</p>
+        </div>
+      </div>
+      <div class="nav-pills">
+        <span class="pill live">100 % gratuit avec Colab</span>
+        <span class="pill" id="vf-server-pill">Serveur hors ligne</span>
+      </div>
+    </header>
+
+    <div class="alert alert-warn file-banner" id="vf-file-banner">
+      Fichier local détecté. Pour générer via le serveur, lancez <strong>npm start</strong> puis ouvrez
+      <a href="http://localhost:3000/studio">http://localhost:3000/studio</a>
+      — ou utilisez le mode <strong>Colab gratuit</strong> ci-dessous.
+    </div>
+
+    <div id="vf-toast" class="alert alert-info hidden"></div>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <h2>Transformez votre <span>script</span> en vidéo prête à publier</h2>
+        <p class="lead">
+          Collez votre narration, choisissez la durée et le format TikTok / YouTube / Carré.
+          Le studio découpe votre script en scènes et assemble un MP4 final.
+        </p>
+        <div class="hero-stats">
+          <div class="stat-chip"><strong>0 €</strong> avec Google Colab</div>
+          <div class="stat-chip"><strong>30 s → 10 min</strong> durée libre</div>
+          <div class="stat-chip"><strong>9:16 · 16:9 · 1:1</strong> formats sociaux</div>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <h3>Ce n'est pas « illimité » — mais c'est gratuit</h3>
+        <ul>
+          <li><strong>Colab</strong> : GPU Google gratuit, sessions ~12 h, quotas journaliers.</li>
+          <li><strong>Serveur local</strong> : illimité si vous avez un GPU NVIDIA.</li>
+          <li><strong>Mistral</strong> : planification de scènes gratuite (console.mistral.ai).</li>
+        </ul>
+      </aside>
+    </section>
+
+    <div class="layout-grid">
+      <main>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Votre script</h3>
+            <span class="step-badge">Étape 1</span>
+          </div>
+          <div class="field">
+            <label for="vf-script">Script / narration complète</label>
+            <textarea id="vf-script" placeholder="Collez ici votre script voix-off ou votre article...
+
+Exemple :
+Bienvenue dans cette exploration des secrets de la productivité.
+Chaque matin, les plus performants appliquent une règle simple...
+"></textarea>
+            <span class="field-hint">Le texte est découpé automatiquement selon la durée choisie.</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Réglages vidéo</h3>
+            <span class="step-badge">Étape 2</span>
+          </div>
+
+          <div class="field">
+            <label>Durée souhaitée</label>
+            <div class="duration-row">
+              <input type="range" id="vf-duration" min="0.5" max="10" step="0.5" value="1">
+              <div class="duration-value" id="vf-duration-label">1 min</div>
+            </div>
+            <span class="field-hint">Glissez pour régler : 30 secondes à 10 minutes.</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="vf-clip-sec">Durée par scène IA</label>
+              <select id="vf-clip-sec">
+                <option value="3">3 secondes (rapide)</option>
+                <option value="4" selected>4 secondes (recommandé)</option>
+                <option value="5">5 secondes</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Scènes estimées</label>
+              <input type="text" id="vf-scenes-estimate" value="15" readonly>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Format de sortie</label>
+            <div class="format-grid">
+              <button type="button" class="format-card active" data-aspect="9:16">
+                <div class="ratio">9:16</div>
+                <div class="label">TikTok / Reels</div>
+              </button>
+              <button type="button" class="format-card" data-aspect="16:9">
+                <div class="ratio">16:9</div>
+                <div class="label">YouTube</div>
+              </button>
+              <button type="button" class="format-card" data-aspect="1:1">
+                <div class="ratio">1:1</div>
+                <div class="label">Carré / Feed</div>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Moteur de génération</h3>
+            <span class="step-badge">Étape 3</span>
+          </div>
+
+          <div class="engine-tabs">
+            <button type="button" class="engine-tab active" data-engine="colab">
+              <div class="title">☁ Colab gratuit</div>
+              <div class="price">0 € — sans GPU chez vous</div>
+              <div class="desc">Recommandé sans carte NVIDIA</div>
+            </button>
+            <button type="button" class="engine-tab" data-engine="server">
+              <div class="title">🖥 Serveur local</div>
+              <div class="price">0 € — GPU NVIDIA requis</div>
+              <div class="desc">npm start + CUDA</div>
+            </button>
+            <button type="button" class="engine-tab" data-engine="fal">
+              <div class="title">⚡ Cloud Pro</div>
+              <div class="price">Payant (FAL.ai)</div>
+              <div class="desc">Qualité premium</div>
+            </button>
+          </div>
+
+          <div class="alert alert-info" id="vf-colab-note">
+            Mode Colab : cliquez sur Générer → la config est copiée → Colab s'ouvre → collez dans la cellule Configuration → Tout exécuter → téléchargez le MP4.
+          </div>
+
+          <div id="vf-server-fields" class="hidden">
+            <div class="field">
+              <label for="vf-api-base">URL du serveur ClipForge</label>
+              <input type="url" id="vf-api-base" value="http://localhost:3000" placeholder="http://localhost:3000">
+            </div>
+            <button type="button" class="btn btn-ghost" id="vf-check-server">Tester la connexion</button>
+          </div>
+
+          <div class="field">
+            <label for="vf-mistral-key">Clé Mistral (optionnel — scènes plus intelligentes)</label>
+            <input type="password" id="vf-mistral-key" placeholder="Clé gratuite sur console.mistral.ai">
+            <span class="field-hint">Sans clé : découpage automatique du script (toujours 0 €).</span>
+          </div>
+
+          <div class="progress-wrap">
+            <div class="progress-track"><div class="progress-fill" id="vf-progress-fill"></div></div>
+            <div class="progress-meta">
+              <span id="vf-progress-label">Prêt</span>
+              <span id="vf-progress-detail"></span>
+            </div>
+          </div>
+
+          <div class="log-box" id="vf-log"></div>
+          <div class="result-card hidden" id="vf-result"></div>
+
+          <div class="cta-row">
+            <button type="button" class="btn btn-primary" id="vf-generate-btn">▶ Générer ma vidéo</button>
+            <button type="button" class="btn btn-secondary" id="vf-download-colab">⬇ Config Colab</button>
+            <button type="button" class="btn btn-secondary" id="vf-cancel-btn" disabled>Annuler</button>
+          </div>
+        </section>
+      </main>
+
+      <aside>
+        <section class="panel sidebar-card">
+          <div class="panel-head"><h3>Récapitulatif</h3></div>
+          <div class="metric"><span>Durée cible</span><span id="vf-metric-duration">1 min</span></div>
+          <div class="metric"><span>Scènes IA</span><span id="vf-metric-scenes">15</span></div>
+          <div class="metric"><span>Format</span><span id="vf-metric-format">9:16</span></div>
+          <div class="metric"><span>Moteur</span><span id="vf-metric-engine">Google Colab</span></div>
+          <div class="metric"><span>Coût estimé</span><span id="vf-metric-cost">0 €</span></div>
+        </section>
+
+        <section class="panel hero-card" style="margin-top:18px">
+          <h3>Installer sur votre PC (1 seul fichier)</h3>
+          <ul>
+            <li>Téléchargez <a href="downloads/index-video-studio.html" download>index-video-studio.html</a> (tout-en-un).</li>
+            <li>Placez-le dans <code>Downloads</code> et ouvrez-le — ou renommez en <code>index (3).html</code>.</li>
+            <li>Mode serveur : <a href="/studio">/studio</a> après <code>npm start</code>.</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+/**
+ * ClipForge Video Factory — interface surface (script, durée, format)
+ */
+(function initVideoFactory(global) {
+  const COLAB_URL =
+    "https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb";
+  const STORAGE_KEY = "vf_settings_v1";
+
+  const state = {
+    aspectRatio: "9:16",
+    engine: "colab",
+    running: false,
+    cancelRequested: false,
+    jobId: null
+  };
+
+  function loadSettings() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  function saveSettings(patch) {
+    const next = { ...loadSettings(), ...patch };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function getApiBase() {
+    const saved = document.getElementById("vf-api-base")?.value?.trim();
+    if (saved) return saved.replace(/\/$/, "");
+    if (global.location?.protocol !== "file:") {
+      return `${global.location.origin}`;
+    }
+    return "http://localhost:3000";
+  }
+
+  function sulphurUrl(path) {
+    return `${getApiBase()}/api/sulphur${path}`;
+  }
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function log(line) {
+    const box = $("vf-log");
+    if (!box) return;
+    const row = document.createElement("div");
+    row.className = "log-line";
+    row.textContent = `[${new Date().toLocaleTimeString("fr-FR")}] ${line}`;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function setProgress(pct, label, detail) {
+    const fill = $("vf-progress-fill");
+    const lbl = $("vf-progress-label");
+    const det = $("vf-progress-detail");
+    if (fill) fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    if (lbl) lbl.textContent = label || "";
+    if (det) det.textContent = detail || "";
+  }
+
+  function toast(msg, type = "info") {
+    const el = $("vf-toast");
+    if (!el) return;
+    el.className = `alert alert-${type === "error" ? "error" : type === "warn" ? "warn" : "info"}`;
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+
+  function getScript() {
+    return String($("vf-script")?.value || "").trim();
+  }
+
+  function getDurationMin() {
+    return Number($("vf-duration")?.value || 1);
+  }
+
+  function getClipSec() {
+    return Number($("vf-clip-sec")?.value || 4);
+  }
+
+  function getMistralKey() {
+    return String($("vf-mistral-key")?.value || loadSettings().mistralKey || "").trim();
+  }
+
+  function updateDurationLabel() {
+    const min = getDurationMin();
+    const clip = getClipSec();
+    const scenes = Math.max(1, Math.ceil((min * 60) / clip));
+    const label = $("vf-duration-label");
+    const scenesEl = $("vf-scenes-estimate");
+    if (label) {
+      if (min < 1) {
+        label.textContent = `${Math.round(min * 60)} s`;
+      } else {
+        label.textContent = `${min} min`;
+      }
+    }
+    if (scenesEl) scenesEl.textContent = String(scenes);
+  }
+
+  function updateMetrics() {
+    updateDurationLabel();
+    const engine = state.engine;
+    const min = getDurationMin();
+    const scenes = Math.max(1, Math.ceil((min * 60) / getClipSec()));
+    const durLabel = $("vf-duration-label")?.textContent || `${min} min`;
+    $("vf-metric-duration").textContent = durLabel;
+    $("vf-metric-scenes").textContent = String(scenes);
+    $("vf-metric-format").textContent = state.aspectRatio;
+    $("vf-metric-cost").textContent =
+      engine === "fal" ? `~${(scenes * 0.5).toFixed(1)} €` : "0 €";
+    $("vf-metric-engine").textContent =
+      engine === "colab"
+        ? "Google Colab"
+        : engine === "server"
+          ? "Serveur local"
+          : "FAL cloud";
+  }
+
+  function bindFormatCards() {
+    document.querySelectorAll("[data-aspect]").forEach((card) => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll("[data-aspect]").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        state.aspectRatio = card.getAttribute("data-aspect") || "9:16";
+        updateMetrics();
+      });
+    });
+  }
+
+  function bindEngineTabs() {
+    document.querySelectorAll("[data-engine]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll("[data-engine]").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        state.engine = tab.getAttribute("data-engine") || "colab";
+        $("vf-server-fields")?.classList.toggle("hidden", state.engine !== "server");
+        $("vf-fal-fields")?.classList.toggle("hidden", state.engine !== "fal");
+        $("vf-colab-note")?.classList.toggle("hidden", state.engine !== "colab");
+        updateMetrics();
+      });
+    });
+  }
+
+  async function checkServerHealth() {
+    try {
+      const res = await fetch(sulphurUrl("/health"));
+      const data = await res.json();
+      const pill = $("vf-server-pill");
+      if (pill) {
+        const gpu = data.engine?.cuda ? "GPU OK" : "Sans GPU local";
+        pill.textContent = `Serveur connecté · ${gpu}`;
+        pill.classList.add("live");
+      }
+      return data;
+    } catch {
+      const pill = $("vf-server-pill");
+      if (pill) {
+        pill.textContent = "Serveur hors ligne";
+        pill.classList.remove("live");
+      }
+      return null;
+    }
+  }
+
+  function escapePythonTriple(text) {
+    return String(text || "").replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"');
+  }
+
+  function buildColabSnippet() {
+    const script = getScript();
+    const firstLine = script.split("\n")[0]?.trim() || "Ma vidéo IA";
+    return `# Collez dans la cellule Configuration du notebook Colab (Video Factory)
+TOPIC = """${escapePythonTriple(firstLine)}"""
+SCRIPT = """${escapePythonTriple(script)}"""
+DURATION_MIN = ${getDurationMin()}
+CLIP_SEC = ${getClipSec()}
+ASPECT = "${state.aspectRatio}"
+BATCH_COUNT = 1
+FPS = 16
+MISTRAL_API_KEY = "${getMistralKey().replace(/"/g, '\\"')}"
+HF_TOKEN = ""
+`;
+  }
+
+  function downloadColabConfig() {
+    const snippet = buildColabSnippet();
+    const blob = new Blob([snippet], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "colab-video-config.py";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function launchColab() {
+    const script = getScript();
+    if (!script) {
+      toast("Collez votre script avant de lancer Colab.", "warn");
+      return;
+    }
+    const snippet = buildColabSnippet();
+    try {
+      await navigator.clipboard.writeText(snippet);
+      toast("Configuration copiée ! Collez-la dans la cellule Configuration du notebook Colab.", "info");
+    } catch {
+      downloadColabConfig();
+      toast("Téléchargement de colab-video-config.py — copiez son contenu dans Colab.", "info");
+    }
+    log("Ouverture Google Colab…");
+    log("1. GPU T4 activé  2. Coller la config  3. Tout exécuter  4. Télécharger final.mp4");
+    global.open(COLAB_URL, "_blank", "noopener");
+  }
+
+  async function apiPost(path, body, headers = {}) {
+    const res = await fetch(sulphurUrl(path), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+    if (!res.ok) {
+      throw new Error(data.error || data.message || text || res.statusText);
+    }
+    return data;
+  }
+
+  async function pollJob(jobId) {
+    for (let i = 0; i < 7200; i += 1) {
+      if (state.cancelRequested) throw new Error("Génération annulée");
+      const res = await fetch(sulphurUrl(`/jobs/${encodeURIComponent(jobId)}`));
+      const job = await res.json();
+      setProgress(job.progress || 0, job.status || "…", `${job.scenesDone || 0}/${job.sceneCount || "?"}`);
+      const lastLog = job.logs?.[job.logs.length - 1];
+      if (lastLog?.message) log(lastLog.message);
+      if (job.status === "completed") return job;
+      if (job.status === "failed") throw new Error(job.error || "Échec génération");
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    throw new Error("Timeout — la génération prend trop de temps");
+  }
+
+  async function runServerGeneration() {
+    const script = getScript();
+    if (!script) {
+      toast("Collez votre script.", "warn");
+      return;
+    }
+
+    const health = await checkServerHealth();
+    if (!health) {
+      toast("Serveur inaccessible. Lancez npm start ou utilisez le mode Colab.", "error");
+      return;
+    }
+    if (!health.engine?.cuda && !health.engine?.ready) {
+      toast(
+        "Pas de GPU NVIDIA sur le serveur. Utilisez le mode Colab gratuit ou installez CUDA.",
+        "warn"
+      );
+      return;
+    }
+
+    const mistralKey = getMistralKey();
+    saveSettings({
+      apiBase: getApiBase(),
+      mistralKey
+    });
+
+    state.running = true;
+    state.cancelRequested = false;
+    $("vf-generate-btn").disabled = true;
+    $("vf-cancel-btn").disabled = false;
+    $("vf-result").classList.add("hidden");
+    $("vf-log").innerHTML = "";
+
+    try {
+      setProgress(2, "Envoi au studio…", "");
+      log("Création du job Sulphur…");
+
+      const job = await apiPost(
+        "/jobs/auto",
+        {
+          provider: "sulphur",
+          script,
+          durationMin: getDurationMin(),
+          clipSec: getClipSec(),
+          aspectRatio: state.aspectRatio,
+          hfModel: "wan21lite",
+          plannerMode: mistralKey ? "mistral" : "free",
+          mistralKey: mistralKey || undefined
+        },
+        mistralKey ? { "x-mistral-key": mistralKey } : {}
+      );
+
+      state.jobId = job.id;
+      log(`Job #${job.id} en file d'attente`);
+      const finalJob = await pollJob(job.id);
+      const url = `${getApiBase()}${finalJob.downloadUrl}`;
+      setProgress(100, "Terminé", "MP4 prêt");
+      const result = $("vf-result");
+      result.classList.remove("hidden");
+      result.innerHTML = `
+        <strong>✓ Vidéo générée</strong><br>
+        ${finalJob.title || "Votre vidéo"}<br>
+        <a href="${url}" target="_blank" rel="noopener">⬇ Télécharger le MP4</a>
+      `;
+      toast("Vidéo prête !", "info");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`ERREUR : ${msg}`);
+      toast(msg, "error");
+      setProgress(0, "Erreur", msg);
+    } finally {
+      state.running = false;
+      $("vf-generate-btn").disabled = false;
+      $("vf-cancel-btn").disabled = true;
+    }
+  }
+
+  async function runGeneration() {
+    if (state.running) return;
+    if (state.engine === "colab") {
+      await launchColab();
+      return;
+    }
+    if (state.engine === "server") {
+      await runServerGeneration();
+      return;
+    }
+    toast("Mode FAL cloud : utilisez VOANH /voanh pour l'instant.", "warn");
+  }
+
+  function restoreSettings() {
+    const saved = loadSettings();
+    if (saved.apiBase && $("vf-api-base")) $("vf-api-base").value = saved.apiBase;
+    if (saved.mistralKey && $("vf-mistral-key")) $("vf-mistral-key").value = saved.mistralKey;
+    if (saved.script && $("vf-script")) $("vf-script").value = saved.script;
+  }
+
+  function bindUi() {
+    const isFile = global.location?.protocol === "file:";
+    const banner = $("vf-file-banner");
+    if (banner && isFile) {
+      banner.classList.add("visible");
+    }
+
+    $("vf-duration")?.addEventListener("input", updateMetrics);
+    $("vf-clip-sec")?.addEventListener("change", updateMetrics);
+    $("vf-script")?.addEventListener("input", () => {
+      saveSettings({ script: getScript() });
+    });
+    $("vf-api-base")?.addEventListener("change", () => {
+      saveSettings({ apiBase: getApiBase() });
+      checkServerHealth();
+    });
+    $("vf-mistral-key")?.addEventListener("change", () => {
+      saveSettings({ mistralKey: getMistralKey() });
+    });
+
+    $("vf-generate-btn")?.addEventListener("click", runGeneration);
+    $("vf-cancel-btn")?.addEventListener("click", () => {
+      state.cancelRequested = true;
+      log("Annulation demandée…");
+    });
+    $("vf-check-server")?.addEventListener("click", checkServerHealth);
+    $("vf-download-colab")?.addEventListener("click", downloadColabConfig);
+
+    bindFormatCards();
+    bindEngineTabs();
+    restoreSettings();
+    updateMetrics();
+    checkServerHealth();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindUi);
+  } else {
+    bindUi();
+  }
+
+  global.VideoFactory = { runGeneration, launchColab, checkServerHealth, downloadColabConfig };
+})(window);
+
+</script>
+  <script>
+    document.getElementById("vf-duration")?.addEventListener("input", () => {
+      const label = document.getElementById("vf-duration-label")?.textContent || "";
+      const metric = document.getElementById("vf-metric-duration");
+      if (metric) metric.textContent = label;
+    });
+  </script>
+</body>
+</html>

@@ -17,7 +17,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY app.js config.js index.html voanh.html voanh-video-studio.js styles.css favicon.png privacy.html terms.html tiktok-callback.html ./
+COPY app.js config.js index.html voanh.html voanh-video-studio.js video-factory.html video-factory.css video-factory.js video-factory-standalone.html styles.css favicon.png privacy.html terms.html tiktok-callback.html ./
+COPY downloads ./downloads
 COPY server ./server
 COPY storage ./storage
 

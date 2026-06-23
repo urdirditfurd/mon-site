@@ -23,10 +23,18 @@ Pas besoin d'installer Python, CUDA ni `npm` sur votre PC : tout tourne dans le 
 
 ### 2. Ouvrir le notebook
 
+**Méthode Video Factory (script → Colab en 1 clic) :**
+
+1. Téléchargez [index-video-studio.html](https://github.com/urdirditfurd/mon-site/raw/main/downloads/index-video-studio.html) ou ouvrez `http://localhost:3000/studio`
+2. Collez votre script, durée, format → **Générer** (copie auto) ou **Config Colab**
+3. Ouvrez Colab → collez dans la cellule **Configuration**
+
+**Lien direct Colab :** [Ouvrir le notebook](https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb)
+
+**Via GitHub dans Colab :**
+
 1. Dans Colab : **Fichier → Ouvrir un notebook**
-2. Onglet **GitHub**
-3. Collez : `urdirditfurd/mon-site`
-4. Ouvrez : `colab/text-to-video-gratuit.ipynb`
+2. Onglet **GitHub** → `urdirditfurd/mon-site` → `colab/text-to-video-gratuit.ipynb`
 
 *(Ou téléchargez le fichier `.ipynb` depuis le repo et uploadez-le dans Colab.)*
 
@@ -54,14 +62,14 @@ Sans clé : le notebook utilise des **templates** automatiques (toujours 0 €).
 
 ### 6. Configurer votre vidéo
 
-Dans la cellule **Configuration**, modifiez :
+Dans la cellule **Configuration**, modifiez — ou collez la config exportée depuis Video Factory :
 
 ```python
-TOPIC = "Les secrets de la productivité"   # sujet
-DURATION_MIN = 1                            # durée cible (minutes)
-CLIP_SEC = 4                                # secondes par clip
-ASPECT = "9:16"                             # TikTok/Reels
-BATCH_COUNT = 3                             # nombre de vidéos différentes
+TOPIC = "Les secrets de la productivité"
+SCRIPT = """Collez ici votre script complet (prioritaire)"""
+DURATION_MIN = 1
+CLIP_SEC = 4
+ASPECT = "9:16"
 ```
 
 ### 7. Récupérer les MP4
