@@ -11,22 +11,36 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
   router.get("/health", async (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
     const engine = await manager.checkEngineReady();
+    const snapdragon = Boolean(engine.snapdragon || (process.platform === "win32" && process.arch === "arm64"));
+    const hasCuda = Boolean(engine.cuda);
+    let recommendedProvider = "sulphur";
+    let recommendedMode = "gpu-local";
+    if (snapdragon && !hasCuda) {
+      recommendedProvider = "fal";
+      recommendedMode = "snapdragon-hybrid";
+    }
     res.json({
       ok: true,
       ffmpegReady,
       engine,
+      snapdragon,
+      hostArch: process.arch,
+      hostPlatform: process.platform,
       models: listHfModels(),
       planners: listPlanners(),
-      defaultModel: DEFAULT_HF_MODEL,
+      defaultModel: snapdragon ? "wan21lite" : DEFAULT_HF_MODEL,
       defaultPlanner: "mistral",
       mistralFreeTier: {
         signup: "https://console.mistral.ai",
         model: "mistral-small-2506",
         cost: "0€"
       },
-      cost: "0€ — GPU local gratuit, ou FAL cloud (crédits offerts)",
-      recommendedMode: engine.cuda ? "gpu-local" : "fal-cloud",
-      canGenerateLocal: Boolean(engine.cuda),
+      cost: snapdragon
+        ? "0€ CPU local (lent) ou crédits FAL offerts (rapide)"
+        : "0€ — GPU local gratuit, ou FAL cloud (crédits offerts)",
+      recommendedMode,
+      recommendedProvider,
+      canGenerateLocal: Boolean(hasCuda || engine.cpuGenerationAllowed),
       canGenerateCloud: true,
       concurrency: Number(process.env.SULPHUR_WORKER_CONCURRENCY || 2)
     });

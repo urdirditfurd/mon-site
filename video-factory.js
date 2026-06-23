@@ -156,10 +156,17 @@
   function resolveProvider(health) {
     const falKey = getFalKey();
     const engine = state.engine;
+    const snapdragon = Boolean(health?.snapdragon || health?.engine?.snapdragon);
+    const scenes = Math.max(1, Math.ceil((getDurationMin() * 60) / getClipSec()));
 
     if (engine === "gpu") {
       if (!health?.engine?.cuda) {
-        return { provider: null, error: "GPU NVIDIA requis pour ce mode. Utilisez Automatique + clé FAL." };
+        return {
+          provider: null,
+          error: snapdragon
+            ? "Snapdragon X Elite : pas de GPU NVIDIA. Utilisez Automatique + clé FAL."
+            : "GPU NVIDIA requis pour ce mode."
+        };
       }
       return { provider: "sulphur", hfModel: "wan21lite", label: "GPU local" };
     }
@@ -175,13 +182,41 @@
     if (health?.engine?.cuda) {
       return { provider: "sulphur", hfModel: "wan21lite", label: "GPU détecté" };
     }
+
+    if (snapdragon && falKey && falKey.length >= 20) {
+      return {
+        provider: "fal",
+        modelPath: FAL_MODEL_ECO,
+        label: "Snapdragon + FAL (rapide, recommandé)"
+      };
+    }
+
+    if (snapdragon && health?.canGenerateLocal && health?.engine?.cpuGenerationAllowed) {
+      if (getDurationMin() > 1.5 || scenes > 20) {
+        return {
+          provider: null,
+          error:
+            `Vidéo trop longue pour CPU ARM (${scenes} scènes). Sur Snapdragon : baissez à 1 min max, ` +
+            "ou ajoutez une clé FAL gratuite pour génération rapide en interne."
+        };
+      }
+      return {
+        provider: "sulphur",
+        hfModel: "wan21lite",
+        label: "Snapdragon CPU — Wan 2.1 (0€, ~5-15 min/scène)"
+      };
+    }
+
     if (falKey && falKey.length >= 20) {
       return { provider: "fal", modelPath: FAL_MODEL_ECO, label: "Cloud FAL (sans GPU)" };
     }
+
     return {
       provider: null,
-      error:
-        "Pas de GPU détecté. Ajoutez une clé FAL gratuite (fal.ai) pour générer automatiquement sans Colab, ou lancez le serveur sur un PC avec GPU NVIDIA."
+      error: snapdragon
+        ? "Snapdragon X Elite détecté. Ajoutez une clé FAL (rapide, crédits gratuits) pour générer en interne, " +
+          "ou réduisez la durée à ≤1 min pour le mode CPU gratuit Wan 2.1."
+        : "Pas de GPU détecté. Ajoutez une clé FAL gratuite (fal.ai) ou lancez le serveur sur un PC avec GPU NVIDIA."
     };
   }
 
@@ -195,7 +230,13 @@
       const resolved = resolveProvider(data);
 
       if (pill) {
-        if (data.engine?.cuda) {
+        if (data.snapdragon) {
+          pill.textContent = data.engine?.cuda
+            ? "Snapdragon · GPU OK"
+            : getFalKey().length >= 20
+              ? "Snapdragon · FAL prêt"
+              : "Snapdragon X Elite détecté";
+        } else if (data.engine?.cuda) {
           pill.textContent = "Serveur · GPU NVIDIA OK";
         } else if (getFalKey().length >= 20) {
           pill.textContent = "Serveur · Cloud FAL prêt";
@@ -205,8 +246,23 @@
         pill.classList.add("live");
       }
 
+      const snapCard = $("vf-snapdragon-card");
+      if (snapCard) {
+        snapCard.classList.toggle("hidden", !data.snapdragon);
+      }
+
       if (statusEl) {
-        if (resolved.provider === "sulphur") {
+        if (data.snapdragon) {
+          if (resolved.provider === "fal") {
+            statusEl.textContent =
+              "Snapdragon X Elite : génération rapide en interne via FAL cloud (recommandé). Votre NPU reste libre pour Cursor.";
+          } else if (resolved.provider === "sulphur") {
+            statusEl.textContent =
+              "Snapdragon X Elite : mode 100 % gratuit CPU (Wan 2.1). Comptez ~5-15 min par scène — idéal pour vidéos courtes ≤1 min.";
+          } else {
+            statusEl.textContent = resolved.error || data.engine?.hint || "Configurez FAL ou réduisez la durée.";
+          }
+        } else if (resolved.provider === "sulphur") {
           statusEl.textContent =
             "Génération 100 % automatique en interne via GPU local. Cliquez sur Générer — aucune action Colab.";
         } else if (resolved.provider === "fal") {

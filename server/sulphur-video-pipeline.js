@@ -32,18 +32,28 @@ function resolvePythonBin() {
   return process.env.SULPHUR_PYTHON || process.env.PYTHON_BIN || "python3";
 }
 
+function isSnapdragonHost() {
+  return process.platform === "win32" && process.arch === "arm64";
+}
+
+function buildPythonEnv() {
+  const snapdragon = isSnapdragonHost() || process.env.SULPHUR_SNAPDRAGON === "1";
+  return {
+    ...process.env,
+    HF_TOKEN: process.env.HF_TOKEN || process.env.HUGGINGFACE_HUB_TOKEN || "",
+    SULPHUR_MODEL_CACHE: process.env.SULPHUR_MODEL_CACHE || "",
+    SULPHUR_CPU_OFFLOAD: process.env.SULPHUR_CPU_OFFLOAD || "1",
+    SULPHUR_ALLOW_CPU: snapdragon ? "1" : process.env.SULPHUR_ALLOW_CPU || "",
+    SULPHUR_SNAPDRAGON: snapdragon ? "1" : process.env.SULPHUR_SNAPDRAGON || "0"
+  };
+}
+
 function runPythonEngine(args, stdinPayload) {
   return new Promise((resolve, reject) => {
     const python = resolvePythonBin();
     const proc = spawn(python, [ENGINE_SCRIPT, ...args], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        HF_TOKEN: process.env.HF_TOKEN || process.env.HUGGINGFACE_HUB_TOKEN || "",
-        SULPHUR_MODEL_CACHE: process.env.SULPHUR_MODEL_CACHE || "",
-        SULPHUR_CPU_OFFLOAD: process.env.SULPHUR_CPU_OFFLOAD || "1",
-        SULPHUR_ALLOW_CPU: process.env.SULPHUR_ALLOW_CPU || ""
-      }
+      env: buildPythonEnv()
     });
 
     let stdout = "";

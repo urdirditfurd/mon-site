@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 import traceback
 from pathlib import Path
@@ -53,11 +54,52 @@ MODEL_PRESETS = {
 }
 
 
-def pick_device() -> str:
+def platform_profile() -> dict:
+    machine = platform.machine().lower()
+    system = platform.system().lower()
+    is_arm = machine in ("aarch64", "arm64")
+    is_windows = system == "windows"
+    snapdragon = is_arm and is_windows
+    return {
+        "machine": machine,
+        "system": system,
+        "arm64": is_arm,
+        "windows": is_windows,
+        "snapdragon": snapdragon,
+        "processor": platform.processor() or "",
+    }
+
+
+def snapdragon_mode() -> bool:
+    profile = platform_profile()
+    if not profile["snapdragon"]:
+        return False
+    return os.environ.get("SULPHUR_SNAPDRAGON", "1").lower() not in ("0", "false", "no")
+
+
+def cpu_generation_allowed() -> bool:
+    if os.environ.get("SULPHUR_ALLOW_CPU", "").lower() in ("1", "true", "yes"):
+        return True
+    return snapdragon_mode()
+
+
+def pick_device():
     if torch.cuda.is_available():
         return "cuda"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
+    if snapdragon_mode():
+        return "cpu"
+    return "cpu"
+
+
+def device_label(device) -> str:
+    if device == "cuda":
+        return "cuda"
+    if device == "mps":
+        return "mps"
+    if snapdragon_mode():
+        return "snapdragon-cpu"
     return "cpu"
 
 
@@ -162,15 +204,25 @@ def generate_clip(
     seed: int | None,
 ) -> dict:
     device = pick_device()
-    if device == "cpu" and os.environ.get("SULPHUR_ALLOW_CPU", "").lower() not in ("1", "true", "yes"):
+    device_str = device_label(device)
+    if device == "cpu" and not cpu_generation_allowed():
         raise RuntimeError(
-            "Aucun GPU détecté. Installez CUDA ou définissez SULPHUR_ALLOW_CPU=1 (très lent)."
+            "Aucun GPU NVIDIA détecté. Sur Snapdragon X Elite : ajoutez une clé FAL (rapide) "
+            "ou activez SULPHUR_SNAPDRAGON=1 pour génération CPU locale (lente)."
         )
+
+    if snapdragon_mode() and model_key not in ("wan21lite",):
+        model_key = "wan21lite"
 
     pipe, preset = get_pipe(model_key, cache_dir, device)
     generator = None
+    gen_device = "cpu" if device in ("cpu", "mps") or snapdragon_mode() else device
     if seed is not None:
-        generator = torch.Generator(device=device if device != "mps" else "cpu").manual_seed(seed)
+        generator = torch.Generator(device=gen_device).manual_seed(seed)
+
+    inference_steps = preset.get("steps", 30)
+    if snapdragon_mode() and device == "cpu":
+        inference_steps = min(inference_steps, 24)
 
     kwargs = {
         "prompt": prompt,
@@ -178,7 +230,7 @@ def generate_clip(
         "width": width,
         "height": height,
         "num_frames": num_frames,
-        "num_inference_steps": preset.get("steps", 30),
+        "num_inference_steps": inference_steps,
         "guidance_scale": preset.get("guidance", 4.0),
     }
     if generator is not None:
@@ -197,7 +249,7 @@ def generate_clip(
         "ok": True,
         "outputPath": str(out.resolve()),
         "model": model_key,
-        "device": device,
+        "device": device_str,
         "width": width,
         "height": height,
         "numFrames": num_frames,
@@ -224,14 +276,28 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_check(_args: argparse.Namespace) -> int:
     device = pick_device()
+    profile = platform_profile()
+    snap = snapdragon_mode()
     info = {
         "ok": True,
-        "device": device,
+        "device": device_label(device),
         "cuda": torch.cuda.is_available(),
         "cudaDevices": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+        "snapdragon": snap,
+        "arm64": profile["arm64"],
+        "platform": profile,
+        "cpuGenerationAllowed": cpu_generation_allowed(),
+        "recommendedModel": "wan21lite" if snap else "sulphur2",
+        "recommendedProvider": "fal" if snap and not torch.cuda.is_available() else "sulphur",
         "models": list(MODEL_PRESETS.keys()),
         "hfToken": bool(hf_token()),
         "torch": torch.__version__,
+        "hint": (
+            "Snapdragon X Elite : NPU idéal pour Cursor/IA bureau. "
+            "Vidéo IA = FAL cloud (rapide, crédits gratuits) ou Wan 2.1 CPU (0€, lent)."
+            if snap
+            else None
+        ),
     }
     try:
         import diffusers

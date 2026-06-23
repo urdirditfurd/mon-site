@@ -11,7 +11,8 @@
     "check": "node --check app.js && node --check server/index.js && node --check server/sulphur-video-pipeline.js && node --check server/sulphur-video.js && node --check server/hf-video-models.js && node --check server/free-scene-planner.js && node --check video-factory.js",
     "build:studio": "node scripts/build-video-factory-standalone.mjs",
     "setup": "npm install",
-    "setup:video": "pip3 install -r requirements-video.txt"
+    "setup:video": "pip3 install -r requirements-video.txt",
+    "setup:video:arm": "powershell -ExecutionPolicy Bypass -File scripts/setup-video-arm.ps1"
   },
   "repository": {
     "type": "git",
