@@ -429,6 +429,8 @@ Sans clé Mistral, utilisez `"plannerMode": "free"` (templates, 0€).
 
 Guide Snapdragon X Elite : [`docs/snapdragon-x-elite.md`](docs/snapdragon-x-elite.md)
 
+**FAL.ai** intégré (modes Remix IA + script → vidéo). Limites et coûts : [`docs/fal-ai-limites.md`](docs/fal-ai-limites.md)
+
 Interface studio : `/studio` ou `video-factory.html` (script + durée + format, 0€ via Colab).
 
 ### Ollama (optionnel, toujours gratuit)

@@ -50,7 +50,9 @@ const state = {
   automationPollTimer: null,
   automationItems: [],
   automationScheduleEnabled: false,
-  generationMode: "ai-remix"
+  generationMode: "ai-remix",
+  sulphurJobId: "",
+  falLimitsLoaded: false
 };
 
 const AI_KEYS_STORAGE = "clipforge-ai-keys";
@@ -140,6 +142,14 @@ const dom = {
   aiKeysDetails: document.getElementById("aiKeysDetails"),
   mistralApiKey: document.getElementById("mistralApiKey"),
   falApiKey: document.getElementById("falApiKey"),
+  falLimitsList: document.getElementById("falLimitsList"),
+  falCostEstimate: document.getElementById("falCostEstimate"),
+  scriptVideoRow: document.getElementById("scriptVideoRow"),
+  scriptVideoInput: document.getElementById("scriptVideoInput"),
+  videoDurationRow: document.getElementById("videoDurationRow"),
+  videoDurationMin: document.getElementById("videoDurationMin"),
+  youtubeUrlRow: document.getElementById("youtubeUrlRow"),
+  clipSettingsGrid: document.getElementById("clipSettingsGrid"),
   ytDlpWarning: document.getElementById("ytDlpWarning")
 };
 
@@ -235,15 +245,100 @@ function isAiRemixMode() {
   return state.generationMode === "ai-remix";
 }
 
+function isScriptVideoMode() {
+  return state.generationMode === "script-video";
+}
+
+function usesFalApi() {
+  return isAiRemixMode() || isScriptVideoMode();
+}
+
+function resolveGenerationMode(value) {
+  if (value === "script-video") return "script-video";
+  if (value === "ai-remix") return "ai-remix";
+  return "classic";
+}
+
+async function loadFalLimits() {
+  if (!state.backendAvailable || state.falLimitsLoaded) return;
+  try {
+    const res = await fetch(apiUrl("/api/fal/limits"));
+    if (!res.ok) return;
+    const data = await res.json();
+    state.falLimitsLoaded = true;
+    if (dom.falLimitsList && data.limits) {
+      const L = data.limits;
+      dom.falLimitsList.innerHTML = `
+        <li><strong>Facturation :</strong> ${L.billingModel}</li>
+        <li><strong>Crédits inscription :</strong> ${L.signupCredits.summary}</li>
+        <li><strong>Expiration :</strong> achats = ${L.creditExpiry.purchased}</li>
+        <li><strong>Parallélisme :</strong> ${L.concurrency.newAccount} requêtes simultanées (nouveau compte)</li>
+        <li><strong>Recharge min :</strong> ${L.minTopUpUsd} $ après épuisement des crédits</li>
+        <li><strong>Non facturé :</strong> erreurs serveur, attente en file</li>
+      `;
+    }
+    void updateFalCostEstimate();
+  } catch {
+    // ignore
+  }
+}
+
+async function updateFalCostEstimate() {
+  if (!dom.falCostEstimate || !usesFalApi()) return;
+  if (!state.backendAvailable) {
+    dom.falCostEstimate.textContent = "Estimation : serveur hors ligne";
+    return;
+  }
+  const body = isScriptVideoMode()
+    ? {
+        durationMin: Number(dom.videoDurationMin?.value || 1),
+        clipSec: 5,
+        sceneCount: Math.ceil((Number(dom.videoDurationMin?.value || 1) * 60) / 5)
+      }
+    : {
+        clipsCount: Number(dom.clipsCount?.value || 4),
+        clipDurationSec: Number(dom.clipDuration?.value || 45),
+        clipSec: 5
+      };
+  try {
+    const res = await fetch(apiUrl("/api/fal/estimate"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) return;
+    const est = await res.json();
+    dom.falCostEstimate.textContent =
+      `Estimation : ~${est.sceneCount} scènes FAL · ~${est.totalEur} € (~${est.totalUsd} $) · ${est.modelLabel}`;
+  } catch {
+    dom.falCostEstimate.textContent = "Estimation : indisponible";
+  }
+}
+
 function applyGenerationModeUi() {
   const aiMode = isAiRemixMode();
-  if (dom.aiKeysDetails) dom.aiKeysDetails.open = aiMode;
+  const scriptMode = isScriptVideoMode();
+  const falMode = usesFalApi();
+
+  if (dom.aiKeysDetails) dom.aiKeysDetails.open = falMode;
+  if (dom.scriptVideoRow) dom.scriptVideoRow.hidden = !scriptMode;
+  if (dom.videoDurationRow) dom.videoDurationRow.hidden = !scriptMode;
+  if (dom.youtubeUrlRow) dom.youtubeUrlRow.hidden = scriptMode;
+  if (dom.clipSettingsGrid) dom.clipSettingsGrid.hidden = scriptMode;
+  if (dom.copyrightShieldRow) dom.copyrightShieldRow.hidden = scriptMode;
+
   if (dom.generationModeHint) {
-    dom.generationModeHint.textContent = aiMode
-      ? "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres."
-      : "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
+    if (scriptMode) {
+      dom.generationModeHint.textContent =
+        "Mistral découpe votre script en scènes, FAL génère les clips, le serveur assemble le MP4 — tout en interne.";
+    } else if (aiMode) {
+      dom.generationModeHint.textContent =
+        "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres.";
+    } else {
+      dom.generationModeHint.textContent = "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
+    }
   }
-  if (dom.copyrightShieldRow) {
+  if (dom.copyrightShieldRow && !scriptMode) {
     const label = dom.copyrightShieldRow.querySelector("span");
     if (label) {
       label.textContent = aiMode
@@ -251,14 +346,19 @@ function applyGenerationModeUi() {
         : "Mode Shorts foot — miroir, zoom, musique de fond, sous-titres discrets";
     }
   }
-  if (dom.copyrightShieldHint) {
+  if (dom.copyrightShieldHint && !scriptMode) {
     dom.copyrightShieldHint.textContent = aiMode
       ? "Les vidéos sont 100 % générées par IA à partir du script — prêtes à publier en Short."
       : "Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.";
   }
   if (dom.analyzeBtn) {
-    dom.analyzeBtn.textContent = aiMode ? "Générer mes shorts IA" : "Générer mes shorts";
+    dom.analyzeBtn.textContent = scriptMode
+      ? "Générer ma vidéo IA"
+      : aiMode
+        ? "Générer mes shorts IA"
+        : "Générer mes shorts";
   }
+  void updateFalCostEstimate();
 }
 
 function sleep(ms) {
@@ -1293,6 +1393,7 @@ async function checkBackendHealth() {
     }
     renderBackendMeta();
     renderYtDlpWarning();
+    void loadFalLimits();
     if (!state.ytDlpAvailable) {
       updateStatus("Installe les dépendances : npm install puis npm start (voir bandeau orange).", false);
     } else {
@@ -1311,7 +1412,128 @@ async function checkBackendHealth() {
   }
 }
 
+async function createScriptVideoJob() {
+  const script = (dom.scriptVideoInput?.value || "").trim();
+  const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
+  const falApiKey = (dom.falApiKey?.value || "").trim();
+  const aspectRatio = dom.aspectRatio?.value || "9:16";
+  const durationMin = Number(dom.videoDurationMin?.value || 1);
+
+  if (!script) {
+    updateStatus("Collez votre script avant de générer.", false);
+    return;
+  }
+  if (!falApiKey) {
+    updateStatus("Ajoute ta clé API FAL.ai (crédits offerts sur fal.ai).", false);
+    return;
+  }
+  if (!state.backendAvailable) {
+    updateStatus("Backend indisponible — lance: npm start", false);
+    return;
+  }
+
+  saveAiKeysToStorage();
+  dom.analyzeBtn.disabled = true;
+  resetClipState();
+  state.sulphurJobId = "";
+  setGenerationProgress(5);
+  updateStatus("Envoi du script au studio FAL…", false);
+
+  try {
+    const response = await fetch(apiUrl("/api/sulphur/jobs/auto"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-fal-key": falApiKey,
+        ...(mistralApiKey ? { "x-mistral-key": mistralApiKey } : {})
+      },
+      body: JSON.stringify({
+        provider: "fal",
+        script,
+        durationMin,
+        clipSec: 5,
+        aspectRatio,
+        plannerMode: mistralApiKey ? "mistral" : "free",
+        mistralKey: mistralApiKey || undefined,
+        falKey,
+        modelPath: "fal-ai/kling-video/v1.6/standard/text-to-video"
+      })
+    });
+    if (!response.ok) {
+      const details = await response.json().catch(() => ({}));
+      throw new Error(details.error || "Impossible de créer le job vidéo");
+    }
+    const job = await response.json();
+    state.sulphurJobId = job.id;
+    updateStatus(`Vidéo IA #${job.id.slice(0, 8)}… génération FAL en cours`, false);
+    scheduleSulphurPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
+
+function scheduleSulphurPolling() {
+  clearPolling();
+  state.pollTimer = setTimeout(() => {
+    void pollSulphurJob();
+  }, config.pollIntervalMs);
+}
+
+async function pollSulphurJob() {
+  if (!state.sulphurJobId) return;
+  try {
+    const response = await fetch(apiUrl(`/api/sulphur/jobs/${state.sulphurJobId}`));
+    if (!response.ok) throw new Error("Job vidéo introuvable");
+    const job = await response.json();
+
+    if (job.status === "queued" || job.status === "planning") {
+      setGenerationProgress(Math.max(8, Number(job.progress) || 0), job.status);
+      updateStatus(`Planification du script… ${job.progress || 0}%`, false);
+      scheduleSulphurPolling();
+      return;
+    }
+    if (job.status === "generating" || job.status === "assembling") {
+      setGenerationProgress(job.progress || 0, job.status);
+      updateStatus(
+        `Génération FAL… ${job.scenesDone || 0}/${job.sceneCount || "?"} scènes`,
+        false
+      );
+      scheduleSulphurPolling();
+      return;
+    }
+    if (job.status === "failed") {
+      setGenerationProgress(100);
+      updateStatus(job.error || "Génération vidéo échouée", false);
+      dom.analyzeBtn.disabled = false;
+      return;
+    }
+    if (job.status === "completed") {
+      const downloadUrl = apiUrl(job.downloadUrl || `/api/sulphur/download/${job.id}`);
+      setGenerationProgress(100, "terminé");
+      dom.player.src = downloadUrl;
+      if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = job.title || "Vidéo générée";
+      if (dom.selectedClipSummary) {
+        dom.selectedClipSummary.innerHTML = `MP4 prêt · <a href="${downloadUrl}" download>Télécharger</a>`;
+      }
+      dom.downloadAllBtn.disabled = false;
+      dom.downloadAllBtn.onclick = () => triggerDownload(job.downloadUrl || `/api/sulphur/download/${job.id}`, `clipforge-${job.id}.mp4`);
+      dom.analyzeBtn.disabled = false;
+      updateStatus("Vidéo IA générée via FAL — prête à télécharger", true);
+      return;
+    }
+    scheduleSulphurPolling();
+  } catch (error) {
+    updateStatus(error instanceof Error ? error.message : "Erreur polling vidéo", false);
+    dom.analyzeBtn.disabled = false;
+  }
+}
+
 async function createJob() {
+  if (isScriptVideoMode()) {
+    return createScriptVideoJob();
+  }
+
   const rawVideoUrl = (dom.videoUrlInput.value || "").trim();
   if (!rawVideoUrl) {
     updateStatus("Colle un lien YouTube avant de générer.", false);
@@ -1495,15 +1717,23 @@ function initEvents() {
 
   if (dom.generationMode) {
     dom.generationMode.addEventListener("change", () => {
-      state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
+      state.generationMode = resolveGenerationMode(dom.generationMode.value);
       applyGenerationModeUi();
+    });
+  }
+  for (const el of [dom.clipDuration, dom.clipsCount, dom.videoDurationMin, dom.aspectRatio]) {
+    el?.addEventListener("change", () => {
+      void updateFalCostEstimate();
     });
   }
   if (dom.mistralApiKey) {
     dom.mistralApiKey.addEventListener("change", saveAiKeysToStorage);
   }
   if (dom.falApiKey) {
-    dom.falApiKey.addEventListener("change", saveAiKeysToStorage);
+    dom.falApiKey.addEventListener("change", () => {
+      saveAiKeysToStorage();
+      void updateFalCostEstimate();
+    });
   }
 
   if (dom.analyzeBtn) {
@@ -1537,7 +1767,7 @@ function initEvents() {
 
 function initDefaults() {
   if (dom.generationMode) {
-    state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
+    state.generationMode = resolveGenerationMode(dom.generationMode.value);
     applyGenerationModeUi();
   }
   loadAiKeysFromStorage();

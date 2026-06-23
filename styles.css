@@ -612,3 +612,23 @@ input[type="range"] {
 .site-footer span {
   margin: 0 8px;
 }
+
+.fal-limits-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.fal-limits-list {
+  margin: 8px 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.fal-limits-list li + li {
+  margin-top: 4px;
+}

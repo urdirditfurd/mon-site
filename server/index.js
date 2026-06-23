@@ -16,6 +16,7 @@ const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
+const { FAL_LIMITS, estimateFalJob, listFalModels, DEFAULT_FAL_MODEL } = require("./fal-limits");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
@@ -3274,6 +3275,26 @@ function readDeployInfo() {
   }
   return { rootDir: ROOT_DIR, indexBytes, uiSimplified };
 }
+
+app.get("/api/fal/limits", (_req, res) => {
+  res.json({
+    ok: true,
+    limits: FAL_LIMITS,
+    models: listFalModels(),
+    defaultModel: DEFAULT_FAL_MODEL
+  });
+});
+
+app.post("/api/fal/estimate", (req, res) => {
+  try {
+    const estimate = estimateFalJob(req.body || {});
+    return res.json({ ok: true, ...estimate });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Erreur estimation FAL"
+    });
+  }
+});
 
 app.get("/api/health", async (_req, res) => {
   const q = await readQueueStats();

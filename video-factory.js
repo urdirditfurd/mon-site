@@ -91,10 +91,22 @@
   }
 
   function getMistralKey() {
+    try {
+      const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
+      if (shared.mistralApiKey) return String(shared.mistralApiKey).trim();
+    } catch {
+      /* ignore */
+    }
     return String($("vf-mistral-key")?.value || loadSettings().mistralKey || "").trim();
   }
 
   function getFalKey() {
+    try {
+      const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
+      if (shared.falApiKey) return String(shared.falApiKey).trim();
+    } catch {
+      /* ignore */
+    }
     return String($("vf-fal-key")?.value || loadSettings().falKey || "").trim();
   }
 
@@ -380,6 +392,14 @@
       falKey,
       script
     });
+    try {
+      localStorage.setItem(
+        "clipforge-ai-keys",
+        JSON.stringify({ mistralApiKey: mistralKey, falApiKey: falKey })
+      );
+    } catch {
+      /* ignore */
+    }
 
     state.running = true;
     state.cancelRequested = false;
@@ -446,6 +466,13 @@
 
   function restoreSettings() {
     const saved = loadSettings();
+    try {
+      const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
+      if (shared.mistralApiKey && $("vf-mistral-key")) $("vf-mistral-key").value = shared.mistralApiKey;
+      if (shared.falApiKey && $("vf-fal-key")) $("vf-fal-key").value = shared.falApiKey;
+    } catch {
+      /* ignore */
+    }
     if (saved.apiBase && $("vf-api-base")) $("vf-api-base").value = saved.apiBase;
     if (saved.mistralKey && $("vf-mistral-key")) $("vf-mistral-key").value = saved.mistralKey;
     if (saved.falKey && $("vf-fal-key")) $("vf-fal-key").value = saved.falKey;

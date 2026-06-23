@@ -27,12 +27,30 @@
         <span>Mode de génération</span>
         <select id="generationMode">
           <option value="classic">Découpe classique (extraits de la vidéo)</option>
-          <option value="ai-remix" selected>Remix IA viral (Mistral + FAL — style Cortisia)</option>
+          <option value="ai-remix" selected>Remix IA viral (Mistral + FAL — YouTube → shorts)</option>
+          <option value="script-video">Vidéo depuis script (Mistral + FAL — text-to-video)</option>
         </select>
       </label>
       <p class="hint small" id="generationModeHint">L'IA analyse la vidéo source, écrit des scripts viraux originaux, puis génère des shorts IA avec sous-titres.</p>
 
-      <label class="field">
+      <label class="field" id="scriptVideoRow" hidden>
+        <span>Script / narration complète</span>
+        <textarea id="scriptVideoInput" rows="6" placeholder="Collez votre script ici…"></textarea>
+      </label>
+
+      <label class="field" id="videoDurationRow" hidden>
+        <span>Durée vidéo cible</span>
+        <select id="videoDurationMin">
+          <option value="0.5">30 secondes</option>
+          <option value="1" selected>1 minute</option>
+          <option value="2">2 minutes</option>
+          <option value="3">3 minutes</option>
+          <option value="5">5 minutes</option>
+          <option value="10">10 minutes</option>
+        </select>
+      </label>
+
+      <label class="field" id="youtubeUrlRow">
         <span>Lien YouTube</span>
         <input
           type="url"
@@ -42,7 +60,7 @@
         >
       </label>
 
-      <div class="grid-3">
+      <div class="grid-3" id="clipSettingsGrid">
         <label class="field">
           <span>Durée par clip</span>
           <select id="clipDuration">
@@ -88,7 +106,14 @@
           <span>Clé API FAL.ai</span>
           <input type="password" id="falApiKey" placeholder="fal-..." autocomplete="off">
         </label>
-        <p class="hint small">Les clés restent dans ton navigateur (localStorage) et sont envoyées au serveur uniquement pour la génération.</p>
+        <p class="hint small">Les clés restent dans ton navigateur (localStorage) et sont partagées avec <a href="/studio">Video Factory</a>.</p>
+        <div class="fal-limits-box" id="falLimitsBox">
+          <p class="hint small no-margin"><strong>Limites FAL.ai</strong></p>
+          <ul class="fal-limits-list" id="falLimitsList">
+            <li>Chargement…</li>
+          </ul>
+          <p class="hint small no-margin" id="falCostEstimate">Estimation : —</p>
+        </div>
       </details>
 
       <p class="hint warning-banner" id="ytDlpWarning" hidden></p>
