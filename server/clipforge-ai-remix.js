@@ -1,143 +1,37 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const {
-  falFetch,
-  pollFalClip,
-  downloadFile,
-  runFfmpegConcat,
-  resolveFalModel,
-  FAL_QUEUE_BASE,
-  DEFAULT_FAL_MODEL
-} = require("./voanh-video-pipeline");
+const { planViralScriptsFromTranscript } = require("./ai-storyboard");
+const { runFfmpegConcat } = require("./voanh-video-pipeline");
+const { generateVideoWithHuggingFace, resolveVideoGenerationProfile } = require("./hf-video-generation");
 
-const FAL_CLIP_SEC = 10;
+function resolveSceneDuration(clipDurationSec, profileKey, customModelId) {
+  const profile = resolveVideoGenerationProfile(profileKey, customModelId);
+  return Math.max(4, Math.min(profile.defaultSceneDurationSec, Math.max(4, Math.round(clipDurationSec))));
+}
 
-function falDurationForScene(durationSec) {
-  const sec = Math.max(5, Math.min(FAL_CLIP_SEC, Math.round(durationSec)));
-  return sec <= 7 ? "5" : "10";
+function createSceneSeed(jobId, scriptIndex, sceneIndex) {
+  return `${jobId}:${scriptIndex + 1}:${sceneIndex + 1}`;
 }
 
 async function planViralScriptsWithMistral({
-  mistralKey,
   sourceTranscript,
   sourceTitle,
   clipsCount,
   clipDurationSec,
   aspectRatio,
-  mistralModel
+  videoGenerationProfile,
+  videoModelId
 }) {
-  const scenesPerScript = Math.max(1, Math.ceil(clipDurationSec / FAL_CLIP_SEC));
-  const prompt = `Tu es un expert en contenus viraux TikTok et YouTube Shorts (style Cortisia / faceless viral).
-
-Vidéo source : ${sourceTitle || "contenu inspirant"}
-Transcript source (inspiration uniquement — crée du contenu 100 % ORIGINAL, ne copie pas mot pour mot) :
-"""
-${String(sourceTranscript || "").slice(0, 14000)}
-"""
-
-Génère EXACTEMENT ${clipsCount} scripts de shorts viraux (~${clipDurationSec}s chacun).
-Format cible : ${aspectRatio}
-
-Règles :
-- Hook fort dans les 2 premières secondes
-- Narration voix-off en français (pour sous-titres)
-- Visuels cinématiques IA en anglais (pas de logos, pas de célébrités reconnaissables, pas de texte à l'écran)
-- Chaque script = ${scenesPerScript} scène(s) de ~${FAL_CLIP_SEC}s max
-- Ton énergique, rythme court, idéal YouTube Shorts
-
-Réponds UNIQUEMENT en JSON valide :
-{
-  "scripts": [
-    {
-      "title": "titre accrocheur du short",
-      "hook": "phrase d'accroche",
-      "narration": "texte complet du short en français",
-      "hashtags": ["#shorts", "#viral"],
-      "scenes": [
-        {
-          "index": 1,
-          "visualPrompt": "detailed cinematic visual in English for AI video",
-          "narration": "segment voix-off français pour cette scène",
-          "durationSec": ${FAL_CLIP_SEC}
-        }
-      ]
-    }
-  ]
-}`;
-
-  const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${mistralKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: mistralModel || "mistral-small-2506",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.8,
-      max_tokens: Math.min(16000, 800 + clipsCount * scenesPerScript * 150)
-    })
+  const sceneDurationSec = resolveSceneDuration(clipDurationSec, videoGenerationProfile, videoModelId);
+  return planViralScriptsFromTranscript({
+    sourceTranscript,
+    sourceTitle,
+    clipsCount,
+    clipDurationSec,
+    aspectRatio,
+    sceneDurationSec
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Mistral scripts: ${errText.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const raw = data.choices?.[0]?.message?.content || "";
-  const clean = raw.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(clean);
-  if (!Array.isArray(parsed.scripts) || !parsed.scripts.length) {
-    throw new Error("Scripts viraux invalides (Mistral)");
-  }
-
-  return parsed.scripts.slice(0, clipsCount).map((script, index) => {
-    const scenes = Array.isArray(script.scenes) ? script.scenes : [];
-    const normalizedScenes =
-      scenes.length > 0
-        ? scenes.slice(0, scenesPerScript)
-        : [
-            {
-              index: 1,
-              visualPrompt: script.visualPrompt || "Cinematic abstract motion, dramatic lighting, no text",
-              narration: script.narration || script.hook || "",
-              durationSec: FAL_CLIP_SEC
-            }
-          ];
-    return {
-      title: String(script.title || script.hook || `Short viral ${index + 1}`).trim(),
-      hook: String(script.hook || "").trim(),
-      narration: String(script.narration || normalizedScenes.map((s) => s.narration).join(" ")).trim(),
-      hashtags: Array.isArray(script.hashtags) ? script.hashtags : [],
-      scenes: normalizedScenes.map((scene, sceneIndex) => ({
-        index: sceneIndex + 1,
-        visualPrompt: String(scene.visualPrompt || script.visualPrompt || "Cinematic viral short scene").trim(),
-        narration: String(scene.narration || "").trim(),
-        durationSec: Math.max(5, Math.min(FAL_CLIP_SEC, Number(scene.durationSec) || FAL_CLIP_SEC))
-      }))
-    };
-  });
-}
-
-async function generateFalSceneClip({ falKey, modelPath, scene, aspectRatio, destPath }) {
-  const visual = `${scene.visualPrompt}. Cinematic, original content, viral short style, no logos, no celebrity faces, no text overlay.`;
-  const submit = await falFetch(`${FAL_QUEUE_BASE}/${modelPath}`, falKey, {
-    method: "POST",
-    body: JSON.stringify({
-      prompt: visual,
-      duration: falDurationForScene(scene.durationSec),
-      aspect_ratio: aspectRatio
-    })
-  });
-  const clipUrl = await pollFalClip({
-    falKey,
-    modelPath,
-    requestId: submit.request_id
-  });
-  await downloadFile(clipUrl, destPath);
-  return destPath;
 }
 
 async function processAiRemixJob(job, ctx) {
@@ -160,13 +54,10 @@ async function processAiRemixJob(job, ctx) {
     DEFAULTS
   } = ctx;
 
-  const mistralKey = String(job.aiSecrets?.mistralApiKey || "").trim();
-  const falKey = String(job.aiSecrets?.falApiKey || "").trim();
-  if (!mistralKey) throw new Error("Clé API Mistral requise pour le mode Remix IA");
-  if (!falKey) throw new Error("Clé API FAL requise pour le mode Remix IA");
-
-  const falModel = resolveFalModel(job.params.falModel || DEFAULT_FAL_MODEL);
-  const mistralModel = job.params.mistralModel || "mistral-small-2506";
+  const hfApiToken = String(job.aiSecrets?.hfApiToken || "").trim();
+  const videoGenerationProfile = String(job.params.videoGenerationProfile || "balanced").trim();
+  const videoModelId = String(job.params.videoModelId || "").trim();
+  const resolvedProfile = resolveVideoGenerationProfile(videoGenerationProfile, videoModelId);
 
   job.params.burnSubtitles = true;
   job.params.includeAutoTranscript = true;
@@ -199,22 +90,22 @@ async function processAiRemixJob(job, ctx) {
   }
 
   job.progress = 20;
-  job.aiRemixStage = "Génération des scripts viraux (Mistral)…";
+  job.aiRemixStage = "Construction du storyboard viral (local)…";
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
 
   const scripts = await planViralScriptsWithMistral({
-    mistralKey,
     sourceTranscript,
     sourceTitle: job.originalFilename,
     clipsCount: job.params.clipsCount,
     clipDurationSec: job.params.clipDuration,
     aspectRatio: job.params.aspectRatio,
-    mistralModel
+    videoGenerationProfile,
+    videoModelId
   });
 
   job.progress = 30;
-  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA (FAL)…`;
+  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA Hugging Face (${resolvedProfile.label})…`;
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
 
@@ -231,17 +122,20 @@ async function processAiRemixJob(job, ctx) {
     const localScenePaths = [];
     for (let sceneIndex = 0; sceneIndex < script.scenes.length; sceneIndex += 1) {
       const scene = script.scenes[sceneIndex];
-      job.aiRemixStage = `Short ${scriptIndex + 1}/${scripts.length} — scène ${sceneIndex + 1}/${script.scenes.length} (FAL)`;
+      job.aiRemixStage = `Short ${scriptIndex + 1}/${scripts.length} — scène ${sceneIndex + 1}/${script.scenes.length} (${resolvedProfile.modelId})`;
       job.updatedAt = new Date().toISOString();
       await persistJobsDb();
 
       const scenePath = path.join(clipDir, `scene-${String(sceneIndex + 1).padStart(2, "0")}.mp4`);
-      await generateFalSceneClip({
-        falKey,
-        modelPath: falModel,
-        scene,
+      await generateVideoWithHuggingFace({
+        prompt: scene.visualPrompt,
         aspectRatio: job.params.aspectRatio,
-        destPath: scenePath
+        outputPath: scenePath,
+        profile: videoGenerationProfile,
+        customModelId: videoModelId,
+        hfApiToken,
+        sceneDurationSec: scene.durationSec,
+        seedInput: createSceneSeed(job.id, scriptIndex, sceneIndex)
       });
       localScenePaths.push(scenePath);
       completedScenes += 1;
@@ -320,7 +214,7 @@ async function processAiRemixJob(job, ctx) {
     createdAt: job.createdAt,
     mode: "ai-remix",
     source: { filename: job.originalFilename, duration: job.duration, url: job.sourceUrl },
-    params: { ...job.params, mistralApiKey: undefined, falApiKey: undefined },
+    params: { ...job.params, hfApiToken: undefined },
     autoTranscriptUsed: !!job.autoTranscriptUsed,
     scripts: rendered.map((clip) => ({
       id: clip.id,
@@ -350,5 +244,5 @@ async function processAiRemixJob(job, ctx) {
 module.exports = {
   planViralScriptsWithMistral,
   processAiRemixJob,
-  FAL_CLIP_SEC
+  FAL_CLIP_SEC: 5
 };

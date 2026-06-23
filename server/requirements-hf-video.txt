@@ -1,0 +1,10 @@
+torch>=2.4.0
+diffusers>=0.33.0
+transformers>=4.46.0
+accelerate>=1.6.0
+huggingface-hub>=0.33.0
+safetensors>=0.5.0
+sentencepiece>=0.2.0
+protobuf>=5.29.0
+imageio>=2.37.0
+imageio-ffmpeg>=0.6.0

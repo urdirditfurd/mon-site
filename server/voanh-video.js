@@ -280,6 +280,9 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
         modelPath: req.body?.modelPath,
+        videoGenerationProfile: req.body?.videoGenerationProfile,
+        videoModelId: req.body?.videoModelId,
+        hfApiToken: req.body?.hfApiToken || req.headers["x-hf-token"],
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"]
@@ -311,7 +314,7 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({ ok: true, ffmpegReady, models: FAL_MODELS, localTextToVideo: true });
   });
 
   return router;

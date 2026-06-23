@@ -15,6 +15,7 @@ const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
+const { HF_VIDEO_PROFILES } = require("./hf-video-generation");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
@@ -3325,8 +3326,11 @@ app.get("/api/config", (_req, res) => {
       burnSubtitles: true,
       copyrightShield: true,
       backgroundMusic: fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC),
-      aiRemixViral: true
+      aiRemixViral: true,
+      localTextToVideo: true
     },
+    videoGenerationProfiles: Object.keys(HF_VIDEO_PROFILES),
+    defaultVideoGenerationProfile: "balanced",
     youtubeCookies: cookiesMeta,
     automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
   });
@@ -3694,18 +3698,13 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const copyrightShield = boolFrom(req.body.copyrightShield, DEFAULTS.copyrightShield);
     const youtubeCookies = String(req.body.youtubeCookies || "");
     const aiRemixMode = boolFrom(req.body.aiRemixMode, false);
-    const mistralApiKey = String(req.body.mistralApiKey || "").trim();
-    const falApiKey = String(req.body.falApiKey || "").trim();
-    const mistralModel = String(req.body.mistralModel || "mistral-small-2506").trim();
-    const falModel = String(req.body.falModel || "").trim();
+    const hfApiToken = String(req.body.hfApiToken || "").trim();
+    const videoGenerationProfile = ["volume", "balanced", "quality"].includes(req.body.videoGenerationProfile)
+      ? req.body.videoGenerationProfile
+      : "balanced";
+    const videoModelId = String(req.body.videoModelId || "").trim();
 
     if (aiRemixMode) {
-      if (!mistralApiKey) {
-        return res.status(400).json({ error: "Clé API Mistral requise pour le mode Remix IA viral." });
-      }
-      if (!falApiKey) {
-        return res.status(400).json({ error: "Clé API FAL requise pour le mode Remix IA viral." });
-      }
       if (!hasVideoUrl) {
         return res.status(400).json({ error: "Le mode Remix IA nécessite un lien YouTube." });
       }
@@ -3769,10 +3768,10 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         backgroundMusic: boolFrom(req.body.backgroundMusic, DEFAULTS.backgroundMusic),
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath),
         aiRemixMode,
-        mistralModel: mistralModel || "mistral-small-2506",
-        falModel: falModel || undefined
+        videoGenerationProfile,
+        videoModelId: videoModelId || undefined
       }),
-      aiSecrets: aiRemixMode ? { mistralApiKey, falApiKey } : undefined,
+      aiSecrets: aiRemixMode ? { hfApiToken } : undefined,
       clips: [],
       error: null
     };

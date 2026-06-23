@@ -34,6 +34,11 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - clip individuel MP4
   - plan JSON
   - bundle ZIP (clips + SRT + plan)
+- Nouveau moteur text-to-video **Hugging Face local** pour les remix IA:
+  - profil **Volume** par défaut: `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`
+  - profil **Qualité**: `Wan-AI/Wan2.1-T2V-14B-Diffusers`
+  - `Model ID` personnalisé possible (ex: `SulphurAI/Sulphur-2-base`)
+- Storyboard local sans dépendance obligatoire à Mistral/FAL pour lancer les shorts IA
 
 ## Pré-requis
 
@@ -41,6 +46,14 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 - FFmpeg + FFprobe dans le PATH
 - **yt-dlp** (obligatoire pour les liens YouTube) : `pip install -U yt-dlp`
 - Redis recommandé pour le mode BullMQ (optionnel)
+- Python 3.10+ pour le worker text-to-video Hugging Face
+- Dépendances vidéo IA :
+
+```bash
+pip install -r server/requirements-hf-video.txt
+```
+
+> Pour un gros volume quotidien, le meilleur compromis pratique est `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` sur une machine GPU dédiée.
 
 ## Mise à jour (local ou VPS)
 
@@ -97,6 +110,27 @@ REDIS_URL=redis://127.0.0.1:6379 QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 npm run 
 Ouvrir ensuite:
 - **App**: `http://localhost:3000`
 
+### Mode IA Hugging Face local
+
+Le mode **Remix IA viral** ne dépend plus de FAL pour la génération vidéo:
+
+- le backend extrait le sujet depuis la vidéo source,
+- construit un storyboard local,
+- génère les scènes avec un modèle text-to-video Hugging Face,
+- assemble les scènes en short final avec FFmpeg.
+
+Profils recommandés:
+
+- **Volume**: beaucoup de vidéos, plus vite, coût GPU plus bas
+- **Équilibré**: meilleur mode par défaut pour publier tous les jours
+- **Qualité**: plus lourd, utile pour les vidéos premium ou les tests créatifs
+
+Tu peux aussi forcer un modèle custom dans l’interface, par exemple:
+
+```text
+SulphurAI/Sulphur-2-base
+```
+
 ## Utilisation
 
 ### Mode express (recommandé)
@@ -109,6 +143,24 @@ Le mode express applique des réglages short-form recommandés **sans écraser l
 - ratio **9:16** (TikTok/Reels)
 - transcription auto activée
 - doublage audio FR activé (si mode langue = "vidéo à traduire")
+
+### Remix IA viral (Hugging Face)
+
+1. Colle un lien YouTube.
+2. Sélectionne **Remix IA viral (Hugging Face local)**.
+3. Choisis un profil:
+   - **Volume** pour produire beaucoup tous les jours
+   - **Équilibré** pour le meilleur compromis
+   - **Qualité** pour les rendus plus lourds
+4. (Optionnel) ajoute un token Hugging Face si ton modèle personnalisé l’exige.
+5. (Optionnel) renseigne un `Model ID` custom si tu veux tester un autre modèle du Hub.
+6. Clique **Générer mes shorts IA**.
+
+Le système produit alors:
+- un storyboard local,
+- plusieurs scènes text-to-video,
+- un MP4 assemblé,
+- les sous-titres et le ZIP comme pour les autres jobs.
 
 ### Auto-Pipeline V1 (opérationnel aujourd'hui)
 
