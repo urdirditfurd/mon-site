@@ -16,6 +16,7 @@ const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
+const hfT2V = require("./hf-t2v-pipeline");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
 const UPLOADS_DIR = path.join(STORAGE_DIR, "uploads");
 const JOBS_DIR = path.join(STORAGE_DIR, "jobs");
@@ -3852,6 +3853,138 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   }
 });
 
+// ─── Routes HF Text-to-Video (Studio Illimité) ────────────────────────────────
+
+app.get("/api/hf-t2v/health", async (_req, res) => {
+  try {
+    const ok = await hfT2V.startService();
+    if (!ok) return res.status(503).json({ status: "unavailable", reason: "Service Python HF T2V non démarré" });
+    const data = await fetch(`${hfT2V.HF_T2V_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    return res.json(await data.json());
+  } catch (err) {
+    return res.status(503).json({ status: "unavailable", reason: err.message });
+  }
+});
+
+app.get("/api/hf-t2v/models", async (_req, res) => {
+  return res.json(Object.entries(hfT2V.SUPPORTED_MODELS_INFO).map(([key, info]) => ({ key, ...info })));
+});
+
+app.post("/api/hf-t2v/generate", async (req, res) => {
+  try {
+    const { prompt, durationSec, width, height, fps, guidanceScale, steps, model, seed, negativePrompt } = req.body;
+    if (!prompt || !String(prompt).trim()) return res.status(400).json({ error: "prompt requis" });
+    const job = await hfT2V.generateVideo({ prompt, durationSec, width, height, fps, guidanceScale, steps, model, seed, negativePrompt });
+    return res.status(202).json(job);
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get("/api/hf-t2v/jobs", async (_req, res) => {
+  try {
+    const jobs = await hfT2V.listJobs(50);
+    return res.json(jobs);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/hf-t2v/jobs/:jobId", async (req, res) => {
+  try {
+    const job = await hfT2V.getJobStatus(req.params.jobId);
+    return res.json(job);
+  } catch (err) {
+    return res.status(404).json({ error: err.message });
+  }
+});
+
+app.get("/api/hf-t2v/jobs/:jobId/download", async (req, res) => {
+  try {
+    await hfT2V.proxyDownload(req.params.jobId, res);
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/hf-t2v/queue", async (_req, res) => {
+  try {
+    const status = await hfT2V.getQueueStatus();
+    return res.json(status);
+  } catch (err) {
+    return res.status(503).json({ error: err.message });
+  }
+});
+
+app.post("/api/hf-t2v/queue/clear", async (_req, res) => {
+  try {
+    const result = await hfT2V.clearQueue();
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Génération en masse (bulk sessions) ───────────────────────────────────
+
+app.post("/api/hf-t2v/bulk", async (req, res) => {
+  try {
+    const {
+      theme, count, durationMin, width, height, fps, steps, guidanceScale, model,
+      mistralKey, mistralModel
+    } = req.body;
+    if (!theme || !String(theme).trim()) return res.status(400).json({ error: "theme requis" });
+    const session = await hfT2V.createBulkSession({
+      theme, count, durationMin, width, height, fps, steps, guidanceScale, model,
+      mistralKey, mistralModel
+    });
+    return res.status(202).json(session);
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get("/api/hf-t2v/bulk", async (_req, res) => {
+  try {
+    const sessions = await hfT2V.listBulkSessions(30);
+    return res.json(sessions);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/hf-t2v/bulk/:sessionId", async (req, res) => {
+  try {
+    const session = await hfT2V.getBulkSession(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: "Session introuvable" });
+    return res.json(session);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Planificateur quotidien ────────────────────────────────────────────────
+
+app.get("/api/hf-t2v/schedule", async (_req, res) => {
+  try {
+    const cfg = await hfT2V.getSchedule();
+    return res.json(cfg);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/hf-t2v/schedule", async (req, res) => {
+  try {
+    const cfg = await hfT2V.saveSchedule(req.body);
+    return res.json(cfg);
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 app.use(express.static(ROOT_DIR, { index: false }));
 app.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
@@ -3881,6 +4014,7 @@ ensureDirs()
     if (scheduleConfig.enabled) {
       scheduleNextAutomationTick(scheduleConfig);
     }
+    await hfT2V.initScheduler();
     app.listen(PORT, () => {
       const deploy = readDeployInfo();
       console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);

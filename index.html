@@ -11,6 +11,42 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <style>
+    /* ── Studio Illimité HF ── */
+    .tabs-nav { display:flex; gap:6px; margin-bottom:20px; flex-wrap:wrap; }
+    .tabs-nav button { padding:8px 18px; border-radius:8px; border:1.5px solid var(--border,#2e3340); background:transparent; color:var(--text-muted,#9099aa); font-size:.9rem; font-weight:600; cursor:pointer; transition:all .15s; }
+    .tabs-nav button.active { background:var(--accent,#4f8ef7); border-color:var(--accent,#4f8ef7); color:#fff; }
+    .tabs-nav button:hover:not(.active) { border-color:var(--accent,#4f8ef7); color:#fff; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .hf-badge { display:inline-block; padding:2px 8px; background:#ff9800; color:#fff; border-radius:4px; font-size:.75rem; font-weight:700; margin-left:6px; }
+    .hf-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media(max-width:700px){ .hf-grid { grid-template-columns:1fr; } }
+    .hf-jobs-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; max-height:500px; overflow-y:auto; }
+    .hf-jobs-list li { background:var(--card-bg,#1c1f2a); border:1px solid var(--border,#2e3340); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:.88rem; }
+    .hf-jobs-list li .job-prompt { flex:1; color:var(--text,#e2e8f4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hf-jobs-list li .job-status { font-weight:700; min-width:90px; text-align:right; }
+    .job-status.queued    { color:#9099aa; }
+    .job-status.running   { color:#f59e0b; }
+    .job-status.completed { color:#22c55e; }
+    .job-status.failed    { color:#ef4444; }
+    .job-status.cancelled { color:#6b7280; }
+    .hf-log-box { background:#0d1117; border-radius:8px; padding:10px 14px; font-family:monospace; font-size:.8rem; color:#a0aab4; max-height:180px; overflow-y:auto; white-space:pre-wrap; }
+    .hf-progress-wrap { margin-top:8px; }
+    .hf-progress-track { height:6px; background:var(--border,#2e3340); border-radius:99px; overflow:hidden; }
+    .hf-progress-fill { height:100%; background:var(--accent,#4f8ef7); border-radius:99px; transition:width .4s; }
+    .btn-sm { padding:5px 12px; font-size:.83rem; border-radius:6px; }
+    .hf-section-title { font-size:1rem; font-weight:700; color:var(--text,#e2e8f4); margin:16px 0 8px; }
+    .hf-model-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:var(--card-bg,#1c1f2a); border:1px solid var(--border,#2e3340); font-size:.82rem; cursor:pointer; }
+    .hf-model-badge input[type=radio] { accent-color:var(--accent,#4f8ef7); }
+    .hf-stat-row { display:flex; gap:20px; margin:8px 0; flex-wrap:wrap; }
+    .hf-stat { background:var(--card-bg,#1c1f2a); border:1px solid var(--border,#2e3340); border-radius:8px; padding:8px 16px; font-size:.85rem; }
+    .hf-stat span { font-size:1.3rem; font-weight:800; color:var(--accent,#4f8ef7); display:block; }
+    .schedule-active { border-color:#22c55e!important; }
+    .btn-danger { background:#ef4444; border-color:#ef4444; }
+    .btn-danger:hover { background:#dc2626; }
+  </style>
+
   <header class="topbar">
     <div>
       <p class="eyebrow">Shorts en 3 clics</p>
@@ -19,7 +55,12 @@
     </div>
   </header>
 
-  <main class="layout">
+  <main class="layout" style="flex-direction:column;">
+  <nav class="tabs-nav" id="mainTabs">
+    <button class="active" data-tab="tab-clipforge">Clips YouTube</button>
+    <button data-tab="tab-hf-studio">Studio Illimité <span class="hf-badge">HF</span></button>
+  </nav>
+  <div id="tab-clipforge" class="tab-content active" style="display:contents;">
     <section class="panel">
       <h2>Créer des clips</h2>
 
@@ -147,10 +188,539 @@
         </ul>
       </div>
     </section>
+  </div><!-- /tab-clipforge -->
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       STUDIO ILLIMITÉ — Génération HF Text-to-Video sans limites
+       ═══════════════════════════════════════════════════════════════════ -->
+  <div id="tab-hf-studio" class="tab-content" style="display:none; width:100%;">
+    <div class="layout" style="align-items:flex-start;">
+
+      <!-- Panneau gauche : configuration -->
+      <section class="panel">
+        <h2>Studio Illimité <span class="hf-badge">HuggingFace Local</span></h2>
+        <p class="hint small">Génère des vidéos courtes et longues en illimité chaque jour via les modèles HF open-source — sans API payante, sans quota.</p>
+
+        <!-- Statut du service HF -->
+        <div id="hfServiceStatus" style="margin-bottom:12px;">
+          <p class="hint small">Service: <strong id="hfServiceStatusText">Non vérifié</strong>
+            <button class="btn btn-ghost btn-sm" id="hfCheckServiceBtn" type="button" style="margin-left:8px;">Vérifier</button>
+            <button class="btn btn-ghost btn-sm" id="hfStartServiceBtn" type="button" style="margin-left:4px;" hidden>Démarrer</button>
+          </p>
+        </div>
+
+        <!-- Sélection du modèle -->
+        <p class="hf-section-title">Modèle HuggingFace</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="hfModelPicker">
+          <label class="hf-model-badge">
+            <input type="radio" name="hfModel" value="wan-1.3b" checked>
+            Wan 2.1 — 1.3B <span style="color:#9099aa;font-size:.75rem;">(8 GB VRAM · rapide)</span>
+          </label>
+          <label class="hf-model-badge">
+            <input type="radio" name="hfModel" value="wan-14b">
+            Wan 2.1 — 14B <span style="color:#9099aa;font-size:.75rem;">(18 GB · haute qualité)</span>
+          </label>
+          <label class="hf-model-badge">
+            <input type="radio" name="hfModel" value="ltx">
+            LTX-Video 2.1 <span style="color:#9099aa;font-size:.75rem;">(8 GB · ultra-rapide)</span>
+          </label>
+        </div>
+
+        <!-- ── Génération simple ── -->
+        <details class="details-box" open>
+          <summary>Générer une vidéo simple</summary>
+          <label class="field no-margin">
+            <span>Prompt visuel (anglais recommandé)</span>
+            <textarea id="hfSinglePrompt" rows="3" placeholder="A serene mountain landscape at golden hour, cinematic, 4K, no text, dramatic lighting, original content"></textarea>
+          </label>
+          <div class="hf-grid" style="margin-top:8px;">
+            <label class="field no-margin">
+              <span>Durée (secondes)</span>
+              <select id="hfSingleDuration">
+                <option value="5">5 sec</option>
+                <option value="10" selected>10 sec</option>
+                <option value="15">15 sec</option>
+                <option value="30">30 sec</option>
+                <option value="60">60 sec</option>
+              </select>
+            </label>
+            <label class="field no-margin">
+              <span>Résolution</span>
+              <select id="hfSingleRes">
+                <option value="832x480" selected>832×480 (9:16 compact)</option>
+                <option value="480x832">480×832 (vertical 9:16)</option>
+                <option value="1280x720">1280×720 (16:9 HD)</option>
+                <option value="720x1280">720×1280 (vertical HD)</option>
+                <option value="512x512">512×512 (carré)</option>
+              </select>
+            </label>
+            <label class="field no-margin">
+              <span>Étapes</span>
+              <select id="hfSingleSteps">
+                <option value="20">20 (rapide)</option>
+                <option value="50" selected>50 (standard)</option>
+                <option value="80">80 (qualité)</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn btn-primary btn-block" id="hfGenerateSingleBtn" type="button" style="margin-top:10px;">Générer la vidéo</button>
+          <div id="hfSingleJobResult" style="margin-top:8px;" hidden>
+            <p class="hint small">Job ID: <code id="hfSingleJobId"></code> — <strong id="hfSingleJobStatus">En file…</strong></p>
+            <div class="hf-progress-wrap" id="hfSingleProgressWrap" hidden>
+              <div class="hf-progress-track"><div class="hf-progress-fill" id="hfSingleProgressFill" style="width:0%"></div></div>
+            </div>
+            <video id="hfSinglePlayer" controls style="width:100%;max-height:200px;margin-top:8px;border-radius:8px;" hidden></video>
+            <button class="btn btn-ghost btn-sm" id="hfSingleDownloadBtn" type="button" hidden>Télécharger</button>
+          </div>
+        </details>
+
+        <!-- ── Génération en masse ── -->
+        <details class="details-box" style="margin-top:10px;" open>
+          <summary>Génération en masse (batch illimité)</summary>
+          <label class="field no-margin">
+            <span>Thème ou niche de contenu</span>
+            <input type="text" id="hfBulkTheme" placeholder="Sport viral, motivation, cuisine, voyages, tutoriels…">
+          </label>
+          <div class="hf-grid" style="margin-top:8px;">
+            <label class="field no-margin">
+              <span>Nombre de vidéos</span>
+              <input type="number" id="hfBulkCount" value="10" min="1" max="500">
+            </label>
+            <label class="field no-margin">
+              <span>Durée (secondes)</span>
+              <select id="hfBulkDuration">
+                <option value="5">5 sec</option>
+                <option value="10" selected>10 sec</option>
+                <option value="30">30 sec</option>
+                <option value="60">60 sec (long)</option>
+                <option value="120">2 min (long)</option>
+                <option value="300">5 min (long)</option>
+              </select>
+            </label>
+            <label class="field no-margin">
+              <span>Résolution</span>
+              <select id="hfBulkRes">
+                <option value="832x480" selected>832×480</option>
+                <option value="480x832">480×832 (TikTok)</option>
+                <option value="1280x720">1280×720 (HD)</option>
+              </select>
+            </label>
+            <label class="field no-margin">
+              <span>Étapes</span>
+              <select id="hfBulkSteps">
+                <option value="20">20 (rapide)</option>
+                <option value="50" selected>50 (standard)</option>
+              </select>
+            </label>
+          </div>
+          <details class="details-box" style="margin-top:8px;">
+            <summary>Planification IA avec Mistral (optionnel)</summary>
+            <label class="field no-margin">
+              <span>Clé API Mistral (pour diversifier les prompts)</span>
+              <input type="password" id="hfBulkMistralKey" placeholder="mistral-..." autocomplete="off">
+            </label>
+            <p class="hint small">Sans clé Mistral, le thème est utilisé directement comme prompt vidéo.</p>
+          </details>
+          <button class="btn btn-primary btn-block" id="hfStartBulkBtn" type="button" style="margin-top:10px;">Lancer la génération en masse</button>
+          <div id="hfBulkResult" style="margin-top:8px;" hidden>
+            <p class="hint small">Session: <code id="hfBulkSessionId"></code></p>
+            <div class="hf-progress-wrap" style="margin-top:6px;">
+              <div class="hf-progress-track"><div class="hf-progress-fill" id="hfBulkProgressFill" style="width:0%"></div></div>
+              <p class="hint small" id="hfBulkProgressText">0 / 0 vidéos</p>
+            </div>
+            <div class="hf-log-box" id="hfBulkLog" style="margin-top:6px;"></div>
+          </div>
+        </details>
+
+        <!-- ── Planificateur quotidien ── -->
+        <details class="details-box" style="margin-top:10px;" id="hfSchedulerBox">
+          <summary>Planificateur automatique (illimité)</summary>
+          <p class="hint small">Lance automatiquement des batches de génération à intervalles réguliers — 24h/24, 7j/7.</p>
+          <label class="field no-margin">
+            <span>Thème récurrent</span>
+            <input type="text" id="hfSchedTheme" placeholder="Sport viral, motivation, cuisine…">
+          </label>
+          <div class="hf-grid" style="margin-top:8px;">
+            <label class="field no-margin">
+              <span>Vidéos par run</span>
+              <input type="number" id="hfSchedCount" value="20" min="1" max="500">
+            </label>
+            <label class="field no-margin">
+              <span>Toutes les (heures)</span>
+              <input type="number" id="hfSchedInterval" value="24" min="1">
+            </label>
+            <label class="field no-margin">
+              <span>Durée vidéos (sec)</span>
+              <select id="hfSchedDuration">
+                <option value="5">5 sec</option>
+                <option value="10" selected>10 sec</option>
+                <option value="30">30 sec</option>
+                <option value="60">60 sec</option>
+              </select>
+            </label>
+          </div>
+          <label class="field no-margin" style="margin-top:8px;">
+            <span>Clé Mistral (optionnel)</span>
+            <input type="password" id="hfSchedMistralKey" placeholder="mistral-..." autocomplete="off">
+          </label>
+          <div class="buttons-row" style="margin-top:10px;">
+            <button class="btn btn-primary" id="hfSchedEnableBtn" type="button">Activer le planificateur</button>
+            <button class="btn btn-danger btn-ghost" id="hfSchedDisableBtn" type="button" hidden>Désactiver</button>
+          </div>
+          <p class="hint small" id="hfSchedStatus" style="margin-top:6px;"></p>
+        </details>
+
+      </section>
+
+      <!-- Panneau droit : file d'attente + sessions -->
+      <section class="workspace">
+        <!-- Statistiques -->
+        <div class="player-card" style="margin-bottom:14px;">
+          <div class="player-head"><h2>File HF T2V</h2>
+            <button class="btn btn-ghost btn-sm" id="hfRefreshJobsBtn" type="button">Actualiser</button>
+          </div>
+          <div class="hf-stat-row" id="hfStatRow">
+            <div class="hf-stat"><span id="hfStatQueue">—</span>En attente</div>
+            <div class="hf-stat"><span id="hfStatCompleted">—</span>Terminées</div>
+            <div class="hf-stat"><span id="hfStatRunning">—</span>En cours</div>
+            <div class="hf-stat"><span id="hfStatFailed">—</span>Échouées</div>
+          </div>
+          <button class="btn btn-ghost btn-sm btn-danger" id="hfClearQueueBtn" type="button" style="margin-top:8px;">Vider la file</button>
+        </div>
+
+        <!-- Jobs récents -->
+        <div class="timeline-card">
+          <h2>Jobs récents</h2>
+          <ul class="hf-jobs-list" id="hfJobsList">
+            <li style="color:#9099aa;font-style:italic;">Aucun job pour le moment.</li>
+          </ul>
+        </div>
+
+        <!-- Sessions bulk récentes -->
+        <div class="timeline-card" style="margin-top:14px;">
+          <h2>Sessions batch récentes</h2>
+          <ul class="hf-jobs-list" id="hfBulkSessionsList">
+            <li style="color:#9099aa;font-style:italic;">Aucune session.</li>
+          </ul>
+        </div>
+      </section>
+
+    </div>
+  </div><!-- /tab-hf-studio -->
+
   </main>
 
   <script src="config.js?v=ai-remix-3"></script>
   <script src="app.js?v=ai-remix-3"></script>
+  <script>
+  // ─── Onglets principaux ───────────────────────────────────────────────────
+  document.getElementById('mainTabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-tab]');
+    if (!btn) return;
+    const tabId = btn.dataset.tab;
+    document.querySelectorAll('.tabs-nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (tabId === 'tab-clipforge') {
+      document.getElementById('tab-clipforge').style.display = 'contents';
+      document.getElementById('tab-hf-studio').style.display = 'none';
+    } else if (tabId === 'tab-hf-studio') {
+      document.getElementById('tab-clipforge').style.display = 'none';
+      document.getElementById('tab-hf-studio').style.display = 'block';
+      hfStudio.init();
+    }
+  });
+
+  // ─── HF Studio ────────────────────────────────────────────────────────────
+  const hfStudio = (() => {
+    let _initialized = false;
+    let _pollSingleTimer = null;
+    let _pollBulkTimer = null;
+    let _currentBulkSessionId = null;
+
+    function getModel() {
+      return document.querySelector('input[name="hfModel"]:checked')?.value || 'wan-1.3b';
+    }
+
+    function getRes(id) {
+      const v = document.getElementById(id)?.value || '832x480';
+      const [w, h] = v.split('x').map(Number);
+      return { width: w, height: h };
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch('/api/hf-t2v' + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts
+      });
+      return res.json();
+    }
+
+    async function checkService() {
+      const el = document.getElementById('hfServiceStatusText');
+      const startBtn = document.getElementById('hfStartServiceBtn');
+      el.textContent = 'Vérification…';
+      try {
+        const data = await api('/health');
+        if (data.status === 'ok') {
+          el.textContent = `Actif — modèle: ${data.model || '?'} | file: ${data.queue_size ?? '?'}`;
+          el.style.color = '#22c55e';
+          startBtn.hidden = true;
+        } else {
+          el.textContent = 'Indisponible';
+          el.style.color = '#ef4444';
+          startBtn.hidden = false;
+        }
+      } catch {
+        el.textContent = 'Non démarré';
+        el.style.color = '#f59e0b';
+        startBtn.hidden = false;
+      }
+    }
+
+    async function refreshJobs() {
+      const [jobs, queue] = await Promise.all([
+        api('/jobs').catch(() => []),
+        api('/queue').catch(() => ({}))
+      ]);
+      const list = document.getElementById('hfJobsList');
+      const statQueue = document.getElementById('hfStatQueue');
+      const statCompleted = document.getElementById('hfStatCompleted');
+      const statRunning = document.getElementById('hfStatRunning');
+      const statFailed = document.getElementById('hfStatFailed');
+
+      statQueue.textContent = queue.size ?? '?';
+      statCompleted.textContent = jobs.filter(j => j.status === 'completed').length;
+      statRunning.textContent = jobs.filter(j => j.status === 'running').length;
+      statFailed.textContent = jobs.filter(j => j.status === 'failed').length;
+
+      if (!Array.isArray(jobs) || !jobs.length) {
+        list.innerHTML = '<li style="color:#9099aa;font-style:italic;">Aucun job pour le moment.</li>';
+        return;
+      }
+      list.innerHTML = jobs.slice(0, 30).map(j => {
+        const dl = j.status === 'completed'
+          ? `<a href="/api/hf-t2v/jobs/${j.id}/download" class="btn btn-ghost btn-sm" download>DL</a>`
+          : '';
+        const dur = j.durationSec ? `${j.durationSec}s` : '';
+        return `<li>
+          <span class="job-prompt">${escHtml(j.prompt || j.id)}</span>
+          <span style="color:#9099aa;font-size:.78rem;white-space:nowrap;">${dur}</span>
+          <span class="job-status ${j.status}">${j.status}</span>
+          ${dl}
+        </li>`;
+      }).join('');
+    }
+
+    async function refreshBulkSessions() {
+      const sessions = await api('/bulk').catch(() => []);
+      const list = document.getElementById('hfBulkSessionsList');
+      if (!Array.isArray(sessions) || !sessions.length) {
+        list.innerHTML = '<li style="color:#9099aa;font-style:italic;">Aucune session.</li>';
+        return;
+      }
+      list.innerHTML = sessions.slice(0, 15).map(s => {
+        const pct = s.progress ?? 0;
+        return `<li>
+          <span class="job-prompt">${escHtml(s.theme || s.id)}</span>
+          <span style="color:#9099aa;font-size:.78rem;white-space:nowrap;">${s.videosCompleted ?? 0}/${s.videosPlanned ?? '?'}</span>
+          <span class="job-status ${s.status}">${s.status} ${pct}%</span>
+        </li>`;
+      }).join('');
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function generateSingle() {
+      const prompt = document.getElementById('hfSinglePrompt').value.trim();
+      if (!prompt) { alert('Entrez un prompt visuel.'); return; }
+      const durationSec = Number(document.getElementById('hfSingleDuration').value);
+      const { width, height } = getRes('hfSingleRes');
+      const steps = Number(document.getElementById('hfSingleSteps').value);
+      const model = getModel();
+
+      const btn = document.getElementById('hfGenerateSingleBtn');
+      btn.disabled = true;
+      btn.textContent = 'Soumission…';
+
+      try {
+        const job = await api('/generate', {
+          method: 'POST',
+          body: JSON.stringify({ prompt, durationSec, width, height, steps, model })
+        });
+        document.getElementById('hfSingleJobResult').hidden = false;
+        document.getElementById('hfSingleJobId').textContent = job.id;
+        document.getElementById('hfSingleJobStatus').textContent = 'En file…';
+        document.getElementById('hfSingleProgressWrap').hidden = false;
+        document.getElementById('hfSinglePlayer').hidden = true;
+        document.getElementById('hfSingleDownloadBtn').hidden = true;
+        _pollSingle(job.id);
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Générer la vidéo';
+      }
+    }
+
+    function _pollSingle(jobId) {
+      clearTimeout(_pollSingleTimer);
+      _pollSingleTimer = setTimeout(async () => {
+        try {
+          const job = await api(`/jobs/${jobId}`);
+          document.getElementById('hfSingleJobStatus').textContent = job.status;
+          if (job.status === 'completed') {
+            document.getElementById('hfSingleProgressFill').style.width = '100%';
+            const videoEl = document.getElementById('hfSinglePlayer');
+            videoEl.src = `/api/hf-t2v/jobs/${jobId}/download`;
+            videoEl.hidden = false;
+            const dlBtn = document.getElementById('hfSingleDownloadBtn');
+            dlBtn.hidden = false;
+            dlBtn.onclick = () => { const a = document.createElement('a'); a.href = `/api/hf-t2v/jobs/${jobId}/download`; a.download = `hf-t2v-${jobId.slice(0,8)}.mp4`; a.click(); };
+            refreshJobs();
+          } else if (job.status === 'running') {
+            document.getElementById('hfSingleProgressFill').style.width = '40%';
+            _pollSingle(jobId);
+          } else if (job.status === 'failed') {
+            document.getElementById('hfSingleJobStatus').textContent = 'Erreur: ' + (job.error || '?');
+          } else {
+            _pollSingle(jobId);
+          }
+        } catch { _pollSingle(jobId); }
+      }, 5000);
+    }
+
+    async function startBulk() {
+      const theme = document.getElementById('hfBulkTheme').value.trim();
+      if (!theme) { alert('Entrez un thème.'); return; }
+      const count = Number(document.getElementById('hfBulkCount').value);
+      const durationSec = Number(document.getElementById('hfBulkDuration').value);
+      const durationMin = durationSec / 60;
+      const { width, height } = getRes('hfBulkRes');
+      const steps = Number(document.getElementById('hfBulkSteps').value);
+      const model = getModel();
+      const mistralKey = document.getElementById('hfBulkMistralKey').value.trim();
+
+      const btn = document.getElementById('hfStartBulkBtn');
+      btn.disabled = true;
+      btn.textContent = 'Lancement…';
+
+      try {
+        const session = await api('/bulk', {
+          method: 'POST',
+          body: JSON.stringify({ theme, count, durationMin, width, height, steps, model, mistralKey: mistralKey || undefined })
+        });
+        _currentBulkSessionId = session.id;
+        document.getElementById('hfBulkResult').hidden = false;
+        document.getElementById('hfBulkSessionId').textContent = session.id;
+        document.getElementById('hfBulkProgressFill').style.width = '0%';
+        document.getElementById('hfBulkProgressText').textContent = '0 / ? vidéos';
+        document.getElementById('hfBulkLog').textContent = '';
+        _pollBulk(session.id);
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Lancer la génération en masse';
+      }
+    }
+
+    function _pollBulk(sessionId) {
+      clearTimeout(_pollBulkTimer);
+      _pollBulkTimer = setTimeout(async () => {
+        try {
+          const s = await api(`/bulk/${sessionId}`);
+          const pct = s.progress ?? 0;
+          document.getElementById('hfBulkProgressFill').style.width = pct + '%';
+          document.getElementById('hfBulkProgressText').textContent =
+            `${s.videosCompleted ?? 0} / ${s.videosPlanned ?? '?'} vidéos — ${pct}%`;
+          const logEl = document.getElementById('hfBulkLog');
+          logEl.textContent = (s.logs || []).map(l => `[${(l.at||'').slice(11,19)}] ${l.msg}`).join('\n');
+          logEl.scrollTop = logEl.scrollHeight;
+          refreshBulkSessions();
+          if (s.status !== 'completed' && s.status !== 'failed' && s.status !== 'cancelled') {
+            _pollBulk(sessionId);
+          } else {
+            refreshJobs();
+          }
+        } catch { _pollBulk(sessionId); }
+      }, 6000);
+    }
+
+    async function loadSchedule() {
+      try {
+        const cfg = await api('/schedule');
+        if (cfg.theme) document.getElementById('hfSchedTheme').value = cfg.theme;
+        if (cfg.countPerRun) document.getElementById('hfSchedCount').value = cfg.countPerRun;
+        if (cfg.intervalHours) document.getElementById('hfSchedInterval').value = cfg.intervalHours;
+        if (cfg.durationMin) document.getElementById('hfSchedDuration').value = String(Math.round(cfg.durationMin * 60));
+        const statusEl = document.getElementById('hfSchedStatus');
+        if (cfg.enabled) {
+          document.getElementById('hfSchedEnableBtn').hidden = true;
+          document.getElementById('hfSchedDisableBtn').hidden = false;
+          document.getElementById('hfSchedulerBox').classList.add('schedule-active');
+          statusEl.textContent = `Actif — prochain run: ${cfg.nextRunAt ? new Date(cfg.nextRunAt).toLocaleString('fr-FR') : '?'}`;
+          statusEl.style.color = '#22c55e';
+        } else {
+          statusEl.textContent = cfg.lastRunAt ? `Dernier run: ${new Date(cfg.lastRunAt).toLocaleString('fr-FR')}` : 'Désactivé';
+          statusEl.style.color = '';
+        }
+      } catch { /* ignore */ }
+    }
+
+    async function enableSchedule() {
+      const theme = document.getElementById('hfSchedTheme').value.trim();
+      if (!theme) { alert('Entrez un thème pour le planificateur.'); return; }
+      const countPerRun = Number(document.getElementById('hfSchedCount').value);
+      const intervalHours = Number(document.getElementById('hfSchedInterval').value);
+      const durationSec = Number(document.getElementById('hfSchedDuration').value);
+      const mistralKey = document.getElementById('hfSchedMistralKey').value.trim();
+      const model = getModel();
+      try {
+        await api('/schedule', {
+          method: 'POST',
+          body: JSON.stringify({ enabled: true, theme, countPerRun, intervalHours, durationMin: durationSec/60, model, mistralKey: mistralKey||undefined })
+        });
+        await loadSchedule();
+      } catch (err) { alert('Erreur: ' + err.message); }
+    }
+
+    async function disableSchedule() {
+      const cfg = await api('/schedule').catch(() => ({}));
+      await api('/schedule', { method: 'POST', body: JSON.stringify({ ...cfg, enabled: false }) }).catch(() => {});
+      document.getElementById('hfSchedEnableBtn').hidden = false;
+      document.getElementById('hfSchedDisableBtn').hidden = true;
+      document.getElementById('hfSchedulerBox').classList.remove('schedule-active');
+      document.getElementById('hfSchedStatus').textContent = 'Désactivé';
+    }
+
+    async function init() {
+      if (_initialized) { refreshJobs(); refreshBulkSessions(); return; }
+      _initialized = true;
+      await checkService();
+      await Promise.all([refreshJobs(), refreshBulkSessions(), loadSchedule()]);
+    }
+
+    document.getElementById('hfCheckServiceBtn').addEventListener('click', checkService);
+    document.getElementById('hfStartServiceBtn').addEventListener('click', async () => {
+      document.getElementById('hfServiceStatusText').textContent = 'Démarrage…';
+      await checkService();
+    });
+    document.getElementById('hfGenerateSingleBtn').addEventListener('click', generateSingle);
+    document.getElementById('hfStartBulkBtn').addEventListener('click', startBulk);
+    document.getElementById('hfRefreshJobsBtn').addEventListener('click', () => { refreshJobs(); refreshBulkSessions(); });
+    document.getElementById('hfClearQueueBtn').addEventListener('click', async () => {
+      if (!confirm('Vider toute la file d\'attente HF ?')) return;
+      await api('/queue/clear', { method: 'POST' });
+      refreshJobs();
+    });
+    document.getElementById('hfSchedEnableBtn').addEventListener('click', enableSchedule);
+    document.getElementById('hfSchedDisableBtn').addEventListener('click', disableSchedule);
+
+    return { init };
+  })();
+  </script>
   <footer class="site-footer">
     <a href="/terms.html">Conditions</a>
     <span>·</span>
