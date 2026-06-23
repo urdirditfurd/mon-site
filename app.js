@@ -17,6 +17,9 @@ const state = {
   tiktokConfigured: false,
   youtubeCookiesConfigured: false,
   youtubeCookiesUpdatedAt: "",
+  videoProvider: "fal",
+  videoModel: "SulphurAI/Sulphur-2-base",
+  hfVideoServiceConfigured: false,
   ytDlpAvailable: false,
   quickMode: true,
   languageMode: "no-added-audio",
@@ -138,6 +141,9 @@ const dom = {
   copyrightShieldRow: document.getElementById("copyrightShieldRow"),
   copyrightShieldHint: document.getElementById("copyrightShieldHint"),
   aiKeysDetails: document.getElementById("aiKeysDetails"),
+  videoProvider: document.getElementById("videoProvider"),
+  videoModel: document.getElementById("videoModel"),
+  falApiKeyField: document.getElementById("falApiKeyField"),
   mistralApiKey: document.getElementById("mistralApiKey"),
   falApiKey: document.getElementById("falApiKey"),
   ytDlpWarning: document.getElementById("ytDlpWarning")
@@ -155,7 +161,7 @@ function isLikelyYouTubeUrl(value) {
 function renderBackendMeta() {
   if (!dom.backendMeta) return;
   dom.backendMeta.textContent =
-    `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+    `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"} · vidéo IA: ${state.videoProvider === "huggingface-local" ? "HF local" : "FAL"}`;
   if (!state.ytDlpAvailable) {
     dom.backendMeta.textContent += " — lance: npm install puis npm start";
   }
@@ -212,6 +218,8 @@ function loadAiKeysFromStorage() {
     const parsed = JSON.parse(raw);
     if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
     if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
+    if (dom.videoProvider && parsed.videoProvider) dom.videoProvider.value = parsed.videoProvider;
+    if (dom.videoModel && parsed.videoModel) dom.videoModel.value = parsed.videoModel;
   } catch {
     // ignore corrupt storage
   }
@@ -223,7 +231,9 @@ function saveAiKeysToStorage() {
       AI_KEYS_STORAGE,
       JSON.stringify({
         mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
-        falApiKey: (dom.falApiKey?.value || "").trim()
+        falApiKey: (dom.falApiKey?.value || "").trim(),
+        videoProvider: dom.videoProvider?.value || state.videoProvider,
+        videoModel: dom.videoModel?.value || state.videoModel
       })
     );
   } catch {
@@ -235,12 +245,42 @@ function isAiRemixMode() {
   return state.generationMode === "ai-remix";
 }
 
+function providerNeedsFalKey() {
+  return state.videoProvider === "fal";
+}
+
+function syncVideoProviderFromDom() {
+  if (dom.videoProvider?.value) {
+    state.videoProvider = dom.videoProvider.value === "huggingface-local" ? "huggingface-local" : "fal";
+  }
+  if (dom.videoModel?.value) {
+    state.videoModel = dom.videoModel.value;
+  }
+}
+
+function applyVideoProviderUi() {
+  syncVideoProviderFromDom();
+  const showFalField = providerNeedsFalKey();
+  if (dom.falApiKeyField) {
+    dom.falApiKeyField.hidden = !showFalField;
+  }
+  if (dom.videoModel) {
+    dom.videoModel.disabled = !isAiRemixMode();
+  }
+  if (dom.generationModeHint && isAiRemixMode()) {
+    dom.generationModeHint.textContent =
+      state.videoProvider === "huggingface-local"
+        ? "L'IA VOANH analyse la vidéo source, écrit des scripts viraux originaux, puis le moteur Hugging Face local génère les shorts IA avec sous-titres."
+        : "L'IA VOANH analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres.";
+  }
+}
+
 function applyGenerationModeUi() {
   const aiMode = isAiRemixMode();
   if (dom.aiKeysDetails) dom.aiKeysDetails.open = aiMode;
   if (dom.generationModeHint) {
     dom.generationModeHint.textContent = aiMode
-      ? "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres."
+      ? "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis génère des shorts IA avec sous-titres."
       : "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
   }
   if (dom.copyrightShieldRow) {
@@ -259,6 +299,7 @@ function applyGenerationModeUi() {
   if (dom.analyzeBtn) {
     dom.analyzeBtn.textContent = aiMode ? "Générer mes shorts IA" : "Générer mes shorts";
   }
+  applyVideoProviderUi();
 }
 
 function sleep(ms) {
@@ -1264,6 +1305,9 @@ async function checkBackendHealth() {
     const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
     state.ytDlpAvailable = Boolean(payload.ytDlpAvailable);
+    state.hfVideoServiceConfigured = Boolean(
+      serverConfig?.videoGeneration?.hfServiceConfigured ?? payload.hfVideoServiceConfigured ?? false
+    );
     state.youtubeApiAvailable = Boolean(
       serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
     );
@@ -1282,6 +1326,16 @@ async function checkBackendHealth() {
         state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
       }
     }
+    if (serverConfig?.videoGeneration) {
+      state.videoProvider =
+        serverConfig.videoGeneration.defaultProvider === "huggingface-local" ? "huggingface-local" : "fal";
+      const defaultModel =
+        serverConfig.videoGeneration.models?.huggingfaceLocal?.find((item) => item.recommended)?.id ||
+        state.videoModel;
+      state.videoModel = defaultModel;
+      if (dom.videoProvider) dom.videoProvider.value = state.videoProvider;
+      if (dom.videoModel) dom.videoModel.value = state.videoModel;
+    }
     if (serverConfig?.youtubeCookies) {
       renderYoutubeCookiesStatus(serverConfig.youtubeCookies);
     } else {
@@ -1293,6 +1347,7 @@ async function checkBackendHealth() {
     }
     renderBackendMeta();
     renderYtDlpWarning();
+    applyVideoProviderUi();
     if (!state.ytDlpAvailable) {
       updateStatus("Installe les dépendances : npm install puis npm start (voir bandeau orange).", false);
     } else {
@@ -1331,6 +1386,7 @@ async function createJob() {
   const aspectRatio = dom.aspectRatio.value;
   const copyrightShield = dom.copyrightShield ? dom.copyrightShield.checked : true;
   const aiRemixMode = isAiRemixMode();
+  syncVideoProviderFromDom();
   state.currentAspectRatio = aspectRatio;
   applyPreviewAspectRatio(aspectRatio);
 
@@ -1341,7 +1397,7 @@ async function createJob() {
       updateStatus("Ajoute ta clé API Mistral pour le mode Remix IA.", false);
       return;
     }
-    if (!falApiKey) {
+    if (providerNeedsFalKey() && !falApiKey) {
       updateStatus("Ajoute ta clé API FAL pour le mode Remix IA.", false);
       return;
     }
@@ -1355,9 +1411,13 @@ async function createJob() {
   body.append("aspectRatio", aspectRatio);
   body.append("copyrightShield", copyrightShield ? "true" : "false");
   body.append("aiRemixMode", aiRemixMode ? "true" : "false");
+  body.append("videoProvider", state.videoProvider);
+  body.append("hfModel", state.videoModel);
   if (aiRemixMode) {
     body.append("mistralApiKey", (dom.mistralApiKey?.value || "").trim());
-    body.append("falApiKey", (dom.falApiKey?.value || "").trim());
+    if (providerNeedsFalKey()) {
+      body.append("falApiKey", (dom.falApiKey?.value || "").trim());
+    }
   }
   body.append("frameMode", "full-video");
   body.append("languageMode", "no-added-audio");
@@ -1380,7 +1440,12 @@ async function createJob() {
   dom.analyzeBtn.disabled = true;
   resetClipState();
   setGenerationProgress(5);
-  updateStatus(aiRemixMode ? "Analyse YouTube + scripts IA viraux…" : "Analyse du lien et création des shorts…", false);
+  updateStatus(
+    aiRemixMode
+      ? `Analyse YouTube + scripts IA viraux (${state.videoProvider === "huggingface-local" ? "Hugging Face" : "FAL"})…`
+      : "Analyse du lien et création des shorts…",
+    false
+  );
 
   try {
     const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
@@ -1505,6 +1570,19 @@ function initEvents() {
   if (dom.falApiKey) {
     dom.falApiKey.addEventListener("change", saveAiKeysToStorage);
   }
+  if (dom.videoProvider) {
+    dom.videoProvider.addEventListener("change", () => {
+      syncVideoProviderFromDom();
+      applyVideoProviderUi();
+      saveAiKeysToStorage();
+    });
+  }
+  if (dom.videoModel) {
+    dom.videoModel.addEventListener("change", () => {
+      syncVideoProviderFromDom();
+      saveAiKeysToStorage();
+    });
+  }
 
   if (dom.analyzeBtn) {
     dom.analyzeBtn.addEventListener("click", () => {
@@ -1536,11 +1614,13 @@ function initEvents() {
 }
 
 function initDefaults() {
+  loadAiKeysFromStorage();
   if (dom.generationMode) {
     state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
     applyGenerationModeUi();
   }
-  loadAiKeysFromStorage();
+  syncVideoProviderFromDom();
+  applyVideoProviderUi();
   if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
   if (dom.clipsCount) dom.clipsCount.value = String(config.defaultClipsCount);
   if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;

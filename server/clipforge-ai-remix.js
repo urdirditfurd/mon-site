@@ -2,13 +2,13 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const {
-  falFetch,
-  pollFalClip,
-  downloadFile,
+  generateSceneClip,
   runFfmpegConcat,
   resolveFalModel,
-  FAL_QUEUE_BASE,
-  DEFAULT_FAL_MODEL
+  resolveHfVideoModel,
+  resolveVideoProvider,
+  DEFAULT_FAL_MODEL,
+  DEFAULT_VIDEO_PROVIDER
 } = require("./voanh-video-pipeline");
 
 const FAL_CLIP_SEC = 10;
@@ -121,25 +121,6 @@ Réponds UNIQUEMENT en JSON valide :
   });
 }
 
-async function generateFalSceneClip({ falKey, modelPath, scene, aspectRatio, destPath }) {
-  const visual = `${scene.visualPrompt}. Cinematic, original content, viral short style, no logos, no celebrity faces, no text overlay.`;
-  const submit = await falFetch(`${FAL_QUEUE_BASE}/${modelPath}`, falKey, {
-    method: "POST",
-    body: JSON.stringify({
-      prompt: visual,
-      duration: falDurationForScene(scene.durationSec),
-      aspect_ratio: aspectRatio
-    })
-  });
-  const clipUrl = await pollFalClip({
-    falKey,
-    modelPath,
-    requestId: submit.request_id
-  });
-  await downloadFile(clipUrl, destPath);
-  return destPath;
-}
-
 async function processAiRemixJob(job, ctx) {
   const {
     jobDir,
@@ -163,9 +144,13 @@ async function processAiRemixJob(job, ctx) {
   const mistralKey = String(job.aiSecrets?.mistralApiKey || "").trim();
   const falKey = String(job.aiSecrets?.falApiKey || "").trim();
   if (!mistralKey) throw new Error("Clé API Mistral requise pour le mode Remix IA");
-  if (!falKey) throw new Error("Clé API FAL requise pour le mode Remix IA");
+  const videoProvider = resolveVideoProvider(job.params.videoProvider || DEFAULT_VIDEO_PROVIDER);
+  if (videoProvider === "fal" && !falKey) {
+    throw new Error("Clé API FAL requise pour le mode Remix IA");
+  }
 
   const falModel = resolveFalModel(job.params.falModel || DEFAULT_FAL_MODEL);
+  const hfModel = resolveHfVideoModel(job.params.hfModel);
   const mistralModel = job.params.mistralModel || "mistral-small-2506";
 
   job.params.burnSubtitles = true;
@@ -214,7 +199,7 @@ async function processAiRemixJob(job, ctx) {
   });
 
   job.progress = 30;
-  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA (FAL)…`;
+  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA (${videoProvider === "huggingface-local" ? "Hugging Face" : "FAL"})…`;
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
 
@@ -236,10 +221,15 @@ async function processAiRemixJob(job, ctx) {
       await persistJobsDb();
 
       const scenePath = path.join(clipDir, `scene-${String(sceneIndex + 1).padStart(2, "0")}.mp4`);
-      await generateFalSceneClip({
+      await generateSceneClip({
+        provider: videoProvider,
         falKey,
-        modelPath: falModel,
-        scene,
+        falModelPath: falModel,
+        hfModel,
+        scene: {
+          ...scene,
+          durationSec: falDurationForScene(scene.durationSec)
+        },
         aspectRatio: job.params.aspectRatio,
         destPath: scenePath
       });

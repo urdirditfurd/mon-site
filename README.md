@@ -34,6 +34,11 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - clip individuel MP4
   - plan JSON
   - bundle ZIP (clips + SRT + plan)
+- Nouveau provider **Hugging Face local** pour la génération text-to-video:
+  - **`SulphurAI/Sulphur-2-base`** par défaut pour le gros volume
+  - **`Wan2.1-T2V-1.3B-Diffusers`** pour GPU plus modestes
+  - **`Wan2.2-T2V-A14B-Diffusers`** pour la meilleure qualité open-weight
+- Fallback **FAL.ai** conservé pour le cloud
 
 ## Pré-requis
 
@@ -41,6 +46,10 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 - FFmpeg + FFprobe dans le PATH
 - **yt-dlp** (obligatoire pour les liens YouTube) : `pip install -U yt-dlp`
 - Redis recommandé pour le mode BullMQ (optionnel)
+- Pour la génération vidéo locale en volume:
+  - un GPU compatible CUDA est fortement recommandé
+  - le microservice `hf_video_service/` doit être lancé séparément
+  - voir `hf_video_service/README.md`
 
 ## Mise à jour (local ou VPS)
 
@@ -73,6 +82,36 @@ Guide complet (2 sites sur le même VPS, Nginx, PM2, HTTPS) : [`docs/vps-ovh.md`
 npm install
 npm start
 ```
+
+### Mode text-to-video local Hugging Face (recommandé pour gros volume)
+
+1) Démarrer le microservice vidéo local:
+
+```bash
+python3 -m venv .venv-hf-video
+source .venv-hf-video/bin/activate
+pip install --upgrade pip
+# installer ici la bonne roue torch pour votre GPU
+pip install -r hf_video_service/requirements.txt
+export HF_VIDEO_SERVICE_TOKEN=change-me
+uvicorn hf_video_service.app:app --host 0.0.0.0 --port 7861
+```
+
+2) Dans un autre terminal, lancer le backend principal avec le provider local:
+
+```bash
+export VIDEO_PROVIDER=huggingface-local
+export HF_VIDEO_SERVICE_URL=http://127.0.0.1:7861
+export HF_VIDEO_SERVICE_TOKEN=change-me
+export HF_VIDEO_DEFAULT_MODEL=SulphurAI/Sulphur-2-base
+npm start
+```
+
+Avec cette config:
+
+- le mode **Remix IA viral** utilise Hugging Face local par defaut
+- le studio **VOANH** long format utilise aussi Hugging Face local par defaut
+- FAL reste disponible dans l'UI comme fallback cloud
 
 ### Mode V4 pro (BullMQ + Redis)
 
@@ -348,3 +387,4 @@ npm run start:v4:workers4
 - Queue: BullMQ + Redis (optionnel, fallback mémoire)
 - Vidéo: FFmpeg/FFprobe
 - Packaging: Archiver
+- Text-to-video local: FastAPI + Diffusers (`hf_video_service/`)

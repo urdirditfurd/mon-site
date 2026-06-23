@@ -17,3 +17,11 @@ services:
         sync: false
       - key: QUEUE_MODE
         value: memory
+      - key: VIDEO_PROVIDER
+        sync: false
+      - key: HF_VIDEO_SERVICE_URL
+        sync: false
+      - key: HF_VIDEO_SERVICE_TOKEN
+        sync: false
+      - key: HF_VIDEO_DEFAULT_MODEL
+        sync: false

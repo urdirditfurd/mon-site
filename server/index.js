@@ -14,6 +14,14 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
+const {
+  getVideoProviderConfig,
+  providerNeedsFalKey,
+  resolveVideoProvider,
+  resolveFalModel,
+  resolveHfVideoModel,
+  DEFAULT_VIDEO_PROVIDER
+} = require("./voanh-video-pipeline");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
@@ -3278,6 +3286,7 @@ app.get("/api/health", async (_req, res) => {
   const cookiesMeta = getStoredYoutubeCookiesMeta();
   const scheduleConfig = readAutomationScheduleConfig();
   const deploy = readDeployInfo();
+  const videoProviderConfig = getVideoProviderConfig();
   res.json({
     ok: true,
     ...deploy,
@@ -3290,6 +3299,8 @@ app.get("/api/health", async (_req, res) => {
     youtubeCookiesConfigured: cookiesMeta.configured,
     automationScheduleEnabled: Boolean(scheduleConfig.enabled),
     automationPipelineRunning,
+    videoProvider: videoProviderConfig.defaultProvider,
+    hfVideoServiceConfigured: videoProviderConfig.hfServiceConfigured,
     queueMode: queueModeRuntime,
     workerConcurrency: WORKER_CONCURRENCY,
     queueSize: q.waiting,
@@ -3301,6 +3312,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/config", (_req, res) => {
   const cookiesMeta = getStoredYoutubeCookiesMeta();
   const scheduleConfig = readAutomationScheduleConfig();
+  const videoProviderConfig = getVideoProviderConfig();
   res.json({
     defaults: DEFAULTS,
     queue: {
@@ -3325,8 +3337,10 @@ app.get("/api/config", (_req, res) => {
       burnSubtitles: true,
       copyrightShield: true,
       backgroundMusic: fs.existsSync(COPYRIGHT_SHIELD_BG_MUSIC),
-      aiRemixViral: true
+      aiRemixViral: true,
+      videoProviders: videoProviderConfig.providers
     },
+    videoGeneration: videoProviderConfig,
     youtubeCookies: cookiesMeta,
     automationSchedule: sanitizeAutomationScheduleStatus(scheduleConfig)
   });
@@ -3697,13 +3711,15 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const mistralApiKey = String(req.body.mistralApiKey || "").trim();
     const falApiKey = String(req.body.falApiKey || "").trim();
     const mistralModel = String(req.body.mistralModel || "mistral-small-2506").trim();
-    const falModel = String(req.body.falModel || "").trim();
+    const videoProvider = resolveVideoProvider(req.body.videoProvider || DEFAULT_VIDEO_PROVIDER);
+    const falModel = resolveFalModel(String(req.body.falModel || "").trim());
+    const hfModel = resolveHfVideoModel(String(req.body.hfModel || "").trim());
 
     if (aiRemixMode) {
       if (!mistralApiKey) {
         return res.status(400).json({ error: "Clé API Mistral requise pour le mode Remix IA viral." });
       }
-      if (!falApiKey) {
+      if (providerNeedsFalKey(videoProvider) && !falApiKey) {
         return res.status(400).json({ error: "Clé API FAL requise pour le mode Remix IA viral." });
       }
       if (!hasVideoUrl) {
@@ -3769,8 +3785,10 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         backgroundMusic: boolFrom(req.body.backgroundMusic, DEFAULTS.backgroundMusic),
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath),
         aiRemixMode,
+        videoProvider,
         mistralModel: mistralModel || "mistral-small-2506",
-        falModel: falModel || undefined
+        falModel: falModel || undefined,
+        hfModel
       }),
       aiSecrets: aiRemixMode ? { mistralApiKey, falApiKey } : undefined,
       clips: [],

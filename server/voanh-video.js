@@ -3,15 +3,16 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
-const { createVideoJobManager } = require("./voanh-video-pipeline");
+const {
+  createVideoJobManager,
+  FAL_MODELS,
+  getVideoProviderConfig,
+  resolveVideoProvider,
+  resolveFalModel,
+  resolveHfVideoModel
+} = require("./voanh-video-pipeline");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-
-const FAL_MODELS = {
-  kling: "fal-ai/kling-video/v2/master/text-to-video",
-  klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video",
-  minimax: "fal-ai/minimax/video-01-live/text-to-video"
-};
 
 function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
   const router = require("express").Router();
@@ -279,7 +280,9 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         durationMin: req.body?.durationMin,
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
-        modelPath: req.body?.modelPath,
+        videoProvider: resolveVideoProvider(req.body?.videoProvider),
+        modelPath: resolveFalModel(req.body?.modelPath),
+        hfModel: resolveHfVideoModel(req.body?.hfModel),
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"]
@@ -311,7 +314,12 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({
+      ok: true,
+      ffmpegReady,
+      models: FAL_MODELS,
+      videoGeneration: getVideoProviderConfig()
+    });
   });
 
   return router;

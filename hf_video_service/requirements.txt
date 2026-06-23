@@ -1,0 +1,8 @@
+accelerate
+diffusers
+fastapi
+imageio[ffmpeg]
+safetensors
+sentencepiece
+transformers
+uvicorn[standard]
