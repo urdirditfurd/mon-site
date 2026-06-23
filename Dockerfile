@@ -17,11 +17,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY app.js config.js index.html voanh.html voanh-video-studio.js styles.css favicon.png privacy.html terms.html tiktok-callback.html ./
+COPY app.js config.js index.html voanh.html voanh-video-studio.js sulphur.html sulphur-studio.js styles.css favicon.png privacy.html terms.html tiktok-callback.html ./
 COPY server ./server
+COPY scripts ./scripts
 COPY storage ./storage
 
-RUN mkdir -p storage/uploads storage/jobs storage/secrets
+RUN mkdir -p storage/uploads storage/jobs storage/secrets storage/sulphur/clips storage/sulphur/bulk storage/sulphur/long
 
 EXPOSE 3000
 

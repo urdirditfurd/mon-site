@@ -1,6 +1,52 @@
-# ClipForge Studio (V4)
+# ClipForge Studio (V4) + Sulphur Engine
 
-Application fullstack de génération de clips courts “social-ready”, inspirée d’un workflow type Klap (sans copie de code propriétaire).
+Application fullstack de génération de clips courts “social-ready”, inspirée d’un workflow type Klap (sans copie de code propriétaire), plus un **moteur text-to-video Sulphur** pour générer des vidéos IA **courtes ou longues, en masse, sans limite quotidienne** (rotation multi-providers + mode local diffusers).
+
+## Sulphur Engine (text-to-video)
+
+Moteur text-to-video intégré, accessible via `/sulphur` (UI) et `/api/sulphur/*` (API). Conçu pour générer des vidéos IA en grande quantité tous les jours sans plafond :
+
+- **Modèle principal** : `SulphurAI/Sulphur-2-base` (1er au classement téléchargements text-to-video sur Hugging Face), basé sur Lightricks/LTX-2.3. Le code Diffusers local exécute le poids brut quand `python3`, `torch` et `diffusers` sont installés.
+- **Catalogue de fallback** : `Lightricks/LTX-Video`, `Wan-AI/Wan2.2-T2V-A14B`, `Wan-AI/Wan2.1-T2V`, Kling v2/1.6, MiniMax Hailuo.
+- **Rotation multi-providers** : fal-ai → Replicate → Novita → local. Quand un provider tombe en erreur ou en quota, le suivant est essayé automatiquement (retry exponentiel inclus).
+- **Modes** :
+  - `POST /api/sulphur/generate` — un clip court à partir d'un prompt
+  - `POST /api/sulphur/bulk` — N prompts en parallèle (concurrence configurable, idéal pour batchs quotidiens illimités)
+  - `POST /api/sulphur/long` — plan automatique de scènes (sans dépendance LLM par défaut, optimisable avec une clé Mistral) puis assemblage FFmpeg
+- **Clés** : envoyées par header (`x-fal-key`, `x-replicate-key`, `x-novita-key`, `x-hf-token`) ou via variables d'environnement (`FAL_KEY`, `REPLICATE_API_TOKEN`, `NOVITA_API_KEY`, `HF_TOKEN`). Les clés saisies dans l'UI restent dans le `localStorage` du navigateur.
+- **Mode local** : poser un script Python diffusers dans `scripts/sulphur_generate.py` (déjà inclus). Si `python3 -c "import diffusers, torch"` répond OK, l'app génère directement avec le poids `SulphurAI/Sulphur-2-base` ou n'importe quel modèle LTX/Wan, **sans coût provider**.
+
+### Exemples d'API
+
+Clip unique :
+
+```bash
+curl -X POST http://localhost:3000/api/sulphur/generate \
+  -H "x-fal-key: $FAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"a cinematic drone shot of a foggy mountain at sunrise","durationSec":5,"aspectRatio":"9:16","modelKey":"sulphur-2"}'
+```
+
+Batch massif (un prompt par ligne) :
+
+```bash
+curl -X POST http://localhost:3000/api/sulphur/bulk \
+  -H "x-fal-key: $FAL_KEY" -H "x-replicate-key: $REPLICATE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"prompts":["prompt 1","prompt 2","prompt 3"],"modelKey":"wan-2.2-t2v","concurrency":4}'
+```
+
+Vidéo longue auto :
+
+```bash
+curl -X POST http://localhost:3000/api/sulphur/long \
+  -H "x-fal-key: $FAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"topic":"une journée dans la vie d'\''un astronaute","durationSec":120,"sceneSec":5}'
+```
+
+Aller dans l'UI : ouvrir `http://localhost:3000/sulphur`.
+
 
 ## Nouveautés V4
 

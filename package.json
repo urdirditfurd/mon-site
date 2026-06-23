@@ -8,8 +8,8 @@
     "start": "node server/index.js",
     "start:v4": "QUEUE_MODE=bullmq node server/index.js",
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
-    "check": "node --check app.js && node --check server/index.js",
-    "setup": "npm install",
+    "check": "node --check app.js && node --check server/index.js && node --check server/sulphur-engine.js && node --check server/sulphur-router.js",
+    "setup": "npm install"
   },
   "repository": {
     "type": "git",

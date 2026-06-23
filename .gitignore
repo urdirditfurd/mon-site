@@ -2,6 +2,8 @@ node_modules/
 storage/uploads/*
 storage/jobs/*
 storage/jobs-db.json
+storage/sulphur/**
+storage/voanh-videos/**
 !storage/uploads/.gitkeep
 !storage/jobs/.gitkeep
 **/__pycache__/
