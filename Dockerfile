@@ -12,6 +12,10 @@ RUN apt-get update \
   && pip3 install --break-system-packages yt-dlp edge-tts \
   && rm -rf /var/lib/apt/lists/*
 
+# Pour la génération Sulphur/HF locale (GPU requis), décommentez :
+# COPY requirements-video.txt ./
+# RUN pip3 install --break-system-packages -r requirements-video.txt
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

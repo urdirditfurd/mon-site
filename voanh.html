@@ -1953,7 +1953,26 @@ body::before {
       </div>
 
       <div class="field-group">
-        <label class="field-label">🔑 Clé API FAL.ai <span style="color:var(--danger)">*</span></label>
+        <label class="field-label">Moteur de génération</label>
+        <select class="field-input field-select" id="video-provider">
+          <option value="sulphur" selected>Sulphur 2 / Hugging Face (local GPU — sans limite)</option>
+          <option value="fal">FAL.ai Kling (cloud — clé requise)</option>
+        </select>
+        <div class="field-hint">Sulphur 2 Base = modèle #1 HF text-to-video (933k+ téléchargements). Production locale illimitée sur GPU.</div>
+      </div>
+
+      <div class="field-group" id="hf-model-group">
+        <label class="field-label">Modèle Hugging Face</label>
+        <select class="field-input field-select" id="video-hf-model">
+          <option value="sulphur2" selected>Sulphur 2 Base (LTX 2.3 — recommandé)</option>
+          <option value="sulphur2-distilled">Sulphur 2 Distilled (rapide)</option>
+          <option value="wan22">Wan 2.2 TI2V 5B</option>
+          <option value="wan21lite">Wan 2.1 T2V 1.3B (léger, 8GB VRAM)</option>
+        </select>
+      </div>
+
+      <div class="field-group" id="fal-key-group">
+        <label class="field-label">🔑 Clé API FAL.ai <span style="color:var(--danger)" id="fal-key-required">*</span></label>
         <div style="display:flex;gap:8px">
           <input type="password" class="field-input" id="fal-api-key-input" placeholder="fal_xxxxxxxx…" style="flex:1">
           <button class="btn-primary" id="save-fal-key" type="button" style="white-space:nowrap">ENREGISTRER</button>
@@ -1994,7 +2013,7 @@ body::before {
           </select>
         </div>
         <div class="field-group" style="margin-bottom:0">
-          <label class="field-label">Modèle FAL</label>
+          <label class="field-label" id="video-model-label">Modèle</label>
           <select class="field-input field-select" id="video-fal-model">
             <option value="fal-ai/kling-video/v2/master/text-to-video">Kling 2.0 Master (recommandé)</option>
             <option value="fal-ai/kling-video/v1.6/standard/text-to-video">Kling 1.6 Standard (économique)</option>
@@ -2014,6 +2033,12 @@ body::before {
         <label class="field-label">Clé API Creatomate (optionnel)</label>
         <input type="password" class="field-input" id="creatomate-api-key-input" placeholder="creatomate_…">
         <div class="field-hint"><a href="https://creatomate.com" target="_blank" rel="noopener" style="color:var(--cyan)">creatomate.com</a> — assemblage cloud si pas de serveur local.</div>
+      </div>
+
+      <div class="info-block" style="margin-top:0;border-left-color:var(--cyan)">
+        <strong style="color:var(--cyan)">Production en masse (batch)</strong><br>
+        API : <code>POST /api/sulphur/batch</code> — jusqu'à 500 vidéos par requête.<br>
+        Variable <code>SULPHUR_WORKER_CONCURRENCY</code> pour paralléliser sur GPU.
       </div>
 
       <div class="info-block" style="margin-top:0;border-left-color:var(--neon)">

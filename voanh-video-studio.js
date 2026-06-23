@@ -8,6 +8,12 @@
     kling: "fal-ai/kling-video/v2/master/text-to-video",
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
+  const HF_MODELS = {
+    sulphur2: "Sulphur 2 Base",
+    "sulphur2-distilled": "Sulphur 2 Distilled",
+    wan22: "Wan 2.2 TI2V 5B",
+    wan21lite: "Wan 2.1 Lite"
+  };
 
   const videoState = {
     running: false,
@@ -64,9 +70,39 @@
     } catch (_err) { /* ignore */ }
   }
 
+  function getVideoProvider() {
+    return document.getElementById("video-provider")?.value || "sulphur";
+  }
+
+  function getHfModel() {
+    return document.getElementById("video-hf-model")?.value || "sulphur2";
+  }
+
+  function updateProviderUi() {
+    const provider = getVideoProvider();
+    const isFal = provider === "fal";
+    const falGroup = document.getElementById("fal-key-group");
+    const hfGroup = document.getElementById("hf-model-group");
+    const falModelSelect = document.getElementById("video-fal-model");
+    const falRequired = document.getElementById("fal-key-required");
+    if (falGroup) falGroup.style.display = isFal ? "block" : "none";
+    if (hfGroup) hfGroup.style.display = isFal ? "none" : "block";
+    if (falModelSelect) falModelSelect.closest(".field-group").style.display = isFal ? "block" : "none";
+    if (falRequired) falRequired.style.display = isFal ? "inline" : "none";
+    const modelLabel = document.getElementById("video-model-label");
+    if (modelLabel) modelLabel.textContent = isFal ? "Modèle FAL" : "Modèle cloud (FAL)";
+    updateFalStatusPill();
+  }
+
   function updateFalStatusPill() {
     const pill = document.getElementById("fal-status");
     if (!pill) return;
+    const provider = getVideoProvider();
+    if (provider !== "fal") {
+      pill.className = "status-pill active";
+      pill.innerHTML = '<span class="status-dot"></span>SULPHUR ON';
+      return;
+    }
     const key = getFalKey();
     if (key.length >= 20) {
       pill.className = "status-pill active";
@@ -299,6 +335,8 @@ Réponds UNIQUEMENT en JSON valide :
     const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
     const clipSec = Number(document.getElementById("video-clip-sec")?.value || 10);
     const aspectRatio = document.getElementById("video-aspect")?.value || "9:16";
+    const provider = getVideoProvider();
+    const hfModel = getHfModel();
     const modelPath = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
     const assemblyMode = document.getElementById("video-assembly")?.value || "server";
     const falKey = document.getElementById("fal-api-key-input")?.value?.trim() || getFalKey();
@@ -309,7 +347,7 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Décrivez le sujet de la vidéo", "error");
       return;
     }
-    if (!falKey || falKey.length < 20) {
+    if (provider === "fal" && (!falKey || falKey.length < 20)) {
       global.toast?.("Configurez votre clé FAL.ai", "error");
       return;
     }
@@ -328,9 +366,9 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
 
-  const costEstimate = (sceneCount * 0.08 * clipSec).toFixed(1);
+  const costEstimate = provider === "fal" ? (sceneCount * 0.08 * clipSec).toFixed(1) : "0 (local GPU)";
     const proceed = global.confirm(
-      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût FAL estimé : ~${costEstimate}€.\nContinuer ?`
+      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nMoteur : ${provider === "fal" ? "FAL Kling" : HF_MODELS[hfModel] || "Sulphur 2"}.\nCoût estimé : ~${costEstimate}€.\nContinuer ?`
     );
     if (!proceed) return;
 
@@ -373,6 +411,33 @@ Réponds UNIQUEMENT en JSON valide :
         const scene = videoState.scenes[i];
         const pct = 5 + Math.round((i / videoState.scenes.length) * 80);
         setProgress(pct, `Clip ${i + 1}/${videoState.scenes.length}`, scene.visualPrompt?.slice(0, 80) || "");
+
+        if (provider === "sulphur") {
+          appendVideoLog(`Clip ${i + 1} : génération Sulphur/HF (${hfModel})…`);
+          const sulphurRes = await fetch(`${global.location.origin}/api/sulphur/jobs`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-mistral-key": mistralKey },
+            body: JSON.stringify({
+              provider: "sulphur",
+              promptOnly: true,
+              prompt: `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`,
+              clipSec,
+              aspectRatio,
+              hfModel,
+              mistralKey
+            })
+          }).then(async (r) => {
+            const body = await r.json();
+            if (!r.ok) throw new Error(body.error || r.statusText);
+            return body;
+          });
+          const finalJob = await pollSulphurJob(sulphurRes.id);
+          const clipUrl = `${global.location.origin}${finalJob.downloadUrl}`;
+          videoState.clipUrls.push(clipUrl);
+          appendVideoLog(`Clip ${i + 1} : terminé (Sulphur)`);
+          continue;
+        }
+
         appendVideoLog(`Clip ${i + 1} : soumission FAL…`);
 
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
@@ -447,6 +512,9 @@ Réponds UNIQUEMENT en JSON valide :
 
   function bindVideoStudio() {
     updateFalStatusPill();
+    updateProviderUi();
+
+    document.getElementById("video-provider")?.addEventListener("change", updateProviderUi);
 
     const openBtn = document.getElementById("open-video-modal");
     const openMob = document.getElementById("open-video-modal-mob");
@@ -494,10 +562,18 @@ Réponds UNIQUEMENT en JSON valide :
           return;
         }
         try {
-          const job = await startAutoJob({ topic, durationMin, mistralKey, mistralModel: global.state?.model });
-          appendVideoLog(`Job auto #${job.id} lancé en arrière-plan`);
+          const job = await startAutoJob({
+            topic,
+            durationMin,
+            mistralKey,
+            mistralModel: global.state?.model,
+            provider: getVideoProvider(),
+            hfModel: getHfModel()
+          });
+          appendVideoLog(`Job auto #${job.id} lancé (${getVideoProvider()})`);
           setProgress(5, "Production auto…", `Job ${job.id}`);
-          pollAutoJob(job.id, (status) => {
+          const pollFn = getVideoProvider() === "sulphur" ? pollSulphurJob : pollAutoJob;
+          pollFn(job.id, (status) => {
             setProgress(status.progress || 0, status.status, `${status.scenesDone || 0}/${status.sceneCount || "?"} scènes`);
             if (status.logs?.length) {
               const last = status.logs[status.logs.length - 1];
@@ -544,6 +620,13 @@ Réponds UNIQUEMENT en JSON valide :
         .then((h) => appendVideoLog(`Serveur vidéo OK — ffmpeg: ${h.ffmpegReady ? "oui" : "non"}`))
         .catch(() => appendVideoLog("Mode hors-ligne : lancez npm start pour l'assemblage FFmpeg"));
     }
+    fetch(`${global.location.origin}/api/sulphur/health`)
+      .then((r) => r.json())
+      .then((h) => {
+        const engine = h.engine?.ready ? `GPU ${h.engine.device}` : "GPU non détecté";
+        appendVideoLog(`Sulphur Studio : ${engine} — modèle par défaut ${h.defaultModel}`);
+      })
+      .catch(() => appendVideoLog("Moteur Sulphur indisponible — pip install -r requirements-video.txt"));
   }
 
   global.VoanhVideoStudio = {
@@ -592,21 +675,49 @@ Réponds UNIQUEMENT en JSON valide :
     );
   }
 
-  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+  async function pollSulphurJob(jobId) {
+    for (let i = 0; i < 7200; i += 1) {
+      const res = await fetch(`${global.location.origin}/api/sulphur/jobs/${encodeURIComponent(jobId)}`);
+      const job = await res.json();
+      if (!res.ok) throw new Error(job.error || res.statusText);
+      if (job.status === "completed" || job.status === "failed") return job;
+      await sleep(5000);
+    }
+    throw new Error("Timeout job Sulphur");
+  }
+
+  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, provider, hfModel, mistralKey, mistralModel }) {
     const falKey = getFalKey();
+    const videoProvider = provider || getVideoProvider();
     if (!mistralKey) throw new Error("Clé Mistral requise");
-    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    if (videoProvider === "fal" && (!falKey || falKey.length < 20)) {
+      throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    }
 
     const payload = {
       topic,
       durationMin,
       clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
       aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
+      provider: videoProvider,
+      hfModel: hfModel || getHfModel(),
       modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
       mistralModel: mistralModel || global.state?.model,
       mistralKey,
       falKey
     };
+
+    const videoProvider = provider || getVideoProvider();
+    if (videoProvider === "sulphur") {
+      const res = await fetch(`${global.location.origin}/api/sulphur/jobs/auto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      return body;
+    }
 
     return apiFetch("/jobs/auto", {
       method: "POST",

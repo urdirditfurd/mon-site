@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const DEFAULT_FAL_MODEL = "fal-ai/kling-video/v2/master/text-to-video";
+const { DEFAULT_HF_MODEL } = require("./hf-video-models");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,6 +18,13 @@ function resolveFalModel(modelKey) {
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
   return map[modelKey] || modelKey || DEFAULT_FAL_MODEL;
+}
+
+function resolveVideoProvider(provider) {
+  const value = String(provider || "fal").toLowerCase();
+  if (["sulphur", "hf", "local", "sulphur2"].includes(value)) return "sulphur";
+  if (value === "fal") return "fal";
+  return "fal";
 }
 
 async function falFetch(url, apiKey, options = {}) {
@@ -241,9 +249,12 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       mistralKey,
       falKey,
       modelPath,
-      mistralModel
+      mistralModel,
+      provider,
+      hfModel
     } = job.config;
 
+    const videoProvider = resolveVideoProvider(provider);
     const resolvedModel = resolveFalModel(modelPath);
     const jobDir = path.join(videoJobsDir, jobId);
     await fsp.mkdir(jobDir, { recursive: true });
@@ -272,27 +283,44 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await appendLog(jobId, `Plan OK : ${plan.title} (${plan.scenes.length} scènes)`);
 
       const clipUrls = [];
+      const localClips = [];
+      const { generateHfClip } = require("./sulphur-video-pipeline");
+
       for (let i = 0; i < plan.scenes.length; i += 1) {
         const scene = plan.scenes[i];
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
 
-        await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : soumission FAL`);
-        const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedModel}`, falKey, {
-          method: "POST",
-          body: JSON.stringify({
+        if (videoProvider === "sulphur") {
+          await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : génération Sulphur/HF`);
+          const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
+          await generateHfClip({
             prompt: visual,
-            duration: String(clipSec),
-            aspect_ratio: aspectRatio
-          })
-        });
+            outputPath: clipPath,
+            modelKey: hfModel || DEFAULT_HF_MODEL,
+            aspectRatio,
+            clipSec,
+            seed: i + 1
+          });
+          localClips.push(clipPath);
+        } else {
+          await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : soumission FAL`);
+          const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedModel}`, falKey, {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: visual,
+              duration: String(clipSec),
+              aspect_ratio: aspectRatio
+            })
+          });
 
-        const clipUrl = await pollFalClip({
-          falKey,
-          modelPath: resolvedModel,
-          requestId: submit.request_id
-        });
+          const clipUrl = await pollFalClip({
+            falKey,
+            modelPath: resolvedModel,
+            requestId: submit.request_id
+          });
+          clipUrls.push(clipUrl);
+        }
 
-        clipUrls.push(clipUrl);
         const progress = 8 + Math.round(((i + 1) / plan.scenes.length) * 82);
         await updateJob(jobId, {
           progress,
@@ -305,11 +333,12 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await updateJob(jobId, { status: "assembling", progress: 92 });
       await appendLog(jobId, "Assemblage FFmpeg de la vidéo longue…");
 
-      const localClips = [];
-      for (let i = 0; i < clipUrls.length; i += 1) {
-        const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
-        await downloadFile(clipUrls[i], clipPath);
-        localClips.push(clipPath);
+      if (videoProvider === "fal") {
+        for (let i = 0; i < clipUrls.length; i += 1) {
+          const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
+          await downloadFile(clipUrls[i], clipPath);
+          localClips.push(clipPath);
+        }
       }
 
       const listPath = path.join(jobDir, "concat.txt");
@@ -352,6 +381,8 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
         clipSec: Number(config.clipSec) || 10,
         aspectRatio: String(config.aspectRatio || "9:16"),
         modelPath: String(config.modelPath || DEFAULT_FAL_MODEL),
+        provider: resolveVideoProvider(config.provider),
+        hfModel: String(config.hfModel || DEFAULT_HF_MODEL),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
         falKey: String(config.falKey || "").trim()
@@ -364,7 +395,7 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
     if (!job.config.topic) throw new Error("topic requis");
     if (!job.config.mistralKey) throw new Error("mistralKey requis");
-    if (!job.config.falKey) throw new Error("falKey requis");
+    if (job.config.provider === "fal" && !job.config.falKey) throw new Error("falKey requis");
 
     const sceneCount = Math.ceil((job.config.durationMin * 60) / job.config.clipSec);
     if (sceneCount > 90) throw new Error("Trop de scènes — réduisez la durée");
@@ -415,6 +446,7 @@ module.exports = {
   createVideoJobManager,
   planScenesWithMistral,
   resolveFalModel,
+  resolveVideoProvider,
   falFetch,
   pollFalClip,
   downloadFile,

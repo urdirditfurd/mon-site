@@ -14,6 +14,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
+const { createSulphurVideoRouter } = require("./sulphur-video");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
@@ -3869,6 +3870,7 @@ ensureDirs()
   .then(async () => {
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
+    app.use("/api/sulphur", createSulphurVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = resolveYtDlpAvailable();
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);

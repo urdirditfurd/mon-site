@@ -332,11 +332,70 @@ Le champ `youtubeCookies` dans `POST /api/jobs` reste supporté:
 }
 ```
 
+## Sulphur Studio — Text-to-Video Hugging Face (production en masse)
+
+Intégration du modèle **SulphurAI/Sulphur-2-base** (#1 téléchargements HF text-to-video, basé sur LTX 2.3) pour générer des vidéos courtes et longues **sans limite** sur GPU local.
+
+### Modèles supportés
+
+| Clé | Modèle HF | Usage |
+|-----|-----------|-------|
+| `sulphur2` | SulphurAI/Sulphur-2-base | Qualité max (24GB VRAM) |
+| `sulphur2-distilled` | Sulphur 2 Distilled | Rapide |
+| `wan22` | Wan-AI/Wan2.2-TI2V-5B-Diffusers | Alternative officielle |
+| `wan21lite` | Wan-AI/Wan2.1-T2V-1.3B-Diffusers | GPU 8GB |
+
+### Installation GPU
+
+```bash
+pip3 install -r requirements-video.txt
+# ou
+npm run setup:video
+
+export HF_TOKEN=hf_xxx          # optionnel, accélère les téléchargements
+export SULPHUR_MODEL_CACHE=./models
+export SULPHUR_WORKER_CONCURRENCY=2   # jobs parallèles
+npm start
+```
+
+### API production
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/sulphur/health` | État GPU + modèles |
+| `POST /api/sulphur/jobs` | Vidéo unique (prompt ou topic+Mistral) |
+| `POST /api/sulphur/jobs/auto` | Vidéo longue automatique |
+| `POST /api/sulphur/batch` | Jusqu'à 500 vidéos par requête |
+| `GET /api/sulphur/jobs/:id` | Suivi progression |
+| `GET /api/sulphur/download/:id` | Télécharger MP4 |
+
+Exemple batch quotidien :
+
+```bash
+curl -X POST http://localhost:3000/api/sulphur/batch \
+  -H "Content-Type: application/json" \
+  -H "x-mistral-key: $MISTRAL_KEY" \
+  -d '{
+    "provider": "sulphur",
+    "hfModel": "sulphur2",
+    "clipSec": 5,
+    "aspectRatio": "9:16",
+    "mistralKey": "'"$MISTRAL_KEY"'",
+    "items": [
+      {"topic": "Les secrets de la productivité", "durationMin": 1},
+      {"topic": "Histoire du football français", "durationMin": 2}
+    ]
+  }'
+```
+
+Interface : `/voanh` → bouton **VIDÉO** → moteur **Sulphur 2 / Hugging Face**.
+
 ## Commandes utiles
 
 ```bash
 npm run check
 npm start
+npm run setup:video
 npm run start:v4
 npm run start:v4:workers4
 ```
