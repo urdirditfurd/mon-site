@@ -31,6 +31,149 @@ const NARRATION_HOOKS = [
   "Voici la conclusion de notre voyage."
 ];
 
+function splitScriptIntoChunks(script, sceneCount) {
+  const text = String(script || "").trim();
+  if (!text) return [];
+
+  const paragraphs = text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+  let chunks = paragraphs.length >= 2 ? [...paragraphs] : [];
+
+  if (chunks.length < sceneCount) {
+    const sentences = text.split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter(Boolean);
+    if (sentences.length >= sceneCount) {
+      chunks = [];
+      const perChunk = Math.ceil(sentences.length / sceneCount);
+      for (let i = 0; i < sceneCount; i += 1) {
+        const slice = sentences.slice(i * perChunk, (i + 1) * perChunk).join(" ").trim();
+        if (slice) chunks.push(slice);
+      }
+    }
+  }
+
+  if (!chunks.length) {
+    const words = text.split(/\s+/);
+    const perChunk = Math.max(1, Math.ceil(words.length / sceneCount));
+    for (let i = 0; i < sceneCount; i += 1) {
+      chunks.push(words.slice(i * perChunk, (i + 1) * perChunk).join(" ").trim());
+    }
+  }
+
+  while (chunks.length > sceneCount) {
+    const tail = chunks.pop();
+    chunks[chunks.length - 1] = `${chunks[chunks.length - 1]} ${tail}`.trim();
+  }
+
+  while (chunks.length < sceneCount) {
+    chunks.push(chunks[chunks.length - 1] || text.slice(0, 240));
+  }
+
+  return chunks.slice(0, sceneCount).filter(Boolean);
+}
+
+function buildPlanFromScriptChunks({ script, durationMin, clipSec, sceneCount }) {
+  const chunks = splitScriptIntoChunks(script, sceneCount);
+  const title = String(script || "")
+    .split(/\n/)[0]
+    .trim()
+    .slice(0, 80);
+
+  const scenes = chunks.map((narration, i) => {
+    const snippet = narration.slice(0, 160);
+    const template = SCENE_TEMPLATES[i % SCENE_TEMPLATES.length];
+    return {
+      index: i + 1,
+      visualPrompt: template.replace(/\{topic\}/g, snippet),
+      narration,
+      durationSec: clipSec
+    };
+  });
+
+  return { title: title || "Vidéo personnalisée", scenes };
+}
+
+async function planScenesFromScriptWithMistral({
+  script,
+  durationMin,
+  clipSec,
+  aspectRatio,
+  mistralKey,
+  mistralModel
+}) {
+  const sceneCount = Math.ceil((durationMin * 60) / clipSec);
+  const prompt = `Tu es directeur de création vidéo. À partir du script utilisateur, produis un plan JSON pour une vidéo de ${durationMin} minutes.
+
+Script utilisateur :
+"""
+${String(script).slice(0, 12000)}
+"""
+
+Format : ${aspectRatio}
+Durée par scène : ${clipSec}s
+Nombre de scènes EXACT : ${sceneCount}
+
+Règles :
+- Répartis le script en scènes cohérentes (narration en français)
+- Prompts visuels en anglais, cinématiques, sans logos ni célébrités
+- Pas de texte à l'écran dans les visuels
+
+Réponds UNIQUEMENT en JSON valide :
+{"title":"...","scenes":[{"index":1,"visualPrompt":"...","narration":"...","durationSec":${clipSec}}]}`;
+
+  const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${mistralKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: mistralModel || process.env.MISTRAL_PLANNER_MODEL || DEFAULT_MISTRAL_PLANNER_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.65,
+      max_tokens: Math.min(16000, 500 + sceneCount * 140)
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Mistral script plan: ${errText.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const raw = data.choices?.[0]?.message?.content || "";
+  const clean = raw.replace(/```json|```/g, "").trim();
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Réponse Mistral invalide (JSON attendu)");
+  const parsed = JSON.parse(match[0]);
+  if (!Array.isArray(parsed.scenes) || !parsed.scenes.length) {
+    throw new Error("Plan script invalide");
+  }
+  return { ...parsed, scenes: parsed.scenes.slice(0, sceneCount) };
+}
+
+async function planScenesFromScript(options) {
+  const sceneCount = Math.ceil((Number(options.durationMin) * 60) / Number(options.clipSec));
+  const mistralKey = String(options.mistralKey || "").trim();
+
+  if (mistralKey) {
+    try {
+      return await planScenesFromScriptWithMistral({
+        ...options,
+        mistralKey,
+        mistralModel: options.mistralModel || DEFAULT_MISTRAL_PLANNER_MODEL
+      });
+    } catch (error) {
+      if (process.env.SULPHUR_PLANNER_FALLBACK === "0") throw error;
+    }
+  }
+
+  return buildPlanFromScriptChunks({
+    script: options.script,
+    durationMin: options.durationMin,
+    clipSec: options.clipSec,
+    sceneCount
+  });
+}
+
 function buildFreePlan({ topic, durationMin, clipSec }) {
   const sceneCount = Math.ceil((durationMin * 60) / clipSec);
   const cleanTopic = String(topic || "creative visual story").trim();
@@ -234,7 +377,9 @@ function listPlanners() {
 
 module.exports = {
   buildFreePlan,
+  buildPlanFromScriptChunks,
   planScenes,
+  planScenesFromScript,
   planScenesWithOllama,
   planScenesWithMistral,
   resolvePlannerMode,

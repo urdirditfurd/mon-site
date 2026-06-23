@@ -11,7 +11,7 @@ const {
   resolveFalModel,
   FAL_QUEUE_BASE
 } = require("./voanh-video-pipeline");
-const { planScenes, resolvePlannerMode } = require("./free-scene-planner");
+const { planScenes, planScenesFromScript, resolvePlannerMode } = require("./free-scene-planner");
 const {
   resolveHfModel,
   framesForDuration,
@@ -327,19 +327,38 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
 
       await updateJob(jobId, { status: "planning", progress: 3 });
       const plannerLabel = resolvePlannerMode(config.plannerMode);
-      await appendLog(jobId, `Planification des scènes (${plannerLabel}, 100% gratuit)…`);
+      const hasScript = Boolean(String(config.script || "").trim());
+      await appendLog(
+        jobId,
+        hasScript
+          ? `Découpage du script (${plannerLabel}, 100% gratuit)…`
+          : `Planification des scènes (${plannerLabel}, 100% gratuit)…`
+      );
 
-      const plan = await planScenes({
-        plannerMode: config.plannerMode,
-        mistralKey: config.mistralKey,
-        topic: config.topic,
-        durationMin: config.durationMin,
-        clipSec: config.clipSec,
-        aspectRatio: config.aspectRatio,
-        mistralModel: config.mistralModel,
-        ollamaModel: config.ollamaModel,
-        ollamaUrl: config.ollamaUrl
-      });
+      const plan = hasScript
+        ? await planScenesFromScript({
+            script: config.script,
+            plannerMode: config.plannerMode,
+            mistralKey: config.mistralKey,
+            topic: config.topic,
+            durationMin: config.durationMin,
+            clipSec: config.clipSec,
+            aspectRatio: config.aspectRatio,
+            mistralModel: config.mistralModel,
+            ollamaModel: config.ollamaModel,
+            ollamaUrl: config.ollamaUrl
+          })
+        : await planScenes({
+            plannerMode: config.plannerMode,
+            mistralKey: config.mistralKey,
+            topic: config.topic,
+            durationMin: config.durationMin,
+            clipSec: config.clipSec,
+            aspectRatio: config.aspectRatio,
+            mistralModel: config.mistralModel,
+            ollamaModel: config.ollamaModel,
+            ollamaUrl: config.ollamaUrl
+          });
 
       await updateJob(jobId, {
         status: "generating",
@@ -399,9 +418,11 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
     const clipSec = Number(config.clipSec) || DEFAULT_CLIP_SEC;
     const durationMin = Number(config.durationMin) || 3;
     const promptOnly = Boolean(config.promptOnly || config.prompt);
+    const script = String(config.script || "").trim();
+    const topic = String(config.topic || "").trim();
 
-    if (!promptOnly && !String(config.topic || "").trim()) {
-      throw new Error("topic requis");
+    if (!promptOnly && !topic && !script) {
+      throw new Error("topic ou script requis");
     }
     if (promptOnly && !String(config.prompt || "").trim()) {
       throw new Error("prompt requis");
@@ -433,10 +454,13 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
       progress: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      title: promptOnly ? String(config.prompt).slice(0, 80) : String(config.topic).slice(0, 80),
+      title: promptOnly
+        ? String(config.prompt).slice(0, 80)
+        : (topic || script.split(/\n/)[0] || "Vidéo").slice(0, 80),
       config: {
         provider,
-        topic: String(config.topic || "").trim(),
+        topic: topic || script.split(/\n/)[0]?.slice(0, 120) || "",
+        script,
         prompt: String(config.prompt || "").trim(),
         promptOnly,
         durationMin,

@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { createSulphurJobManager } = require("./sulphur-video-pipeline");
 const { listHfModels, DEFAULT_HF_MODEL } = require("./hf-video-models");
-const { listPlanners, planScenes } = require("./free-scene-planner");
+const { listPlanners, planScenes, planScenesFromScript } = require("./free-scene-planner");
 
 function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
   const router = require("express").Router();
@@ -35,17 +35,31 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.post("/plan", async (req, res) => {
     try {
-      const plan = await planScenes({
-        plannerMode: req.body?.plannerMode,
-        topic: req.body?.topic,
-        durationMin: req.body?.durationMin,
-        clipSec: req.body?.clipSec,
-        aspectRatio: req.body?.aspectRatio,
-        mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
-        mistralModel: req.body?.mistralModel,
-        ollamaModel: req.body?.ollamaModel,
-        ollamaUrl: req.body?.ollamaUrl
-      });
+      const hasScript = Boolean(String(req.body?.script || "").trim());
+      const plan = hasScript
+        ? await planScenesFromScript({
+            script: req.body?.script,
+            plannerMode: req.body?.plannerMode,
+            topic: req.body?.topic,
+            durationMin: req.body?.durationMin,
+            clipSec: req.body?.clipSec,
+            aspectRatio: req.body?.aspectRatio,
+            mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
+            mistralModel: req.body?.mistralModel,
+            ollamaModel: req.body?.ollamaModel,
+            ollamaUrl: req.body?.ollamaUrl
+          })
+        : await planScenes({
+            plannerMode: req.body?.plannerMode,
+            topic: req.body?.topic,
+            durationMin: req.body?.durationMin,
+            clipSec: req.body?.clipSec,
+            aspectRatio: req.body?.aspectRatio,
+            mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
+            mistralModel: req.body?.mistralModel,
+            ollamaModel: req.body?.ollamaModel,
+            ollamaUrl: req.body?.ollamaUrl
+          });
       return res.json(plan);
     } catch (error) {
       return res.status(400).json({ error: error instanceof Error ? error.message : "Erreur planification" });
@@ -57,6 +71,7 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
       const job = await manager.createJob({
         provider: req.body?.provider || "sulphur",
         topic: req.body?.topic,
+        script: req.body?.script,
         prompt: req.body?.prompt,
         promptOnly: req.body?.promptOnly,
         durationMin: req.body?.durationMin,
@@ -83,6 +98,7 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
       const job = await manager.createJob({
         provider: req.body?.provider || "sulphur",
         topic: req.body?.topic,
+        script: req.body?.script,
         durationMin: req.body?.durationMin,
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,

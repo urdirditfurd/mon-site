@@ -427,7 +427,7 @@ curl -X POST http://localhost:3000/api/sulphur/batch \
 
 Sans clé Mistral, utilisez `"plannerMode": "free"` (templates, 0€).
 
-Interface : `/voanh` → **VIDÉO** → planificateur **Mistral Free Tier** + moteur **Sulphur 2**.
+Interface studio : `/studio` ou `video-factory.html` (script + durée + format, 0€ via Colab).
 
 ### Ollama (optionnel, toujours gratuit)
 
