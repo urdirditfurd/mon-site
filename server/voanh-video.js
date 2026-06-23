@@ -4,6 +4,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { createVideoJobManager } = require("./voanh-video-pipeline");
+const { HF_MODELS, generateHfClip, resolveHfModel } = require("./huggingface-video");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
@@ -16,11 +17,13 @@ const FAL_MODELS = {
 function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
   const router = require("express").Router();
   const videoJobsDir = path.join(storageDir, "voanh-videos");
+  const hfClipsDir = path.join(videoJobsDir, "hf-clips");
   const videoJobs = new Map();
   const autoJobs = createVideoJobManager({ storageDir, getFfmpegReady });
 
   async function ensureVideoDirs() {
     await fsp.mkdir(videoJobsDir, { recursive: true });
+    await fsp.mkdir(hfClipsDir, { recursive: true });
   }
 
   function falHeaders(apiKey) {
@@ -51,6 +54,12 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   function resolveFalModel(modelKey) {
     return FAL_MODELS[modelKey] || modelKey || FAL_MODELS.kling;
+  }
+
+  function getBaseUrl(req) {
+    const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    return host ? `${proto}://${host}` : "";
   }
 
   router.post("/fal/submit", async (req, res) => {
@@ -117,6 +126,60 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
       return res.json(payload);
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur FAL result" });
+    }
+  });
+
+  router.post("/hf/generate", async (req, res) => {
+    try {
+      await ensureVideoDirs();
+      const hfToken = String(req.headers["x-hf-token"] || req.body?.hfToken || "").trim();
+      if (!hfToken) return res.status(400).json({ error: "Token Hugging Face manquant (header x-hf-token)" });
+
+      const prompt = String(req.body?.prompt || "").trim();
+      if (!prompt) return res.status(400).json({ error: "Prompt requis" });
+
+      const modelId = resolveHfModel(req.body?.modelKey);
+      const duration = String(req.body?.duration || "5");
+      const aspectRatio = String(req.body?.aspectRatio || "9:16");
+      const endpointUrl = String(req.body?.endpointUrl || req.headers["x-hf-endpoint-url"] || "").trim();
+
+      const clip = await generateHfClip({
+        hfToken,
+        modelId,
+        prompt,
+        duration,
+        aspectRatio,
+        endpointUrl,
+        destDir: hfClipsDir,
+        baseUrl: getBaseUrl(req),
+        filePrefix: "hf-clip"
+      });
+
+      return res.json({
+        status: "COMPLETED",
+        provider: "huggingface",
+        modelId: clip.modelId,
+        url: clip.url,
+        fileName: clip.fileName,
+        remote: clip.remote,
+        mimeType: clip.mimeType
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur Hugging Face" });
+    }
+  });
+
+  router.get("/hf/clips/:fileName", async (req, res) => {
+    try {
+      await ensureVideoDirs();
+      const fileName = path.basename(String(req.params.fileName || ""));
+      const filePath = path.join(hfClipsDir, fileName);
+      if (!fileName || !filePath.startsWith(hfClipsDir) || !fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "Clip Hugging Face introuvable" });
+      }
+      return res.sendFile(filePath);
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur clip Hugging Face" });
     }
   });
 
@@ -279,10 +342,13 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         durationMin: req.body?.durationMin,
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
+        videoProvider: req.body?.videoProvider,
         modelPath: req.body?.modelPath,
+        hfEndpointUrl: req.body?.hfEndpointUrl,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
-        falKey: req.body?.falKey || req.headers["x-fal-key"]
+        falKey: req.body?.falKey || req.headers["x-fal-key"],
+        hfToken: req.body?.hfToken || req.headers["x-hf-token"]
       });
       return res.status(202).json(job);
     } catch (error) {
@@ -311,10 +377,10 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({ ok: true, ffmpegReady, models: FAL_MODELS, hfModels: HF_MODELS });
   });
 
   return router;
 }
 
-module.exports = { createVoanhVideoRouter, FAL_MODELS };
+module.exports = { createVoanhVideoRouter, FAL_MODELS, HF_MODELS };

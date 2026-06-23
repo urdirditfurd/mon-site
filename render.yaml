@@ -17,3 +17,5 @@ services:
         sync: false
       - key: QUEUE_MODE
         value: memory
+      - key: VOANH_MAX_SCENES
+        value: "240"

@@ -1,12 +1,18 @@
 /**
  * VOANH Video Studio — génération longue durée (10+ min)
- * Pipeline : Mistral (script) → FAL.ai Kling (clips) → FFmpeg/Creatomate (assemblage)
+ * Pipeline : Mistral (script) → FAL.ai ou Hugging Face (clips) → FFmpeg/Creatomate (assemblage)
  */
 (function initVoanhVideoStudio(global) {
   const API_BASE = detectApiBase();
   const FAL_MODELS = {
     kling: "fal-ai/kling-video/v2/master/text-to-video",
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
+  };
+  const HF_MODELS = {
+    sulphur: "SulphurAI/Sulphur-2-base",
+    wanLite: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    wanTurbo: "IPostYellow/TurboWan2.1-T2V-1.3B-Diffusers",
+    wanPro: "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
   };
 
   const videoState = {
@@ -50,6 +56,22 @@
     updateFalStatusPill();
   }
 
+  function getHfToken() {
+    try {
+      return localStorage.getItem("voanh_hf_token") || "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  function setHfToken(token) {
+    const value = String(token || "").trim();
+    try {
+      localStorage.setItem("voanh_hf_token", value);
+    } catch (_err) { /* ignore */ }
+    updateFalStatusPill();
+  }
+
   function getCreatomateKey() {
     try {
       return localStorage.getItem("voanh_creatomate_api_key") || "";
@@ -67,10 +89,11 @@
   function updateFalStatusPill() {
     const pill = document.getElementById("fal-status");
     if (!pill) return;
-    const key = getFalKey();
+    const provider = document.getElementById("video-provider")?.value || "fal";
+    const key = provider === "huggingface" ? getHfToken() : getFalKey();
     if (key.length >= 20) {
       pill.className = "status-pill active";
-      pill.innerHTML = '<span class="status-dot"></span>VIDEO ON';
+      pill.innerHTML = `<span class="status-dot"></span>${provider === "huggingface" ? "HF" : "FAL"} ON`;
     } else {
       pill.className = "status-pill";
       pill.innerHTML = '<span class="status-dot"></span>VIDEO OFF';
@@ -100,6 +123,7 @@
     if (!API_BASE) throw new Error("Serveur VOANH requis pour le proxy vidéo. Lancez: npm start puis ouvrez /voanh");
     const headers = { ...(options.headers || {}) };
     if (options.falKey) headers["x-fal-key"] = options.falKey;
+    if (options.hfToken) headers["x-hf-token"] = options.hfToken;
     if (options.creatomateKey) headers["x-creatomate-key"] = options.creatomateKey;
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
     const text = await res.text();
@@ -182,6 +206,22 @@ Réponds UNIQUEMENT en JSON valide :
         aspectRatio
       })
     });
+  }
+
+  async function generateHfClip({ hfToken, modelPath, prompt, duration, aspectRatio }) {
+    const result = await apiFetch("/hf/generate", {
+      method: "POST",
+      hfToken,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        modelKey: modelPath,
+        prompt,
+        duration: String(duration),
+        aspectRatio
+      })
+    });
+    if (!result.url) throw new Error("URL vidéo absente dans la réponse Hugging Face");
+    return result.url;
   }
 
   async function pollFalResult({ falKey, modelPath, requestId, onTick }) {
@@ -299,9 +339,13 @@ Réponds UNIQUEMENT en JSON valide :
     const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
     const clipSec = Number(document.getElementById("video-clip-sec")?.value || 10);
     const aspectRatio = document.getElementById("video-aspect")?.value || "9:16";
-    const modelPath = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+    const videoProvider = document.getElementById("video-provider")?.value || "fal";
+    const modelPath = videoProvider === "huggingface"
+      ? document.getElementById("video-hf-model")?.value || HF_MODELS.sulphur
+      : document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
     const assemblyMode = document.getElementById("video-assembly")?.value || "server";
     const falKey = document.getElementById("fal-api-key-input")?.value?.trim() || getFalKey();
+    const hfToken = document.getElementById("hf-token-input")?.value?.trim() || getHfToken();
     const creatomateKey = document.getElementById("creatomate-api-key-input")?.value?.trim() || getCreatomateKey();
     const mistralKey = global.state?.apiKey;
 
@@ -309,8 +353,12 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Décrivez le sujet de la vidéo", "error");
       return;
     }
-    if (!falKey || falKey.length < 20) {
+    if (videoProvider === "fal" && (!falKey || falKey.length < 20)) {
       global.toast?.("Configurez votre clé FAL.ai", "error");
+      return;
+    }
+    if (videoProvider === "huggingface" && (!hfToken || hfToken.length < 20)) {
+      global.toast?.("Configurez votre token Hugging Face", "error");
       return;
     }
     if (!mistralKey) {
@@ -328,13 +376,16 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
 
-  const costEstimate = (sceneCount * 0.08 * clipSec).toFixed(1);
+    const costEstimate = videoProvider === "fal"
+      ? `Coût FAL estimé : ~${(sceneCount * 0.08 * clipSec).toFixed(1)}€`
+      : "Coût/quota : selon votre provider Hugging Face ou endpoint dédié";
     const proceed = global.confirm(
-      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût FAL estimé : ~${costEstimate}€.\nContinuer ?`
+      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nProvider : ${videoProvider === "huggingface" ? "Hugging Face" : "FAL.ai"}\n${costEstimate}.\nContinuer ?`
     );
     if (!proceed) return;
 
-    setFalKey(falKey);
+    if (videoProvider === "huggingface") setHfToken(hfToken);
+    else setFalKey(falKey);
     if (creatomateKey) setCreatomateKey(creatomateKey);
 
     videoState.running = true;
@@ -373,24 +424,35 @@ Réponds UNIQUEMENT en JSON valide :
         const scene = videoState.scenes[i];
         const pct = 5 + Math.round((i / videoState.scenes.length) * 80);
         setProgress(pct, `Clip ${i + 1}/${videoState.scenes.length}`, scene.visualPrompt?.slice(0, 80) || "");
-        appendVideoLog(`Clip ${i + 1} : soumission FAL…`);
+        appendVideoLog(`Clip ${i + 1} : soumission ${videoProvider === "huggingface" ? "Hugging Face" : "FAL"}…`);
 
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
-        const submit = await submitFalClip({
-          falKey,
-          modelPath,
-          prompt: visual,
-          duration: clipSec,
-          aspectRatio
-        });
+        let clipUrl;
+        if (videoProvider === "huggingface") {
+          clipUrl = await generateHfClip({
+            hfToken,
+            modelPath,
+            prompt: visual,
+            duration: clipSec,
+            aspectRatio
+          });
+        } else {
+          const submit = await submitFalClip({
+            falKey,
+            modelPath,
+            prompt: visual,
+            duration: clipSec,
+            aspectRatio
+          });
 
-        appendVideoLog(`Clip ${i + 1} : file d'attente ${submit.requestId}`);
-        const clipUrl = await pollFalResult({
-          falKey,
-          modelPath: submit.modelPath || modelPath,
-          requestId: submit.requestId,
-          onTick: (st) => appendVideoLog(`Clip ${i + 1} : ${st.status}`)
-        });
+          appendVideoLog(`Clip ${i + 1} : file d'attente ${submit.requestId}`);
+          clipUrl = await pollFalResult({
+            falKey,
+            modelPath: submit.modelPath || modelPath,
+            requestId: submit.requestId,
+            onTick: (st) => appendVideoLog(`Clip ${i + 1} : ${st.status}`)
+          });
+        }
 
         videoState.clipUrls.push(clipUrl);
         appendVideoLog(`Clip ${i + 1} : terminé`);
@@ -445,8 +507,21 @@ Réponds UNIQUEMENT en JSON valide :
     }
   }
 
+  function updateVideoProviderFields() {
+    const provider = document.getElementById("video-provider")?.value || "fal";
+    const falGroup = document.getElementById("fal-key-group");
+    const hfGroup = document.getElementById("hf-token-group");
+    const falModelGroup = document.getElementById("fal-model-group");
+    const hfModelGroup = document.getElementById("hf-model-group");
+    if (falGroup) falGroup.style.display = provider === "fal" ? "" : "none";
+    if (hfGroup) hfGroup.style.display = provider === "huggingface" ? "" : "none";
+    if (falModelGroup) falModelGroup.style.display = provider === "fal" ? "" : "none";
+    if (hfModelGroup) hfModelGroup.style.display = provider === "huggingface" ? "" : "none";
+  }
+
   function bindVideoStudio() {
     updateFalStatusPill();
+    updateVideoProviderFields();
 
     const openBtn = document.getElementById("open-video-modal");
     const openMob = document.getElementById("open-video-modal-mob");
@@ -455,9 +530,12 @@ Réponds UNIQUEMENT en JSON valide :
 
     const open = () => {
       const falInput = document.getElementById("fal-api-key-input");
+      const hfInput = document.getElementById("hf-token-input");
       const cmInput = document.getElementById("creatomate-api-key-input");
       if (falInput) falInput.value = getFalKey();
+      if (hfInput) hfInput.value = getHfToken();
       if (cmInput) cmInput.value = getCreatomateKey();
+      updateVideoProviderFields();
       modal?.classList.add("active");
     };
 
@@ -483,6 +561,21 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Clé FAL.ai enregistrée", "success");
     });
 
+    document.getElementById("save-hf-token")?.addEventListener("click", () => {
+      const token = document.getElementById("hf-token-input")?.value?.trim();
+      if (!token || token.length < 20) {
+        global.toast?.("Token Hugging Face invalide", "error");
+        return;
+      }
+      setHfToken(token);
+      global.toast?.("Token Hugging Face enregistré", "success");
+    });
+
+    document.getElementById("video-provider")?.addEventListener("change", () => {
+      updateVideoProviderFields();
+      updateFalStatusPill();
+    });
+
     document.getElementById("video-generate-btn")?.addEventListener("click", async () => {
       const auto = document.getElementById("video-auto-mode")?.checked;
       if (auto) {
@@ -494,7 +587,18 @@ Réponds UNIQUEMENT en JSON valide :
           return;
         }
         try {
-          const job = await startAutoJob({ topic, durationMin, mistralKey, mistralModel: global.state?.model });
+          const videoProvider = document.getElementById("video-provider")?.value || "fal";
+          const modelPath = videoProvider === "huggingface"
+            ? document.getElementById("video-hf-model")?.value || HF_MODELS.sulphur
+            : document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+          const job = await startAutoJob({
+            topic,
+            durationMin,
+            videoProvider,
+            modelPath,
+            mistralKey,
+            mistralModel: global.state?.model
+          });
           appendVideoLog(`Job auto #${job.id} lancé en arrière-plan`);
           setProgress(5, "Production auto…", `Job ${job.id}`);
           pollAutoJob(job.id, (status) => {
@@ -550,6 +654,8 @@ Réponds UNIQUEMENT en JSON valide :
     bindVideoStudio,
     getFalKey,
     setFalKey,
+    getHfToken,
+    setHfToken,
     parseVideoCommand,
     startAutoJob,
     pollAutoJob,
@@ -592,20 +698,39 @@ Réponds UNIQUEMENT en JSON valide :
     );
   }
 
-  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+  async function startAutoJob({
+    topic,
+    durationMin = 10,
+    clipSec,
+    aspectRatio,
+    videoProvider,
+    modelPath,
+    mistralKey,
+    mistralModel
+  }) {
+    const provider = videoProvider || document.getElementById("video-provider")?.value || "fal";
     const falKey = getFalKey();
+    const hfToken = getHfToken();
     if (!mistralKey) throw new Error("Clé Mistral requise");
-    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    if (provider === "huggingface") {
+      if (!hfToken || hfToken.length < 20) throw new Error("Token Hugging Face requis — ouvrez ▶ VIDÉO");
+    } else if (!falKey || falKey.length < 20) {
+      throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    }
 
     const payload = {
       topic,
       durationMin,
       clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
       aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
-      modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
+      videoProvider: provider,
+      modelPath: modelPath || (provider === "huggingface"
+        ? document.getElementById("video-hf-model")?.value || HF_MODELS.sulphur
+        : document.getElementById("video-fal-model")?.value || FAL_MODELS.kling),
       mistralModel: mistralModel || global.state?.model,
       mistralKey,
-      falKey
+      falKey: provider === "fal" ? falKey : "",
+      hfToken: provider === "huggingface" ? hfToken : ""
     };
 
     return apiFetch("/jobs/auto", {
@@ -684,7 +809,7 @@ Réponds UNIQUEMENT en JSON valide :
         "Tu es VideoForge, producteur vidéo IA intégré à VOANH.",
         "Quand l'utilisateur demande une vidéo, guide-le vers la commande : /video 10min sujet",
         "Ou reformule sa demande et confirme : durée cible, angle, public.",
-        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral + FAL + FFmpeg s'en charge.",
+        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral + provider vidéo + FFmpeg s'en charge.",
         "Rappelle : contenu original uniquement, pas de logos ni célébrités."
       ].join("\n"),
       primer: "Je transforme vos idées en vidéos longues prêtes pour YouTube.",

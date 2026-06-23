@@ -1948,17 +1948,34 @@ body::before {
     <div class="modal-body">
       <div class="info-block" style="border-left-color:var(--plasma)">
         <strong style="color:var(--plasma)">Pipeline 10+ minutes</strong><br>
-        Mistral découpe le script → <strong>FAL.ai (Kling)</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
-        <span style="font-size:12px;color:var(--text-dim)">Obtenez une clé gratuite sur <a href="https://fal.ai" target="_blank" rel="noopener" style="color:var(--cyan)">fal.ai</a> (crédits offerts à l'inscription).</span>
+        Mistral découpe le script → <strong>FAL.ai ou Hugging Face</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
+        <span style="font-size:12px;color:var(--text-dim)">Pour le volume, utilisez FAL ou un endpoint Hugging Face dédié avec le modèle Sulphur/Wan adapté.</span>
       </div>
 
       <div class="field-group">
+        <label class="field-label">Provider vidéo</label>
+        <select class="field-input field-select" id="video-provider">
+          <option value="fal" selected>FAL.ai Kling (rapide cloud)</option>
+          <option value="huggingface">Hugging Face text-to-video</option>
+        </select>
+      </div>
+
+      <div class="field-group" id="fal-key-group">
         <label class="field-label">🔑 Clé API FAL.ai <span style="color:var(--danger)">*</span></label>
         <div style="display:flex;gap:8px">
           <input type="password" class="field-input" id="fal-api-key-input" placeholder="fal_xxxxxxxx…" style="flex:1">
           <button class="btn-primary" id="save-fal-key" type="button" style="white-space:nowrap">ENREGISTRER</button>
         </div>
         <div class="field-hint">Utilisée pour générer les clips IA (Kling). Stockée localement comme Mistral.</div>
+      </div>
+
+      <div class="field-group" id="hf-token-group" style="display:none">
+        <label class="field-label">🔑 Token Hugging Face <span style="color:var(--danger)">*</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="password" class="field-input" id="hf-token-input" placeholder="hf_xxxxxxxx…" style="flex:1">
+          <button class="btn-primary" id="save-hf-token" type="button" style="white-space:nowrap">ENREGISTRER</button>
+        </div>
+        <div class="field-hint">Utilisé côté serveur pour appeler l'Inference API ou votre endpoint Hugging Face. Stocké localement dans ce navigateur.</div>
       </div>
 
       <div class="field-group">
@@ -1993,11 +2010,20 @@ body::before {
             <option value="1:1">1:1 Carré</option>
           </select>
         </div>
-        <div class="field-group" style="margin-bottom:0">
+        <div class="field-group" id="fal-model-group" style="margin-bottom:0">
           <label class="field-label">Modèle FAL</label>
           <select class="field-input field-select" id="video-fal-model">
             <option value="fal-ai/kling-video/v2/master/text-to-video">Kling 2.0 Master (recommandé)</option>
             <option value="fal-ai/kling-video/v1.6/standard/text-to-video">Kling 1.6 Standard (économique)</option>
+          </select>
+        </div>
+        <div class="field-group" id="hf-model-group" style="display:none;margin-bottom:0">
+          <label class="field-label">Modèle Hugging Face</label>
+          <select class="field-input field-select" id="video-hf-model">
+            <option value="SulphurAI/Sulphur-2-base" selected>Sulphur 2 Base (top téléchargements)</option>
+            <option value="Wan-AI/Wan2.1-T2V-1.3B-Diffusers">Wan 2.1 T2V 1.3B (léger Apache-2.0)</option>
+            <option value="IPostYellow/TurboWan2.1-T2V-1.3B-Diffusers">TurboWan 1.3B (rapide)</option>
+            <option value="Wan-AI/Wan2.2-TI2V-5B-Diffusers">Wan 2.2 TI2V 5B (qualité)</option>
           </select>
         </div>
       </div>

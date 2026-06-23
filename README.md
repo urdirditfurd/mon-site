@@ -262,6 +262,17 @@ Render crée:
 - Le service redéploie automatiquement à chaque push GitHub
 - En plan Free, le service peut se mettre en veille (réveil automatique au prochain accès)
 
+## VOANH Video Studio — text-to-video Hugging Face
+
+Le studio vidéo longue durée peut générer des clips avec **FAL.ai** ou **Hugging Face**, puis les assembler en MP4 avec FFmpeg.
+
+- Provider HF par défaut : `SulphurAI/Sulphur-2-base` (modèle le plus téléchargé dans la catégorie text-to-video au moment de l'intégration).
+- Options HF incluses : `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`, `IPostYellow/TurboWan2.1-T2V-1.3B-Diffusers`, `Wan-AI/Wan2.2-TI2V-5B-Diffusers`.
+- Interface : ouvre `/voanh`, clique **VIDÉO**, choisis `Hugging Face text-to-video`, colle un token `hf_...`, puis lance une génération manuelle ou automatique.
+- API clip direct : `POST /api/voanh/hf/generate` avec `x-hf-token` et `{ "prompt": "...", "modelKey": "SulphurAI/Sulphur-2-base", "duration": "5", "aspectRatio": "9:16" }`.
+- API vidéo longue : `POST /api/voanh/jobs/auto` avec `videoProvider: "huggingface"`, `hfToken`, `mistralKey`, `topic`, `durationMin`, `clipSec`, `aspectRatio`.
+- Limite de scènes configurable : `VOANH_MAX_SCENES` (par défaut `240`). Une production vraiment "sans limite" dépendra toujours du quota, du GPU/provider et du stockage disponible.
+
 ## API
 
 - `GET /api/health`
