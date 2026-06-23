@@ -368,7 +368,18 @@ Obtenir une clé Mistral gratuite (comme [VOANH AI](https://github.com/LaurentVo
 | `wan22` | Wan-AI/Wan2.2-TI2V-5B-Diffusers | Alternative officielle |
 | `wan21lite` | Wan-AI/Wan2.1-T2V-1.3B-Diffusers | GPU 8GB |
 
-### Installation GPU
+### Sans GPU NVIDIA → Google Colab (recommandé)
+
+Si vous n'avez pas de carte NVIDIA localement, utilisez le notebook Colab gratuit :
+
+1. [colab.research.google.com](https://colab.research.google.com) → **GPU T4**
+2. Ouvrir `colab/text-to-video-gratuit.ipynb` depuis ce repo
+3. Configurer `TOPIC`, `DURATION_MIN`, `BATCH_COUNT` → **Tout exécuter**
+4. Télécharger les MP4 générés
+
+Guide détaillé : [`docs/colab-sans-gpu.md`](docs/colab-sans-gpu.md)
+
+### Installation GPU (PC / VPS avec NVIDIA)
 
 ```bash
 pip3 install -r requirements-video.txt
