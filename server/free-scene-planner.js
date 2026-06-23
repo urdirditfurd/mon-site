@@ -1,7 +1,9 @@
 /**
- * Planification de scènes 100 % gratuite — aucune API payante.
- * Modes : free (templates), ollama (LLM local), mistral (optionnel payant).
+ * Planification de scènes 100 % gratuite.
+ * Modes : mistral (Free Tier console.mistral.ai), free (templates), ollama (local).
  */
+
+const DEFAULT_MISTRAL_PLANNER_MODEL = "mistral-small-2506";
 
 const SCENE_TEMPLATES = [
   "Cinematic wide establishing shot of {topic}, dramatic lighting, atmospheric depth, film grain",
@@ -145,7 +147,7 @@ Réponds UNIQUEMENT en JSON valide :
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: mistralModel || "mistral-small-2506",
+      model: mistralModel || process.env.MISTRAL_PLANNER_MODEL || DEFAULT_MISTRAL_PLANNER_MODEL,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.75,
       max_tokens: Math.min(16000, 400 + sceneCount * 120)
@@ -168,21 +170,38 @@ Réponds UNIQUEMENT en JSON valide :
 }
 
 function resolvePlannerMode(mode) {
-  const value = String(mode || process.env.SULPHUR_PLANNER || "free").toLowerCase();
-  if (["free", "template", "gratuit"].includes(value)) return "free";
+  const value = String(mode || process.env.SULPHUR_PLANNER || "mistral").toLowerCase();
+  if (["free", "template", "gratuit", "templates"].includes(value)) return "free";
   if (["ollama", "local-llm"].includes(value)) return "ollama";
-  if (["mistral", "paid"].includes(value)) return "mistral";
-  return "free";
+  if (["mistral", "mistral-free", "mistral_free", "mistral-freetier"].includes(value)) return "mistral";
+  return "mistral";
 }
 
 async function planScenes(options) {
   const plannerMode = resolvePlannerMode(options.plannerMode);
 
   if (plannerMode === "mistral") {
-    if (!String(options.mistralKey || "").trim()) {
-      throw new Error("mistralKey requis pour le planificateur Mistral (mode payant)");
+    const mistralKey = String(options.mistralKey || "").trim();
+    if (!mistralKey) {
+      if (process.env.SULPHUR_PLANNER_FALLBACK !== "0") {
+        return buildFreePlan(options);
+      }
+      throw new Error(
+        "Clé Mistral requise — créez-en une gratuitement sur https://console.mistral.ai (Free Tier, sans carte bancaire)"
+      );
     }
-    return planScenesWithMistral(options);
+    try {
+      return await planScenesWithMistral({
+        ...options,
+        mistralKey,
+        mistralModel: options.mistralModel || DEFAULT_MISTRAL_PLANNER_MODEL
+      });
+    } catch (error) {
+      if (process.env.SULPHUR_PLANNER_FALLBACK !== "0") {
+        return buildFreePlan(options);
+      }
+      throw error;
+    }
   }
 
   if (plannerMode === "ollama") {
@@ -201,9 +220,15 @@ async function planScenes(options) {
 
 function listPlanners() {
   return [
-    { key: "free", label: "Gratuit (templates — aucune API)", cost: "0€" },
-    { key: "ollama", label: "Ollama local (LLM gratuit)", cost: "0€" },
-    { key: "mistral", label: "Mistral API (option payante)", cost: "payant" }
+    {
+      key: "mistral",
+      label: "Mistral Free Tier (console.mistral.ai)",
+      cost: "0€",
+      model: DEFAULT_MISTRAL_PLANNER_MODEL,
+      signup: "https://console.mistral.ai"
+    },
+    { key: "free", label: "Templates (aucune clé API)", cost: "0€" },
+    { key: "ollama", label: "Ollama local (LLM gratuit)", cost: "0€" }
   ];
 }
 
@@ -213,5 +238,6 @@ module.exports = {
   planScenesWithOllama,
   planScenesWithMistral,
   resolvePlannerMode,
-  listPlanners
+  listPlanners,
+  DEFAULT_MISTRAL_PLANNER_MODEL
 };

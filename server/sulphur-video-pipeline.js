@@ -416,7 +416,11 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
     if (!promptOnly) {
       const plannerMode = resolvePlannerMode(config.plannerMode);
       if (plannerMode === "mistral" && !String(config.mistralKey || "").trim()) {
-        throw new Error("mistralKey requis uniquement pour le planificateur Mistral (mode payant)");
+        if (process.env.SULPHUR_PLANNER_FALLBACK === "0") {
+          throw new Error(
+            "mistralKey requis — clé gratuite sur https://console.mistral.ai (Free Tier VOANH)"
+          );
+        }
       }
       const sceneCount = Math.ceil((durationMin * 60) / clipSec);
       if (sceneCount > 180) throw new Error("Trop de scènes — réduisez la durée ou augmentez clipSec");

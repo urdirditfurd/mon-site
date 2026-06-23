@@ -406,7 +406,11 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
     if (!job.config.topic) throw new Error("topic requis");
     if (!job.config.mistralKey && resolvePlannerMode(job.config.plannerMode) === "mistral") {
-      throw new Error("mistralKey requis uniquement pour le planificateur Mistral (mode payant)");
+      if (process.env.SULPHUR_PLANNER_FALLBACK === "0") {
+        throw new Error(
+          "mistralKey requis — clé gratuite sur https://console.mistral.ai (Free Tier VOANH)"
+        );
+      }
     }
     if (job.config.provider === "fal" && !job.config.falKey) throw new Error("falKey requis pour FAL (option payante)");
 

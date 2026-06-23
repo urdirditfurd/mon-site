@@ -70,12 +70,27 @@
     } catch (_err) { /* ignore */ }
   }
 
+  function getMistralKey() {
+    if (global.state?.apiKey) return global.state.apiKey;
+    try {
+      const cookie = document.cookie.match(/(?:^|;\s*)mistral_api_key=([^;]+)/);
+      if (cookie) return decodeURIComponent(cookie[1]);
+    } catch (_err) { /* ignore */ }
+    try {
+      return localStorage.getItem("voanh_mistral_api_key") || "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
   function getPlannerMode() {
-    return document.getElementById("video-planner")?.value || "free";
+    const select = document.getElementById("video-planner");
+    if (select?.value) return select.value;
+    return getMistralKey() ? "mistral" : "free";
   }
 
   function isFreeVideoMode() {
-    return getVideoProvider() !== "fal" && getPlannerMode() !== "mistral";
+    return getVideoProvider() !== "fal";
   }
 
   function getVideoProvider() {
@@ -90,11 +105,15 @@
     const provider = getVideoProvider();
     const planner = getPlannerMode();
     const isFal = provider === "fal";
-    const needsMistral = planner === "mistral";
+    const hasMistral = Boolean(getMistralKey());
     const falGroup = document.getElementById("fal-key-group");
     const hfGroup = document.getElementById("hf-model-group");
     const falModelSelect = document.getElementById("video-fal-model");
     const falRequired = document.getElementById("fal-key-required");
+    const plannerSelect = document.getElementById("video-planner");
+    if (plannerSelect && !plannerSelect.dataset.userTouched) {
+      plannerSelect.value = hasMistral ? "mistral" : "free";
+    }
     if (falGroup) falGroup.style.display = isFal ? "block" : "none";
     if (hfGroup) hfGroup.style.display = isFal ? "none" : "block";
     if (falModelSelect) {
@@ -354,7 +373,7 @@ Réponds UNIQUEMENT en JSON valide :
     const assemblyMode = document.getElementById("video-assembly")?.value || "server";
     const falKey = document.getElementById("fal-api-key-input")?.value?.trim() || getFalKey();
     const creatomateKey = document.getElementById("creatomate-api-key-input")?.value?.trim() || getCreatomateKey();
-    const mistralKey = global.state?.apiKey;
+    const mistralKey = getMistralKey();
 
     if (!topic) {
       global.toast?.("Décrivez le sujet de la vidéo", "error");
@@ -365,7 +384,7 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
     if (getPlannerMode() === "mistral" && !mistralKey) {
-      global.toast?.("Clé Mistral requise pour le planificateur Mistral (mode payant)", "error");
+      global.toast?.("Clé Mistral Free Tier requise — configurez-la via ⬡ API KEY (console.mistral.ai, gratuit)", "error");
       return;
     }
     if (assemblyMode === "creatomate" && !creatomateKey) {
@@ -539,7 +558,10 @@ Réponds UNIQUEMENT en JSON valide :
     updateProviderUi();
 
     document.getElementById("video-provider")?.addEventListener("change", updateProviderUi);
-    document.getElementById("video-planner")?.addEventListener("change", updateProviderUi);
+    document.getElementById("video-planner")?.addEventListener("change", (e) => {
+      if (e.target) e.target.dataset.userTouched = "1";
+      updateProviderUi();
+    });
 
     const openBtn = document.getElementById("open-video-modal");
     const openMob = document.getElementById("open-video-modal-mob");
@@ -581,13 +603,13 @@ Réponds UNIQUEMENT en JSON valide :
       if (auto) {
         const topic = document.getElementById("video-topic")?.value?.trim();
         const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
-        const mistralKey = global.state?.apiKey;
+        const mistralKey = getMistralKey();
         if (!topic) {
           global.toast?.("Sujet requis", "error");
           return;
         }
         if (getPlannerMode() === "mistral" && !mistralKey) {
-          global.toast?.("Clé Mistral requise pour le planificateur Mistral", "error");
+          global.toast?.("Clé Mistral Free Tier requise — ⬡ API KEY dans le header", "error");
           return;
         }
         try {
@@ -663,6 +685,7 @@ Réponds UNIQUEMENT en JSON valide :
     bindVideoStudio,
     getFalKey,
     setFalKey,
+    getMistralKey,
     parseVideoCommand,
     startAutoJob,
     pollAutoJob,
@@ -721,7 +744,7 @@ Réponds UNIQUEMENT en JSON valide :
     const videoProvider = provider || getVideoProvider();
     const videoPlanner = plannerMode || getPlannerMode();
     if (videoPlanner === "mistral" && !mistralKey) {
-      throw new Error("Clé Mistral requise pour le planificateur Mistral (mode payant)");
+      throw new Error("Clé Mistral Free Tier requise — configurez ⬡ API KEY (console.mistral.ai, gratuit)");
     }
     if (videoProvider === "fal" && (!falKey || falKey.length < 20)) {
       throw new Error("Clé FAL.ai requise pour le mode cloud payant");
@@ -785,18 +808,21 @@ Réponds UNIQUEMENT en JSON valide :
 
     if (!parsed?.topic) return false;
 
-    const mistralKey = global.state?.apiKey;
-    if (!mistralKey) {
-      global.toast?.("Configurez votre clé Mistral", "error");
-      return true;
+    const mistralKey = getMistralKey();
+    const plannerMode = mistralKey ? getPlannerMode() : "free";
+    if (!mistralKey && getPlannerMode() === "mistral") {
+      global.toast?.("Clé Mistral absente — planificateur templates utilisé (gratuit)", "info");
     }
 
     try {
       const job = await startAutoJob({
         topic: parsed.topic,
         durationMin: parsed.durationMin,
-        mistralKey,
-        mistralModel: global.state?.model
+        mistralKey: mistralKey || "",
+        mistralModel: global.state?.model,
+        plannerMode,
+        provider: getVideoProvider(),
+        hfModel: getHfModel()
       });
 
       hooks.onJobStarted?.(job);
@@ -829,7 +855,7 @@ Réponds UNIQUEMENT en JSON valide :
         "Tu es VideoForge, producteur vidéo IA intégré à VOANH.",
         "Quand l'utilisateur demande une vidéo, guide-le vers la commande : /video 10min sujet",
         "Ou reformule sa demande et confirme : durée cible, angle, public.",
-        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral + FAL + FFmpeg s'en charge.",
+        "Tu ne génères pas la vidéo toi-même : le pipeline Sulphur 2 + Mistral Free Tier + FFmpeg s'en charge.",
         "Rappelle : contenu original uniquement, pas de logos ni célébrités."
       ].join("\n"),
       primer: "Je transforme vos idées en vidéos longues prêtes pour YouTube.",

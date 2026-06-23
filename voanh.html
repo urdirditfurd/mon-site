@@ -1948,18 +1948,18 @@ body::before {
     <div class="modal-body">
       <div class="info-block" style="border-left-color:var(--plasma)">
         <strong style="color:var(--plasma)">100 % gratuit — zéro API payante</strong><br>
-        <strong>Sulphur 2</strong> (GPU local) génère les clips → <strong>FFmpeg</strong> assemble → planificateur <strong>gratuit</strong> (templates ou Ollama).<br>
-        <span style="font-size:12px;color:var(--text-dim)">Aucune clé Mistral ni FAL requise. Coût : <strong>0€</strong>.</span>
+        <strong>Sulphur 2</strong> (GPU local) génère les clips → <strong>FFmpeg</strong> assemble → <strong>Mistral Free Tier</strong> planifie les scènes.<br>
+        <span style="font-size:12px;color:var(--text-dim)">Clé Mistral gratuite via VOANH (<a href="https://console.mistral.ai" target="_blank" rel="noopener" style="color:var(--cyan)">console.mistral.ai</a>). Coût total : <strong>0€</strong>.</span>
       </div>
 
       <div class="field-group">
         <label class="field-label">Planificateur de scènes</label>
         <select class="field-input field-select" id="video-planner">
-          <option value="free" selected>Gratuit — templates (aucune API)</option>
+          <option value="mistral" selected>Mistral Free Tier — scripts intelligents (0€)</option>
+          <option value="free">Templates — sans clé API</option>
           <option value="ollama">Ollama local — LLM gratuit</option>
-          <option value="mistral">Mistral API — option payante</option>
         </select>
-        <div class="field-hint">Par défaut : découpage automatique gratuit, sans clé API.</div>
+        <div class="field-hint">Utilise votre clé VOANH (<a href="https://console.mistral.ai" target="_blank" rel="noopener" style="color:var(--cyan)">console.mistral.ai</a> — Free Tier, sans carte bancaire). Sinon : templates gratuits.</div>
       </div>
 
       <div class="field-group">

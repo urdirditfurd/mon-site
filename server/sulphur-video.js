@@ -18,8 +18,13 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
       models: listHfModels(),
       planners: listPlanners(),
       defaultModel: DEFAULT_HF_MODEL,
-      defaultPlanner: "free",
-      cost: "0€ — 100% gratuit (GPU local + planificateur templates/Ollama)",
+      defaultPlanner: "mistral",
+      mistralFreeTier: {
+        signup: "https://console.mistral.ai",
+        model: "mistral-small-2506",
+        cost: "0€"
+      },
+      cost: "0€ — 100% gratuit (GPU local + Mistral Free Tier ou templates/Ollama)",
       concurrency: Number(process.env.SULPHUR_WORKER_CONCURRENCY || 2)
     });
   });

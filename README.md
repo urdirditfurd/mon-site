@@ -339,17 +339,25 @@ Génération vidéo **sans aucune API payante** : modèles open-source Hugging F
 | Composant | Solution | Coût |
 |-----------|----------|------|
 | Génération clips | Sulphur 2 / Wan 2.2 (GPU local) | **0€** |
-| Planification scènes | Templates gratuits (défaut) ou Ollama local | **0€** |
+| Planification scènes | **Mistral Free Tier** (VOANH / console.mistral.ai) | **0€** |
+| Fallback scripts | Templates ou Ollama local | **0€** |
 | Assemblage | FFmpeg serveur | **0€** |
-| Mistral / FAL | Optionnels uniquement | payant |
+| FAL cloud | Optionnel uniquement | payant |
 
-### Planificateurs (défaut : gratuit)
+### Planificateurs (défaut : Mistral Free Tier)
 
 | Mode | Description |
 |------|-------------|
-| `free` | Templates cinématiques — **aucune clé API** |
+| `mistral` | **Mistral Free Tier** via clé VOANH (`console.mistral.ai`, sans carte bancaire) |
+| `free` | Templates cinématiques — aucune clé API |
 | `ollama` | LLM local gratuit (`ollama run llama3.2`) |
-| `mistral` | Option payante si vous avez déjà une clé |
+
+Obtenir une clé Mistral gratuite (comme [VOANH AI](https://github.com/LaurentVoanh/Mistral-universal-Chat-Bot-free-tiers)) :
+
+1. Créez un compte sur [console.mistral.ai](https://console.mistral.ai)
+2. Menu **API Keys** → **Create new key**
+3. Collez la clé dans VOANH via **⬡ API KEY** (stockée 365 jours en local)
+4. Le studio vidéo la réutilise automatiquement pour planifier vos scènes
 
 ### Modèles vidéo supportés
 
@@ -369,7 +377,7 @@ npm run setup:video
 
 export HF_TOKEN=hf_xxx          # optionnel, accélère les téléchargements
 export SULPHUR_MODEL_CACHE=./models
-export SULPHUR_PLANNER=free              # gratuit par défaut
+export SULPHUR_PLANNER=mistral            # Mistral Free Tier (défaut)
 export SULPHUR_WORKER_CONCURRENCY=2   # jobs parallèles
 npm start
 ```
@@ -386,17 +394,19 @@ npm start
 | `GET /api/sulphur/jobs/:id` | Suivi progression |
 | `GET /api/sulphur/download/:id` | Télécharger MP4 |
 
-Exemple batch quotidien **sans aucune clé API** :
+Exemple batch quotidien avec **Mistral Free Tier** :
 
 ```bash
 curl -X POST http://localhost:3000/api/sulphur/batch \
   -H "Content-Type: application/json" \
+  -H "x-mistral-key: VOTRE_CLE_MISTRAL_GRATUITE" \
   -d '{
     "provider": "sulphur",
-    "plannerMode": "free",
+    "plannerMode": "mistral",
     "hfModel": "sulphur2",
     "clipSec": 5,
     "aspectRatio": "9:16",
+    "mistralKey": "VOTRE_CLE_MISTRAL_GRATUITE",
     "items": [
       {"topic": "Les secrets de la productivité", "durationMin": 1},
       {"topic": "Histoire du football français", "durationMin": 2}
@@ -404,7 +414,9 @@ curl -X POST http://localhost:3000/api/sulphur/batch \
   }'
 ```
 
-Interface : `/voanh` → **VIDÉO** → planificateur **Gratuit** + moteur **Sulphur 2**.
+Sans clé Mistral, utilisez `"plannerMode": "free"` (templates, 0€).
+
+Interface : `/voanh` → **VIDÉO** → planificateur **Mistral Free Tier** + moteur **Sulphur 2**.
 
 ### Ollama (optionnel, toujours gratuit)
 
