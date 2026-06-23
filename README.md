@@ -332,6 +332,18 @@ Le champ `youtubeCookies` dans `POST /api/jobs` reste supporté:
 }
 ```
 
+## Text-to-video gratuit (sans GPU NVIDIA) — Google Colab
+
+Si vous n'avez pas de carte NVIDIA, ouvrez directement le notebook :
+
+**[Ouvrir dans Colab](https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb)**
+
+1. Exécution → Modifier le type d'exécution → **GPU**
+2. Modifiez `TOPIC` / `DURATION_MIN` dans la cellule Configuration
+3. Exécution → Tout exécuter → téléchargez les MP4
+
+Guide pas à pas : [`docs/colab-sans-gpu.md`](docs/colab-sans-gpu.md)
+
 ## Commandes utiles
 
 ```bash
