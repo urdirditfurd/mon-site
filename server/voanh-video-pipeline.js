@@ -3,6 +3,11 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
+const {
+  DEFAULT_HF_TEXT_TO_VIDEO_MODEL,
+  generateHfTextToVideoClip,
+  resolveHfTextToVideoModel
+} = require("./huggingface-video");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const DEFAULT_FAL_MODEL = "fal-ai/kling-video/v2/master/text-to-video";
@@ -17,6 +22,16 @@ function resolveFalModel(modelKey) {
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
   return map[modelKey] || modelKey || DEFAULT_FAL_MODEL;
+}
+
+function normalizeVideoProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  if (provider === "hf" || provider === "huggingface" || provider === "hugging-face") return "huggingface";
+  return "fal";
+}
+
+function videoProviderLabel(provider) {
+  return provider === "huggingface" ? "Hugging Face" : "FAL";
 }
 
 async function falFetch(url, apiKey, options = {}) {
@@ -198,8 +213,13 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
   }
 
   function sanitizeJob(job) {
-    const { mistralKey, falKey, creatomateKey, ...safe } = job;
-    return safe;
+    const { mistralKey, falKey, hfKey, hfEndpointUrl, creatomateKey, ...safe } = job;
+    const config = { ...(safe.config || {}) };
+    delete config.mistralKey;
+    delete config.falKey;
+    delete config.hfKey;
+    delete config.hfEndpointUrl;
+    return { ...safe, config };
   }
 
   async function updateJob(jobId, patch) {
@@ -240,11 +260,17 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       aspectRatio,
       mistralKey,
       falKey,
+      hfKey,
+      hfEndpointUrl,
       modelPath,
+      hfModel,
+      videoProvider: videoProviderConfig,
       mistralModel
     } = job.config;
 
-    const resolvedModel = resolveFalModel(modelPath);
+    const videoProvider = normalizeVideoProvider(videoProviderConfig);
+    const resolvedFalModel = resolveFalModel(modelPath);
+    const resolvedHfModel = resolveHfTextToVideoModel(hfModel || DEFAULT_HF_TEXT_TO_VIDEO_MODEL);
     const jobDir = path.join(videoJobsDir, jobId);
     await fsp.mkdir(jobDir, { recursive: true });
 
@@ -272,27 +298,43 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await appendLog(jobId, `Plan OK : ${plan.title} (${plan.scenes.length} scènes)`);
 
       const clipUrls = [];
+      const generatedClips = [];
       for (let i = 0; i < plan.scenes.length; i += 1) {
         const scene = plan.scenes[i];
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
 
-        await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : soumission FAL`);
-        const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedModel}`, falKey, {
-          method: "POST",
-          body: JSON.stringify({
+        await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : génération ${videoProviderLabel(videoProvider)}`);
+        if (videoProvider === "huggingface") {
+          const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
+          await generateHfTextToVideoClip({
+            hfKey,
+            hfEndpointUrl,
+            modelId: resolvedHfModel,
             prompt: visual,
-            duration: String(clipSec),
-            aspect_ratio: aspectRatio
-          })
-        });
+            durationSec: clipSec,
+            aspectRatio,
+            destPath: clipPath
+          });
+          generatedClips.push({ path: clipPath });
+        } else {
+          const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedFalModel}`, falKey, {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: visual,
+              duration: String(clipSec),
+              aspect_ratio: aspectRatio
+            })
+          });
 
-        const clipUrl = await pollFalClip({
-          falKey,
-          modelPath: resolvedModel,
-          requestId: submit.request_id
-        });
+          const clipUrl = await pollFalClip({
+            falKey,
+            modelPath: resolvedFalModel,
+            requestId: submit.request_id
+          });
 
-        clipUrls.push(clipUrl);
+          clipUrls.push(clipUrl);
+          generatedClips.push({ url: clipUrl });
+        }
         const progress = 8 + Math.round(((i + 1) / plan.scenes.length) * 82);
         await updateJob(jobId, {
           progress,
@@ -306,9 +348,13 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await appendLog(jobId, "Assemblage FFmpeg de la vidéo longue…");
 
       const localClips = [];
-      for (let i = 0; i < clipUrls.length; i += 1) {
+      for (let i = 0; i < generatedClips.length; i += 1) {
+        if (generatedClips[i].path) {
+          localClips.push(generatedClips[i].path);
+          continue;
+        }
         const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
-        await downloadFile(clipUrls[i], clipPath);
+        await downloadFile(generatedClips[i].url, clipPath);
         localClips.push(clipPath);
       }
 
@@ -351,10 +397,14 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
         durationMin: Number(config.durationMin) || 10,
         clipSec: Number(config.clipSec) || 10,
         aspectRatio: String(config.aspectRatio || "9:16"),
+        videoProvider: normalizeVideoProvider(config.videoProvider),
         modelPath: String(config.modelPath || DEFAULT_FAL_MODEL),
+        hfModel: String(config.hfModel || DEFAULT_HF_TEXT_TO_VIDEO_MODEL),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
-        falKey: String(config.falKey || "").trim()
+        falKey: String(config.falKey || "").trim(),
+        hfKey: String(config.hfKey || "").trim(),
+        hfEndpointUrl: String(config.hfEndpointUrl || "").trim()
       },
       logs: [],
       clipUrls: [],
@@ -364,7 +414,10 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
     if (!job.config.topic) throw new Error("topic requis");
     if (!job.config.mistralKey) throw new Error("mistralKey requis");
-    if (!job.config.falKey) throw new Error("falKey requis");
+    if (job.config.videoProvider === "fal" && !job.config.falKey) throw new Error("falKey requis");
+    if (job.config.videoProvider === "huggingface" && !job.config.hfKey && !job.config.hfEndpointUrl) {
+      throw new Error("hfKey ou hfEndpointUrl requis");
+    }
 
     const sceneCount = Math.ceil((job.config.durationMin * 60) / job.config.clipSec);
     if (sceneCount > 90) throw new Error("Trop de scènes — réduisez la durée");

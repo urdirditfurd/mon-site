@@ -3695,16 +3695,29 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
     const youtubeCookies = String(req.body.youtubeCookies || "");
     const aiRemixMode = boolFrom(req.body.aiRemixMode, false);
     const mistralApiKey = String(req.body.mistralApiKey || "").trim();
+    const videoProviderRaw = String(req.body.videoProvider || "fal").trim().toLowerCase();
+    const videoProvider =
+      videoProviderRaw === "hf" || videoProviderRaw === "huggingface" || videoProviderRaw === "hugging-face"
+        ? "huggingface"
+        : "fal";
     const falApiKey = String(req.body.falApiKey || "").trim();
+    const hfApiKey = String(req.body.hfApiKey || "").trim();
+    const hfEndpointUrl = String(req.body.hfEndpointUrl || "").trim();
     const mistralModel = String(req.body.mistralModel || "mistral-small-2506").trim();
     const falModel = String(req.body.falModel || "").trim();
+    const hfModel = String(req.body.hfModel || "").trim();
 
     if (aiRemixMode) {
       if (!mistralApiKey) {
         return res.status(400).json({ error: "Clé API Mistral requise pour le mode Remix IA viral." });
       }
-      if (!falApiKey) {
+      if (videoProvider === "fal" && !falApiKey) {
         return res.status(400).json({ error: "Clé API FAL requise pour le mode Remix IA viral." });
+      }
+      if (videoProvider === "huggingface" && !hfApiKey && !hfEndpointUrl) {
+        return res.status(400).json({
+          error: "Clé API Hugging Face ou URL d'Inference Endpoint requise pour le mode Remix IA viral."
+        });
       }
       if (!hasVideoUrl) {
         return res.status(400).json({ error: "Le mode Remix IA nécessite un lien YouTube." });
@@ -3769,10 +3782,12 @@ app.post("/api/jobs", upload.single("video"), async (req, res) => {
         backgroundMusic: boolFrom(req.body.backgroundMusic, DEFAULTS.backgroundMusic),
         hasYoutubeCookies: Boolean(youtubeCookiesFilePath),
         aiRemixMode,
+        videoProvider,
         mistralModel: mistralModel || "mistral-small-2506",
-        falModel: falModel || undefined
+        falModel: falModel || undefined,
+        hfModel: hfModel || undefined
       }),
-      aiSecrets: aiRemixMode ? { mistralApiKey, falApiKey } : undefined,
+      aiSecrets: aiRemixMode ? { mistralApiKey, falApiKey, hfApiKey, hfEndpointUrl } : undefined,
       clips: [],
       error: null
     };

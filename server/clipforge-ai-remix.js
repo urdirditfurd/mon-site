@@ -10,8 +10,23 @@ const {
   FAL_QUEUE_BASE,
   DEFAULT_FAL_MODEL
 } = require("./voanh-video-pipeline");
+const {
+  DEFAULT_HF_TEXT_TO_VIDEO_MODEL,
+  generateHfTextToVideoClip,
+  resolveHfTextToVideoModel
+} = require("./huggingface-video");
 
 const FAL_CLIP_SEC = 10;
+
+function normalizeVideoProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  if (provider === "hf" || provider === "huggingface" || provider === "hugging-face") return "huggingface";
+  return "fal";
+}
+
+function videoProviderLabel(provider) {
+  return provider === "huggingface" ? "Hugging Face" : "FAL";
+}
 
 function falDurationForScene(durationSec) {
   const sec = Math.max(5, Math.min(FAL_CLIP_SEC, Math.round(durationSec)));
@@ -140,6 +155,34 @@ async function generateFalSceneClip({ falKey, modelPath, scene, aspectRatio, des
   return destPath;
 }
 
+async function generateSceneClip({
+  videoProvider,
+  falKey,
+  hfKey,
+  hfEndpointUrl,
+  falModel,
+  hfModel,
+  scene,
+  aspectRatio,
+  destPath
+}) {
+  if (videoProvider === "huggingface") {
+    const visual = `${scene.visualPrompt}. Cinematic, original content, viral short style, no logos, no celebrity faces, no text overlay.`;
+    await generateHfTextToVideoClip({
+      hfKey,
+      hfEndpointUrl,
+      modelId: hfModel,
+      prompt: visual,
+      durationSec: scene.durationSec,
+      aspectRatio,
+      destPath
+    });
+    return destPath;
+  }
+
+  return generateFalSceneClip({ falKey, modelPath: falModel, scene, aspectRatio, destPath });
+}
+
 async function processAiRemixJob(job, ctx) {
   const {
     jobDir,
@@ -161,11 +204,18 @@ async function processAiRemixJob(job, ctx) {
   } = ctx;
 
   const mistralKey = String(job.aiSecrets?.mistralApiKey || "").trim();
+  const videoProvider = normalizeVideoProvider(job.params.videoProvider);
   const falKey = String(job.aiSecrets?.falApiKey || "").trim();
+  const hfKey = String(job.aiSecrets?.hfApiKey || "").trim();
+  const hfEndpointUrl = String(job.aiSecrets?.hfEndpointUrl || "").trim();
   if (!mistralKey) throw new Error("Clé API Mistral requise pour le mode Remix IA");
-  if (!falKey) throw new Error("Clé API FAL requise pour le mode Remix IA");
+  if (videoProvider === "fal" && !falKey) throw new Error("Clé API FAL requise pour le mode Remix IA");
+  if (videoProvider === "huggingface" && !hfKey && !hfEndpointUrl) {
+    throw new Error("Clé API Hugging Face ou endpoint dédié requis pour le mode Remix IA");
+  }
 
   const falModel = resolveFalModel(job.params.falModel || DEFAULT_FAL_MODEL);
+  const hfModel = resolveHfTextToVideoModel(job.params.hfModel || DEFAULT_HF_TEXT_TO_VIDEO_MODEL);
   const mistralModel = job.params.mistralModel || "mistral-small-2506";
 
   job.params.burnSubtitles = true;
@@ -214,7 +264,7 @@ async function processAiRemixJob(job, ctx) {
   });
 
   job.progress = 30;
-  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA (FAL)…`;
+  job.aiRemixStage = `${scripts.length} scripts prêts — génération vidéo IA (${videoProviderLabel(videoProvider)})…`;
   job.updatedAt = new Date().toISOString();
   await persistJobsDb();
 
@@ -231,14 +281,19 @@ async function processAiRemixJob(job, ctx) {
     const localScenePaths = [];
     for (let sceneIndex = 0; sceneIndex < script.scenes.length; sceneIndex += 1) {
       const scene = script.scenes[sceneIndex];
-      job.aiRemixStage = `Short ${scriptIndex + 1}/${scripts.length} — scène ${sceneIndex + 1}/${script.scenes.length} (FAL)`;
+      job.aiRemixStage =
+        `Short ${scriptIndex + 1}/${scripts.length} — scène ${sceneIndex + 1}/${script.scenes.length} (${videoProviderLabel(videoProvider)})`;
       job.updatedAt = new Date().toISOString();
       await persistJobsDb();
 
       const scenePath = path.join(clipDir, `scene-${String(sceneIndex + 1).padStart(2, "0")}.mp4`);
-      await generateFalSceneClip({
+      await generateSceneClip({
+        videoProvider,
         falKey,
-        modelPath: falModel,
+        hfKey,
+        hfEndpointUrl,
+        falModel,
+        hfModel,
         scene,
         aspectRatio: job.params.aspectRatio,
         destPath: scenePath

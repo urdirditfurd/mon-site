@@ -140,6 +140,10 @@ const dom = {
   aiKeysDetails: document.getElementById("aiKeysDetails"),
   mistralApiKey: document.getElementById("mistralApiKey"),
   falApiKey: document.getElementById("falApiKey"),
+  videoProvider: document.getElementById("videoProvider"),
+  hfApiKey: document.getElementById("hfApiKey"),
+  hfEndpointUrl: document.getElementById("hfEndpointUrl"),
+  hfModel: document.getElementById("hfModel"),
   ytDlpWarning: document.getElementById("ytDlpWarning")
 };
 
@@ -212,6 +216,10 @@ function loadAiKeysFromStorage() {
     const parsed = JSON.parse(raw);
     if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
     if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
+    if (dom.videoProvider && parsed.videoProvider) dom.videoProvider.value = parsed.videoProvider;
+    if (dom.hfApiKey && parsed.hfApiKey) dom.hfApiKey.value = parsed.hfApiKey;
+    if (dom.hfEndpointUrl && parsed.hfEndpointUrl) dom.hfEndpointUrl.value = parsed.hfEndpointUrl;
+    if (dom.hfModel && parsed.hfModel) dom.hfModel.value = parsed.hfModel;
   } catch {
     // ignore corrupt storage
   }
@@ -223,7 +231,11 @@ function saveAiKeysToStorage() {
       AI_KEYS_STORAGE,
       JSON.stringify({
         mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
-        falApiKey: (dom.falApiKey?.value || "").trim()
+        falApiKey: (dom.falApiKey?.value || "").trim(),
+        videoProvider: dom.videoProvider?.value || "huggingface",
+        hfApiKey: (dom.hfApiKey?.value || "").trim(),
+        hfEndpointUrl: (dom.hfEndpointUrl?.value || "").trim(),
+        hfModel: dom.hfModel?.value || "SulphurAI/Sulphur-2-base"
       })
     );
   } catch {
@@ -239,8 +251,9 @@ function applyGenerationModeUi() {
   const aiMode = isAiRemixMode();
   if (dom.aiKeysDetails) dom.aiKeysDetails.open = aiMode;
   if (dom.generationModeHint) {
+    const providerLabel = dom.videoProvider?.value === "fal" ? "FAL/Kling" : "Hugging Face/Sulphur";
     dom.generationModeHint.textContent = aiMode
-      ? "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres."
+      ? `L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis ${providerLabel} génère des shorts IA avec sous-titres.`
       : "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
   }
   if (dom.copyrightShieldRow) {
@@ -1336,13 +1349,20 @@ async function createJob() {
 
   if (aiRemixMode) {
     const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
+    const videoProvider = dom.videoProvider?.value || "huggingface";
     const falApiKey = (dom.falApiKey?.value || "").trim();
+    const hfApiKey = (dom.hfApiKey?.value || "").trim();
+    const hfEndpointUrl = (dom.hfEndpointUrl?.value || "").trim();
     if (!mistralApiKey) {
       updateStatus("Ajoute ta clé API Mistral pour le mode Remix IA.", false);
       return;
     }
-    if (!falApiKey) {
+    if (videoProvider === "fal" && !falApiKey) {
       updateStatus("Ajoute ta clé API FAL pour le mode Remix IA.", false);
+      return;
+    }
+    if (videoProvider === "huggingface" && !hfApiKey && !hfEndpointUrl) {
+      updateStatus("Ajoute une clé Hugging Face ou un endpoint dédié pour le mode Remix IA.", false);
       return;
     }
     saveAiKeysToStorage();
@@ -1357,7 +1377,11 @@ async function createJob() {
   body.append("aiRemixMode", aiRemixMode ? "true" : "false");
   if (aiRemixMode) {
     body.append("mistralApiKey", (dom.mistralApiKey?.value || "").trim());
+    body.append("videoProvider", dom.videoProvider?.value || "huggingface");
     body.append("falApiKey", (dom.falApiKey?.value || "").trim());
+    body.append("hfApiKey", (dom.hfApiKey?.value || "").trim());
+    body.append("hfEndpointUrl", (dom.hfEndpointUrl?.value || "").trim());
+    body.append("hfModel", dom.hfModel?.value || "SulphurAI/Sulphur-2-base");
   }
   body.append("frameMode", "full-video");
   body.append("languageMode", "no-added-audio");
@@ -1505,6 +1529,21 @@ function initEvents() {
   if (dom.falApiKey) {
     dom.falApiKey.addEventListener("change", saveAiKeysToStorage);
   }
+  if (dom.videoProvider) {
+    dom.videoProvider.addEventListener("change", () => {
+      saveAiKeysToStorage();
+      applyGenerationModeUi();
+    });
+  }
+  if (dom.hfApiKey) {
+    dom.hfApiKey.addEventListener("change", saveAiKeysToStorage);
+  }
+  if (dom.hfEndpointUrl) {
+    dom.hfEndpointUrl.addEventListener("change", saveAiKeysToStorage);
+  }
+  if (dom.hfModel) {
+    dom.hfModel.addEventListener("change", saveAiKeysToStorage);
+  }
 
   if (dom.analyzeBtn) {
     dom.analyzeBtn.addEventListener("click", () => {
@@ -1536,11 +1575,11 @@ function initEvents() {
 }
 
 function initDefaults() {
+  loadAiKeysFromStorage();
   if (dom.generationMode) {
     state.generationMode = dom.generationMode.value === "ai-remix" ? "ai-remix" : "classic";
     applyGenerationModeUi();
   }
-  loadAiKeysFromStorage();
   if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
   if (dom.clipsCount) dom.clipsCount.value = String(config.defaultClipsCount);
   if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;

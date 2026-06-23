@@ -4,6 +4,12 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { createVideoJobManager } = require("./voanh-video-pipeline");
+const {
+  DEFAULT_HF_TEXT_TO_VIDEO_MODEL,
+  HF_TEXT_TO_VIDEO_MODELS,
+  generateHfTextToVideoClip,
+  resolveHfTextToVideoModel
+} = require("./huggingface-video");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
@@ -77,6 +83,58 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
       });
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur FAL submit" });
+    }
+  });
+
+  router.post("/hf/generate", async (req, res) => {
+    try {
+      await ensureVideoDirs();
+      const hfKey = String(req.headers["x-hf-key"] || req.body?.apiKey || req.body?.hfKey || "").trim();
+      const hfEndpointUrl = String(req.headers["x-hf-endpoint-url"] || req.body?.endpointUrl || "").trim();
+      if (!hfKey && !hfEndpointUrl) {
+        return res.status(400).json({ error: "Clé Hugging Face ou endpoint dédié requis" });
+      }
+
+      const prompt = String(req.body?.prompt || "").trim();
+      if (!prompt) return res.status(400).json({ error: "Prompt requis" });
+
+      const durationSec = Number(req.body?.duration || req.body?.durationSec || 5);
+      const aspectRatio = String(req.body?.aspectRatio || "9:16");
+      const modelId = resolveHfTextToVideoModel(req.body?.modelKey || DEFAULT_HF_TEXT_TO_VIDEO_MODEL);
+      const jobId = uuidv4();
+      const jobDir = path.join(videoJobsDir, jobId);
+      await fsp.mkdir(jobDir, { recursive: true });
+      const outputPath = path.join(jobDir, "clip.mp4");
+
+      await generateHfTextToVideoClip({
+        hfKey,
+        hfEndpointUrl,
+        modelId,
+        prompt,
+        durationSec,
+        aspectRatio,
+        destPath: outputPath
+      });
+
+      const stats = await fsp.stat(outputPath);
+      const job = {
+        id: jobId,
+        status: "completed",
+        outputPath,
+        size: stats.size,
+        createdAt: new Date().toISOString()
+      };
+      videoJobs.set(jobId, job);
+
+      return res.json({
+        id: jobId,
+        provider: "huggingface",
+        modelId,
+        downloadUrl: `/api/voanh/download/${jobId}`,
+        size: stats.size
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Erreur Hugging Face" });
     }
   });
 
@@ -280,6 +338,10 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
         modelPath: req.body?.modelPath,
+        videoProvider: req.body?.videoProvider,
+        hfModel: req.body?.hfModel,
+        hfKey: req.body?.hfKey || req.headers["x-hf-key"],
+        hfEndpointUrl: req.body?.hfEndpointUrl || req.headers["x-hf-endpoint-url"],
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"]
@@ -311,7 +373,7 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({ ok: true, ffmpegReady, models: FAL_MODELS, hfModels: HF_TEXT_TO_VIDEO_MODELS });
   });
 
   return router;

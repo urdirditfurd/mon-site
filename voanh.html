@@ -1948,17 +1948,28 @@ body::before {
     <div class="modal-body">
       <div class="info-block" style="border-left-color:var(--plasma)">
         <strong style="color:var(--plasma)">Pipeline 10+ minutes</strong><br>
-        Mistral découpe le script → <strong>FAL.ai (Kling)</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
-        <span style="font-size:12px;color:var(--text-dim)">Obtenez une clé gratuite sur <a href="https://fal.ai" target="_blank" rel="noopener" style="color:var(--cyan)">fal.ai</a> (crédits offerts à l'inscription).</span>
+        Mistral découpe le script → <strong>Hugging Face / FAL.ai</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
+        <span style="font-size:12px;color:var(--text-dim)">Pour produire beaucoup tous les jours, privilégiez un Hugging Face Inference Endpoint dédié.</span>
       </div>
 
       <div class="field-group">
-        <label class="field-label">🔑 Clé API FAL.ai <span style="color:var(--danger)">*</span></label>
+        <label class="field-label">Fournisseur text-to-video</label>
+        <select class="field-input field-select" id="video-provider">
+          <option value="huggingface" selected>Hugging Face — Sulphur/Wan (recommandé volume)</option>
+          <option value="fal">FAL.ai — Kling</option>
+        </select>
+        <div class="field-hint">Hugging Face permet d'utiliser SulphurAI/Sulphur-2-base ou un endpoint GPU dédié.</div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">🔑 Clés vidéo</label>
         <div style="display:flex;gap:8px">
-          <input type="password" class="field-input" id="fal-api-key-input" placeholder="fal_xxxxxxxx…" style="flex:1">
+          <input type="password" class="field-input" id="fal-api-key-input" placeholder="FAL: fal_xxxxxxxx…" style="flex:1">
           <button class="btn-primary" id="save-fal-key" type="button" style="white-space:nowrap">ENREGISTRER</button>
         </div>
-        <div class="field-hint">Utilisée pour générer les clips IA (Kling). Stockée localement comme Mistral.</div>
+        <input type="password" class="field-input" id="hf-api-key-input" placeholder="Hugging Face token: hf_xxxxxxxx…" style="margin-top:8px">
+        <input type="url" class="field-input" id="hf-endpoint-url-input" placeholder="Endpoint dédié optionnel: https://xxxxx.endpoints.huggingface.cloud" style="margin-top:8px">
+        <div class="field-hint">Les clés sont stockées localement. L'endpoint dédié est conseillé pour éviter les limites du serverless.</div>
       </div>
 
       <div class="field-group">
@@ -1998,6 +2009,15 @@ body::before {
           <select class="field-input field-select" id="video-fal-model">
             <option value="fal-ai/kling-video/v2/master/text-to-video">Kling 2.0 Master (recommandé)</option>
             <option value="fal-ai/kling-video/v1.6/standard/text-to-video">Kling 1.6 Standard (économique)</option>
+          </select>
+        </div>
+        <div class="field-group" style="margin-bottom:0">
+          <label class="field-label">Modèle Hugging Face</label>
+          <select class="field-input field-select" id="video-hf-model">
+            <option value="SulphurAI/Sulphur-2-base" selected>SulphurAI/Sulphur-2-base (top téléchargements)</option>
+            <option value="Wan-AI/Wan2.1-T2V-1.3B-Diffusers">Wan2.1 T2V 1.3B (Apache 2.0)</option>
+            <option value="Wan-AI/Wan2.2-TI2V-5B-Diffusers">Wan2.2 TI2V 5B (qualité + lourd)</option>
+            <option value="ali-vilab/text-to-video-ms-1.7b">ModelScope T2V 1.7B (legacy)</option>
           </select>
         </div>
       </div>

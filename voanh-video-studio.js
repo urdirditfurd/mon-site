@@ -8,6 +8,12 @@
     kling: "fal-ai/kling-video/v2/master/text-to-video",
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
+  const HF_MODELS = {
+    sulphur2: "SulphurAI/Sulphur-2-base",
+    wan21Small: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    wan22Ti2v: "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    modelScope: "ali-vilab/text-to-video-ms-1.7b"
+  };
 
   const videoState = {
     running: false,
@@ -35,6 +41,35 @@
     } catch (_err) {
       return "";
     }
+  }
+
+  function getHfKey() {
+    try {
+      return localStorage.getItem("voanh_hf_api_key") || "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  function setHfKey(key) {
+    try {
+      localStorage.setItem("voanh_hf_api_key", String(key || "").trim());
+    } catch (_err) { /* ignore */ }
+    updateFalStatusPill();
+  }
+
+  function getHfEndpointUrl() {
+    try {
+      return localStorage.getItem("voanh_hf_endpoint_url") || "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  function setHfEndpointUrl(url) {
+    try {
+      localStorage.setItem("voanh_hf_endpoint_url", String(url || "").trim());
+    } catch (_err) { /* ignore */ }
   }
 
   function setFalKey(key) {
@@ -67,13 +102,14 @@
   function updateFalStatusPill() {
     const pill = document.getElementById("fal-status");
     if (!pill) return;
-    const key = getFalKey();
-    if (key.length >= 20) {
+    const provider = document.getElementById("video-provider")?.value || "fal";
+    const ready = provider === "huggingface" ? getHfKey().length >= 10 || !!getHfEndpointUrl() : getFalKey().length >= 20;
+    if (ready) {
       pill.className = "status-pill active";
-      pill.innerHTML = '<span class="status-dot"></span>VIDEO ON';
+      pill.innerHTML = `<span class="status-dot"></span>${provider === "huggingface" ? "HF ON" : "VIDEO ON"}`;
     } else {
       pill.className = "status-pill";
-      pill.innerHTML = '<span class="status-dot"></span>VIDEO OFF';
+      pill.innerHTML = `<span class="status-dot"></span>${provider === "huggingface" ? "HF OFF" : "VIDEO OFF"}`;
     }
   }
 
@@ -100,6 +136,8 @@
     if (!API_BASE) throw new Error("Serveur VOANH requis pour le proxy vidéo. Lancez: npm start puis ouvrez /voanh");
     const headers = { ...(options.headers || {}) };
     if (options.falKey) headers["x-fal-key"] = options.falKey;
+    if (options.hfKey) headers["x-hf-key"] = options.hfKey;
+    if (options.hfEndpointUrl) headers["x-hf-endpoint-url"] = options.hfEndpointUrl;
     if (options.creatomateKey) headers["x-creatomate-key"] = options.creatomateKey;
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
     const text = await res.text();
@@ -182,6 +220,25 @@ Réponds UNIQUEMENT en JSON valide :
         aspectRatio
       })
     });
+  }
+
+  async function submitHfClip({ hfKey, hfEndpointUrl, modelPath, prompt, duration, aspectRatio }) {
+    const out = await apiFetch("/hf/generate", {
+      method: "POST",
+      hfKey,
+      hfEndpointUrl,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        modelKey: modelPath,
+        prompt,
+        duration: String(duration),
+        aspectRatio
+      })
+    });
+    const downloadUrl = out.downloadUrl?.startsWith("http")
+      ? out.downloadUrl
+      : `${global.location.origin}${out.downloadUrl}`;
+    return { ...out, downloadUrl };
   }
 
   async function pollFalResult({ falKey, modelPath, requestId, onTick }) {
@@ -299,9 +356,15 @@ Réponds UNIQUEMENT en JSON valide :
     const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
     const clipSec = Number(document.getElementById("video-clip-sec")?.value || 10);
     const aspectRatio = document.getElementById("video-aspect")?.value || "9:16";
-    const modelPath = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+    const videoProvider = document.getElementById("video-provider")?.value || "fal";
+    const modelPath =
+      videoProvider === "huggingface"
+        ? document.getElementById("video-hf-model")?.value || HF_MODELS.sulphur2
+        : document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
     const assemblyMode = document.getElementById("video-assembly")?.value || "server";
     const falKey = document.getElementById("fal-api-key-input")?.value?.trim() || getFalKey();
+    const hfKey = document.getElementById("hf-api-key-input")?.value?.trim() || getHfKey();
+    const hfEndpointUrl = document.getElementById("hf-endpoint-url-input")?.value?.trim() || getHfEndpointUrl();
     const creatomateKey = document.getElementById("creatomate-api-key-input")?.value?.trim() || getCreatomateKey();
     const mistralKey = global.state?.apiKey;
 
@@ -309,8 +372,12 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Décrivez le sujet de la vidéo", "error");
       return;
     }
-    if (!falKey || falKey.length < 20) {
+    if (videoProvider === "fal" && (!falKey || falKey.length < 20)) {
       global.toast?.("Configurez votre clé FAL.ai", "error");
+      return;
+    }
+    if (videoProvider === "huggingface" && !hfKey && !hfEndpointUrl) {
+      global.toast?.("Configurez votre clé Hugging Face ou un endpoint dédié", "error");
       return;
     }
     if (!mistralKey) {
@@ -328,13 +395,15 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
 
-  const costEstimate = (sceneCount * 0.08 * clipSec).toFixed(1);
+    const costEstimate = videoProvider === "fal" ? `~${(sceneCount * 0.08 * clipSec).toFixed(1)}€ FAL` : "quota/endpoint Hugging Face";
     const proceed = global.confirm(
-      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût FAL estimé : ~${costEstimate}€.\nContinuer ?`
+      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût estimé : ${costEstimate}.\nContinuer ?`
     );
     if (!proceed) return;
 
-    setFalKey(falKey);
+    if (falKey) setFalKey(falKey);
+    if (hfKey) setHfKey(hfKey);
+    if (hfEndpointUrl) setHfEndpointUrl(hfEndpointUrl);
     if (creatomateKey) setCreatomateKey(creatomateKey);
 
     videoState.running = true;
@@ -373,24 +442,37 @@ Réponds UNIQUEMENT en JSON valide :
         const scene = videoState.scenes[i];
         const pct = 5 + Math.round((i / videoState.scenes.length) * 80);
         setProgress(pct, `Clip ${i + 1}/${videoState.scenes.length}`, scene.visualPrompt?.slice(0, 80) || "");
-        appendVideoLog(`Clip ${i + 1} : soumission FAL…`);
+        appendVideoLog(`Clip ${i + 1} : génération ${videoProvider === "huggingface" ? "Hugging Face" : "FAL"}…`);
 
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
-        const submit = await submitFalClip({
-          falKey,
-          modelPath,
-          prompt: visual,
-          duration: clipSec,
-          aspectRatio
-        });
+        let clipUrl;
+        if (videoProvider === "huggingface") {
+          const generated = await submitHfClip({
+            hfKey,
+            hfEndpointUrl,
+            modelPath,
+            prompt: visual,
+            duration: clipSec,
+            aspectRatio
+          });
+          clipUrl = generated.downloadUrl;
+        } else {
+          const submit = await submitFalClip({
+            falKey,
+            modelPath,
+            prompt: visual,
+            duration: clipSec,
+            aspectRatio
+          });
 
-        appendVideoLog(`Clip ${i + 1} : file d'attente ${submit.requestId}`);
-        const clipUrl = await pollFalResult({
-          falKey,
-          modelPath: submit.modelPath || modelPath,
-          requestId: submit.requestId,
-          onTick: (st) => appendVideoLog(`Clip ${i + 1} : ${st.status}`)
-        });
+          appendVideoLog(`Clip ${i + 1} : file d'attente ${submit.requestId}`);
+          clipUrl = await pollFalResult({
+            falKey,
+            modelPath: submit.modelPath || modelPath,
+            requestId: submit.requestId,
+            onTick: (st) => appendVideoLog(`Clip ${i + 1} : ${st.status}`)
+          });
+        }
 
         videoState.clipUrls.push(clipUrl);
         appendVideoLog(`Clip ${i + 1} : terminé`);
@@ -455,8 +537,12 @@ Réponds UNIQUEMENT en JSON valide :
 
     const open = () => {
       const falInput = document.getElementById("fal-api-key-input");
+      const hfInput = document.getElementById("hf-api-key-input");
+      const hfEndpointInput = document.getElementById("hf-endpoint-url-input");
       const cmInput = document.getElementById("creatomate-api-key-input");
       if (falInput) falInput.value = getFalKey();
+      if (hfInput) hfInput.value = getHfKey();
+      if (hfEndpointInput) hfEndpointInput.value = getHfEndpointUrl();
       if (cmInput) cmInput.value = getCreatomateKey();
       modal?.classList.add("active");
     };
@@ -475,13 +561,19 @@ Réponds UNIQUEMENT en JSON valide :
 
     document.getElementById("save-fal-key")?.addEventListener("click", () => {
       const key = document.getElementById("fal-api-key-input")?.value?.trim();
-      if (!key || key.length < 20) {
-        global.toast?.("Clé FAL invalide", "error");
+      const hfKey = document.getElementById("hf-api-key-input")?.value?.trim();
+      const hfEndpointUrl = document.getElementById("hf-endpoint-url-input")?.value?.trim();
+      if ((!key || key.length < 20) && !hfKey && !hfEndpointUrl) {
+        global.toast?.("Ajoutez une clé FAL ou Hugging Face", "error");
         return;
       }
-      setFalKey(key);
-      global.toast?.("Clé FAL.ai enregistrée", "success");
+      if (key) setFalKey(key);
+      if (hfKey) setHfKey(hfKey);
+      if (hfEndpointUrl) setHfEndpointUrl(hfEndpointUrl);
+      global.toast?.("Clés vidéo enregistrées", "success");
     });
+
+    document.getElementById("video-provider")?.addEventListener("change", updateFalStatusPill);
 
     document.getElementById("video-generate-btn")?.addEventListener("click", async () => {
       const auto = document.getElementById("video-auto-mode")?.checked;
@@ -593,19 +685,29 @@ Réponds UNIQUEMENT en JSON valide :
   }
 
   async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+    const videoProvider = document.getElementById("video-provider")?.value || "fal";
     const falKey = getFalKey();
+    const hfKey = getHfKey();
+    const hfEndpointUrl = getHfEndpointUrl();
     if (!mistralKey) throw new Error("Clé Mistral requise");
-    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    if (videoProvider === "fal" && (!falKey || falKey.length < 20)) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    if (videoProvider === "huggingface" && !hfKey && !hfEndpointUrl) {
+      throw new Error("Clé Hugging Face ou endpoint dédié requis — ouvrez ▶ VIDÉO");
+    }
 
     const payload = {
       topic,
       durationMin,
       clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
       aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
+      videoProvider,
       modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
+      hfModel: document.getElementById("video-hf-model")?.value || HF_MODELS.sulphur2,
       mistralModel: mistralModel || global.state?.model,
       mistralKey,
-      falKey
+      falKey,
+      hfKey,
+      hfEndpointUrl
     };
 
     return apiFetch("/jobs/auto", {
