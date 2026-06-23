@@ -8,6 +8,10 @@
     kling: "fal-ai/kling-video/v2/master/text-to-video",
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
+  const HF_MODELS = {
+    wan13b: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    wan14b: "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+  };
 
   const videoState = {
     running: false,
@@ -23,6 +27,22 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function parseVideoProviderSelection(rawModelValue) {
+    const value = String(rawModelValue || "").trim();
+    if (value.startsWith("hf-local:")) {
+      return {
+        provider: "hf-local",
+        hfModelId: value.slice("hf-local:".length).trim() || HF_MODELS.wan13b,
+        falModelPath: ""
+      };
+    }
+    return {
+      provider: "fal",
+      hfModelId: "",
+      falModelPath: value || FAL_MODELS.kling
+    };
   }
 
   function getFalKey() {
@@ -67,6 +87,12 @@
   function updateFalStatusPill() {
     const pill = document.getElementById("fal-status");
     if (!pill) return;
+    const selectedModel = document.getElementById("video-fal-model")?.value || "";
+    if (String(selectedModel).startsWith("hf-local:")) {
+      pill.className = "status-pill active";
+      pill.innerHTML = '<span class="status-dot"></span>HF LOCAL';
+      return;
+    }
     const key = getFalKey();
     if (key.length >= 20) {
       pill.className = "status-pill active";
@@ -299,7 +325,9 @@ Réponds UNIQUEMENT en JSON valide :
     const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
     const clipSec = Number(document.getElementById("video-clip-sec")?.value || 10);
     const aspectRatio = document.getElementById("video-aspect")?.value || "9:16";
-    const modelPath = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+    const selectedModel = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+    const providerChoice = parseVideoProviderSelection(selectedModel);
+    const modelPath = providerChoice.falModelPath || FAL_MODELS.kling;
     const assemblyMode = document.getElementById("video-assembly")?.value || "server";
     const falKey = document.getElementById("fal-api-key-input")?.value?.trim() || getFalKey();
     const creatomateKey = document.getElementById("creatomate-api-key-input")?.value?.trim() || getCreatomateKey();
@@ -309,16 +337,21 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Décrivez le sujet de la vidéo", "error");
       return;
     }
-    if (!falKey || falKey.length < 20) {
+    if (providerChoice.provider === "fal" && (!falKey || falKey.length < 20)) {
       global.toast?.("Configurez votre clé FAL.ai", "error");
       return;
     }
     if (!mistralKey) {
-      global.toast?.("Configurez d'abord votre clé Mistral", "error");
+      global.toast?.("Configurez d'abord votre clé Mistral (requis en mode manuel).", "error");
       return;
     }
     if (assemblyMode === "creatomate" && !creatomateKey) {
       global.toast?.("Clé Creatomate requise pour ce mode d'assemblage", "error");
+      return;
+    }
+    if (providerChoice.provider === "hf-local" && !document.getElementById("video-auto-mode")?.checked) {
+      global.toast?.("Le provider Hugging Face local fonctionne en mode automatique.", "info");
+      document.getElementById("video-auto-mode").checked = true;
       return;
     }
 
@@ -328,9 +361,11 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
 
-  const costEstimate = (sceneCount * 0.08 * clipSec).toFixed(1);
+    const isFalProvider = providerChoice.provider === "fal";
+    const costEstimate = isFalProvider ? (sceneCount * 0.08 * clipSec).toFixed(1) : "0.0";
+    const costLabel = isFalProvider ? `${costEstimate}€` : "0€ (GPU locale)";
     const proceed = global.confirm(
-      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût FAL estimé : ~${costEstimate}€.\nContinuer ?`
+      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nCoût estimé : ~${costLabel}.\nContinuer ?`
     );
     if (!proceed) return;
 
@@ -483,18 +518,37 @@ Réponds UNIQUEMENT en JSON valide :
       global.toast?.("Clé FAL.ai enregistrée", "success");
     });
 
+    document.getElementById("video-fal-model")?.addEventListener("change", () => {
+      updateFalStatusPill();
+    });
+
     document.getElementById("video-generate-btn")?.addEventListener("click", async () => {
       const auto = document.getElementById("video-auto-mode")?.checked;
       if (auto) {
         const topic = document.getElementById("video-topic")?.value?.trim();
         const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
         const mistralKey = global.state?.apiKey;
-        if (!topic || !mistralKey) {
-          global.toast?.("Sujet et clé Mistral requis", "error");
+        const selectedModel = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+        const providerChoice = parseVideoProviderSelection(selectedModel);
+
+        if (!topic) {
+          global.toast?.("Sujet requis", "error");
+          return;
+        }
+        if (providerChoice.provider === "fal" && (!getFalKey() || getFalKey().length < 20)) {
+          global.toast?.("Clé FAL.ai requise pour le provider FAL", "error");
           return;
         }
         try {
-          const job = await startAutoJob({ topic, durationMin, mistralKey, mistralModel: global.state?.model });
+          const job = await startAutoJob({
+            topic,
+            durationMin,
+            mistralKey,
+            mistralModel: global.state?.model,
+            provider: providerChoice.provider,
+            modelPath: providerChoice.falModelPath,
+            hfModelId: providerChoice.hfModelId
+          });
           appendVideoLog(`Job auto #${job.id} lancé en arrière-plan`);
           setProgress(5, "Production auto…", `Job ${job.id}`);
           pollAutoJob(job.id, (status) => {
@@ -592,17 +646,37 @@ Réponds UNIQUEMENT en JSON valide :
     );
   }
 
-  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+  async function startAutoJob({
+    topic,
+    durationMin = 10,
+    clipSec,
+    aspectRatio,
+    provider,
+    modelPath,
+    hfModelId,
+    mistralKey,
+    mistralModel
+  }) {
     const falKey = getFalKey();
-    if (!mistralKey) throw new Error("Clé Mistral requise");
-    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    const activeProvider = String(provider || "fal").trim() === "hf-local" ? "hf-local" : "fal";
+    if (activeProvider === "fal" && (!falKey || falKey.length < 20)) {
+      throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    }
 
     const payload = {
       topic,
       durationMin,
       clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
       aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
-      modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
+      provider: activeProvider,
+      modelPath:
+        activeProvider === "fal"
+          ? modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling
+          : "",
+      hfModelId: hfModelId || HF_MODELS.wan13b,
+      hfNumInferenceSteps: 30,
+      hfGuidanceScale: 5,
+      hfFps: 12,
       mistralModel: mistralModel || global.state?.model,
       mistralKey,
       falKey
@@ -640,18 +714,17 @@ Réponds UNIQUEMENT en JSON valide :
 
     if (!parsed?.topic) return false;
 
-    const mistralKey = global.state?.apiKey;
-    if (!mistralKey) {
-      global.toast?.("Configurez votre clé Mistral", "error");
-      return true;
-    }
-
     try {
+      const modelSelectValue = document.getElementById("video-fal-model")?.value || FAL_MODELS.kling;
+      const providerChoice = parseVideoProviderSelection(modelSelectValue);
       const job = await startAutoJob({
         topic: parsed.topic,
         durationMin: parsed.durationMin,
-        mistralKey,
-        mistralModel: global.state?.model
+        mistralKey: global.state?.apiKey,
+        mistralModel: global.state?.model,
+        provider: providerChoice.provider,
+        modelPath: providerChoice.falModelPath,
+        hfModelId: providerChoice.hfModelId
       });
 
       hooks.onJobStarted?.(job);
@@ -684,7 +757,7 @@ Réponds UNIQUEMENT en JSON valide :
         "Tu es VideoForge, producteur vidéo IA intégré à VOANH.",
         "Quand l'utilisateur demande une vidéo, guide-le vers la commande : /video 10min sujet",
         "Ou reformule sa demande et confirme : durée cible, angle, public.",
-        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral + FAL + FFmpeg s'en charge.",
+        "Tu ne génères pas la vidéo toi-même : le pipeline automatique Mistral/Fallback + FAL ou Hugging Face local + FFmpeg s'en charge.",
         "Rappelle : contenu original uniquement, pas de logos ni célébrités."
       ].join("\n"),
       primer: "Je transforme vos idées en vidéos longues prêtes pour YouTube.",

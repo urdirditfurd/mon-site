@@ -3,7 +3,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
-const { createVideoJobManager } = require("./voanh-video-pipeline");
+const { createVideoJobManager, DEFAULT_HF_MODEL } = require("./voanh-video-pipeline");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
@@ -11,6 +11,11 @@ const FAL_MODELS = {
   kling: "fal-ai/kling-video/v2/master/text-to-video",
   klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video",
   minimax: "fal-ai/minimax/video-01-live/text-to-video"
+};
+
+const HF_MODELS = {
+  wan13b: DEFAULT_HF_MODEL,
+  wan14b: "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 };
 
 function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
@@ -279,7 +284,13 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         durationMin: req.body?.durationMin,
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
+        provider: req.body?.provider,
         modelPath: req.body?.modelPath,
+        hfModelId: req.body?.hfModelId,
+        hfNegativePrompt: req.body?.hfNegativePrompt,
+        hfNumInferenceSteps: req.body?.hfNumInferenceSteps,
+        hfGuidanceScale: req.body?.hfGuidanceScale,
+        hfFps: req.body?.hfFps,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"]
@@ -311,7 +322,15 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({
+      ok: true,
+      ffmpegReady,
+      providers: ["fal", "hf-local"],
+      models: {
+        fal: FAL_MODELS,
+        hfLocal: HF_MODELS
+      }
+    });
   });
 
   return router;

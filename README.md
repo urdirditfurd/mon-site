@@ -34,6 +34,10 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - clip individuel MP4
   - plan JSON
   - bundle ZIP (clips + SRT + plan)
+- Nouveau moteur text-to-video **Hugging Face local** (mode VOANH auto):
+  - modèle par défaut: `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` (trié top téléchargements HF text-to-video)
+  - fallback planification locale sans clé Mistral
+  - génération en lot de scènes + assemblage FFmpeg pour vidéos courtes et longues
 
 ## Pré-requis
 
@@ -41,6 +45,7 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 - FFmpeg + FFprobe dans le PATH
 - **yt-dlp** (obligatoire pour les liens YouTube) : `pip install -U yt-dlp`
 - Redis recommandé pour le mode BullMQ (optionnel)
+- Pour le moteur Hugging Face local (GPU recommandé): dépendances Python dans `requirements-hf-video.txt`
 
 ## Mise à jour (local ou VPS)
 
@@ -96,6 +101,25 @@ REDIS_URL=redis://127.0.0.1:6379 QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 npm run 
 
 Ouvrir ensuite:
 - **App**: `http://localhost:3000`
+
+### Installer le moteur text-to-video Hugging Face local (VOANH)
+
+```bash
+chmod +x scripts/install-hf-video-deps.sh
+./scripts/install-hf-video-deps.sh
+```
+
+Variables utiles:
+
+- `HF_T2V_MODEL` (défaut: `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`)
+- `HF_T2V_PYTHON_BIN` (défaut: `python3`)
+- `HF_T2V_NEGATIVE_PROMPT` (prompt négatif global)
+
+Ensuite ouvrir:
+
+- `http://localhost:3000/voanh`
+- sélectionner **Hugging Face local — Wan2.1** dans **Moteur vidéo IA**
+- lancer la production en **mode automatique** (court ou long)
 
 ## Utilisation
 
@@ -284,6 +308,11 @@ Render crée:
 - `GET /api/jobs/:jobId/clips/:clipId/stream`
 - `GET /api/jobs/:jobId/clips/:clipId/download`
 - `GET /api/jobs/:jobId/clips/:clipId/srt`
+- `GET /api/voanh/health`
+- `POST /api/voanh/jobs/auto` (génération text-to-video longue/courte en mode auto)
+- `GET /api/voanh/jobs`
+- `GET /api/voanh/jobs/:jobId`
+- `GET /api/voanh/download/:jobId`
 
 ## Paramètres `POST /api/jobs`
 
@@ -303,6 +332,27 @@ Render crée:
 - `includeSrtInZip` (`true`/`false`)
 - `burnSubtitles` (`true`/`false`)
 - `dubFrenchAudio` (`true`/`false`) — remplace la piste audio par une voix FR synthétique
+
+## Paramètres `POST /api/voanh/jobs/auto`
+
+- `topic` (obligatoire)
+- `durationMin` (minutes cibles, ex: `2` pour court, `10+` pour long)
+- `clipSec` (durée d’une scène générée, recommandé `5` à `10`)
+- `aspectRatio` (`9:16` | `1:1` | `16:9`)
+- `provider` (`fal` | `hf-local`)
+- `mistralKey` (optionnel; si absent, fallback planification locale)
+- `mistralModel` (optionnel)
+
+Si `provider=fal`:
+- `falKey` (obligatoire)
+- `modelPath` (ex: `fal-ai/kling-video/v2/master/text-to-video`)
+
+Si `provider=hf-local`:
+- `hfModelId` (défaut: `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`)
+- `hfNumInferenceSteps` (défaut: `30`)
+- `hfGuidanceScale` (défaut: `5`)
+- `hfFps` (défaut: `12`)
+- `hfNegativePrompt` (optionnel)
 
 ### Cookies YouTube persistants (recommandé)
 
@@ -347,4 +397,5 @@ npm run start:v4:workers4
 - Backend: Node.js + Express + Multer
 - Queue: BullMQ + Redis (optionnel, fallback mémoire)
 - Vidéo: FFmpeg/FFprobe
+- Text-to-video local: Python + Diffusers (Wan2.1)
 - Packaging: Archiver

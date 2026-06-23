@@ -18,6 +18,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY app.js config.js index.html voanh.html voanh-video-studio.js styles.css favicon.png privacy.html terms.html tiktok-callback.html ./
+COPY requirements-hf-video.txt ./
+COPY scripts ./scripts
 COPY server ./server
 COPY storage ./storage
 
