@@ -3,7 +3,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
-const { createVideoJobManager } = require("./voanh-video-pipeline");
+const { createVideoJobManager, DEFAULT_HF_MODEL } = require("./voanh-video-pipeline");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
@@ -275,6 +275,7 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
   router.post("/jobs/auto", async (req, res) => {
     try {
       const job = await autoJobs.createAutoJob({
+        provider: req.body?.provider,
         topic: req.body?.topic,
         durationMin: req.body?.durationMin,
         clipSec: req.body?.clipSec,
@@ -282,7 +283,15 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         modelPath: req.body?.modelPath,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
-        falKey: req.body?.falKey || req.headers["x-fal-key"]
+        falKey: req.body?.falKey || req.headers["x-fal-key"],
+        hfModelId: req.body?.hfModelId,
+        hfNegativePrompt: req.body?.hfNegativePrompt,
+        hfSteps: req.body?.hfSteps,
+        hfGuidanceScale: req.body?.hfGuidanceScale,
+        hfFps: req.body?.hfFps,
+        hfDevice: req.body?.hfDevice,
+        hfEnableCpuOffload: req.body?.hfEnableCpuOffload,
+        hfSeed: req.body?.hfSeed
       });
       return res.status(202).json(job);
     } catch (error) {
@@ -311,7 +320,14 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
 
   router.get("/health", (_req, res) => {
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    res.json({ ok: true, ffmpegReady, models: FAL_MODELS });
+    res.json({
+      ok: true,
+      ffmpegReady,
+      models: FAL_MODELS,
+      providers: ["fal", "huggingface-local"],
+      defaultHfModel: DEFAULT_HF_MODEL,
+      hfScriptPath: "/server/hf-text-to-video.py"
+    });
   });
 
   return router;

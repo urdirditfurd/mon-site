@@ -488,13 +488,24 @@ Réponds UNIQUEMENT en JSON valide :
       if (auto) {
         const topic = document.getElementById("video-topic")?.value?.trim();
         const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
+        const provider = document.getElementById("video-provider")?.value || "huggingface-local";
         const mistralKey = global.state?.apiKey;
-        if (!topic || !mistralKey) {
-          global.toast?.("Sujet et clé Mistral requis", "error");
+        if (!topic) {
+          global.toast?.("Sujet requis", "error");
+          return;
+        }
+        if (provider === "fal" && !mistralKey) {
+          global.toast?.("Clé Mistral requise pour le provider FAL", "error");
           return;
         }
         try {
-          const job = await startAutoJob({ topic, durationMin, mistralKey, mistralModel: global.state?.model });
+          const job = await startAutoJob({
+            provider,
+            topic,
+            durationMin,
+            mistralKey,
+            mistralModel: global.state?.model
+          });
           appendVideoLog(`Job auto #${job.id} lancé en arrière-plan`);
           setProgress(5, "Production auto…", `Job ${job.id}`);
           pollAutoJob(job.id, (status) => {
@@ -592,12 +603,33 @@ Réponds UNIQUEMENT en JSON valide :
     );
   }
 
-  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, mistralKey, mistralModel }) {
+  async function startAutoJob({
+    provider = "huggingface-local",
+    topic,
+    durationMin = 10,
+    clipSec,
+    aspectRatio,
+    modelPath,
+    mistralKey,
+    mistralModel,
+    hfModelId,
+    hfNegativePrompt,
+    hfSteps,
+    hfGuidanceScale,
+    hfFps,
+    hfDevice,
+    hfEnableCpuOffload,
+    hfSeed
+  }) {
     const falKey = getFalKey();
-    if (!mistralKey) throw new Error("Clé Mistral requise");
-    if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    const normalizedProvider = String(provider || "huggingface-local").toLowerCase();
+    if (normalizedProvider === "fal") {
+      if (!mistralKey) throw new Error("Clé Mistral requise");
+      if (!falKey || falKey.length < 20) throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+    }
 
     const payload = {
+      provider: normalizedProvider,
       topic,
       durationMin,
       clipSec: clipSec || Number(document.getElementById("video-clip-sec")?.value || 10),
@@ -605,7 +637,15 @@ Réponds UNIQUEMENT en JSON valide :
       modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
       mistralModel: mistralModel || global.state?.model,
       mistralKey,
-      falKey
+      falKey,
+      hfModelId: hfModelId || "",
+      hfNegativePrompt: hfNegativePrompt || "",
+      hfSteps: hfSteps || undefined,
+      hfGuidanceScale: hfGuidanceScale || undefined,
+      hfFps: hfFps || undefined,
+      hfDevice: hfDevice || undefined,
+      hfEnableCpuOffload: hfEnableCpuOffload || undefined,
+      hfSeed: hfSeed || undefined
     };
 
     return apiFetch("/jobs/auto", {
@@ -640,14 +680,12 @@ Réponds UNIQUEMENT en JSON valide :
 
     if (!parsed?.topic) return false;
 
+    const provider = "huggingface-local";
     const mistralKey = global.state?.apiKey;
-    if (!mistralKey) {
-      global.toast?.("Configurez votre clé Mistral", "error");
-      return true;
-    }
 
     try {
       const job = await startAutoJob({
+        provider,
         topic: parsed.topic,
         durationMin: parsed.durationMin,
         mistralKey,

@@ -6,9 +6,34 @@ const { v4: uuidv4 } = require("uuid");
 
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const DEFAULT_FAL_MODEL = "fal-ai/kling-video/v2/master/text-to-video";
+const DEFAULT_HF_MODEL = process.env.HF_TEXT_TO_VIDEO_MODEL || "Wan-AI/Wan2.1-T2V-1.3B-Diffusers";
+const DEFAULT_HF_NEGATIVE_PROMPT =
+  "low quality, blurry, watermark, logo, text overlay, subtitle, deformed face, static frame, low detail";
+const HF_VIDEO_SCRIPT_PATH = path.join(__dirname, "hf-text-to-video.py");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function boolFrom(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  const str = String(value).trim().toLowerCase();
+  return str === "1" || str === "true" || str === "yes" || str === "on";
+}
+
+function toNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function resolveProvider(rawProvider) {
+  const value = String(rawProvider || "").trim().toLowerCase();
+  if (!value || value === "fal") return "fal";
+  if (value === "huggingface-local" || value === "huggingface" || value === "hf-local") {
+    return "huggingface-local";
+  }
+  return "fal";
 }
 
 function resolveFalModel(modelKey) {
@@ -17,6 +42,134 @@ function resolveFalModel(modelKey) {
     klingTurbo: "fal-ai/kling-video/v1.6/standard/text-to-video"
   };
   return map[modelKey] || modelKey || DEFAULT_FAL_MODEL;
+}
+
+function getDimensionsFromAspectRatio(aspectRatio) {
+  const ratio = String(aspectRatio || "9:16").trim();
+  if (ratio === "16:9") return { width: 832, height: 480 };
+  if (ratio === "1:1") return { width: 640, height: 640 };
+  return { width: 480, height: 832 };
+}
+
+function buildLocalScenePlan({ topic, durationMin, clipSec, aspectRatio }) {
+  const sceneCount = Math.max(1, Math.ceil((durationMin * 60) / clipSec));
+  const beats = [
+    "opening wide establishing shot",
+    "medium dynamic camera movement",
+    "cinematic close-up with strong emotion",
+    "action-focused tracking movement",
+    "atmospheric transition with depth",
+    "hero shot with dramatic lighting",
+    "slow motion emotional beat",
+    "final impactful closing shot"
+  ];
+  const tones = [
+    "cinematic realism",
+    "high detail textures",
+    "natural motion",
+    "film color grading",
+    "rich contrast",
+    "ultra clear subject focus"
+  ];
+  const scenes = Array.from({ length: sceneCount }, (_item, index) => {
+    const beat = beats[index % beats.length];
+    const tone = tones[index % tones.length];
+    const visualPrompt = `${beat}, ${tone}, topic: ${topic}, no logos, no subtitles, no watermark, ${aspectRatio} framing`;
+    return {
+      index: index + 1,
+      visualPrompt,
+      narration: `Scène ${index + 1} autour du thème: ${topic}.`,
+      durationSec: clipSec
+    };
+  });
+  return {
+    title: `Vidéo IA - ${topic}`,
+    scenes
+  };
+}
+
+function runHfTextToVideo({
+  prompt,
+  outputPath,
+  modelId,
+  negativePrompt,
+  durationSec,
+  fps,
+  guidanceScale,
+  steps,
+  seed,
+  device,
+  enableCpuOffload,
+  aspectRatio
+}) {
+  const pythonBin = process.env.PYTHON_BIN || "python3";
+  const dims = getDimensionsFromAspectRatio(aspectRatio);
+  const args = [
+    HF_VIDEO_SCRIPT_PATH,
+    "--prompt",
+    prompt,
+    "--output",
+    outputPath,
+    "--model-id",
+    modelId || DEFAULT_HF_MODEL,
+    "--negative-prompt",
+    negativePrompt || DEFAULT_HF_NEGATIVE_PROMPT,
+    "--duration-sec",
+    String(durationSec),
+    "--fps",
+    String(fps),
+    "--guidance-scale",
+    String(guidanceScale),
+    "--num-inference-steps",
+    String(steps),
+    "--width",
+    String(dims.width),
+    "--height",
+    String(dims.height)
+  ];
+  if (Number.isFinite(seed) && seed >= 0) {
+    args.push("--seed", String(seed));
+  }
+  if (device) {
+    args.push("--device", String(device));
+  }
+  if (enableCpuOffload) {
+    args.push("--enable-cpu-offload");
+  }
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(pythonBin, args, {
+      cwd: path.dirname(HF_VIDEO_SCRIPT_PATH),
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (error) => {
+      reject(new Error(`Impossible de lancer ${pythonBin}: ${error.message}`));
+    });
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.slice(-1200) || `hf-text-to-video exit ${code}`));
+        return;
+      }
+      const raw = stdout.trim();
+      if (!raw) {
+        resolve({ output: outputPath });
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve({ output: outputPath, raw });
+      }
+    });
+  });
 }
 
 async function falFetch(url, apiKey, options = {}) {
@@ -198,8 +351,14 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
   }
 
   function sanitizeJob(job) {
-    const { mistralKey, falKey, creatomateKey, ...safe } = job;
-    return safe;
+    if (!job) return null;
+    const safeConfig = { ...(job.config || {}) };
+    delete safeConfig.mistralKey;
+    delete safeConfig.falKey;
+    return {
+      ...job,
+      config: safeConfig
+    };
   }
 
   async function updateJob(jobId, patch) {
@@ -226,22 +385,34 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
   async function runAutoJob(jobId) {
     const job = jobs.get(jobId);
     if (!job) return;
-
+    const provider = resolveProvider(job.config?.provider);
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
-    if (!ffmpegReady) {
+    const normalizedDurationMin = Math.max(0.1, toNumber(job.config?.durationMin, 10));
+    const normalizedClipSec = Math.max(3, Math.min(20, toNumber(job.config?.clipSec, 5)));
+    const estimatedSceneCount = Math.max(1, Math.ceil((normalizedDurationMin * 60) / normalizedClipSec));
+    const needsConcat = estimatedSceneCount > 1;
+    if (!ffmpegReady && needsConcat) {
       await updateJob(jobId, { status: "failed", error: "ffmpeg indisponible sur le serveur" });
       return;
     }
 
     const {
       topic,
-      durationMin,
-      clipSec,
+      durationMin = normalizedDurationMin,
+      clipSec = normalizedClipSec,
       aspectRatio,
       mistralKey,
       falKey,
       modelPath,
-      mistralModel
+      mistralModel,
+      hfModelId,
+      hfNegativePrompt,
+      hfSteps,
+      hfGuidanceScale,
+      hfFps,
+      hfDevice,
+      hfEnableCpuOffload,
+      hfSeed
     } = job.config;
 
     const resolvedModel = resolveFalModel(modelPath);
@@ -250,16 +421,23 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
     try {
       await updateJob(jobId, { status: "planning", progress: 3 });
-      await appendLog(jobId, "Planification des scènes via Mistral…");
+      if (provider === "huggingface-local") {
+        await appendLog(jobId, "Planification locale des scènes (sans API externe)...");
+      } else {
+        await appendLog(jobId, "Planification des scènes via Mistral…");
+      }
 
-      const plan = await planScenesWithMistral({
-        mistralKey,
-        topic,
-        durationMin,
-        clipSec,
-        aspectRatio,
-        mistralModel
-      });
+      const plan =
+        provider === "huggingface-local"
+          ? buildLocalScenePlan({ topic, durationMin, clipSec, aspectRatio })
+          : await planScenesWithMistral({
+              mistralKey,
+              topic,
+              durationMin,
+              clipSec,
+              aspectRatio,
+              mistralModel
+            });
 
       await updateJob(jobId, {
         status: "generating",
@@ -272,27 +450,52 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await appendLog(jobId, `Plan OK : ${plan.title} (${plan.scenes.length} scènes)`);
 
       const clipUrls = [];
+      const localClips = [];
       for (let i = 0; i < plan.scenes.length; i += 1) {
         const scene = plan.scenes[i];
         const visual = `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`;
+        const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
 
-        await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : soumission FAL`);
-        const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedModel}`, falKey, {
-          method: "POST",
-          body: JSON.stringify({
+        if (provider === "huggingface-local") {
+          await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : génération Hugging Face locale`);
+          const seedForClip = Number.isFinite(hfSeed) && hfSeed >= 0 ? hfSeed + i : -1;
+          await runHfTextToVideo({
             prompt: visual,
-            duration: String(clipSec),
-            aspect_ratio: aspectRatio
-          })
-        });
+            outputPath: clipPath,
+            modelId: hfModelId,
+            negativePrompt: hfNegativePrompt,
+            durationSec: clipSec,
+            fps: hfFps,
+            guidanceScale: hfGuidanceScale,
+            steps: hfSteps,
+            seed: seedForClip,
+            device: hfDevice,
+            enableCpuOffload: hfEnableCpuOffload,
+            aspectRatio
+          });
+          localClips.push(clipPath);
+          clipUrls.push(`file://${clipPath}`);
+        } else {
+          await appendLog(jobId, `Clip ${i + 1}/${plan.scenes.length} : soumission FAL`);
+          const submit = await falFetch(`${FAL_QUEUE_BASE}/${resolvedModel}`, falKey, {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: visual,
+              duration: String(clipSec),
+              aspect_ratio: aspectRatio
+            })
+          });
 
-        const clipUrl = await pollFalClip({
-          falKey,
-          modelPath: resolvedModel,
-          requestId: submit.request_id
-        });
+          const clipUrl = await pollFalClip({
+            falKey,
+            modelPath: resolvedModel,
+            requestId: submit.request_id
+          });
+          clipUrls.push(clipUrl);
+          await downloadFile(clipUrl, clipPath);
+          localClips.push(clipPath);
+        }
 
-        clipUrls.push(clipUrl);
         const progress = 8 + Math.round(((i + 1) / plan.scenes.length) * 82);
         await updateJob(jobId, {
           progress,
@@ -305,21 +508,17 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       await updateJob(jobId, { status: "assembling", progress: 92 });
       await appendLog(jobId, "Assemblage FFmpeg de la vidéo longue…");
 
-      const localClips = [];
-      for (let i = 0; i < clipUrls.length; i += 1) {
-        const clipPath = path.join(jobDir, `clip-${String(i + 1).padStart(3, "0")}.mp4`);
-        await downloadFile(clipUrls[i], clipPath);
-        localClips.push(clipPath);
+      const outputPath = path.join(jobDir, "final.mp4");
+      if (localClips.length <= 1) {
+        await fsp.copyFile(localClips[0], outputPath);
+      } else {
+        const listPath = path.join(jobDir, "concat.txt");
+        const listContent = localClips.map((clip) => `file '${clip.replace(/'/g, "'\\''")}'`).join("\n");
+        await fsp.writeFile(listPath, listContent, "utf8");
+        await runFfmpegConcat(listPath, outputPath);
       }
 
-      const listPath = path.join(jobDir, "concat.txt");
-      const listContent = localClips.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
-      await fsp.writeFile(listPath, listContent, "utf8");
-
-      const outputPath = path.join(jobDir, "final.mp4");
-      await runFfmpegConcat(listPath, outputPath);
       const stats = await fsp.stat(outputPath);
-
       await updateJob(jobId, {
         status: "completed",
         progress: 100,
@@ -338,6 +537,8 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
   async function createAutoJob(config) {
     await loadJobs();
+    const provider = resolveProvider(config.provider);
+    const clipSecDefault = provider === "huggingface-local" ? 5 : 10;
     const id = uuidv4();
     const job = {
       id,
@@ -347,14 +548,23 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       updatedAt: new Date().toISOString(),
       title: config.topic,
       config: {
+        provider,
         topic: String(config.topic || "").trim(),
-        durationMin: Number(config.durationMin) || 10,
-        clipSec: Number(config.clipSec) || 10,
+        durationMin: Math.max(0.1, toNumber(config.durationMin, 10)),
+        clipSec: Math.max(3, Math.min(20, toNumber(config.clipSec, clipSecDefault))),
         aspectRatio: String(config.aspectRatio || "9:16"),
         modelPath: String(config.modelPath || DEFAULT_FAL_MODEL),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
-        falKey: String(config.falKey || "").trim()
+        falKey: String(config.falKey || "").trim(),
+        hfModelId: String(config.hfModelId || DEFAULT_HF_MODEL).trim(),
+        hfNegativePrompt: String(config.hfNegativePrompt || DEFAULT_HF_NEGATIVE_PROMPT).trim(),
+        hfSteps: Math.max(15, Math.min(80, toNumber(config.hfSteps, 30))),
+        hfGuidanceScale: Math.max(1, Math.min(12, toNumber(config.hfGuidanceScale, 5))),
+        hfFps: Math.max(8, Math.min(30, toNumber(config.hfFps, 15))),
+        hfDevice: String(config.hfDevice || "auto").trim(),
+        hfEnableCpuOffload: boolFrom(config.hfEnableCpuOffload, false),
+        hfSeed: Number.isFinite(Number(config.hfSeed)) ? Number(config.hfSeed) : -1
       },
       logs: [],
       clipUrls: [],
@@ -363,11 +573,11 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
     };
 
     if (!job.config.topic) throw new Error("topic requis");
-    if (!job.config.mistralKey) throw new Error("mistralKey requis");
-    if (!job.config.falKey) throw new Error("falKey requis");
+    if (provider === "fal" && !job.config.mistralKey) throw new Error("mistralKey requis");
+    if (provider === "fal" && !job.config.falKey) throw new Error("falKey requis");
 
-    const sceneCount = Math.ceil((job.config.durationMin * 60) / job.config.clipSec);
-    if (sceneCount > 90) throw new Error("Trop de scènes — réduisez la durée");
+    const sceneCount = Math.max(1, Math.ceil((job.config.durationMin * 60) / job.config.clipSec));
+    if (sceneCount > 360) throw new Error("Trop de scènes — réduisez la durée ou augmentez clipSec");
 
     job.sceneCount = sceneCount;
     jobs.set(id, job);
@@ -419,6 +629,10 @@ module.exports = {
   pollFalClip,
   downloadFile,
   runFfmpegConcat,
+  resolveProvider,
+  buildLocalScenePlan,
+  runHfTextToVideo,
   FAL_QUEUE_BASE,
-  DEFAULT_FAL_MODEL
+  DEFAULT_FAL_MODEL,
+  DEFAULT_HF_MODEL
 };

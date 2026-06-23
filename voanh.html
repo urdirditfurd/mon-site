@@ -1948,12 +1948,12 @@ body::before {
     <div class="modal-body">
       <div class="info-block" style="border-left-color:var(--plasma)">
         <strong style="color:var(--plasma)">Pipeline 10+ minutes</strong><br>
-        Mistral découpe le script → <strong>FAL.ai (Kling)</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
-        <span style="font-size:12px;color:var(--text-dim)">Obtenez une clé gratuite sur <a href="https://fal.ai" target="_blank" rel="noopener" style="color:var(--cyan)">fal.ai</a> (crédits offerts à l'inscription).</span>
+        <strong>Mode recommandé :</strong> Hugging Face local (Wan 2.1 open-source) → FFmpeg assemble la vidéo finale.<br>
+        <strong>Mode alternatif :</strong> Mistral + FAL.ai (Kling) si vous préférez le cloud.
       </div>
 
       <div class="field-group">
-        <label class="field-label">🔑 Clé API FAL.ai <span style="color:var(--danger)">*</span></label>
+        <label class="field-label">🔑 Clé API FAL.ai (optionnelle, mode cloud)</label>
         <div style="display:flex;gap:8px">
           <input type="password" class="field-input" id="fal-api-key-input" placeholder="fal_xxxxxxxx…" style="flex:1">
           <button class="btn-primary" id="save-fal-key" type="button" style="white-space:nowrap">ENREGISTRER</button>
@@ -1968,6 +1968,13 @@ body::before {
       </div>
 
       <div class="video-grid-2">
+        <div class="field-group" style="margin-bottom:0">
+          <label class="field-label">Provider auto</label>
+          <select class="field-input field-select" id="video-provider">
+            <option value="huggingface-local" selected>Hugging Face local (Wan2.1 - recommandé)</option>
+            <option value="fal">FAL cloud (Kling + Mistral)</option>
+          </select>
+        </div>
         <div class="field-group" style="margin-bottom:0">
           <label class="field-label">Durée cible</label>
           <select class="field-input field-select" id="video-duration-min">
@@ -1994,7 +2001,7 @@ body::before {
           </select>
         </div>
         <div class="field-group" style="margin-bottom:0">
-          <label class="field-label">Modèle FAL</label>
+          <label class="field-label">Modèle FAL (mode cloud)</label>
           <select class="field-input field-select" id="video-fal-model">
             <option value="fal-ai/kling-video/v2/master/text-to-video">Kling 2.0 Master (recommandé)</option>
             <option value="fal-ai/kling-video/v1.6/standard/text-to-video">Kling 1.6 Standard (économique)</option>

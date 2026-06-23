@@ -1,0 +1,7 @@
+diffusers
+transformers
+accelerate
+torch
+sentencepiece
+imageio[ffmpeg]
+safetensors

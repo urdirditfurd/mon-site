@@ -40,7 +40,17 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 - Node.js 18+
 - FFmpeg + FFprobe dans le PATH
 - **yt-dlp** (obligatoire pour les liens YouTube) : `pip install -U yt-dlp`
+- Python 3.10+ (pour la génération text-to-video locale Hugging Face)
+- Dépendances T2V locales : `python3 -m pip install -r server/requirements-hf-video.txt`
 - Redis recommandé pour le mode BullMQ (optionnel)
+
+### Modèle text-to-video recommandé (intégré)
+
+Le pipeline local utilise par défaut **`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`** :
+- top téléchargements sur Hugging Face pour `text-to-video`,
+- licence Apache-2.0,
+- utilisable sur GPU “consumer” (~8GB+ VRAM),
+- adapté au volume quotidien via génération de clips + assemblage.
 
 ## Mise à jour (local ou VPS)
 
@@ -284,6 +294,33 @@ Render crée:
 - `GET /api/jobs/:jobId/clips/:clipId/stream`
 - `GET /api/jobs/:jobId/clips/:clipId/download`
 - `GET /api/jobs/:jobId/clips/:clipId/srt`
+- `GET /api/voanh/health`
+- `POST /api/voanh/jobs/auto` (auto vidéo longue: provider local HF ou cloud FAL)
+- `GET /api/voanh/jobs`
+- `GET /api/voanh/jobs/:jobId`
+- `GET /api/voanh/download/:jobId`
+
+## Paramètres `POST /api/voanh/jobs/auto`
+
+- `provider` (`huggingface-local` recommandé | `fal`)
+- `topic` (obligatoire)
+- `durationMin` (float/int)
+- `clipSec` (3..20)
+- `aspectRatio` (`9:16` | `1:1` | `16:9`)
+
+Si `provider=huggingface-local` (pas de limite API externe):
+- `hfModelId` (défaut: `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`)
+- `hfNegativePrompt` (optionnel)
+- `hfSteps` (défaut 30)
+- `hfGuidanceScale` (défaut 5)
+- `hfFps` (défaut 15)
+- `hfDevice` (`auto` | `cuda` | `cpu`)
+- `hfEnableCpuOffload` (`true`/`false`)
+- `hfSeed` (optionnel)
+
+Si `provider=fal` (cloud):
+- `mistralKey` + `falKey` requis
+- `modelPath` (Kling, etc.)
 
 ## Paramètres `POST /api/jobs`
 

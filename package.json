@@ -10,6 +10,7 @@
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
     "check": "node --check app.js && node --check server/index.js",
     "setup": "npm install",
+    "setup:hf-video": "python3 -m pip install -r server/requirements-hf-video.txt"
   },
   "repository": {
     "type": "git",
