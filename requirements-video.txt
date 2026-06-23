@@ -1,0 +1,14 @@
+# Dépendances Python pour la génération text-to-video locale (Sulphur 2 / Wan 2.2)
+# Installation : pip install -r requirements-video.txt
+# Nécessite CUDA (GPU NVIDIA) pour la production en masse.
+
+torch>=2.4.0
+diffusers>=0.37.0
+transformers>=4.46.0
+accelerate>=1.2.0
+safetensors>=0.4.5
+huggingface-hub>=0.27.0
+imageio[ffmpeg]>=2.36.0
+numpy>=1.26.0
+sentencepiece>=0.2.0
+protobuf>=5.29.0

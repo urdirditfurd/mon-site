@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClipForge Video Factory — Script vers vidéo IA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="video-factory.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="top-nav">
+      <div class="brand">
+        <div class="brand-mark">VF</div>
+        <div>
+          <h1>ClipForge Video Factory</h1>
+          <p>Script → vidéo IA · production courte &amp; longue</p>
+        </div>
+      </div>
+      <div class="nav-pills">
+        <span class="pill live">100 % gratuit avec Colab</span>
+        <span class="pill" id="vf-server-pill">Serveur hors ligne</span>
+      </div>
+    </header>
+
+    <div class="alert alert-warn file-banner" id="vf-file-banner">
+      Fichier local détecté. Pour générer via le serveur, lancez <strong>npm start</strong> puis ouvrez
+      <a href="http://localhost:3000/studio">http://localhost:3000/studio</a>
+      — ou utilisez le mode <strong>Colab gratuit</strong> ci-dessous.
+    </div>
+
+    <div id="vf-toast" class="alert alert-info hidden"></div>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <h2>Transformez votre <span>script</span> en vidéo prête à publier</h2>
+        <p class="lead">
+          Collez votre narration, choisissez la durée et le format TikTok / YouTube / Carré.
+          Le studio découpe votre script en scènes et assemble un MP4 final.
+        </p>
+        <div class="hero-stats">
+          <div class="stat-chip"><strong>0 €</strong> avec Google Colab</div>
+          <div class="stat-chip"><strong>30 s → 10 min</strong> durée libre</div>
+          <div class="stat-chip"><strong>9:16 · 16:9 · 1:1</strong> formats sociaux</div>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <h3>Ce n'est pas « illimité » — mais c'est gratuit</h3>
+        <ul>
+          <li><strong>Colab</strong> : GPU Google gratuit, sessions ~12 h, quotas journaliers.</li>
+          <li><strong>Serveur local</strong> : illimité si vous avez un GPU NVIDIA.</li>
+          <li><strong>Mistral</strong> : planification de scènes gratuite (console.mistral.ai).</li>
+        </ul>
+      </aside>
+    </section>
+
+    <div class="layout-grid">
+      <main>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Votre script</h3>
+            <span class="step-badge">Étape 1</span>
+          </div>
+          <div class="field">
+            <label for="vf-script">Script / narration complète</label>
+            <textarea id="vf-script" placeholder="Collez ici votre script voix-off ou votre article...
+
+Exemple :
+Bienvenue dans cette exploration des secrets de la productivité.
+Chaque matin, les plus performants appliquent une règle simple...
+"></textarea>
+            <span class="field-hint">Le texte est découpé automatiquement selon la durée choisie.</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Réglages vidéo</h3>
+            <span class="step-badge">Étape 2</span>
+          </div>
+
+          <div class="field">
+            <label>Durée souhaitée</label>
+            <div class="duration-row">
+              <input type="range" id="vf-duration" min="0.5" max="10" step="0.5" value="1">
+              <div class="duration-value" id="vf-duration-label">1 min</div>
+            </div>
+            <span class="field-hint">Glissez pour régler : 30 secondes à 10 minutes.</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="vf-clip-sec">Durée par scène IA</label>
+              <select id="vf-clip-sec">
+                <option value="3">3 secondes (rapide)</option>
+                <option value="4" selected>4 secondes (recommandé)</option>
+                <option value="5">5 secondes</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Scènes estimées</label>
+              <input type="text" id="vf-scenes-estimate" value="15" readonly>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Format de sortie</label>
+            <div class="format-grid">
+              <button type="button" class="format-card active" data-aspect="9:16">
+                <div class="ratio">9:16</div>
+                <div class="label">TikTok / Reels</div>
+              </button>
+              <button type="button" class="format-card" data-aspect="16:9">
+                <div class="ratio">16:9</div>
+                <div class="label">YouTube</div>
+              </button>
+              <button type="button" class="format-card" data-aspect="1:1">
+                <div class="ratio">1:1</div>
+                <div class="label">Carré / Feed</div>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Moteur de génération</h3>
+            <span class="step-badge">Étape 3</span>
+          </div>
+
+          <div class="engine-tabs">
+            <button type="button" class="engine-tab active" data-engine="colab">
+              <div class="title">☁ Colab gratuit</div>
+              <div class="price">0 € — sans GPU chez vous</div>
+              <div class="desc">Recommandé sans carte NVIDIA</div>
+            </button>
+            <button type="button" class="engine-tab" data-engine="server">
+              <div class="title">🖥 Serveur local</div>
+              <div class="price">0 € — GPU NVIDIA requis</div>
+              <div class="desc">npm start + CUDA</div>
+            </button>
+            <button type="button" class="engine-tab" data-engine="fal">
+              <div class="title">⚡ Cloud Pro</div>
+              <div class="price">Payant (FAL.ai)</div>
+              <div class="desc">Qualité premium</div>
+            </button>
+          </div>
+
+          <div class="alert alert-info" id="vf-colab-note">
+            Mode Colab : cliquez sur Générer → la config est copiée → Colab s'ouvre → collez dans la cellule Configuration → Tout exécuter → téléchargez le MP4.
+          </div>
+
+          <div id="vf-server-fields" class="hidden">
+            <div class="field">
+              <label for="vf-api-base">URL du serveur ClipForge</label>
+              <input type="url" id="vf-api-base" value="http://localhost:3000" placeholder="http://localhost:3000">
+            </div>
+            <button type="button" class="btn btn-ghost" id="vf-check-server">Tester la connexion</button>
+          </div>
+
+          <div class="field">
+            <label for="vf-mistral-key">Clé Mistral (optionnel — scènes plus intelligentes)</label>
+            <input type="password" id="vf-mistral-key" placeholder="Clé gratuite sur console.mistral.ai">
+            <span class="field-hint">Sans clé : découpage automatique du script (toujours 0 €).</span>
+          </div>
+
+          <div class="progress-wrap">
+            <div class="progress-track"><div class="progress-fill" id="vf-progress-fill"></div></div>
+            <div class="progress-meta">
+              <span id="vf-progress-label">Prêt</span>
+              <span id="vf-progress-detail"></span>
+            </div>
+          </div>
+
+          <div class="log-box" id="vf-log"></div>
+          <div class="result-card hidden" id="vf-result"></div>
+
+          <div class="cta-row">
+            <button type="button" class="btn btn-primary" id="vf-generate-btn">▶ Générer ma vidéo</button>
+            <button type="button" class="btn btn-secondary" id="vf-cancel-btn" disabled>Annuler</button>
+          </div>
+        </section>
+      </main>
+
+      <aside>
+        <section class="panel sidebar-card">
+          <div class="panel-head"><h3>Récapitulatif</h3></div>
+          <div class="metric"><span>Durée cible</span><span id="vf-metric-duration">1 min</span></div>
+          <div class="metric"><span>Scènes IA</span><span id="vf-metric-scenes">15</span></div>
+          <div class="metric"><span>Format</span><span id="vf-metric-format">9:16</span></div>
+          <div class="metric"><span>Moteur</span><span id="vf-metric-engine">Google Colab</span></div>
+          <div class="metric"><span>Coût estimé</span><span id="vf-metric-cost">0 €</span></div>
+        </section>
+
+        <section class="panel hero-card" style="margin-top:18px">
+          <h3>Installer sur votre PC</h3>
+          <ul>
+            <li>Téléchargez <code>video-factory.html</code>, <code>video-factory.css</code>, <code>video-factory.js</code> dans le même dossier.</li>
+            <li>Renommez en <code>index.html</code> si vous voulez.</li>
+            <li>Ouvrez le fichier — ou préférez <code>http://localhost:3000/studio</code> pour le mode serveur.</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script src="video-factory.js"></script>
+  <script>
+    document.getElementById("vf-duration")?.addEventListener("input", () => {
+      const label = document.getElementById("vf-duration-label")?.textContent || "";
+      const metric = document.getElementById("vf-metric-duration");
+      if (metric) metric.textContent = label;
+    });
+  </script>
+</body>
+</html>

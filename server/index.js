@@ -13,7 +13,9 @@ const { v4: uuidv4 } = require("uuid");
 const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
+const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
+const { createSulphurVideoRouter } = require("./sulphur-video");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
 const STORAGE_DIR = path.join(ROOT_DIR, "storage");
@@ -3864,11 +3866,19 @@ app.get("/voanh", (_req, res) => {
   }
   return res.sendFile(VOANH_HTML_PATH);
 });
+app.get("/studio", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(VIDEO_FACTORY_HTML_PATH)) {
+    return res.status(404).send("video-factory.html introuvable");
+  }
+  return res.sendFile(VIDEO_FACTORY_HTML_PATH);
+});
 
 ensureDirs()
   .then(async () => {
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
+    app.use("/api/sulphur", createSulphurVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = resolveYtDlpAvailable();
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);

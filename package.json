@@ -8,8 +8,9 @@
     "start": "node server/index.js",
     "start:v4": "QUEUE_MODE=bullmq node server/index.js",
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
-    "check": "node --check app.js && node --check server/index.js",
+    "check": "node --check app.js && node --check server/index.js && node --check server/sulphur-video-pipeline.js && node --check server/sulphur-video.js && node --check server/hf-video-models.js && node --check server/free-scene-planner.js",
     "setup": "npm install",
+    "setup:video": "pip3 install -r requirements-video.txt"
   },
   "repository": {
     "type": "git",

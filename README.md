@@ -332,23 +332,116 @@ Le champ `youtubeCookies` dans `POST /api/jobs` reste supporté:
 }
 ```
 
-## Text-to-video gratuit (sans GPU NVIDIA) — Google Colab
+## Sulphur Studio — Text-to-Video 100 % gratuit
 
-Si vous n'avez pas de carte NVIDIA, ouvrez directement le notebook :
+Génération vidéo **sans aucune API payante** : modèles open-source Hugging Face + planificateur gratuit + FFmpeg.
 
-**[Ouvrir dans Colab](https://colab.research.google.com/github/urdirditfurd/mon-site/blob/main/colab/text-to-video-gratuit.ipynb)**
+| Composant | Solution | Coût |
+|-----------|----------|------|
+| Génération clips | Sulphur 2 / Wan 2.2 (GPU local) | **0€** |
+| Planification scènes | **Mistral Free Tier** (VOANH / console.mistral.ai) | **0€** |
+| Fallback scripts | Templates ou Ollama local | **0€** |
+| Assemblage | FFmpeg serveur | **0€** |
+| FAL cloud | Optionnel uniquement | payant |
 
-1. Exécution → Modifier le type d'exécution → **GPU**
-2. Modifiez `TOPIC` / `DURATION_MIN` dans la cellule Configuration
-3. Exécution → Tout exécuter → téléchargez les MP4
+### Planificateurs (défaut : Mistral Free Tier)
 
-Guide pas à pas : [`docs/colab-sans-gpu.md`](docs/colab-sans-gpu.md)
+| Mode | Description |
+|------|-------------|
+| `mistral` | **Mistral Free Tier** via clé VOANH (`console.mistral.ai`, sans carte bancaire) |
+| `free` | Templates cinématiques — aucune clé API |
+| `ollama` | LLM local gratuit (`ollama run llama3.2`) |
+
+Obtenir une clé Mistral gratuite (comme [VOANH AI](https://github.com/LaurentVoanh/Mistral-universal-Chat-Bot-free-tiers)) :
+
+1. Créez un compte sur [console.mistral.ai](https://console.mistral.ai)
+2. Menu **API Keys** → **Create new key**
+3. Collez la clé dans VOANH via **⬡ API KEY** (stockée 365 jours en local)
+4. Le studio vidéo la réutilise automatiquement pour planifier vos scènes
+
+### Modèles vidéo supportés
+
+| Clé | Modèle HF | Usage |
+|-----|-----------|-------|
+| `sulphur2` | SulphurAI/Sulphur-2-base | Qualité max (24GB VRAM) |
+| `sulphur2-distilled` | Sulphur 2 Distilled | Rapide |
+| `wan22` | Wan-AI/Wan2.2-TI2V-5B-Diffusers | Alternative officielle |
+| `wan21lite` | Wan-AI/Wan2.1-T2V-1.3B-Diffusers | GPU 8GB |
+
+### Sans GPU NVIDIA → Google Colab (recommandé)
+
+Si vous n'avez pas de carte NVIDIA localement, utilisez le notebook Colab gratuit :
+
+1. [colab.research.google.com](https://colab.research.google.com) → **GPU T4**
+2. Ouvrir `colab/text-to-video-gratuit.ipynb` depuis ce repo
+3. Configurer `TOPIC`, `DURATION_MIN`, `BATCH_COUNT` → **Tout exécuter**
+4. Télécharger les MP4 générés
+
+Guide détaillé : [`docs/colab-sans-gpu.md`](docs/colab-sans-gpu.md)
+
+### Installation GPU (PC / VPS avec NVIDIA)
+
+```bash
+pip3 install -r requirements-video.txt
+# ou
+npm run setup:video
+
+export HF_TOKEN=hf_xxx          # optionnel, accélère les téléchargements
+export SULPHUR_MODEL_CACHE=./models
+export SULPHUR_PLANNER=mistral            # Mistral Free Tier (défaut)
+export SULPHUR_WORKER_CONCURRENCY=2   # jobs parallèles
+npm start
+```
+
+### API production (0€)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/sulphur/health` | État GPU + modèles |
+| `POST /api/sulphur/plan` | Planifier scènes gratuitement |
+| `POST /api/sulphur/jobs` | Vidéo unique (sans clé API) |
+| `POST /api/sulphur/jobs/auto` | Vidéo longue automatique |
+| `POST /api/sulphur/batch` | Jusqu'à 500 vidéos par requête |
+| `GET /api/sulphur/jobs/:id` | Suivi progression |
+| `GET /api/sulphur/download/:id` | Télécharger MP4 |
+
+Exemple batch quotidien avec **Mistral Free Tier** :
+
+```bash
+curl -X POST http://localhost:3000/api/sulphur/batch \
+  -H "Content-Type: application/json" \
+  -H "x-mistral-key: VOTRE_CLE_MISTRAL_GRATUITE" \
+  -d '{
+    "provider": "sulphur",
+    "plannerMode": "mistral",
+    "hfModel": "sulphur2",
+    "clipSec": 5,
+    "aspectRatio": "9:16",
+    "mistralKey": "VOTRE_CLE_MISTRAL_GRATUITE",
+    "items": [
+      {"topic": "Les secrets de la productivité", "durationMin": 1},
+      {"topic": "Histoire du football français", "durationMin": 2}
+    ]
+  }'
+```
+
+Sans clé Mistral, utilisez `"plannerMode": "free"` (templates, 0€).
+
+Interface studio : `/studio` ou `video-factory.html` (script + durée + format, 0€ via Colab).
+
+### Ollama (optionnel, toujours gratuit)
+
+```bash
+ollama pull llama3.2
+export SULPHUR_PLANNER=ollama
+```
 
 ## Commandes utiles
 
 ```bash
 npm run check
 npm start
+npm run setup:video
 npm run start:v4
 npm run start:v4:workers4
 ```
