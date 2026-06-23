@@ -110,6 +110,31 @@
     return String($("vf-fal-key")?.value || loadSettings().falKey || "").trim();
   }
 
+  function getWanPromptExtend() {
+    const el = $("vf-wan-prompt-extend");
+    if (!el) return loadSettings().wanPromptExtend !== false;
+    return el.checked;
+  }
+
+  function updateWanExtendHint() {
+    const hint = $("vf-wan-extend-hint");
+    const row = $("vf-wan-extend-row");
+    if (!hint || !row) return;
+    const mistral = getMistralKey();
+    const resolved = resolveProvider(state.serverHealth);
+    const wanMode = resolved.provider === "sulphur";
+    row.style.opacity = wanMode ? "1" : "0.55";
+    if (!wanMode) {
+      hint.textContent = "Actif uniquement pour Wan 2.1 local/Colab (moteur GPU ou CPU). Ignoré avec FAL cloud.";
+    } else if (!mistral) {
+      hint.textContent = "Ajoutez une clé Mistral gratuite pour activer l'enrichissement Wan 2.1.";
+    } else if (getWanPromptExtend()) {
+      hint.textContent = "Chaque scène sera enrichie style Wan officiel avant génération (0 €, ~1 appel Mistral/scène).";
+    } else {
+      hint.textContent = "Enrichissement désactivé — prompts visuels bruts envoyés à Wan.";
+    }
+  }
+
   function updateDurationLabel() {
     const min = getDurationMin();
     const clip = getClipSec();
@@ -161,6 +186,7 @@
         state.engine = tab.getAttribute("data-engine") || "auto";
         $("vf-fal-fields")?.classList.toggle("hidden", state.engine === "gpu");
         updateMetrics();
+        updateWanExtendHint();
       });
     });
   }
@@ -286,6 +312,7 @@
       }
 
       updateMetrics();
+      updateWanExtendHint();
       return data;
     } catch {
       state.serverHealth = null;
@@ -300,6 +327,7 @@
           "Lancez le serveur : ouvrez un terminal dans le dossier mon-site, tapez npm start, puis recliquez Générer.";
       }
       updateMetrics();
+      updateWanExtendHint();
       return null;
     }
   }
@@ -423,7 +451,8 @@
         mistralKey: mistralKey || undefined,
         falKey: resolved.provider === "fal" ? falKey : undefined,
         hfModel: resolved.hfModel || "wan21lite",
-        modelPath: resolved.modelPath || FAL_MODEL_ECO
+        modelPath: resolved.modelPath || FAL_MODEL_ECO,
+        wanPromptExtend: getWanPromptExtend()
       };
 
       const headers = {};
@@ -470,6 +499,9 @@
       const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
       if (shared.mistralApiKey && $("vf-mistral-key")) $("vf-mistral-key").value = shared.mistralApiKey;
       if (shared.falApiKey && $("vf-fal-key")) $("vf-fal-key").value = shared.falApiKey;
+      if ($("vf-wan-prompt-extend") && shared.wanPromptExtend !== undefined) {
+        $("vf-wan-prompt-extend").checked = shared.wanPromptExtend !== false;
+      }
     } catch {
       /* ignore */
     }
@@ -477,9 +509,13 @@
     if (saved.mistralKey && $("vf-mistral-key")) $("vf-mistral-key").value = saved.mistralKey;
     if (saved.falKey && $("vf-fal-key")) $("vf-fal-key").value = saved.falKey;
     if (saved.script && $("vf-script")) $("vf-script").value = saved.script;
+    if ($("vf-wan-prompt-extend")) {
+      $("vf-wan-prompt-extend").checked = saved.wanPromptExtend !== false;
+    }
     if (saved.engine) {
       document.querySelector(`[data-engine="${saved.engine}"]`)?.click();
     }
+    updateWanExtendHint();
   }
 
   function bindUi() {
@@ -496,11 +532,23 @@
     });
     $("vf-mistral-key")?.addEventListener("change", () => {
       saveSettings({ mistralKey: getMistralKey() });
+      updateWanExtendHint();
       checkServerHealth();
     });
     $("vf-fal-key")?.addEventListener("change", () => {
       saveSettings({ falKey: getFalKey() });
       checkServerHealth();
+    });
+    $("vf-wan-prompt-extend")?.addEventListener("change", () => {
+      saveSettings({ wanPromptExtend: getWanPromptExtend() });
+      try {
+        const shared = JSON.parse(localStorage.getItem("clipforge-ai-keys") || "{}");
+        shared.wanPromptExtend = getWanPromptExtend();
+        localStorage.setItem("clipforge-ai-keys", JSON.stringify(shared));
+      } catch {
+        /* ignore */
+      }
+      updateWanExtendHint();
     });
 
     $("vf-generate-btn")?.addEventListener("click", () => {

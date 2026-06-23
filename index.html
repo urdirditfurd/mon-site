@@ -106,6 +106,11 @@
           <span>Clé API FAL.ai</span>
           <input type="password" id="falApiKey" placeholder="fal-..." autocomplete="off">
         </label>
+        <label class="field checkbox-field no-margin" id="wanPromptExtendRow">
+          <input type="checkbox" id="wanPromptExtend" checked>
+          <span>Enrichissement prompts Wan 2.1 (style officiel — Wan local / Video Factory)</span>
+        </label>
+        <p class="hint small no-margin" id="wanPromptExtendHint">Améliore Wan 2.1 local/Colab via Mistral. Ignoré en mode FAL cloud.</p>
         <p class="hint small">Les clés restent dans ton navigateur (localStorage) et sont partagées avec <a href="/studio">Video Factory</a>.</p>
         <div class="fal-limits-box" id="falLimitsBox">
           <p class="hint small no-margin"><strong>Limites FAL.ai</strong></p>

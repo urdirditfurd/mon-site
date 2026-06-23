@@ -42,6 +42,14 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
       recommendedProvider,
       canGenerateLocal: Boolean(hasCuda || engine.cpuGenerationAllowed),
       canGenerateCloud: true,
+      wanPromptExtension: {
+        enabled: true,
+        defaultOn: true,
+        requiresMistralKey: true,
+        appliesTo: ["wan21lite", "wan22"],
+        description:
+          "Enrichit chaque prompt visuel style Wan 2.1 officiel (--use_prompt_extend) via Mistral gratuit"
+      },
       concurrency: Number(process.env.SULPHUR_WORKER_CONCURRENCY || 2)
     });
   });
@@ -102,6 +110,7 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"],
+        wanPromptExtend: req.body?.wanPromptExtend,
         seedBase: req.body?.seedBase
       });
       return res.status(202).json(job);
@@ -127,6 +136,7 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"],
+        wanPromptExtend: req.body?.wanPromptExtend,
         seedBase: req.body?.seedBase
       });
       return res.status(202).json(job);
@@ -150,6 +160,7 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"],
+        wanPromptExtend: req.body?.wanPromptExtend,
         seedBase: req.body?.seedBase
       });
       return res.status(202).json(batch);

@@ -12,6 +12,7 @@ const {
   FAL_QUEUE_BASE
 } = require("./voanh-video-pipeline");
 const { planScenes, planScenesFromScript, resolvePlannerMode } = require("./free-scene-planner");
+const { resolveWanPromptExtend, extendWanScenes, extendWanPromptWithMistral } = require("./wan-prompt-extension");
 const {
   resolveHfModel,
   framesForDuration,
@@ -260,6 +261,57 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
     pumpQueue();
   }
 
+  async function maybeExtendWanPlan(plan, config, jobId) {
+    if (!resolveWanPromptExtend(config)) return plan;
+
+    await appendLog(
+      jobId,
+      "Enrichissement prompts Wan 2.1 (style officiel Qwen via Mistral)…"
+    );
+
+    const scenes = await extendWanScenes({
+      scenes: plan.scenes,
+      mistralKey: config.mistralKey,
+      mistralModel: config.mistralModel,
+      aspectRatio: config.aspectRatio,
+      clipSec: config.clipSec,
+      onScene: ({ index, total, original, extended, fallback }) => {
+        const preview = extended.slice(0, 72);
+        if (fallback) {
+          void appendLog(jobId, `  Scène ${index}/${total} : enrichissement ignoré (prompt original)`);
+          return;
+        }
+        void appendLog(
+          jobId,
+          `  Scène ${index}/${total} : «${original.slice(0, 48)}…» → «${preview}…»`
+        );
+      }
+    });
+
+    return { ...plan, scenes, wanPromptExtended: true };
+  }
+
+  async function maybeExtendWanPrompt(prompt, config, jobId) {
+    if (!resolveWanPromptExtend(config)) return prompt;
+
+    await appendLog(jobId, "Enrichissement prompt Wan 2.1 (clip unique)…");
+    try {
+      const extended = await extendWanPromptWithMistral({
+        prompt,
+        mistralKey: config.mistralKey,
+        mistralModel: config.mistralModel,
+        aspectRatio: config.aspectRatio,
+        clipSec: config.clipSec
+      });
+      await appendLog(jobId, `Prompt enrichi : ${extended.slice(0, 96)}…`);
+      return extended;
+    } catch (error) {
+      if (process.env.SULPHUR_PROMPT_EXTEND_FALLBACK === "0") throw error;
+      await appendLog(jobId, "Enrichissement ignoré — prompt original conservé");
+      return prompt;
+    }
+  }
+
   async function generateSceneClip({
     provider,
     scene,
@@ -312,9 +364,10 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
       if (config.promptOnly && config.prompt) {
         await updateJob(jobId, { status: "generating", progress: 10, sceneCount: 1, scenesDone: 0 });
         await appendLog(jobId, `Génération clip unique (${provider})…`);
+        const enrichedPrompt = await maybeExtendWanPrompt(config.prompt, config, jobId);
         const clipPath = await generateSceneClip({
           provider,
-          scene: { visualPrompt: config.prompt },
+          scene: { visualPrompt: enrichedPrompt },
           jobDir,
           index: 0,
           config
@@ -345,7 +398,7 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
           : `Planification des scènes (${plannerLabel}, 100% gratuit)…`
       );
 
-      const plan = hasScript
+      let plan = hasScript
         ? await planScenesFromScript({
             script: config.script,
             plannerMode: config.plannerMode,
@@ -369,6 +422,8 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
             ollamaModel: config.ollamaModel,
             ollamaUrl: config.ollamaUrl
           });
+
+      plan = await maybeExtendWanPlan(plan, config, jobId);
 
       await updateJob(jobId, {
         status: "generating",
@@ -484,6 +539,7 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
         falKey: String(config.falKey || "").trim(),
+        wanPromptExtend: config.wanPromptExtend !== false,
         seedBase: Number(config.seedBase) || undefined,
         batchId: config.batchId || null
       },

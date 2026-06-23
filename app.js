@@ -144,6 +144,9 @@ const dom = {
   falApiKey: document.getElementById("falApiKey"),
   falLimitsList: document.getElementById("falLimitsList"),
   falCostEstimate: document.getElementById("falCostEstimate"),
+  wanPromptExtend: document.getElementById("wanPromptExtend"),
+  wanPromptExtendRow: document.getElementById("wanPromptExtendRow"),
+  wanPromptExtendHint: document.getElementById("wanPromptExtendHint"),
   scriptVideoRow: document.getElementById("scriptVideoRow"),
   scriptVideoInput: document.getElementById("scriptVideoInput"),
   videoDurationRow: document.getElementById("videoDurationRow"),
@@ -222,6 +225,9 @@ function loadAiKeysFromStorage() {
     const parsed = JSON.parse(raw);
     if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
     if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
+    if (dom.wanPromptExtend && parsed.wanPromptExtend !== undefined) {
+      dom.wanPromptExtend.checked = parsed.wanPromptExtend !== false;
+    }
   } catch {
     // ignore corrupt storage
   }
@@ -233,7 +239,8 @@ function saveAiKeysToStorage() {
       AI_KEYS_STORAGE,
       JSON.stringify({
         mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
-        falApiKey: (dom.falApiKey?.value || "").trim()
+        falApiKey: (dom.falApiKey?.value || "").trim(),
+        wanPromptExtend: dom.wanPromptExtend?.checked !== false
       })
     );
   } catch {
@@ -315,6 +322,26 @@ async function updateFalCostEstimate() {
   }
 }
 
+function updateWanPromptExtendHint() {
+  if (!dom.wanPromptExtendHint) return;
+  const scriptMode = isScriptVideoMode();
+  const mistral = (dom.mistralApiKey?.value || "").trim();
+  const enabled = dom.wanPromptExtend?.checked !== false;
+  if (dom.wanPromptExtendRow) {
+    dom.wanPromptExtendRow.hidden = !scriptMode;
+  }
+  if (!scriptMode) return;
+  if (!mistral) {
+    dom.wanPromptExtendHint.textContent =
+      "Ajoutez une clé Mistral gratuite pour activer l'enrichissement Wan 2.1 (Video Factory / Colab).";
+  } else if (enabled) {
+    dom.wanPromptExtendHint.textContent =
+      "Actif pour Wan 2.1 local/Colab via Video Factory. Ignoré en mode FAL cloud de ce panneau.";
+  } else {
+    dom.wanPromptExtendHint.textContent = "Enrichissement Wan désactivé — préférence sauvegardée pour Video Factory.";
+  }
+}
+
 function applyGenerationModeUi() {
   const aiMode = isAiRemixMode();
   const scriptMode = isScriptVideoMode();
@@ -359,6 +386,7 @@ function applyGenerationModeUi() {
         : "Générer mes shorts";
   }
   void updateFalCostEstimate();
+  updateWanPromptExtendHint();
 }
 
 function sleep(ms) {
@@ -1456,6 +1484,7 @@ async function createScriptVideoJob() {
         plannerMode: mistralApiKey ? "mistral" : "free",
         mistralKey: mistralApiKey || undefined,
         falKey,
+        wanPromptExtend: dom.wanPromptExtend?.checked !== false,
         modelPath: "fal-ai/kling-video/v1.6/standard/text-to-video"
       })
     });
@@ -1727,12 +1756,21 @@ function initEvents() {
     });
   }
   if (dom.mistralApiKey) {
-    dom.mistralApiKey.addEventListener("change", saveAiKeysToStorage);
+    dom.mistralApiKey.addEventListener("change", () => {
+      saveAiKeysToStorage();
+      updateWanPromptExtendHint();
+    });
   }
   if (dom.falApiKey) {
     dom.falApiKey.addEventListener("change", () => {
       saveAiKeysToStorage();
       void updateFalCostEstimate();
+    });
+  }
+  if (dom.wanPromptExtend) {
+    dom.wanPromptExtend.addEventListener("change", () => {
+      saveAiKeysToStorage();
+      updateWanPromptExtendHint();
     });
   }
 

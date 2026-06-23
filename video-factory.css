@@ -560,6 +560,19 @@ a {
   display: block;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+
+.checkbox-field input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
 .hidden {
   display: none !important;
 }
