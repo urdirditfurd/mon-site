@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { createSulphurJobManager } = require("./sulphur-video-pipeline");
 const { listHfModels, DEFAULT_HF_MODEL } = require("./hf-video-models");
+const { listPlanners, planScenes } = require("./free-scene-planner");
 
 function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
   const router = require("express").Router();
@@ -15,13 +16,35 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
       ffmpegReady,
       engine,
       models: listHfModels(),
+      planners: listPlanners(),
       defaultModel: DEFAULT_HF_MODEL,
+      defaultPlanner: "free",
+      cost: "0€ — 100% gratuit (GPU local + planificateur templates/Ollama)",
       concurrency: Number(process.env.SULPHUR_WORKER_CONCURRENCY || 2)
     });
   });
 
   router.get("/models", (_req, res) => {
-    res.json({ models: listHfModels(), defaultModel: DEFAULT_HF_MODEL });
+    res.json({ models: listHfModels(), defaultModel: DEFAULT_HF_MODEL, planners: listPlanners() });
+  });
+
+  router.post("/plan", async (req, res) => {
+    try {
+      const plan = await planScenes({
+        plannerMode: req.body?.plannerMode,
+        topic: req.body?.topic,
+        durationMin: req.body?.durationMin,
+        clipSec: req.body?.clipSec,
+        aspectRatio: req.body?.aspectRatio,
+        mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
+        mistralModel: req.body?.mistralModel,
+        ollamaModel: req.body?.ollamaModel,
+        ollamaUrl: req.body?.ollamaUrl
+      });
+      return res.json(plan);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Erreur planification" });
+    }
   });
 
   router.post("/jobs", async (req, res) => {
@@ -35,6 +58,9 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
         hfModel: req.body?.hfModel,
+        plannerMode: req.body?.plannerMode,
+        ollamaModel: req.body?.ollamaModel,
+        ollamaUrl: req.body?.ollamaUrl,
         modelPath: req.body?.modelPath,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
@@ -56,6 +82,9 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
         hfModel: req.body?.hfModel,
+        plannerMode: req.body?.plannerMode,
+        ollamaModel: req.body?.ollamaModel,
+        ollamaUrl: req.body?.ollamaUrl,
         modelPath: req.body?.modelPath,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
@@ -76,6 +105,9 @@ function createSulphurVideoRouter({ storageDir, getFfmpegReady }) {
         clipSec: req.body?.clipSec,
         aspectRatio: req.body?.aspectRatio,
         hfModel: req.body?.hfModel,
+        plannerMode: req.body?.plannerMode,
+        ollamaModel: req.body?.ollamaModel,
+        ollamaUrl: req.body?.ollamaUrl,
         modelPath: req.body?.modelPath,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],

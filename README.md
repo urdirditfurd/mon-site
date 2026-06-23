@@ -332,11 +332,26 @@ Le champ `youtubeCookies` dans `POST /api/jobs` reste supporté:
 }
 ```
 
-## Sulphur Studio — Text-to-Video Hugging Face (production en masse)
+## Sulphur Studio — Text-to-Video 100 % gratuit
 
-Intégration du modèle **SulphurAI/Sulphur-2-base** (#1 téléchargements HF text-to-video, basé sur LTX 2.3) pour générer des vidéos courtes et longues **sans limite** sur GPU local.
+Génération vidéo **sans aucune API payante** : modèles open-source Hugging Face + planificateur gratuit + FFmpeg.
 
-### Modèles supportés
+| Composant | Solution | Coût |
+|-----------|----------|------|
+| Génération clips | Sulphur 2 / Wan 2.2 (GPU local) | **0€** |
+| Planification scènes | Templates gratuits (défaut) ou Ollama local | **0€** |
+| Assemblage | FFmpeg serveur | **0€** |
+| Mistral / FAL | Optionnels uniquement | payant |
+
+### Planificateurs (défaut : gratuit)
+
+| Mode | Description |
+|------|-------------|
+| `free` | Templates cinématiques — **aucune clé API** |
+| `ollama` | LLM local gratuit (`ollama run llama3.2`) |
+| `mistral` | Option payante si vous avez déjà une clé |
+
+### Modèles vidéo supportés
 
 | Clé | Modèle HF | Usage |
 |-----|-----------|-------|
@@ -354,33 +369,34 @@ npm run setup:video
 
 export HF_TOKEN=hf_xxx          # optionnel, accélère les téléchargements
 export SULPHUR_MODEL_CACHE=./models
+export SULPHUR_PLANNER=free              # gratuit par défaut
 export SULPHUR_WORKER_CONCURRENCY=2   # jobs parallèles
 npm start
 ```
 
-### API production
+### API production (0€)
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/sulphur/health` | État GPU + modèles |
-| `POST /api/sulphur/jobs` | Vidéo unique (prompt ou topic+Mistral) |
+| `POST /api/sulphur/plan` | Planifier scènes gratuitement |
+| `POST /api/sulphur/jobs` | Vidéo unique (sans clé API) |
 | `POST /api/sulphur/jobs/auto` | Vidéo longue automatique |
 | `POST /api/sulphur/batch` | Jusqu'à 500 vidéos par requête |
 | `GET /api/sulphur/jobs/:id` | Suivi progression |
 | `GET /api/sulphur/download/:id` | Télécharger MP4 |
 
-Exemple batch quotidien :
+Exemple batch quotidien **sans aucune clé API** :
 
 ```bash
 curl -X POST http://localhost:3000/api/sulphur/batch \
   -H "Content-Type: application/json" \
-  -H "x-mistral-key: $MISTRAL_KEY" \
   -d '{
     "provider": "sulphur",
+    "plannerMode": "free",
     "hfModel": "sulphur2",
     "clipSec": 5,
     "aspectRatio": "9:16",
-    "mistralKey": "'"$MISTRAL_KEY"'",
     "items": [
       {"topic": "Les secrets de la productivité", "durationMin": 1},
       {"topic": "Histoire du football français", "durationMin": 2}
@@ -388,7 +404,14 @@ curl -X POST http://localhost:3000/api/sulphur/batch \
   }'
 ```
 
-Interface : `/voanh` → bouton **VIDÉO** → moteur **Sulphur 2 / Hugging Face**.
+Interface : `/voanh` → **VIDÉO** → planificateur **Gratuit** + moteur **Sulphur 2**.
+
+### Ollama (optionnel, toujours gratuit)
+
+```bash
+ollama pull llama3.2
+export SULPHUR_PLANNER=ollama
+```
 
 ## Commandes utiles
 

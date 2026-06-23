@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const DEFAULT_FAL_MODEL = "fal-ai/kling-video/v2/master/text-to-video";
 const { DEFAULT_HF_MODEL } = require("./hf-video-models");
+const { planScenes, resolvePlannerMode } = require("./free-scene-planner");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,10 +22,10 @@ function resolveFalModel(modelKey) {
 }
 
 function resolveVideoProvider(provider) {
-  const value = String(provider || "fal").toLowerCase();
+  const value = String(provider || process.env.SULPHUR_DEFAULT_PROVIDER || "sulphur").toLowerCase();
   if (["sulphur", "hf", "local", "sulphur2"].includes(value)) return "sulphur";
   if (value === "fal") return "fal";
-  return "fal";
+  return "sulphur";
 }
 
 async function falFetch(url, apiKey, options = {}) {
@@ -251,7 +252,10 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
       modelPath,
       mistralModel,
       provider,
-      hfModel
+      hfModel,
+      plannerMode,
+      ollamaModel,
+      ollamaUrl
     } = job.config;
 
     const videoProvider = resolveVideoProvider(provider);
@@ -261,15 +265,19 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 
     try {
       await updateJob(jobId, { status: "planning", progress: 3 });
-      await appendLog(jobId, "Planification des scènes via Mistral…");
+      const plannerLabel = resolvePlannerMode(config.plannerMode);
+      await appendLog(jobId, `Planification des scènes (${plannerLabel}, gratuit)…`);
 
-      const plan = await planScenesWithMistral({
+      const plan = await planScenes({
+        plannerMode: config.plannerMode,
         mistralKey,
         topic,
         durationMin,
         clipSec,
         aspectRatio,
-        mistralModel
+        mistralModel,
+        ollamaModel: config.ollamaModel,
+        ollamaUrl: config.ollamaUrl
       });
 
       await updateJob(jobId, {
@@ -383,6 +391,9 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
         modelPath: String(config.modelPath || DEFAULT_FAL_MODEL),
         provider: resolveVideoProvider(config.provider),
         hfModel: String(config.hfModel || DEFAULT_HF_MODEL),
+        plannerMode: resolvePlannerMode(config.plannerMode),
+        ollamaModel: String(config.ollamaModel || process.env.OLLAMA_MODEL || "llama3.2"),
+        ollamaUrl: String(config.ollamaUrl || process.env.OLLAMA_URL || "http://127.0.0.1:11434"),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
         falKey: String(config.falKey || "").trim()
@@ -394,8 +405,10 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
     };
 
     if (!job.config.topic) throw new Error("topic requis");
-    if (!job.config.mistralKey) throw new Error("mistralKey requis");
-    if (job.config.provider === "fal" && !job.config.falKey) throw new Error("falKey requis");
+    if (!job.config.mistralKey && resolvePlannerMode(job.config.plannerMode) === "mistral") {
+      throw new Error("mistralKey requis uniquement pour le planificateur Mistral (mode payant)");
+    }
+    if (job.config.provider === "fal" && !job.config.falKey) throw new Error("falKey requis pour FAL (option payante)");
 
     const sceneCount = Math.ceil((job.config.durationMin * 60) / job.config.clipSec);
     if (sceneCount > 90) throw new Error("Trop de scènes — réduisez la durée");
@@ -445,6 +458,7 @@ function createVideoJobManager({ storageDir, getFfmpegReady }) {
 module.exports = {
   createVideoJobManager,
   planScenesWithMistral,
+  planScenes,
   resolveFalModel,
   resolveVideoProvider,
   falFetch,

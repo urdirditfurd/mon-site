@@ -282,6 +282,9 @@ function createVoanhVideoRouter({ storageDir, getFfmpegReady }) {
         modelPath: req.body?.modelPath,
         provider: req.body?.provider,
         hfModel: req.body?.hfModel,
+        plannerMode: req.body?.plannerMode,
+        ollamaModel: req.body?.ollamaModel,
+        ollamaUrl: req.body?.ollamaUrl,
         mistralModel: req.body?.mistralModel,
         mistralKey: req.body?.mistralKey || req.headers["x-mistral-key"],
         falKey: req.body?.falKey || req.headers["x-fal-key"]

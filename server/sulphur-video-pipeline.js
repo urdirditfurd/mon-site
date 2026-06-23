@@ -4,7 +4,6 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const {
-  planScenesWithMistral,
   downloadFile,
   runFfmpegConcat,
   falFetch,
@@ -12,6 +11,7 @@ const {
   resolveFalModel,
   FAL_QUEUE_BASE
 } = require("./voanh-video-pipeline");
+const { planScenes, resolvePlannerMode } = require("./free-scene-planner");
 const {
   resolveHfModel,
   framesForDuration,
@@ -326,15 +326,19 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
       }
 
       await updateJob(jobId, { status: "planning", progress: 3 });
-      await appendLog(jobId, "Planification des scènes via Mistral…");
+      const plannerLabel = resolvePlannerMode(config.plannerMode);
+      await appendLog(jobId, `Planification des scènes (${plannerLabel}, 100% gratuit)…`);
 
-      const plan = await planScenesWithMistral({
+      const plan = await planScenes({
+        plannerMode: config.plannerMode,
         mistralKey: config.mistralKey,
         topic: config.topic,
         durationMin: config.durationMin,
         clipSec: config.clipSec,
         aspectRatio: config.aspectRatio,
-        mistralModel: config.mistralModel
+        mistralModel: config.mistralModel,
+        ollamaModel: config.ollamaModel,
+        ollamaUrl: config.ollamaUrl
       });
 
       await updateJob(jobId, {
@@ -410,7 +414,10 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
     }
 
     if (!promptOnly) {
-      if (!String(config.mistralKey || "").trim()) throw new Error("mistralKey requis");
+      const plannerMode = resolvePlannerMode(config.plannerMode);
+      if (plannerMode === "mistral" && !String(config.mistralKey || "").trim()) {
+        throw new Error("mistralKey requis uniquement pour le planificateur Mistral (mode payant)");
+      }
       const sceneCount = Math.ceil((durationMin * 60) / clipSec);
       if (sceneCount > 180) throw new Error("Trop de scènes — réduisez la durée ou augmentez clipSec");
     }
@@ -433,6 +440,9 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
         aspectRatio: String(config.aspectRatio || "9:16"),
         hfModel: String(config.hfModel || DEFAULT_HF_MODEL),
         modelPath: String(config.modelPath || ""),
+        plannerMode: resolvePlannerMode(config.plannerMode),
+        ollamaModel: String(config.ollamaModel || process.env.OLLAMA_MODEL || "llama3.2"),
+        ollamaUrl: String(config.ollamaUrl || process.env.OLLAMA_URL || "http://127.0.0.1:11434"),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         mistralKey: String(config.mistralKey || "").trim(),
         falKey: String(config.falKey || "").trim(),
@@ -479,6 +489,9 @@ function createSulphurJobManager({ storageDir, getFfmpegReady }) {
       mistralModel: batchConfig.mistralModel,
       mistralKey: batchConfig.mistralKey,
       falKey: batchConfig.falKey,
+      plannerMode: batchConfig.plannerMode,
+      ollamaModel: batchConfig.ollamaModel,
+      ollamaUrl: batchConfig.ollamaUrl,
       seedBase: batchConfig.seedBase
     };
 

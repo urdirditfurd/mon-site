@@ -70,6 +70,14 @@
     } catch (_err) { /* ignore */ }
   }
 
+  function getPlannerMode() {
+    return document.getElementById("video-planner")?.value || "free";
+  }
+
+  function isFreeVideoMode() {
+    return getVideoProvider() !== "fal" && getPlannerMode() !== "mistral";
+  }
+
   function getVideoProvider() {
     return document.getElementById("video-provider")?.value || "sulphur";
   }
@@ -80,14 +88,19 @@
 
   function updateProviderUi() {
     const provider = getVideoProvider();
+    const planner = getPlannerMode();
     const isFal = provider === "fal";
+    const needsMistral = planner === "mistral";
     const falGroup = document.getElementById("fal-key-group");
     const hfGroup = document.getElementById("hf-model-group");
     const falModelSelect = document.getElementById("video-fal-model");
     const falRequired = document.getElementById("fal-key-required");
     if (falGroup) falGroup.style.display = isFal ? "block" : "none";
     if (hfGroup) hfGroup.style.display = isFal ? "none" : "block";
-    if (falModelSelect) falModelSelect.closest(".field-group").style.display = isFal ? "block" : "none";
+    if (falModelSelect) {
+      const falModelGroup = falModelSelect.closest(".field-group");
+      if (falModelGroup) falModelGroup.style.display = isFal ? "block" : "none";
+    }
     if (falRequired) falRequired.style.display = isFal ? "inline" : "none";
     const modelLabel = document.getElementById("video-model-label");
     if (modelLabel) modelLabel.textContent = isFal ? "Modèle FAL" : "Modèle cloud (FAL)";
@@ -348,11 +361,11 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
     if (provider === "fal" && (!falKey || falKey.length < 20)) {
-      global.toast?.("Configurez votre clé FAL.ai", "error");
+      global.toast?.("Configurez votre clé FAL.ai (mode payant)", "error");
       return;
     }
-    if (!mistralKey) {
-      global.toast?.("Configurez d'abord votre clé Mistral", "error");
+    if (getPlannerMode() === "mistral" && !mistralKey) {
+      global.toast?.("Clé Mistral requise pour le planificateur Mistral (mode payant)", "error");
       return;
     }
     if (assemblyMode === "creatomate" && !creatomateKey) {
@@ -366,9 +379,9 @@ Réponds UNIQUEMENT en JSON valide :
       return;
     }
 
-  const costEstimate = provider === "fal" ? (sceneCount * 0.08 * clipSec).toFixed(1) : "0 (local GPU)";
+  const costEstimate = isFreeVideoMode() ? "0€ (100% gratuit)" : (sceneCount * 0.08 * clipSec).toFixed(1) + "€";
     const proceed = global.confirm(
-      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nMoteur : ${provider === "fal" ? "FAL Kling" : HF_MODELS[hfModel] || "Sulphur 2"}.\nCoût estimé : ~${costEstimate}€.\nContinuer ?`
+      `Génération : ~${durationMin} min → ${sceneCount} clips de ${clipSec}s.\nMoteur : ${provider === "fal" ? "FAL Kling" : HF_MODELS[hfModel] || "Sulphur 2"}.\nPlanificateur : ${getPlannerMode()}.\nCoût estimé : ${costEstimate}.\nContinuer ?`
     );
     if (!proceed) return;
 
@@ -391,17 +404,29 @@ Réponds UNIQUEMENT en JSON valide :
     if (log) log.innerHTML = "";
 
     try {
-      setProgress(2, "Planification Mistral…", `${sceneCount} scènes`);
-      appendVideoLog("Génération du plan de scènes via Mistral…");
+      const planner = getPlannerMode();
+      setProgress(2, "Planification…", `${sceneCount} scènes (${planner})`);
+      appendVideoLog(`Génération du plan de scènes (${planner}, gratuit)…`);
 
-      const plan = await planScenesWithMistral({
-        topic,
-        durationMin,
-        clipSec,
-        aspectRatio,
-        mistralKey,
-        modelId: global.state?.model
+      const planRes = await fetch(`${global.location.origin}/api/sulphur/plan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(mistralKey ? { "x-mistral-key": mistralKey } : {})
+        },
+        body: JSON.stringify({
+          plannerMode: planner,
+          topic,
+          durationMin,
+          clipSec,
+          aspectRatio,
+          mistralKey: mistralKey || "",
+          mistralModel: global.state?.model
+        })
       });
+      const planBody = await planRes.json();
+      if (!planRes.ok) throw new Error(planBody.error || planRes.statusText);
+      const plan = planBody;
 
       videoState.scenes = plan.scenes.slice(0, sceneCount);
       appendVideoLog(`Plan OK : "${plan.title}" — ${videoState.scenes.length} scènes`);
@@ -416,15 +441,14 @@ Réponds UNIQUEMENT en JSON valide :
           appendVideoLog(`Clip ${i + 1} : génération Sulphur/HF (${hfModel})…`);
           const sulphurRes = await fetch(`${global.location.origin}/api/sulphur/jobs`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-mistral-key": mistralKey },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               provider: "sulphur",
               promptOnly: true,
               prompt: `${scene.visualPrompt}. Cinematic, original content, no logos, no celebrity faces, no text overlay.`,
               clipSec,
               aspectRatio,
-              hfModel,
-              mistralKey
+              hfModel
             })
           }).then(async (r) => {
             const body = await r.json();
@@ -515,6 +539,7 @@ Réponds UNIQUEMENT en JSON valide :
     updateProviderUi();
 
     document.getElementById("video-provider")?.addEventListener("change", updateProviderUi);
+    document.getElementById("video-planner")?.addEventListener("change", updateProviderUi);
 
     const openBtn = document.getElementById("open-video-modal");
     const openMob = document.getElementById("open-video-modal-mob");
@@ -557,8 +582,12 @@ Réponds UNIQUEMENT en JSON valide :
         const topic = document.getElementById("video-topic")?.value?.trim();
         const durationMin = Number(document.getElementById("video-duration-min")?.value || 10);
         const mistralKey = global.state?.apiKey;
-        if (!topic || !mistralKey) {
-          global.toast?.("Sujet et clé Mistral requis", "error");
+        if (!topic) {
+          global.toast?.("Sujet requis", "error");
+          return;
+        }
+        if (getPlannerMode() === "mistral" && !mistralKey) {
+          global.toast?.("Clé Mistral requise pour le planificateur Mistral", "error");
           return;
         }
         try {
@@ -568,7 +597,8 @@ Réponds UNIQUEMENT en JSON valide :
             mistralKey,
             mistralModel: global.state?.model,
             provider: getVideoProvider(),
-            hfModel: getHfModel()
+            hfModel: getHfModel(),
+            plannerMode: getPlannerMode()
           });
           appendVideoLog(`Job auto #${job.id} lancé (${getVideoProvider()})`);
           setProgress(5, "Production auto…", `Job ${job.id}`);
@@ -686,12 +716,15 @@ Réponds UNIQUEMENT en JSON valide :
     throw new Error("Timeout job Sulphur");
   }
 
-  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, provider, hfModel, mistralKey, mistralModel }) {
+  async function startAutoJob({ topic, durationMin = 10, clipSec, aspectRatio, modelPath, provider, hfModel, plannerMode, mistralKey, mistralModel }) {
     const falKey = getFalKey();
     const videoProvider = provider || getVideoProvider();
-    if (!mistralKey) throw new Error("Clé Mistral requise");
+    const videoPlanner = plannerMode || getPlannerMode();
+    if (videoPlanner === "mistral" && !mistralKey) {
+      throw new Error("Clé Mistral requise pour le planificateur Mistral (mode payant)");
+    }
     if (videoProvider === "fal" && (!falKey || falKey.length < 20)) {
-      throw new Error("Clé FAL.ai requise — ouvrez ▶ VIDÉO");
+      throw new Error("Clé FAL.ai requise pour le mode cloud payant");
     }
 
     const payload = {
@@ -701,9 +734,10 @@ Réponds UNIQUEMENT en JSON valide :
       aspectRatio: aspectRatio || document.getElementById("video-aspect")?.value || "9:16",
       provider: videoProvider,
       hfModel: hfModel || getHfModel(),
+      plannerMode: videoPlanner,
       modelPath: modelPath || document.getElementById("video-fal-model")?.value || FAL_MODELS.kling,
       mistralModel: mistralModel || global.state?.model,
-      mistralKey,
+      mistralKey: mistralKey || "",
       falKey
     };
 

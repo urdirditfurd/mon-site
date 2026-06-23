@@ -1947,18 +1947,28 @@ body::before {
     </div>
     <div class="modal-body">
       <div class="info-block" style="border-left-color:var(--plasma)">
-        <strong style="color:var(--plasma)">Pipeline 10+ minutes</strong><br>
-        Mistral découpe le script → <strong>FAL.ai (Kling)</strong> génère les clips → <strong>FFmpeg</strong> assemble la vidéo finale.<br>
-        <span style="font-size:12px;color:var(--text-dim)">Obtenez une clé gratuite sur <a href="https://fal.ai" target="_blank" rel="noopener" style="color:var(--cyan)">fal.ai</a> (crédits offerts à l'inscription).</span>
+        <strong style="color:var(--plasma)">100 % gratuit — zéro API payante</strong><br>
+        <strong>Sulphur 2</strong> (GPU local) génère les clips → <strong>FFmpeg</strong> assemble → planificateur <strong>gratuit</strong> (templates ou Ollama).<br>
+        <span style="font-size:12px;color:var(--text-dim)">Aucune clé Mistral ni FAL requise. Coût : <strong>0€</strong>.</span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Planificateur de scènes</label>
+        <select class="field-input field-select" id="video-planner">
+          <option value="free" selected>Gratuit — templates (aucune API)</option>
+          <option value="ollama">Ollama local — LLM gratuit</option>
+          <option value="mistral">Mistral API — option payante</option>
+        </select>
+        <div class="field-hint">Par défaut : découpage automatique gratuit, sans clé API.</div>
       </div>
 
       <div class="field-group">
         <label class="field-label">Moteur de génération</label>
         <select class="field-input field-select" id="video-provider">
-          <option value="sulphur" selected>Sulphur 2 / Hugging Face (local GPU — sans limite)</option>
-          <option value="fal">FAL.ai Kling (cloud — clé requise)</option>
+          <option value="sulphur" selected>Sulphur 2 / Hugging Face (local GPU — 0€)</option>
+          <option value="fal">FAL.ai Kling (cloud payant — optionnel)</option>
         </select>
-        <div class="field-hint">Sulphur 2 Base = modèle #1 HF text-to-video (933k+ téléchargements). Production locale illimitée sur GPU.</div>
+        <div class="field-hint">Sulphur 2 Base = modèle open-source #1 HF. Production illimitée sur votre GPU, sans abonnement.</div>
       </div>
 
       <div class="field-group" id="hf-model-group">
@@ -1977,7 +1987,7 @@ body::before {
           <input type="password" class="field-input" id="fal-api-key-input" placeholder="fal_xxxxxxxx…" style="flex:1">
           <button class="btn-primary" id="save-fal-key" type="button" style="white-space:nowrap">ENREGISTRER</button>
         </div>
-        <div class="field-hint">Utilisée pour générer les clips IA (Kling). Stockée localement comme Mistral.</div>
+        <div class="field-hint">Optionnel — uniquement si vous choisissez FAL (mode payant).</div>
       </div>
 
       <div class="field-group">
@@ -2036,9 +2046,9 @@ body::before {
       </div>
 
       <div class="info-block" style="margin-top:0;border-left-color:var(--cyan)">
-        <strong style="color:var(--cyan)">Production en masse (batch)</strong><br>
-        API : <code>POST /api/sulphur/batch</code> — jusqu'à 500 vidéos par requête.<br>
-        Variable <code>SULPHUR_WORKER_CONCURRENCY</code> pour paralléliser sur GPU.
+        <strong style="color:var(--cyan)">Production en masse gratuite (batch)</strong><br>
+        API : <code>POST /api/sulphur/batch</code> — jusqu'à 500 vidéos/jour, 0€.<br>
+        Aucune clé API requise avec le planificateur <strong>Gratuit</strong>.
       </div>
 
       <div class="info-block" style="margin-top:0;border-left-color:var(--neon)">
