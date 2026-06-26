@@ -19,6 +19,35 @@ Pipeline **plan par plan** pour courts/longs métrages IA, sans text-to-video lo
 
 Ce n'est **pas illimité**, mais bien plus abordable que le text-to-video.
 
+## Clés API — une seule fois (recommandé)
+
+### Option A — fichier `.env` sur votre PC (usage perso)
+
+1. Copiez `.env.example` en `.env` à la racine du projet
+2. Collez vos clés :
+
+```env
+HF_TOKEN=hf_votre_token
+MISTRAL_API_KEY=votre_cle_mistral
+```
+
+3. Relancez `npm start` — **plus besoin de les retaper** dans le navigateur
+
+Le fichier `.env` reste sur votre machine et **n'est jamais publié** sur GitHub.
+
+### Option B — saisie dans le navigateur
+
+Les clés sont mémorisées dans `localStorage` (une fois suffit par navigateur).
+
+### Ne jamais faire
+
+- Mettre les clés dans `index.html`, `app.js` ou `video-factory.js` → visibles par tous
+- Committer `.env` sur GitHub → vol de clés
+
+### Produit vendable
+
+Chaque client utilise **ses propres** clés gratuites HF + Mistral, ou vous hébergez un serveur avec **votre** `.env` (vous payez les usages).
+
 ## Token Hugging Face
 
 1. Créez un compte sur [huggingface.co](https://huggingface.co)

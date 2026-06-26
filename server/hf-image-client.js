@@ -6,6 +6,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const { resolveHfImageModel } = require("./hf-image-models");
+const { resolveHfToken: resolveHfTokenFromSecrets } = require("./ai-secrets");
 
 const HF_ROUTER_BASE = "https://router.huggingface.co/hf-inference/models";
 const HF_FALLBACK_ORDER = ["fluxSchnell", "sdxlTurbo", "sd15"];
@@ -15,9 +16,7 @@ function sleep(ms) {
 }
 
 function resolveHfToken(explicit) {
-  return String(
-    explicit || process.env.HF_TOKEN || process.env.HUGGINGFACE_HUB_TOKEN || ""
-  ).trim();
+  return resolveHfTokenFromSecrets(explicit);
 }
 
 function isImageBuffer(buf) {

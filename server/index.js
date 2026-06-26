@@ -11,6 +11,9 @@ const { spawn, spawnSync, execSync } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
+const { loadProjectEnv } = require("./load-env");
+const { getServerAiSecretsStatus } = require("./ai-secrets");
+loadProjectEnv(ROOT_DIR);
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");

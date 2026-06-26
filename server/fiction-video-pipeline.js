@@ -15,7 +15,8 @@ const {
   listHfImageModels,
   listVisualStyles
 } = require("./hf-image-models");
-const { generateHfImageWithFallback, saveManualImage, resolveHfToken } = require("./hf-image-client");
+const { generateHfImageWithFallback, saveManualImage } = require("./hf-image-client");
+const { resolveHfToken, resolveMistralKey } = require("./ai-secrets");
 const {
   buildSrtFromScenes,
   imageToVideoClip,
@@ -344,7 +345,7 @@ function createFictionJobManager({ storageDir, getFfmpegReady, backgroundMusicPa
         hfToken: resolveHfToken(config.hfToken),
         manualImages: config.manualImages || null,
         plannerMode: resolvePlannerMode(config.plannerMode),
-        mistralKey: String(config.mistralKey || "").trim(),
+        mistralKey: resolveMistralKey(config.mistralKey),
         mistralModel: String(config.mistralModel || "mistral-small-2506"),
         fps: Number(config.fps) || DEFAULT_FPS,
         burnSubtitles: config.burnSubtitles !== false,

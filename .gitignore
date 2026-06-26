@@ -1,4 +1,6 @@
 node_modules/
+.env
+storage/secrets/ai-keys.env
 storage/uploads/*
 storage/jobs/*
 storage/jobs-db.json

@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { createFictionJobManager, DEFAULT_BG_MUSIC } = require("./fiction-video-pipeline");
 const { listHfImageModels, listVisualStyles, DEFAULT_FPS } = require("./hf-image-models");
-const { resolveHfToken } = require("./hf-image-client");
+const { resolveHfToken, resolveMistralKey, getServerAiSecretsStatus } = require("./ai-secrets");
 const { planScenes, planScenesFromScript } = require("./free-scene-planner");
 
 function createFictionVideoRouter({ storageDir, getFfmpegReady, backgroundMusicPath }) {
@@ -17,6 +17,8 @@ function createFictionVideoRouter({ storageDir, getFfmpegReady, backgroundMusicP
     const ffmpegReady = typeof getFfmpegReady === "function" ? getFfmpegReady() : false;
     const hasMusic = fs.existsSync(backgroundMusicPath || DEFAULT_BG_MUSIC);
     const hasHfToken = Boolean(resolveHfToken());
+    const hasMistralKey = Boolean(resolveMistralKey());
+    const aiStatus = getServerAiSecretsStatus();
     res.json({
       ok: true,
       mode: "fiction-studio",
@@ -24,6 +26,8 @@ function createFictionVideoRouter({ storageDir, getFfmpegReady, backgroundMusicP
       ffmpegReady,
       hasBackgroundMusic: hasMusic,
       hasServerHfToken: hasHfToken,
+      hasServerMistralKey: hasMistralKey,
+      keysHint: aiStatus.source,
       defaultFps: DEFAULT_FPS,
       imageModels: listHfImageModels(),
       visualStyles: listVisualStyles(),

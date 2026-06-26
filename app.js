@@ -53,6 +53,8 @@ const state = {
   generationMode: "ai-remix",
   sulphurJobId: "",
   fictionJobId: "",
+  fictionServerHasHf: false,
+  fictionServerHasMistral: false,
   falLimitsLoaded: false
 };
 
@@ -173,11 +175,22 @@ function isLikelyYouTubeUrl(value) {
 
 function renderBackendMeta() {
   if (!dom.backendMeta) return;
-  dom.backendMeta.textContent =
-    `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
-  if (!state.ytDlpAvailable) {
-    dom.backendMeta.textContent += " — lance: npm install puis npm start";
+  const keyParts = [];
+  if (state.fictionServerHasHf || state.fictionServerHasMistral) {
+    const loaded = [
+      state.fictionServerHasHf ? "HF (.env)" : null,
+      state.fictionServerHasMistral ? "Mistral (.env)" : null
+    ].filter(Boolean);
+    keyParts.push(`Clés serveur : ${loaded.join(", ")}`);
   }
+  let text = keyParts.length
+    ? `${keyParts.join(" · ")} · `
+    : "";
+  text += `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
+  if (!state.ytDlpAvailable) {
+    text += " — lance: npm install puis npm start";
+  }
+  dom.backendMeta.textContent = text;
 }
 
 function renderYtDlpWarning() {
@@ -1409,14 +1422,23 @@ async function clearYoutubeCookies() {
 
 async function checkBackendHealth() {
   try {
-    const [healthRes, cfgRes] = await Promise.all([
+    const [healthRes, cfgRes, fictionRes] = await Promise.all([
       fetch(apiUrl("/api/health")),
-      fetch(apiUrl("/api/config"))
+      fetch(apiUrl("/api/config")),
+      fetch(apiUrl("/api/fiction/health")).catch(() => null)
     ]);
     if (!healthRes.ok) throw new Error("health check failed");
     const payload = await healthRes.json();
     const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
     state.backendAvailable = true;
+    if (fictionRes?.ok) {
+      const fictionHealth = await fictionRes.json();
+      state.fictionServerHasHf = Boolean(fictionHealth.hasServerHfToken);
+      state.fictionServerHasMistral = Boolean(fictionHealth.hasServerMistralKey);
+    } else {
+      state.fictionServerHasHf = false;
+      state.fictionServerHasMistral = false;
+    }
     state.ytDlpAvailable = Boolean(payload.ytDlpAvailable);
     state.youtubeApiAvailable = Boolean(
       serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
@@ -1479,8 +1501,8 @@ async function createFictionVideoJob() {
     updateStatus("Collez votre script avant de générer.", false);
     return;
   }
-  if (!hfToken) {
-    updateStatus("Ajoutez votre token Hugging Face (gratuit sur huggingface.co).", false);
+  if (!hfToken && !state.fictionServerHasHf) {
+    updateStatus("Ajoutez votre token Hugging Face — ou créez un fichier .env sur le serveur (HF_TOKEN=…).", false);
     return;
   }
   if (!state.backendAvailable) {
@@ -1501,7 +1523,7 @@ async function createFictionVideoJob() {
       headers: {
         "Content-Type": "application/json",
         ...(mistralApiKey ? { "x-mistral-key": mistralApiKey } : {}),
-        "x-hf-token": hfToken
+        ...(hfToken ? { "x-hf-token": hfToken } : {})
       },
       body: JSON.stringify({
         script,
@@ -1511,8 +1533,8 @@ async function createFictionVideoJob() {
         visualStyle,
         imageProvider: "huggingface",
         hfImageModel: "fluxSchnell",
-        hfToken,
-        plannerMode: mistralApiKey ? "mistral" : "free",
+        hfToken: hfToken || undefined,
+        plannerMode: mistralApiKey || state.fictionServerHasMistral ? "mistral" : "free",
         mistralKey: mistralApiKey || undefined,
         burnSubtitles: true,
         backgroundMusic: true,
