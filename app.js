@@ -151,6 +151,7 @@ const dom = {
   wanPromptExtendRow: document.getElementById("wanPromptExtendRow"),
   wanPromptExtendHint: document.getElementById("wanPromptExtendHint"),
   hfApiToken: document.getElementById("hfApiToken"),
+  hfTokenStatus: document.getElementById("hfTokenStatus"),
   fictionVisualStyle: document.getElementById("fictionVisualStyle"),
   fictionClipSec: document.getElementById("fictionClipSec"),
   fictionStyleRow: document.getElementById("fictionStyleRow"),
@@ -253,19 +254,80 @@ function loadAiKeysFromStorage() {
   }
 }
 
+function getHfToken() {
+  const fromInput = String(dom.hfApiToken?.value || "").trim();
+  if (fromInput.length >= 10) return fromInput;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_KEYS_STORAGE) || "{}");
+    const stored = String(parsed.hfToken || "").trim();
+    if (stored.length >= 10 && dom.hfApiToken && !fromInput) {
+      dom.hfApiToken.value = stored;
+    }
+    return stored.length >= 10 ? stored : fromInput;
+  } catch {
+    return fromInput;
+  }
+}
+
+function getMistralKey() {
+  return String(dom.mistralApiKey?.value || "").trim();
+}
+
+function hasFictionHfToken() {
+  return Boolean(state.fictionServerHasHf || getHfToken().length >= 10);
+}
+
 function saveAiKeysToStorage() {
   try {
     localStorage.setItem(
       AI_KEYS_STORAGE,
       JSON.stringify({
-        mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
+        mistralApiKey: getMistralKey(),
         falApiKey: (dom.falApiKey?.value || "").trim(),
-        hfToken: (dom.hfApiToken?.value || "").trim(),
+        hfToken: getHfToken(),
         wanPromptExtend: dom.wanPromptExtend?.checked !== false
       })
     );
   } catch {
     // ignore quota errors
+  }
+}
+
+function updateFictionKeyStatus() {
+  if (!dom.hfTokenStatus) return;
+  if (!isFictionStudioMode()) {
+    dom.hfTokenStatus.hidden = true;
+    return;
+  }
+  dom.hfTokenStatus.hidden = false;
+  if (state.fictionServerHasHf) {
+    dom.hfTokenStatus.textContent =
+      "Token HF : configuré sur le serveur (.env) — le champ ci-dessus est optionnel.";
+    dom.hfTokenStatus.className = "hint small hf-token-status ok";
+    dom.hfApiToken?.classList.remove("field-missing");
+    return;
+  }
+  const hfToken = getHfToken();
+  if (hfToken.length >= 10) {
+    const preview = hfToken.startsWith("hf_") ? `${hfToken.slice(0, 7)}…` : "••••";
+    dom.hfTokenStatus.textContent = `Token HF : OK (${preview}) — Fiction Studio prêt.`;
+    dom.hfTokenStatus.className = "hint small hf-token-status ok";
+    dom.hfApiToken?.classList.remove("field-missing");
+    return;
+  }
+  dom.hfTokenStatus.textContent =
+    "Token HF : manquant — collez votre clé dans le champ « Token Hugging Face » (pas Mistral). Gratuit sur huggingface.co/settings/tokens";
+  dom.hfTokenStatus.className = "hint small hf-token-status warn";
+  dom.hfApiToken?.classList.add("field-missing");
+}
+
+function refreshFictionReadyStatus() {
+  updateFictionKeyStatus();
+  if (!isFictionStudioMode() || !state.backendAvailable) return;
+  if (hasFictionHfToken()) {
+    updateStatus("Prêt — Fiction Studio (token HF OK)", true);
+  } else {
+    updateStatus("Ajoutez votre token Hugging Face dans le champ dédié (gratuit sur huggingface.co).", false);
   }
 }
 
@@ -426,6 +488,7 @@ function applyGenerationModeUi() {
   }
   void updateFalCostEstimate();
   updateWanPromptExtendHint();
+  refreshFictionReadyStatus();
 }
 
 function sleep(ms) {
@@ -1470,7 +1533,9 @@ async function checkBackendHealth() {
     renderBackendMeta();
     renderYtDlpWarning();
     void loadFalLimits();
-    if (!state.ytDlpAvailable) {
+    if (isFictionStudioMode()) {
+      refreshFictionReadyStatus();
+    } else if (!state.ytDlpAvailable) {
       updateStatus("Installe les dépendances : npm install puis npm start (voir bandeau orange).", false);
     } else {
       updateStatus("Prêt à générer", true);
@@ -1490,8 +1555,8 @@ async function checkBackendHealth() {
 
 async function createFictionVideoJob() {
   const script = (dom.scriptVideoInput?.value || "").trim();
-  const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
-  const hfToken = (dom.hfApiToken?.value || "").trim();
+  const mistralApiKey = getMistralKey();
+  const hfToken = getHfToken();
   const aspectRatio = dom.aspectRatio?.value || "9:16";
   const durationMin = Number(dom.videoDurationMin?.value || 1);
   const clipSec = Number(dom.fictionClipSec?.value || 5);
@@ -1501,8 +1566,13 @@ async function createFictionVideoJob() {
     updateStatus("Collez votre script avant de générer.", false);
     return;
   }
-  if (!hfToken && !state.fictionServerHasHf) {
-    updateStatus("Ajoutez votre token Hugging Face — ou créez un fichier .env sur le serveur (HF_TOKEN=…).", false);
+  if (!hasFictionHfToken()) {
+    updateFictionKeyStatus();
+    dom.hfApiToken?.focus();
+    updateStatus(
+      "Token Hugging Face requis : remplissez le premier champ « Token Hugging Face » (hf_…), pas la clé Mistral.",
+      false
+    );
     return;
   }
   if (!state.backendAvailable) {
@@ -1933,7 +2003,12 @@ function initEvents() {
     });
   }
   if (dom.hfApiToken) {
-    dom.hfApiToken.addEventListener("change", saveAiKeysToStorage);
+    const onHfTokenInput = () => {
+      saveAiKeysToStorage();
+      refreshFictionReadyStatus();
+    };
+    dom.hfApiToken.addEventListener("input", onHfTokenInput);
+    dom.hfApiToken.addEventListener("change", onHfTokenInput);
   }
   if (dom.mistralApiKey) {
     dom.mistralApiKey.addEventListener("change", () => {
@@ -1994,6 +2069,7 @@ function initDefaults() {
   if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;
   applyPreviewAspectRatio(state.currentAspectRatio);
   setGenerationProgress(0);
+  refreshFictionReadyStatus();
 }
 
 async function init() {

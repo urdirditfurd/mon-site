@@ -313,6 +313,19 @@ input[type="range"] {
   color: #ffd48a;
 }
 
+.hf-token-status.ok {
+  color: #9ff0c2;
+}
+
+.hf-token-status.warn {
+  color: #ffd48a;
+}
+
+.field-missing {
+  border-color: #b45309 !important;
+  box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.35);
+}
+
 .btn {
   border: 1px solid transparent;
   border-radius: 10px;

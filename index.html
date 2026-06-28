@@ -123,9 +123,10 @@
       <details class="details-box" id="aiKeysDetails" open>
         <summary>Clés API IA (VOANH — Mistral + FAL)</summary>
         <label class="field no-margin">
-          <span>Token Hugging Face (Fiction Studio)</span>
+          <span>Token Hugging Face (Fiction Studio) — obligatoire pour générer</span>
           <input type="password" id="hfApiToken" placeholder="hf_… — gratuit sur huggingface.co" autocomplete="off">
         </label>
+        <p class="hint small hf-token-status warn" id="hfTokenStatus" hidden>Vérification du token HF…</p>
         <label class="field no-margin">
           <span>Clé API Mistral</span>
           <input type="password" id="mistralApiKey" placeholder="mistral-..." autocomplete="off">
@@ -207,8 +208,8 @@
     </section>
   </main>
 
-  <script src="config.js?v=ai-remix-3"></script>
-  <script src="app.js?v=ai-remix-3"></script>
+  <script src="config.js?v=ai-remix-4"></script>
+  <script src="app.js?v=ai-remix-4"></script>
   <footer class="site-footer">
     <a href="/terms.html">Conditions</a>
     <span>·</span>
