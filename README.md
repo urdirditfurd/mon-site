@@ -427,7 +427,8 @@ curl -X POST http://localhost:3000/api/sulphur/batch \
 
 Sans clé Mistral, utilisez `"plannerMode": "free"` (templates, 0€).
 
-Guide Snapdragon X Elite : [`docs/snapdragon-x-elite.md`](docs/snapdragon-x-elite.md)
+Guide Snapdragon X Elite : [`docs/snapdragon-x-elite.md`](docs/snapdragon-x-elite.md)  
+Pinokio + Wan sans NVIDIA (Surface Copilot+) : [`docs/pinokio-snapdragon-wan.md`](docs/pinokio-snapdragon-wan.md) — app dans [`pinokio/wan-snapdragon-arm/`](pinokio/wan-snapdragon-arm/)
 
 **FAL.ai** intégré (modes Remix IA + script → vidéo). Limites et coûts : [`docs/fal-ai-limites.md`](docs/fal-ai-limites.md)
 
