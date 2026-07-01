@@ -50,7 +50,7 @@ npm start
 
 Si Colab est saturé : clé FAL dans Video Factory — voir `docs/fal-ai-limites.md`.
 
-## Fichiers
+Guide complet (Wan + tous les modèles Pinokio) : [`docs/pinokio-snapdragon-guide-complet.md`](pinokio-snapdragon-guide-complet.md)
 
 | Chemin | Rôle |
 |--------|------|
