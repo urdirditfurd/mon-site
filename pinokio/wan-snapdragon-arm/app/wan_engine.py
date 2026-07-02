@@ -31,13 +31,27 @@ def platform_profile() -> dict:
     machine = platform.machine().lower()
     system = platform.system().lower()
     is_arm = machine in ("aarch64", "arm64")
+    processor = platform.processor() or ""
+    # Pinokio utilise souvent Python x64 émulé sur Surface ARM : machine() = amd64
+    # mais le processeur contient toujours "Qualcomm".
+    qualcomm = "qualcomm" in processor.lower()
+    snapdragon = (is_arm and system == "windows") or (
+        system == "windows" and qualcomm
+    )
     return {
         "machine": machine,
         "system": system,
         "arm64": is_arm,
-        "snapdragon": is_arm and system == "windows",
-        "processor": platform.processor() or "",
+        "qualcomm": qualcomm,
+        "snapdragon": snapdragon,
+        "processor": processor,
     }
+
+
+def is_snapdragon_pc() -> bool:
+    if os.environ.get("SULPHUR_SNAPDRAGON", "").lower() in ("1", "true", "yes"):
+        return True
+    return platform_profile()["snapdragon"]
 
 
 def hf_token() -> str | None:
@@ -57,7 +71,7 @@ def device_label(device: str) -> str:
         return "cuda"
     if device == "mps":
         return "mps"
-    if platform_profile()["snapdragon"]:
+    if is_snapdragon_pc():
         return "snapdragon-cpu"
     return "cpu"
 
@@ -115,7 +129,7 @@ def generate_video(
     device = pick_device()
     width, height = RESOLUTION_PRESETS.get(resolution_key, RESOLUTION_PRESETS["480p 16:9"])
 
-    if platform_profile()["snapdragon"]:
+    if is_snapdragon_pc():
         num_frames = min(num_frames, 49)
         steps = min(steps, 24)
 
@@ -176,7 +190,7 @@ def check_environment() -> dict:
         "ok": True,
         "device": device_label(device),
         "cuda": torch.cuda.is_available(),
-        "snapdragon": profile["snapdragon"],
+        "snapdragon": is_snapdragon_pc(),
         "arm64": profile["arm64"],
         "torch": torch.__version__,
         "model": MODEL_ID,
