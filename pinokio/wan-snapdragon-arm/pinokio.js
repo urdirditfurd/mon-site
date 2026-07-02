@@ -11,7 +11,7 @@ module.exports = {
       params: { fullscreen: true, running: false },
     },
     {
-      icon: "fa-solid fa-rocket",
+      icon: "fa-solid fa-play",
       text: "Run",
       href: "start.js",
       params: { fullscreen: true, running: true },
