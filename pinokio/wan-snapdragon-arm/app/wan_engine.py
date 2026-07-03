@@ -101,12 +101,20 @@ def get_pipe(cache_dir: str | None, device: str):
         cache_dir=cache_dir,
         token=hf_token(),
     )
-    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+    pipe.scheduler = UniPCMultistepScheduler.from_config(
+        pipe.scheduler.config,
+        flow_shift=3.0,
+    )
 
     if device == "cpu":
-        pipe.enable_model_cpu_offload()
+        # Sur CPU pur (Surface Snapdragon) : pas de cpu_offload (bug diffusers 0.38+)
+        pipe.to("cpu")
+        if hasattr(pipe, "enable_attention_slicing"):
+            pipe.enable_attention_slicing("max")
     else:
         pipe = pipe.to(device)
+        if os.environ.get("SULPHUR_CPU_OFFLOAD", "").lower() in ("1", "true", "yes"):
+            pipe.enable_model_cpu_offload()
 
     _PIPE = pipe
     return _PIPE
@@ -130,8 +138,10 @@ def generate_video(
     width, height = RESOLUTION_PRESETS.get(resolution_key, RESOLUTION_PRESETS["480p 16:9"])
 
     if is_snapdragon_pc():
-        num_frames = min(num_frames, 49)
-        steps = min(steps, 24)
+        num_frames = min(num_frames, 33)
+        steps = min(steps, 20)
+    if num_frames % 4 != 1:
+        num_frames = max(17, (num_frames // 4) * 4 + 1)
 
     if progress_callback:
         progress_callback(0.05, "Chargement du modèle Wan 2.1 1.3B…")

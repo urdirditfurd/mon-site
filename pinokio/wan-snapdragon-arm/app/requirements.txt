@@ -1,6 +1,6 @@
 # PyTorch ARM64 : installé via torch.js (CPU, pas CUDA)
 gradio>=5.0.0
-diffusers>=0.37.0
+diffusers>=0.37.0,<0.38.0
 transformers>=4.46.0
 accelerate>=1.2.0
 safetensors>=0.4.5

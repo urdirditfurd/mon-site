@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import time
+import traceback
 import uuid
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from wan_engine import (
     check_environment,
     format_check_message,
     generate_video,
-    platform_profile,
+    is_snapdragon_pc,
 )
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
@@ -29,7 +30,7 @@ COLAB_URL = os.environ.get(
 )
 
 _env = check_environment()
-_IS_SNAPDRAGON = platform_profile()["snapdragon"]
+_IS_SNAPDRAGON = is_snapdragon_pc()
 
 
 def _status_header() -> str:
@@ -53,9 +54,14 @@ def run_generation(
     if not prompt:
         raise gr.Error("Entrez un prompt.")
 
-    if _IS_SNAPDRAGON:
-        num_frames = min(int(num_frames), 49)
-        steps = min(int(steps), 24)
+    if is_snapdragon_pc():
+        num_frames = min(int(num_frames), 33)
+        steps = min(int(steps), 20)
+
+    # Wan exige un nombre de frames 4n+1
+    nf = int(num_frames)
+    if nf % 4 != 1:
+        nf = max(17, (nf // 4) * 4 + 1)
 
     out_name = f"wan_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
     out_path = OUTPUT_DIR / out_name
@@ -64,17 +70,21 @@ def run_generation(
     def on_progress(value: float, desc: str):
         progress(value, desc=desc)
 
-    result = generate_video(
-        prompt=prompt,
-        output_path=str(out_path),
-        resolution_key=resolution,
-        num_frames=int(num_frames),
-        fps=16,
-        steps=int(steps),
-        seed=int(seed) if seed and int(seed) > 0 else None,
-        cache_dir=cache_dir,
-        progress_callback=on_progress,
-    )
+    try:
+        result = generate_video(
+            prompt=prompt,
+            output_path=str(out_path),
+            resolution_key=resolution,
+            num_frames=nf,
+            fps=16,
+            steps=int(steps),
+            seed=int(seed) if seed and int(seed) > 0 else None,
+            cache_dir=cache_dir,
+            progress_callback=on_progress,
+        )
+    except Exception as exc:
+        detail = traceback.format_exc()
+        raise gr.Error(f"{exc}\n\n--- détail ---\n{detail}") from exc
 
     return str(out_path), f"OK — {result['device']} — {result['width']}x{result['height']} — {result['numFrames']} frames"
 
@@ -102,8 +112,8 @@ with gr.Blocks(title="Wan Snapdragon — Pinokio", theme=gr.themes.Soft()) as de
                         value="480p 16:9",
                     )
                     with gr.Row():
-                        num_frames = gr.Slider(17, 81, value=49, step=4, label="Frames (pair+1)")
-                        steps = gr.Slider(12, 40, value=24, step=1, label="Steps")
+                        num_frames = gr.Slider(17, 49, value=33, step=4, label="Frames (4n+1, ex. 33)")
+                        steps = gr.Slider(12, 24, value=20, step=1, label="Steps")
                     seed = gr.Number(label="Seed (0 = aléatoire)", value=0, precision=0)
                     btn = gr.Button("Générer la vidéo", variant="primary")
                 with gr.Column(scale=2):
