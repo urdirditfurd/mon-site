@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pinokio Remote</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:       #0f0f1a;
+    --card:     #1a1a2e;
+    --border:   #2a2a4a;
+    --accent:   #6c63ff;
+    --accent2:  #a78bfa;
+    --text:     #e0e0e0;
+    --muted:    #888;
+    --green:    #00d26a;
+    --red:      #ff4757;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+
+  /* ── Header ────────────────────────────────────────────── */
+  header {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.5rem;
+    background: rgba(26,26,46,.9);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 50;
+  }
+  .brand {
+    font-size: 1.05rem; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header-right { display: flex; align-items: center; gap: .75rem; }
+
+  /* tunnel badge */
+  .tunnel-badge {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .78rem; padding: .3rem .8rem;
+    background: rgba(108,99,255,.1); border: 1px solid rgba(108,99,255,.25);
+    border-radius: 20px; cursor: pointer; user-select: none;
+    transition: background .2s;
+    max-width: 260px; overflow: hidden;
+  }
+  .tunnel-badge:hover { background: rgba(108,99,255,.2); }
+  .tunnel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+  .tunnel-dot.active { background: var(--green); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .tunnel-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+
+  .btn-icon {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: .3rem .8rem; border-radius: 7px; cursor: pointer; font-size: .82rem;
+    transition: border-color .2s, color .2s;
+  }
+  .btn-icon:hover { border-color: var(--red); color: var(--red); }
+
+  /* ── Main ──────────────────────────────────────────────── */
+  main { padding: 1.75rem 1.5rem; }
+  .section-title {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin-bottom: 1.1rem;
+  }
+
+  /* Grille de services */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 1.1rem;
+  }
+
+  /* Carte service */
+  .svc-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.4rem;
+    cursor: pointer;
+    transition: border-color .2s, transform .15s, box-shadow .2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .svc-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(108,99,255,.04) 0%, transparent 60%);
+    opacity: 0; transition: opacity .2s;
+  }
+  .svc-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 10px 35px rgba(108,99,255,.18); }
+  .svc-card:hover::before { opacity: 1; }
+  .svc-card.stopped { opacity: .55; cursor: default; }
+  .svc-card.stopped:hover { border-color: var(--border); transform: none; box-shadow: none; }
+
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: .8rem; }
+  .svc-icon { font-size: 2rem; line-height: 1; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: .3rem; flex-shrink: 0; }
+  .status-dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.stopped { background: var(--red); }
+
+  .svc-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: .25rem; }
+  .svc-card p  { font-size: .82rem; color: var(--muted); line-height: 1.4; }
+
+  .card-footer {
+    margin-top: 1.1rem;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .port-badge {
+    font-size: .72rem; color: var(--muted);
+    background: rgba(255,255,255,.05); padding: .2rem .55rem;
+    border-radius: 4px; font-family: monospace;
+  }
+  .open-label { font-size: .8rem; color: var(--accent); font-weight: 600; }
+  .stopped-label { font-size: .78rem; color: var(--red); }
+
+  /* ── Vue Iframe ─────────────────────────────────────────── */
+  #iframe-view {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    flex-direction: column; background: var(--bg);
+  }
+  #iframe-view.visible { display: flex; }
+
+  .iframe-bar {
+    height: 48px; flex-shrink: 0;
+    display: flex; align-items: center; gap: .9rem;
+    padding: 0 1rem;
+    background: rgba(26,26,46,.95); border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+  }
+  .btn-back {
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    padding: .28rem .75rem; border-radius: 6px; cursor: pointer; font-size: .82rem;
+    white-space: nowrap; transition: background .2s;
+  }
+  .btn-back:hover { background: rgba(255,255,255,.07); }
+  .iframe-title { font-weight: 600; font-size: .9rem; white-space: nowrap; }
+  .iframe-spacer { flex: 1; }
+  .btn-newwin {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: .28rem .75rem; border-radius: 6px; cursor: pointer; font-size: .78rem;
+    white-space: nowrap;
+  }
+  .btn-newwin:hover { color: var(--text); }
+
+  iframe#svc-frame {
+    flex: 1; border: none; background: #fff;
+    width: 100%; height: 100%;
+  }
+
+  /* ── Loader ─────────────────────────────────────────────── */
+  #loader {
+    grid-column: 1/-1;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 3.5rem 1rem; gap: 1rem; color: var(--muted);
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .75s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ──────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 1.75rem; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--accent);
+    padding: .65rem 1.4rem; border-radius: 10px; font-size: .88rem;
+    opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 9999;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ── Modal info tunnel ──────────────────────────────────── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 2rem; max-width: 480px; width: 92vw;
+  }
+  .modal h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+  .modal .url-box {
+    background: #0f0f1a; border: 1px solid var(--border);
+    border-radius: 8px; padding: .7rem 1rem;
+    font-family: monospace; font-size: .85rem; color: var(--accent2);
+    word-break: break-all; margin-bottom: 1rem;
+  }
+  .modal-actions { display: flex; gap: .7rem; flex-wrap: wrap; }
+  .modal-btn {
+    padding: .45rem 1rem; border-radius: 7px; font-size: .85rem;
+    cursor: pointer; border: 1px solid var(--border); background: transparent;
+    color: var(--text); transition: background .2s;
+  }
+  .modal-btn.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .modal-btn:hover { background: rgba(255,255,255,.08); }
+  .modal-btn.primary:hover { opacity: .88; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <span class="brand">⚡ Pinokio Remote</span>
+  <div class="header-right">
+    <div class="tunnel-badge" id="tunnelBadge" title="Cliquer pour afficher l'URL publique">
+      <div class="tunnel-dot" id="tunnelDot"></div>
+      <span class="tunnel-label" id="tunnelLabel">Tunnel…</span>
+    </div>
+    <button class="btn-icon" id="logoutBtn">Déconnexion</button>
+  </div>
+</header>
+
+<!-- ── Dashboard ── -->
+<main id="dashboard">
+  <p class="section-title">Modèles IA — Tour de génération</p>
+  <div class="grid" id="serviceGrid">
+    <div id="loader">
+      <div class="spinner"></div>
+      <span>Détection des services…</span>
+    </div>
+  </div>
+</main>
+
+<!-- ── Vue Iframe ── -->
+<div id="iframe-view">
+  <div class="iframe-bar">
+    <button class="btn-back" id="backBtn">← Tableau de bord</button>
+    <span class="iframe-title" id="iframeTitle"></span>
+    <div class="iframe-spacer"></div>
+    <button class="btn-newwin" id="newwinBtn">↗ Nouvel onglet</button>
+  </div>
+  <iframe id="svc-frame"
+    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock"
+  ></iframe>
+</div>
+
+<!-- ── Modal tunnel ── -->
+<div class="modal-overlay" id="tunnelModal">
+  <div class="modal">
+    <h2>🌐 URL publique Cloudflare</h2>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:.9rem">
+      Partagez cette URL pour accéder à Pinokio Remote depuis n'importe où.
+      Elle est valide tant que le serveur est actif.
+    </p>
+    <div class="url-box" id="modalUrl">—</div>
+    <div class="modal-actions">
+      <button class="modal-btn primary" id="copyUrlBtn">📋 Copier</button>
+      <button class="modal-btn" id="openUrlBtn">Ouvrir dans le navigateur</button>
+      <button class="modal-btn" id="closeModalBtn">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
