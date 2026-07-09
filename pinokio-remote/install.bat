@@ -30,28 +30,44 @@ if %errorlevel% neq 0 (
 )
 echo [OK] Dépendances installées.
 
-:: ── Cloudflared ───────────────────────────────────────────────
+:: ── ngrok (URL fixe permanente — RECOMMANDÉ) ─────────────────
 echo.
-echo [2/3] Téléchargement de cloudflared (tunnel Cloudflare)...
+echo [2/4] Téléchargement de ngrok (URL fixe gratuite)...
+if exist ngrok.exe (
+    echo [OK] ngrok.exe déjà présent — skip.
+) else (
+    curl -L --progress-bar "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -o ngrok_tmp.zip
+    if %errorlevel% neq 0 (
+        echo [AVERT] Téléchargement ngrok échoué. Essai alternatif...
+        powershell -Command "Invoke-WebRequest -Uri 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip' -OutFile 'ngrok_tmp.zip'"
+    )
+    if exist ngrok_tmp.zip (
+        powershell -Command "Expand-Archive -Path 'ngrok_tmp.zip' -DestinationPath '.' -Force"
+        del ngrok_tmp.zip >nul 2>&1
+        echo [OK] ngrok.exe téléchargé.
+    ) else (
+        echo [AVERT] Impossible de télécharger ngrok automatiquement.
+        echo Téléchargez-le sur https://ngrok.com/download et placez ngrok.exe ici.
+    )
+)
+
+:: ── Cloudflared (alternative si ngrok indisponible) ───────────
+echo.
+echo [3/4] Téléchargement de cloudflared (alternative)...
 if exist cloudflared.exe (
     echo [OK] cloudflared.exe déjà présent — skip.
 ) else (
-    curl -L --progress-bar "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o cloudflared.exe
-    if %errorlevel% neq 0 (
-        echo.
-        echo [ERREUR] Echec du téléchargement automatique.
-        echo Téléchargez manuellement sur :
-        echo   https://github.com/cloudflare/cloudflared/releases/latest
-        echo Renommez le fichier en "cloudflared.exe" et placez-le dans ce dossier.
-        pause
-        exit /b 1
+    curl -L --progress-bar "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o cloudflared.exe 2>nul
+    if exist cloudflared.exe (
+        echo [OK] cloudflared.exe téléchargé.
+    ) else (
+        echo [AVERT] cloudflared non téléchargé ^(optionnel^).
     )
-    echo [OK] cloudflared.exe téléchargé.
 )
 
 :: ── Config initiale ───────────────────────────────────────────
 echo.
-echo [3/3] Configuration...
+echo [4/4] Configuration...
 if not exist config.json (
     python -c ^
         "import json,secrets; ^
@@ -65,17 +81,31 @@ if not exist config.json (
 :: ── Résumé ────────────────────────────────────────────────────
 echo.
 echo ╔══════════════════════════════════════════════════╗
-echo ║            ✅  Installation terminée !           ║
+echo ║          ✅  Installation terminée !             ║
 echo ╚══════════════════════════════════════════════════╝
 echo.
-echo  Prochaines étapes :
+echo  ═══════════════════════════════════════════════════
+echo  ÉTAPE SUIVANTE OBLIGATOIRE : configurer ngrok
+echo  ═══════════════════════════════════════════════════
 echo.
-echo  1. Ouvrez config.json et changez le mot de passe
-echo     (champ "password", actuellement "pinokio2026")
+echo  1. Créez un compte GRATUIT sur https://ngrok.com
 echo.
-echo  2. Double-cliquez sur start.bat pour démarrer le serveur
+echo  2. Copiez votre authtoken ici :
+echo     https://dashboard.ngrok.com/get-started/your-authtoken
 echo.
-echo  3. Une URL publique Cloudflare apparaîtra dans la console.
-echo     Copiez-la et ouvrez-la depuis votre Surface Laptop.
+echo  3. Allez dans "Domains" et créez votre domaine fixe
+echo     (1 domaine gratuit par compte, ex: mon-nom.ngrok-free.app)
+echo.
+echo  4. Ouvrez config.json avec le Bloc-notes et remplissez :
+echo       "ngrok_token":  "coller_votre_token_ici"
+echo       "ngrok_domain": "votre-domaine.ngrok-free.app"
+echo       "password":     "votre_mot_de_passe"
+echo.
+echo  5. Double-cliquez sur setup_autostart.bat
+echo     → tout démarrera automatiquement au prochain boot
+echo.
+echo  6. Redémarrez la tour — c'est fini !
+echo     Depuis ce moment, vous n'avez plus JAMAIS besoin
+echo     de toucher à la tour.
 echo.
 pause

@@ -1,15 +1,46 @@
 {
-  "_comment": "Copiez ce fichier en config.json et adaptez les valeurs",
+  "_comment": "Copiez ce fichier en config.json et adaptez les valeurs.",
 
   "password": "MonSuperMotDePasse2026",
 
-  "secret_key": "LAISSEZ_VIDE_GENERE_AUTOMATIQUEMENT",
+  "secret_key": "",
+  "_secret_key_info": "Laissez vide : généré automatiquement au premier démarrage.",
 
-  "tunnel_mode": "quick",
-  "_tunnel_mode_info": "quick = URL temporaire (gratuit, sans compte). named = URL fixe (nécessite un compte Cloudflare et un token).",
+  "tunnel_provider": "ngrok",
+  "_tunnel_provider_info": "ngrok = URL FIXE gratuite (RECOMMANDÉ). cloudflare = URL qui change à chaque démarrage.",
 
+  "ngrok_token": "COLLER_VOTRE_AUTHTOKEN_NGROK_ICI",
+  "_ngrok_token_info": "Compte gratuit sur ngrok.com → https://dashboard.ngrok.com/get-started/your-authtoken",
+
+  "ngrok_domain": "votre-nom.ngrok-free.app",
+  "_ngrok_domain_info": "Domaine fixe gratuit : https://dashboard.ngrok.com/domains (1 par compte gratuit)",
+
+  "tunnel_mode":  "quick",
   "tunnel_token": "",
-  "_tunnel_token_info": "Uniquement pour tunnel_mode=named. Créez un tunnel sur dash.cloudflare.com > Zero Trust > Tunnels.",
+  "_cloudflare_info": "Ces champs ne servent que si tunnel_provider = cloudflare.",
+
+  "auto_launch": [
+    {
+      "_comment": "Exemple : lancer ComfyUI automatiquement sans ouvrir Pinokio.",
+      "_comment2": "Adaptez work_dir au vrai chemin d'installation sur votre tour.",
+      "name":     "ComfyUI",
+      "port":     8188,
+      "command":  "python main.py --listen 0.0.0.0 --port 8188",
+      "work_dir": "%USERPROFILE%\\pinokio\\api\\comfyui.git\\app"
+    },
+    {
+      "_comment": "Exemple : lancer Wan2.1 automatiquement.",
+      "name":     "Wan 2.1",
+      "port":     7862,
+      "command":  "python app.py --port 7862",
+      "work_dir": "%USERPROFILE%\\pinokio\\api\\wan2.git\\app"
+    }
+  ],
+  "_auto_launch_info": [
+    "Listez ici les modèles IA à démarrer automatiquement au boot.",
+    "work_dir = dossier d'installation (cherchez dans %USERPROFILE%\\pinokio\\api\\)",
+    "Laissez 'auto_launch': [] si vous préférez démarrer depuis Pinokio manuellement."
+  ],
 
   "services": [
     {
@@ -60,14 +91,6 @@
       "path": "openwebui",
       "description": "Open WebUI – interface LLM universelle",
       "icon": "🤖"
-    },
-    {
-      "_comment": "Ajoutez autant de services que nécessaire.",
-      "name": "Mon Service Perso",
-      "port": 9999,
-      "path": "monservice",
-      "description": "Description affichée sur le tableau de bord",
-      "icon": "🚀"
     }
   ]
 }

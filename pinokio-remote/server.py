@@ -5,13 +5,15 @@ IA de Pinokio depuis n'importe quel appareil.
 Architecture :
   • FastAPI + proxy ASGI (HTTP + WebSocket) par service
   • Auth JWT stockée en cookie httpOnly
-  • Cloudflare Tunnel (cloudflared) pour l'accès internet sans port-forwarding
+  • Tunnel public : ngrok (URL fixe gratuite) ou Cloudflare Tunnel
+  • Auto-lancement des services IA au démarrage (configurable)
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import platform
 import re
 import secrets
@@ -50,11 +52,12 @@ log = logging.getLogger("pinokio-remote")
 # ──────────────────────────────────────────────────────────────────
 # Chemins & constantes
 # ──────────────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent
+BASE_DIR    = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
 STATIC_DIR  = BASE_DIR / "static"
 IS_WIN      = platform.system() == "Windows"
 CLOUDFLARED = BASE_DIR / ("cloudflared.exe" if IS_WIN else "cloudflared")
+NGROK       = BASE_DIR / ("ngrok.exe"       if IS_WIN else "ngrok")
 
 # ──────────────────────────────────────────────────────────────────
 # Configuration par défaut
@@ -62,8 +65,24 @@ CLOUDFLARED = BASE_DIR / ("cloudflared.exe" if IS_WIN else "cloudflared")
 _DEFAULT_CFG: dict = {
     "password": "pinokio2026",
     "secret_key": secrets.token_hex(32),
-    "tunnel_mode": "quick",   # "quick" = URL temporaire | "named" = URL fixe (token requis)
-    "tunnel_token": "",        # token Cloudflare Named Tunnel (optionnel)
+
+    # ── Tunnel (accès internet) ────────────────────────────────
+    # "tunnel_provider": "ngrok"      → URL FIXE gratuite (RECOMMANDÉ)
+    # "tunnel_provider": "cloudflare" → URL temporaire (change à chaque démarrage)
+    "tunnel_provider": "ngrok",
+    "ngrok_token":  "",   # Token ngrok (https://dashboard.ngrok.com/get-started/your-authtoken)
+    "ngrok_domain": "",   # Domaine fixe ngrok (https://dashboard.ngrok.com/domains)
+    # Cloudflare (si tunnel_provider = "cloudflare")
+    "tunnel_mode":  "quick",
+    "tunnel_token": "",
+
+    # ── Lancement automatique des modèles ─────────────────────
+    # Liste des services à démarrer automatiquement au boot.
+    # work_dir : dossier d'installation du modèle dans Pinokio
+    # command  : commande pour lancer le modèle (sans Pinokio UI)
+    # Laissez la liste vide [] si vous préférez lancer depuis Pinokio manuellement.
+    "auto_launch": [],
+
     "services": [
         {
             "name": "ComfyUI",
@@ -433,32 +452,52 @@ class ServiceProxy:
                 pass
 
 # ──────────────────────────────────────────────────────────────────
-# Gestion du tunnel Cloudflare
+# Gestion du tunnel public (ngrok ou Cloudflare)
 # ──────────────────────────────────────────────────────────────────
 
 _tunnel_proc: Optional[subprocess.Popen] = None
 _tunnel_url:  Optional[str] = None
 
 
-def _start_tunnel() -> None:
+def _print_url(url: str) -> None:
+    print(f"\n{'='*60}", flush=True)
+    print(f"  🌐  URL PUBLIQUE PERMANENTE : {url}", flush=True)
+    print(f"  👉  Ouvrez ce lien depuis votre Surface Laptop", flush=True)
+    print(f"{'='*60}\n", flush=True)
+
+
+def _start_ngrok() -> None:
+    """Démarre ngrok avec domaine fixe (URL permanente gratuite)."""
     global _tunnel_proc, _tunnel_url
 
-    if not CLOUDFLARED.exists():
-        log.warning(
-            "cloudflared introuvable – tunnel désactivé.\n"
-            "Lancez install.bat pour le télécharger automatiquement."
+    if not NGROK.exists():
+        log.warning("ngrok introuvable. Lancez install.bat.")
+        return
+
+    token  = _cfg.get("ngrok_token", "").strip()
+    domain = _cfg.get("ngrok_domain", "").strip()
+
+    if not token:
+        log.error(
+            "ngrok_token manquant dans config.json.\n"
+            "1. Créez un compte gratuit sur https://ngrok.com\n"
+            "2. Copiez votre authtoken dans config.json\n"
+            "3. Copiez votre domaine fixe (Domains) dans ngrok_domain"
         )
         return
 
-    mode  = _cfg.get("tunnel_mode", "quick")
-    token = _cfg.get("tunnel_token", "")
+    # Authentification préalable (idempotente)
+    subprocess.run(
+        [str(NGROK), "config", "add-authtoken", token],
+        capture_output=True, timeout=15,
+    )
 
-    if mode == "named" and token:
-        cmd = [str(CLOUDFLARED), "tunnel", "--no-autoupdate", "run", "--token", token]
-        log.info("Démarrage du tunnel Cloudflare (mode named)…")
+    cmd = [str(NGROK), "http", "8000", "--log", "stdout", "--log-format", "json"]
+    if domain:
+        cmd += ["--domain", domain]
+        log.info(f"Démarrage ngrok avec domaine fixe : {domain}")
     else:
-        cmd = [str(CLOUDFLARED), "tunnel", "--no-autoupdate", "--url", "http://localhost:8000"]
-        log.info("Démarrage du tunnel Cloudflare (mode quick, URL temporaire)…")
+        log.info("Démarrage ngrok (URL aléatoire — ajoutez ngrok_domain pour une URL fixe)")
 
     _tunnel_proc = subprocess.Popen(
         cmd,
@@ -468,7 +507,76 @@ def _start_tunnel() -> None:
         bufsize=1,
     )
 
-    def _watch_output() -> None:
+    def _watch() -> None:
+        global _tunnel_url
+        if not _tunnel_proc or not _tunnel_proc.stdout:
+            return
+        for raw in _tunnel_proc.stdout:
+            raw = raw.strip()
+            if not raw:
+                continue
+            log.debug(f"[ngrok] {raw}")
+            try:
+                data = json.loads(raw)
+                url  = data.get("url", "")
+                if url.startswith("https://"):
+                    _tunnel_url = url
+                    _print_url(url)
+            except json.JSONDecodeError:
+                # Ligne non-JSON : tenter extraction directe
+                m = re.search(r"https://[^\s\"]+\.ngrok(?:-free)?\.app", raw)
+                if m:
+                    _tunnel_url = m.group(0)
+                    _print_url(_tunnel_url)
+
+        # Si ngrok s'est arrêté sans URL, essayer l'API locale
+        if not _tunnel_url:
+            _poll_ngrok_api()
+
+    threading.Thread(target=_watch, daemon=True, name="ngrok-watcher").start()
+
+
+def _poll_ngrok_api() -> None:
+    """Récupère l'URL via l'API locale de ngrok (fallback)."""
+    global _tunnel_url
+    for _ in range(20):
+        time.sleep(3)
+        try:
+            import urllib.request
+            with urllib.request.urlopen("http://localhost:4040/api/tunnels", timeout=2) as r:
+                data = json.loads(r.read())
+            for t in data.get("tunnels", []):
+                if t.get("proto") == "https":
+                    _tunnel_url = t["public_url"]
+                    _print_url(_tunnel_url)
+                    return
+        except Exception:
+            pass
+
+
+def _start_cloudflare() -> None:
+    """Démarre cloudflared (URL temporaire ou named tunnel)."""
+    global _tunnel_proc, _tunnel_url
+
+    if not CLOUDFLARED.exists():
+        log.warning("cloudflared introuvable. Lancez install.bat.")
+        return
+
+    mode  = _cfg.get("tunnel_mode", "quick")
+    token = _cfg.get("tunnel_token", "")
+
+    if mode == "named" and token:
+        cmd = [str(CLOUDFLARED), "tunnel", "--no-autoupdate", "run", "--token", token]
+        log.info("Démarrage Cloudflare Tunnel (named, URL fixe)…")
+    else:
+        cmd = [str(CLOUDFLARED), "tunnel", "--no-autoupdate", "--url", "http://localhost:8000"]
+        log.info("Démarrage Cloudflare Tunnel (quick, URL temporaire)…")
+
+    _tunnel_proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    )
+
+    def _watch() -> None:
         global _tunnel_url
         if not _tunnel_proc or not _tunnel_proc.stdout:
             return
@@ -476,17 +584,20 @@ def _start_tunnel() -> None:
             line = line.strip()
             if line:
                 log.debug(f"[cloudflared] {line}")
-            m = re.search(
-                r"https://\S+\.(?:trycloudflare\.com|cfargotunnel\.com)",
-                line,
-            )
+            m = re.search(r"https://\S+\.(?:trycloudflare\.com|cfargotunnel\.com)", line)
             if m:
                 _tunnel_url = m.group(0)
-                print(f"\n{'='*55}", flush=True)
-                print(f"  🌐  URL PUBLIQUE : {_tunnel_url}", flush=True)
-                print(f"{'='*55}\n", flush=True)
+                _print_url(_tunnel_url)
 
-    threading.Thread(target=_watch_output, daemon=True, name="cf-watcher").start()
+    threading.Thread(target=_watch, daemon=True, name="cf-watcher").start()
+
+
+def _start_tunnel() -> None:
+    provider = _cfg.get("tunnel_provider", "ngrok")
+    if provider == "ngrok":
+        _start_ngrok()
+    else:
+        _start_cloudflare()
 
 
 def _stop_tunnel() -> None:
@@ -498,11 +609,72 @@ def _stop_tunnel() -> None:
             pass
 
 # ──────────────────────────────────────────────────────────────────
+# Lancement automatique des services IA
+# ──────────────────────────────────────────────────────────────────
+
+_launched_procs: list[subprocess.Popen] = []
+
+
+def _auto_launch_services() -> None:
+    """
+    Démarre automatiquement les services IA listés dans config.json → "auto_launch".
+    Vérifie d'abord si le port est déjà actif pour éviter les doublons.
+    """
+    launchers: list[dict] = _cfg.get("auto_launch", [])
+    if not launchers:
+        return
+
+    log.info(f"Auto-lancement de {len(launchers)} service(s) IA…")
+
+    for entry in launchers:
+        name     = entry.get("name", "?")
+        command  = entry.get("command", "")
+        work_dir = os.path.expandvars(entry.get("work_dir", str(BASE_DIR)))
+        port     = entry.get("port", 0)
+
+        if not command:
+            log.warning(f"Auto-launch '{name}' : commande manquante, ignoré.")
+            continue
+
+        # Vérifier si le service écoute déjà sur ce port
+        if port:
+            import socket
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=1)
+                s.close()
+                log.info(f"Auto-launch '{name}' : port {port} déjà actif, skip.")
+                continue
+            except OSError:
+                pass
+
+        log.info(f"Auto-launch '{name}' : {command} (dans {work_dir})")
+
+        creation_flags = 0
+        if IS_WIN:
+            # Lance dans une fenêtre minimisée, non bloquante
+            creation_flags = subprocess.CREATE_NEW_CONSOLE
+
+        try:
+            proc = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=work_dir,
+                creationflags=creation_flags,
+            )
+            _launched_procs.append(proc)
+            log.info(f"Auto-launch '{name}' : PID {proc.pid}")
+        except Exception as e:
+            log.error(f"Auto-launch '{name}' échec : {e}")
+
+# ──────────────────────────────────────────────────────────────────
 # Application FastAPI
 # ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
+    # 1. Lancer les modèles IA automatiquement
+    _auto_launch_services()
+    # 2. Ouvrir le tunnel public
     _start_tunnel()
     yield
     _stop_tunnel()

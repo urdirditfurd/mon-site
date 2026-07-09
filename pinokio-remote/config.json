@@ -1,8 +1,12 @@
 {
   "password": "pinokio2026",
-  "secret_key": "8136aa69c53033196c67da2d95e28c45d12d3ca024e580a5836cec50abec8846",
+  "secret_key": "0c9bb4cb427882b4d21fbab584ffe044f15e5d608cbada3cc1a98aad297dd316",
+  "tunnel_provider": "ngrok",
+  "ngrok_token": "",
+  "ngrok_domain": "",
   "tunnel_mode": "quick",
   "tunnel_token": "",
+  "auto_launch": [],
   "services": [
     {
       "name": "ComfyUI",
