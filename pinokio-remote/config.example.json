@@ -4,93 +4,40 @@
   "password": "MonSuperMotDePasse2026",
 
   "secret_key": "",
-  "_secret_key_info": "Laissez vide : généré automatiquement au premier démarrage.",
+  "_secret_key_info": "Laissez vide — généré automatiquement au premier démarrage.",
 
-  "tunnel_provider": "ngrok",
-  "_tunnel_provider_info": "ngrok = URL FIXE gratuite (RECOMMANDÉ). cloudflare = URL qui change à chaque démarrage.",
+  "tunnel_provider": "serveo",
+  "_tunnel_provider_info": "serveo = URL FIXE, AUCUN compte, SSH intégré Windows (RECOMMANDÉ). cloudflare = URL temporaire. ngrok = URL fixe mais compte requis.",
 
-  "ngrok_token": "COLLER_VOTRE_AUTHTOKEN_NGROK_ICI",
-  "_ngrok_token_info": "Compte gratuit sur ngrok.com → https://dashboard.ngrok.com/get-started/your-authtoken",
+  "serveo_name": "mon-pinokio-ia",
+  "_serveo_name_info": [
+    "Choisissez un nom UNIQUE (lettres minuscules, chiffres, tirets).",
+    "Votre URL fixe sera : https://mon-pinokio-ia.serveo.net",
+    "Si ce nom est pris, choisissez-en un autre (ex: jean-ia-tour, studio-ia-2026…)"
+  ],
 
-  "ngrok_domain": "votre-nom.ngrok-free.app",
-  "_ngrok_domain_info": "Domaine fixe gratuit : https://dashboard.ngrok.com/domains (1 par compte gratuit)",
+  "ngrok_token":  "",
+  "ngrok_domain": "",
+  "_ngrok_info": "Seulement si tunnel_provider = ngrok. Compte sur ngrok.com requis.",
 
   "tunnel_mode":  "quick",
   "tunnel_token": "",
-  "_cloudflare_info": "Ces champs ne servent que si tunnel_provider = cloudflare.",
+  "_cloudflare_info": "Seulement si tunnel_provider = cloudflare.",
 
-  "auto_launch": [
-    {
-      "_comment": "Exemple : lancer ComfyUI automatiquement sans ouvrir Pinokio.",
-      "_comment2": "Adaptez work_dir au vrai chemin d'installation sur votre tour.",
-      "name":     "ComfyUI",
-      "port":     8188,
-      "command":  "python main.py --listen 0.0.0.0 --port 8188",
-      "work_dir": "%USERPROFILE%\\pinokio\\api\\comfyui.git\\app"
-    },
-    {
-      "_comment": "Exemple : lancer Wan2.1 automatiquement.",
-      "name":     "Wan 2.1",
-      "port":     7862,
-      "command":  "python app.py --port 7862",
-      "work_dir": "%USERPROFILE%\\pinokio\\api\\wan2.git\\app"
-    }
-  ],
+  "auto_launch": [],
   "_auto_launch_info": [
     "Listez ici les modèles IA à démarrer automatiquement au boot.",
-    "work_dir = dossier d'installation (cherchez dans %USERPROFILE%\\pinokio\\api\\)",
-    "Laissez 'auto_launch': [] si vous préférez démarrer depuis Pinokio manuellement."
+    "work_dir = chemin d'installation dans %USERPROFILE%\\pinokio\\api\\",
+    "Laissez [] si vous préférez lancer les modèles depuis Pinokio manuellement."
   ],
 
   "services": [
-    {
-      "name": "ComfyUI",
-      "port": 8188,
-      "path": "comfyui",
-      "description": "Images & Vidéos – Wan2.1, AnimateDiff, FLUX…",
-      "icon": "🎨"
-    },
-    {
-      "name": "Wan 2.1",
-      "port": 7862,
-      "path": "wan2",
-      "description": "Text-to-Video Wan2.1",
-      "icon": "🎬"
-    },
-    {
-      "name": "Stable Diffusion",
-      "port": 7860,
-      "path": "sd",
-      "description": "Automatic1111 / Forge WebUI",
-      "icon": "🖼️"
-    },
-    {
-      "name": "LLM Chat",
-      "port": 7861,
-      "path": "llm",
-      "description": "Oobabooga Text Generation WebUI",
-      "icon": "💬"
-    },
-    {
-      "name": "InvokeAI",
-      "port": 9090,
-      "path": "invoke",
-      "description": "InvokeAI",
-      "icon": "✨"
-    },
-    {
-      "name": "Fooocus",
-      "port": 7865,
-      "path": "fooocus",
-      "description": "Fooocus Image Generation",
-      "icon": "🌸"
-    },
-    {
-      "name": "Open WebUI",
-      "port": 3000,
-      "path": "openwebui",
-      "description": "Open WebUI – interface LLM universelle",
-      "icon": "🤖"
-    }
+    { "name": "ComfyUI",          "port": 8188, "path": "comfyui", "description": "Images & Vidéos – Wan2.1, AnimateDiff, FLUX…", "icon": "🎨" },
+    { "name": "Wan 2.1",          "port": 7862, "path": "wan2",    "description": "Text-to-Video Wan2.1",                         "icon": "🎬" },
+    { "name": "Stable Diffusion", "port": 7860, "path": "sd",      "description": "Automatic1111 / Forge WebUI",                  "icon": "🖼️" },
+    { "name": "LLM Chat",         "port": 7861, "path": "llm",     "description": "Oobabooga Text Generation WebUI",              "icon": "💬" },
+    { "name": "InvokeAI",         "port": 9090, "path": "invoke",  "description": "InvokeAI",                                     "icon": "✨" },
+    { "name": "Fooocus",          "port": 7865, "path": "fooocus", "description": "Fooocus Image Generation",                     "icon": "🌸" },
+    { "name": "Open WebUI",       "port": 3000, "path": "openwebui","description": "Open WebUI – interface LLM universelle",      "icon": "🤖" }
   ]
 }

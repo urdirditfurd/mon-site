@@ -1,7 +1,8 @@
 {
   "password": "pinokio2026",
-  "secret_key": "0c9bb4cb427882b4d21fbab584ffe044f15e5d608cbada3cc1a98aad297dd316",
-  "tunnel_provider": "ngrok",
+  "secret_key": "9b655c85d9a98bb91e6fc773878d7768da2420aeac27c773dc511f34cd53dced",
+  "tunnel_provider": "serveo",
+  "serveo_name": "",
   "ngrok_token": "",
   "ngrok_domain": "",
   "tunnel_mode": "quick",

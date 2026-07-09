@@ -67,11 +67,14 @@ _DEFAULT_CFG: dict = {
     "secret_key": secrets.token_hex(32),
 
     # ── Tunnel (accès internet) ────────────────────────────────
-    # "tunnel_provider": "ngrok"      → URL FIXE gratuite (RECOMMANDÉ)
+    # "tunnel_provider": "serveo"     → URL FIXE gratuite, AUCUN compte (RECOMMANDÉ)
     # "tunnel_provider": "cloudflare" → URL temporaire (change à chaque démarrage)
-    "tunnel_provider": "ngrok",
-    "ngrok_token":  "",   # Token ngrok (https://dashboard.ngrok.com/get-started/your-authtoken)
-    "ngrok_domain": "",   # Domaine fixe ngrok (https://dashboard.ngrok.com/domains)
+    # "tunnel_provider": "ngrok"      → URL fixe ngrok (compte requis)
+    "tunnel_provider": "serveo",
+    "serveo_name": "",    # Choisissez un nom unique ex: "mon-ia-2026"
+                          # → URL fixe : https://mon-ia-2026.serveo.net
+    "ngrok_token":  "",
+    "ngrok_domain": "",
     # Cloudflare (si tunnel_provider = "cloudflare")
     "tunnel_mode":  "quick",
     "tunnel_token": "",
@@ -466,8 +469,79 @@ def _print_url(url: str) -> None:
     print(f"{'='*60}\n", flush=True)
 
 
+def _start_serveo() -> None:
+    """
+    Tunnel via serveo.net — SSH intégré Windows, aucun compte, URL fixe.
+    Auto-reconnexion en cas de coupure réseau.
+    """
+    global _tunnel_url
+
+    name = _cfg.get("serveo_name", "").strip()
+    if not name:
+        log.error(
+            "\n"
+            "  serveo_name manquant dans config.json !\n"
+            "  Choisissez un nom unique (lettres, chiffres, tirets) :\n"
+            "    ex: \"serveo_name\": \"mon-pinokio-ia\"\n"
+            "  Votre URL sera : https://mon-pinokio-ia.serveo.net\n"
+        )
+        return
+
+    _tunnel_url = f"https://{name}.serveo.net"
+    _print_url(_tunnel_url)
+
+    def _run_tunnel() -> None:
+        attempt = 0
+        while True:
+            attempt += 1
+            log.info(f"Tunnel serveo.net → {_tunnel_url} (tentative {attempt})")
+
+            cmd = [
+                "ssh",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "ServerAliveInterval=30",
+                "-o", "ServerAliveCountMax=5",
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "ConnectTimeout=15",
+                "-R", f"{name}:80:localhost:8000",
+                "serveo.net",
+            ]
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line:
+                        log.debug(f"[serveo] {line}")
+                    if "Forwarding" in line or "forwarding" in line:
+                        log.info(f"✅ Tunnel actif : {_tunnel_url}")
+                proc.wait()
+            except FileNotFoundError:
+                log.error(
+                    "Commande 'ssh' introuvable.\n"
+                    "Activez OpenSSH : Paramètres → Applications → "
+                    "Fonctionnalités facultatives → Client OpenSSH"
+                )
+                return
+            except Exception as e:
+                log.warning(f"[serveo] Erreur : {e}")
+
+            wait = min(5 * attempt, 60)
+            log.warning(f"Tunnel déconnecté. Reconnexion dans {wait}s…")
+            time.sleep(wait)
+
+    threading.Thread(target=_run_tunnel, daemon=True, name="serveo-tunnel").start()
+
+
 def _start_ngrok() -> None:
-    """Démarre ngrok avec domaine fixe (URL permanente gratuite)."""
+    """Démarre ngrok avec domaine fixe (URL permanente, compte requis)."""
     global _tunnel_proc, _tunnel_url
 
     if not NGROK.exists():
@@ -478,15 +552,9 @@ def _start_ngrok() -> None:
     domain = _cfg.get("ngrok_domain", "").strip()
 
     if not token:
-        log.error(
-            "ngrok_token manquant dans config.json.\n"
-            "1. Créez un compte gratuit sur https://ngrok.com\n"
-            "2. Copiez votre authtoken dans config.json\n"
-            "3. Copiez votre domaine fixe (Domains) dans ngrok_domain"
-        )
+        log.error("ngrok_token manquant dans config.json.")
         return
 
-    # Authentification préalable (idempotente)
     subprocess.run(
         [str(NGROK), "config", "add-authtoken", token],
         capture_output=True, timeout=15,
@@ -495,16 +563,9 @@ def _start_ngrok() -> None:
     cmd = [str(NGROK), "http", "8000", "--log", "stdout", "--log-format", "json"]
     if domain:
         cmd += ["--domain", domain]
-        log.info(f"Démarrage ngrok avec domaine fixe : {domain}")
-    else:
-        log.info("Démarrage ngrok (URL aléatoire — ajoutez ngrok_domain pour une URL fixe)")
 
     _tunnel_proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
 
     def _watch() -> None:
@@ -515,7 +576,6 @@ def _start_ngrok() -> None:
             raw = raw.strip()
             if not raw:
                 continue
-            log.debug(f"[ngrok] {raw}")
             try:
                 data = json.loads(raw)
                 url  = data.get("url", "")
@@ -523,35 +583,12 @@ def _start_ngrok() -> None:
                     _tunnel_url = url
                     _print_url(url)
             except json.JSONDecodeError:
-                # Ligne non-JSON : tenter extraction directe
                 m = re.search(r"https://[^\s\"]+\.ngrok(?:-free)?\.app", raw)
                 if m:
                     _tunnel_url = m.group(0)
                     _print_url(_tunnel_url)
 
-        # Si ngrok s'est arrêté sans URL, essayer l'API locale
-        if not _tunnel_url:
-            _poll_ngrok_api()
-
     threading.Thread(target=_watch, daemon=True, name="ngrok-watcher").start()
-
-
-def _poll_ngrok_api() -> None:
-    """Récupère l'URL via l'API locale de ngrok (fallback)."""
-    global _tunnel_url
-    for _ in range(20):
-        time.sleep(3)
-        try:
-            import urllib.request
-            with urllib.request.urlopen("http://localhost:4040/api/tunnels", timeout=2) as r:
-                data = json.loads(r.read())
-            for t in data.get("tunnels", []):
-                if t.get("proto") == "https":
-                    _tunnel_url = t["public_url"]
-                    _print_url(_tunnel_url)
-                    return
-        except Exception:
-            pass
 
 
 def _start_cloudflare() -> None:
@@ -593,8 +630,10 @@ def _start_cloudflare() -> None:
 
 
 def _start_tunnel() -> None:
-    provider = _cfg.get("tunnel_provider", "ngrok")
-    if provider == "ngrok":
+    provider = _cfg.get("tunnel_provider", "serveo")
+    if provider == "serveo":
+        _start_serveo()
+    elif provider == "ngrok":
         _start_ngrok()
     else:
         _start_cloudflare()
