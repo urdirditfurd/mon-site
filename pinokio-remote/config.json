@@ -1,0 +1,57 @@
+{
+  "password": "pinokio2026",
+  "secret_key": "8136aa69c53033196c67da2d95e28c45d12d3ca024e580a5836cec50abec8846",
+  "tunnel_mode": "quick",
+  "tunnel_token": "",
+  "services": [
+    {
+      "name": "ComfyUI",
+      "port": 8188,
+      "path": "comfyui",
+      "description": "Images & Vidéos – Wan2.1, AnimateDiff, FLUX…",
+      "icon": "🎨"
+    },
+    {
+      "name": "Wan 2.1",
+      "port": 7862,
+      "path": "wan2",
+      "description": "Text-to-Video Wan2.1 (interface dédiée)",
+      "icon": "🎬"
+    },
+    {
+      "name": "Stable Diffusion",
+      "port": 7860,
+      "path": "sd",
+      "description": "Automatic1111 / Forge WebUI",
+      "icon": "🖼️"
+    },
+    {
+      "name": "LLM Chat",
+      "port": 7861,
+      "path": "llm",
+      "description": "Oobabooga Text Generation WebUI",
+      "icon": "💬"
+    },
+    {
+      "name": "InvokeAI",
+      "port": 9090,
+      "path": "invoke",
+      "description": "InvokeAI – génération créative",
+      "icon": "✨"
+    },
+    {
+      "name": "Fooocus",
+      "port": 7865,
+      "path": "fooocus",
+      "description": "Fooocus – images simplifiées",
+      "icon": "🌸"
+    },
+    {
+      "name": "Open WebUI",
+      "port": 3000,
+      "path": "openwebui",
+      "description": "Open WebUI – interface LLM universelle",
+      "icon": "🤖"
+    }
+  ]
+}
