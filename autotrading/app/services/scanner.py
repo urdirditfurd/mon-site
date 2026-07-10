@@ -13,6 +13,7 @@ from app.db.database import AsyncSessionLocal
 from app.models.entities import MarketScan
 from app.services.analyzer import analyze_snapshot
 from app.services.market_data import fetch_market_snapshot
+from app.services.execution_engine import ExecutionEngine
 from app.services.notifier import NotificationService
 from app.services.position_monitor import PositionMonitor
 from app.services.recommender import build_recommendations
@@ -104,6 +105,18 @@ class MarketScanner:
                     severity="info",
                     push_external=True,
                 )
+
+                if settings.auto_stage_on_signal:
+                    engine = ExecutionEngine(session)
+                    broker = await engine.get_default_broker()
+                    if broker:
+                        await engine.stage_order(
+                            top.symbol,
+                            "buy",
+                            min(100.0, broker.max_order_usd),
+                            probability=top.buy_probability,
+                            signal_reason=top.reasoning,
+                        )
 
         logger.info(
             "Scan terminé : %d actifs, %d recommandations",

@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.broker_routes import router as broker_router
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.db.database import init_db
@@ -46,6 +47,7 @@ app = FastAPI(
 )
 
 app.include_router(api_router)
+app.include_router(broker_router)
 
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

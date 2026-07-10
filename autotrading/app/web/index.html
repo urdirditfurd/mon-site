@@ -11,7 +11,7 @@
 <body>
   <header class="hero">
     <div class="hero-inner">
-      <span class="badge">🍋 Phase Lemon — MVP</span>
+      <span class="badge">🍋 Phase Orange — Brokers</span>
       <h1>Le marché mondial,<br /><em>simplifié pour vous</em></h1>
       <p class="subtitle">
         Nous analysons actions, ETF et Bitcoin en temps réel, calculons des probabilités,
@@ -26,6 +26,39 @@
 
   <main class="container">
     <section class="disclaimer" id="disclaimer"></section>
+
+    <section class="card" id="broker-section">
+      <h2>🔗 Connexion courtier (trading auto)</h2>
+      <p class="hint" id="france-notice">Chargez les exchanges disponibles…</p>
+      <div class="broker-form grid-2" style="gap:1rem;margin-bottom:1rem;">
+        <div>
+          <label class="hint">Exchange</label>
+          <select id="broker-exchange" class="input-field"></select>
+        </div>
+        <div>
+          <label class="hint">Mode</label>
+          <select id="broker-mode" class="input-field">
+            <option value="paper" selected>Paper / Testnet (recommandé)</option>
+            <option value="live">Réel (désactivé par défaut sur serveur)</option>
+          </select>
+        </div>
+        <div><label class="hint">API Key</label><input id="broker-key" type="password" class="input-field" placeholder="Clé API" /></div>
+        <div><label class="hint">API Secret</label><input id="broker-secret" type="password" class="input-field" placeholder="Secret" /></div>
+        <div><label class="hint">Passphrase (OKX/Kraken si besoin)</label><input id="broker-pass" type="password" class="input-field" /></div>
+        <div><label class="hint">Montant max par ordre (USD)</label><input id="broker-max" type="number" value="100" class="input-field" /></div>
+      </div>
+      <div class="hero-actions">
+        <button id="btn-test-broker" class="btn btn-outline">Tester connexion</button>
+        <button id="btn-connect-broker" class="btn btn-primary">Connecter le courtier</button>
+      </div>
+      <div id="broker-accounts" class="pos-list" style="margin-top:1rem;"></div>
+    </section>
+
+    <section class="card">
+      <h2>📋 Ordres en attente d'approbation</h2>
+      <p class="hint">Trading-as-Git : stage → vous approuvez → exécution chez le courtier</p>
+      <div id="pending-orders" class="pos-list"><p class="empty">Aucun ordre en attente.</p></div>
+    </section>
 
     <section class="grid-2">
       <div class="card">

@@ -201,3 +201,17 @@ footer {
 }
 
 .toast.hidden { opacity: 0; transform: translateY(10px); pointer-events: none; }
+
+.input-field {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  color: var(--text);
+  font-family: inherit;
+  margin-top: 0.25rem;
+}
+
+.broker-warn { color: #fde68a; font-size: 0.85rem; margin-bottom: 0.75rem; }
+.broker-ok { color: var(--accent); font-size: 0.85rem; }

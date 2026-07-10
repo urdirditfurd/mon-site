@@ -65,3 +65,47 @@ class Notification(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     sent_telegram: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class BrokerAccount(Base):
+    """Connexion courtier — clés chiffrées, mode paper par défaut."""
+
+    __tablename__ = "broker_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_alias: Mapped[str] = mapped_column(String(64), index=True, default="default")
+    exchange_id: Mapped[str] = mapped_column(String(32), index=True)
+    label: Mapped[str] = mapped_column(String(64), default="")
+    api_key_enc: Mapped[str] = mapped_column(Text)
+    api_secret_enc: Mapped[str] = mapped_column(Text)
+    passphrase_enc: Mapped[str] = mapped_column(Text, default="")
+    mode: Mapped[str] = mapped_column(String(16), default="paper")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_execute: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_order_usd: Mapped[float] = mapped_column(Float, default=100.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class StagedOrder(Base):
+    """Trading-as-Git : stage → approve → execute."""
+
+    __tablename__ = "staged_orders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_alias: Mapped[str] = mapped_column(String(64), index=True, default="default")
+    broker_id: Mapped[str] = mapped_column(String(36), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    asset_type: Mapped[str] = mapped_column(String(16))
+    side: Mapped[str] = mapped_column(String(8))
+    amount_usd: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_at_stage: Mapped[float] = mapped_column(Float)
+    probability: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="staged", index=True)
+    commit_message: Mapped[str] = mapped_column(Text, default="")
+    signal_reason: Mapped[str] = mapped_column(Text, default="")
+    external_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    staged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

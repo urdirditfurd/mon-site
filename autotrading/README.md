@@ -1,89 +1,75 @@
 # AutoTrading Lemon 🍋
 
-**Plateforme d'analyse et de recommandations trading pour débutants** — inspirée des principes OpenAlice (surveillance 24/7, mémoire, notifications), adaptée à un VPS sans budget.
+Plateforme d'analyse et de trading automatique pour débutants — inspirée OpenAlice (Trading-as-Git, heartbeat 24/7).
 
-## Phase Lemon (MVP actuel)
+**Code GitHub :** https://github.com/urdirditfurd/mon-site/tree/cursor/autotrading-lemon-7205/autotrading
+
+## Fonctionnalités
 
 | Fonctionnalité | Statut |
 |----------------|--------|
-| Données marché réelles (actions, ETF, BTC/ETH) | ✅ yfinance + CoinGecko |
-| Analyse technique + probabilité achat/vente | ✅ RSI, SMA, MACD, momentum |
-| Top opportunités classées pour débutants | ✅ |
-| Suivi de positions papier | ✅ |
-| Alertes vente (take-profit, stop-loss, signal) | ✅ |
-| Notifications Telegram (gratuit) | ✅ optionnel |
-| Heartbeat / watchdog 24/7 | ✅ |
-| Interface web débutant | ✅ |
-| Exécution broker réelle | ❌ phase suivante |
+| Données marché réelles (actions, ETF, crypto) | ✅ yfinance + CoinGecko |
+| Scoring bayésien (RSI, MACD, Bollinger, EMA) | ✅ |
+| Top opportunités + suivi positions | ✅ |
+| Alertes vente + Telegram | ✅ |
+| **Connexion courtiers multi-exchange (CCXT)** | ✅ |
+| **Trading-as-Git (stage → approve → execute)** | ✅ |
+| Heartbeat 24/7 | ✅ |
 
-## Démarrage rapide (VPS)
+## Courtiers supportés
 
-### Docker (recommandé)
+| Exchange | France | Usage |
+|----------|--------|-------|
+| **Kraken** ★ | Recommandé (PSAN AMF) | Crypto réel |
+| **Bitget** | Alternative EU | Crypto paper/live |
+| **OKX / Bybit** | Vérifier pays | Crypto |
+| **Binance** | ⚠️ Fermeture FR | Testnet uniquement |
+| **Alpaca** | Paper actions US | Actions/ETF |
+
+> **Binance ferme en France.** Utilisez Kraken ou Bitget pour le trading réel. Commencez toujours en mode **paper/testnet**.
+
+## Déploiement VPS
 
 ```bash
 cd autotrading
 cp .env.example .env
-# Éditer .env : ajouter TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID pour les alertes
 docker compose up -d --build
 ```
 
-Ouvrir : `http://VOTRE_IP:8100`
+### Variables importantes (.env)
 
-### Sans Docker
-
-```bash
-cd autotrading
-chmod +x scripts/run-local.sh
-./scripts/run-local.sh
+```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+API_SECRET_KEY=cle-secrete-longue
+ALLOW_LIVE_TRADING=false    # true uniquement quand vous êtes prêt
+MAX_ORDER_USD=500
+DEFAULT_BROKER_MODE=paper
+AUTO_STAGE_ON_SIGNAL=false  # true = prépare ordres auto sur signaux
 ```
 
-## Notifications Telegram (gratuit)
-
-1. Ouvrir Telegram → chercher **@BotFather** → `/newbot`
-2. Copier le token dans `TELEGRAM_BOT_TOKEN`
-3. Envoyer un message à votre bot, puis récupérer votre `chat_id` via :
-   `https://api.telegram.org/bot<VOTRE_TOKEN>/getUpdates`
-4. Coller le `chat_id` dans `TELEGRAM_CHAT_ID`
-
-## Architecture
+## Flux trading automatique
 
 ```
-autotrading/
-├── app/
-│   ├── main.py              # FastAPI + scheduler
-│   ├── api/routes.py        # REST + WebSocket
-│   ├── services/
-│   │   ├── market_data.py   # Cours réels (gratuit)
-│   │   ├── analyzer.py      # Probabilités
-│   │   ├── recommender.py   # Top opportunités
-│   │   ├── position_monitor.py  # Alertes vente
-│   │   ├── notifier.py      # Telegram / email
-│   │   └── scanner.py       # Heartbeat 24/7
-│   └── web/                 # Interface débutant
-├── docker-compose.yml
-└── .env.example
+Scan marché → Signal ACHETER/VENDRE
+       ↓
+Stage ordre (en attente)
+       ↓
+Vous approuvez dans l'UI (ou Telegram)
+       ↓
+Exécution chez Kraken/Bitget/Alpaca...
 ```
 
-## API principale
+## API broker
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /` | Interface web |
-| `GET /api/dashboard` | Vue complète |
-| `GET /api/recommendations` | Top opportunités |
-| `POST /api/scan/trigger` | Forcer un scan |
-| `GET /api/analyze/{symbol}` | Analyse d'un actif |
-| `POST /api/positions` | Suivre un trade (papier) |
-| `GET /api/positions` | Positions ouvertes |
-| `WS /api/ws` | Flux temps réel |
-
-## Roadmap (après Lemon)
-
-1. **Phase Citron** — LLM (Mistral/Ollama) pour explications en langage naturel
-2. **Phase Orange** — Plus d'actifs, sentiment news RSS, Fear & Greed
-3. **Phase Pamplemousse** — Connexion broker (paper trading IBKR/CCXT)
-4. **Phase OpenAlice** — Flux stage/commit/push avec approbation humaine
+| `GET /api/broker/exchanges` | Liste des courtiers |
+| `POST /api/broker/connect` | Connecter un courtier |
+| `POST /api/broker/orders/stage` | Préparer un ordre |
+| `POST /api/broker/orders/{id}/approve` | Approuver & exécuter |
+| `POST /api/broker/orders/{id}/reject` | Rejeter |
 
 ## Avertissement légal
 
-Cet outil est **éducatif**. Les probabilités sont des estimations techniques, pas des conseils en investissement. Ne tradez que ce que vous pouvez perdre.
+Outil éducatif — pas un conseil en investissement. Le trading comporte un risque de perte totale du capital.

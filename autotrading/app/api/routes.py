@@ -32,7 +32,8 @@ router = APIRouter(prefix="/api")
 DISCLAIMER = (
     "⚠️ AutoTrading Lemon est un outil éducatif. Les probabilités sont des estimations techniques, "
     "pas des conseils financiers. Ne investissez que ce que vous pouvez perdre. "
-    "Phase Lemon : suivi papier uniquement, pas d'exécution broker réelle."
+    "Trading broker : mode paper par défaut. Binance ferme en France — préférez Kraken ou Bitget. "
+    "Chaque ordre réel nécessite votre approbation (sauf auto-exécution explicitement activée)."
 )
 
 

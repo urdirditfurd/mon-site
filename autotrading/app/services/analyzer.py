@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from statistics import mean
 
@@ -19,6 +20,11 @@ class IndicatorSet:
     volume_ratio: float
     momentum_5d: float
     momentum_20d: float
+    bb_upper: float
+    bb_middle: float
+    bb_lower: float
+    ema_50: float
+    ema_200: float
 
 
 def _sma(values: list[float], period: int) -> float:
@@ -76,6 +82,9 @@ def compute_indicators(snapshot: MarketSnapshot) -> IndicatorSet:
     sma_20 = _sma(closes, 20)
     sma_50 = _sma(closes, 50)
     macd, macd_signal = _macd(closes)
+    bb_upper, bb_middle, bb_lower = _bollinger(closes)
+    ema_50 = _ema_series(closes, 50)[-1] if closes else 0.0
+    ema_200 = _ema_series(closes, 200)[-1] if len(closes) >= 200 else _ema_series(closes, min(50, len(closes)))[-1]
     avg_vol = mean(volumes[-20:]) if len(volumes) >= 20 else (mean(volumes) if volumes else 1)
     vol_ratio = (volumes[-1] / avg_vol) if avg_vol else 1.0
     mom_5 = ((closes[-1] - closes[-6]) / closes[-6] * 100) if len(closes) >= 6 else 0.0
@@ -89,7 +98,47 @@ def compute_indicators(snapshot: MarketSnapshot) -> IndicatorSet:
         volume_ratio=vol_ratio,
         momentum_5d=mom_5,
         momentum_20d=mom_20,
+        bb_upper=bb_upper,
+        bb_middle=bb_middle,
+        bb_lower=bb_lower,
+        ema_50=ema_50,
+        ema_200=ema_200,
     )
+
+
+def _bollinger(closes: list[float], period: int = 20, mult: float = 2.0) -> tuple[float, float, float]:
+    if len(closes) < period:
+        m = mean(closes) if closes else 0.0
+        return m, m, m
+    slice_vals = closes[-period:]
+    mid = mean(slice_vals)
+    variance = sum((x - mid) ** 2 for x in slice_vals) / period
+    sd = variance**0.5
+    return mid + mult * sd, mid, mid - mult * sd
+
+
+def _ema_series(values: list[float], period: int) -> list[float]:
+    if not values:
+        return []
+    k = 2 / (period + 1)
+    out = [values[0]]
+    for v in values[1:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
+
+
+def _score_to_prob(score: float) -> float:
+    return 0.3 + (score / 100) * 0.5
+
+
+def _bayesian_combine(scores: list[float]) -> float:
+    log_odds = 0.0
+    for s in scores:
+        p = _score_to_prob(s)
+        p = max(0.01, min(0.99, p))
+        log_odds += math.log(p / (1 - p))
+    prob = 1 / (1 + math.exp(-log_odds / 4))
+    return prob * 100
 
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
@@ -102,47 +151,26 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> AnalysisResult:
     ind = compute_indicators(snapshot)
     price = snapshot.price
 
-    # Score achat (0-100) — pondération simple, explicable
-    buy_score = 50.0
-
-    # RSI : zone 40-60 neutre, <35 survente (bullish), >70 surachat (bearish)
-    if ind.rsi < 35:
-        buy_score += 15
-    elif ind.rsi < 45:
-        buy_score += 8
+    # Scores par indicateur (0-100) — inspiré Qwen/OpenAlice
+    rsi_score = 50.0
+    if ind.rsi < 30:
+        rsi_score = 95
+    elif ind.rsi < 40:
+        rsi_score = 75
     elif ind.rsi > 70:
-        buy_score -= 18
+        rsi_score = 15
     elif ind.rsi > 60:
-        buy_score -= 8
+        rsi_score = 35
 
-    # Golden / death cross simplifié
-    if ind.sma_20 > ind.sma_50:
-        buy_score += 12
-    else:
-        buy_score -= 10
+    macd_score = 90.0 if ind.macd > ind.macd_signal else 15.0
+    trend_score = 90.0 if ind.ema_50 > ind.ema_200 and price > ind.ema_50 else 15.0
 
-    # MACD
-    if ind.macd > ind.macd_signal:
-        buy_score += 10
-    else:
-        buy_score -= 8
+    bb_range = ind.bb_upper - ind.bb_lower
+    bb_pos = (price - ind.bb_lower) / bb_range if bb_range > 0 else 0.5
+    bb_score = 90.0 if bb_pos < 0.1 else 15.0 if bb_pos > 0.9 else 50.0
 
-    # Momentum
-    buy_score += _clamp(ind.momentum_5d * 1.5, -12, 12)
-    buy_score += _clamp(ind.momentum_20d * 0.8, -10, 10)
-
-    # Volume confirme le mouvement
-    if ind.volume_ratio > 1.3 and snapshot.change_pct_24h > 0:
-        buy_score += 6
-    elif ind.volume_ratio > 1.3 and snapshot.change_pct_24h < 0:
-        buy_score -= 6
-
-    # Crypto : volatilité plus forte → prudence
-    if snapshot.asset_type == "crypto":
-        buy_score -= 5
-
-    buy_probability = _clamp(buy_score)
-    sell_probability = _clamp(100 - buy_score + (ind.rsi - 50) * 0.3)
+    buy_probability = round(_bayesian_combine([rsi_score, macd_score, trend_score, bb_score]), 1)
+    sell_probability = _clamp(100 - buy_probability + (ind.rsi - 50) * 0.3)
 
     if buy_probability >= 65 and ind.rsi < 72:
         signal = "ACHETER"
@@ -153,12 +181,14 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> AnalysisResult:
 
     confidence = _clamp(abs(buy_probability - 50) * 1.6 + abs(ind.momentum_5d))
 
+    bb_note = "proche bande basse Bollinger" if bb_pos < 0.2 else "proche bande haute" if bb_pos > 0.8 else "zone médiane Bollinger"
     reasoning_parts = [
         f"Prix actuel : {price:.2f} {snapshot.currency} ({snapshot.change_pct_24h:+.1f}% sur 24h).",
-        f"RSI à {ind.rsi:.0f} — {'zone de survente' if ind.rsi < 35 else 'surachat possible' if ind.rsi > 70 else 'zone neutre'}.",
-        f"Moyennes mobiles : tendance {'haussière' if ind.sma_20 > ind.sma_50 else 'baissière'}.",
-        f"MACD {'positif' if ind.macd > ind.macd_signal else 'négatif'}.",
-        f"Momentum 5j : {ind.momentum_5d:+.1f}%.",
+        f"RSI à {ind.rsi:.0f} — {'survente' if ind.rsi < 35 else 'surachat' if ind.rsi > 70 else 'neutre'}.",
+        f"Tendance EMA50/200 : {'haussière' if ind.ema_50 > ind.ema_200 else 'baissière'}.",
+        f"MACD {'haussier' if ind.macd > ind.macd_signal else 'baissier'}.",
+        f"Bollinger : {bb_note}.",
+        f"Probabilité bayésienne combinée : {buy_probability:.0f}%.",
     ]
 
     return AnalysisResult(
@@ -176,5 +206,8 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> AnalysisResult:
             "macd": round(ind.macd, 4),
             "momentum_5d": round(ind.momentum_5d, 2),
             "volume_ratio": round(ind.volume_ratio, 2),
+            "bb_position": round(bb_pos, 3),
+            "ema_50": round(ind.ema_50, 2),
+            "ema_200": round(ind.ema_200, 2),
         },
     )

@@ -13,6 +13,7 @@ from app.models.entities import UserPosition
 from app.schemas.market import PositionResponse
 from app.services.analyzer import analyze_snapshot
 from app.services.market_data import fetch_market_snapshot, fetch_price_only
+from app.services.execution_engine import ExecutionEngine
 from app.services.notifier import NotificationService
 from app.services.universe import TrackedAsset, get_universe
 
@@ -166,3 +167,16 @@ class PositionMonitor:
             symbol=pos.symbol,
             severity="warning" if pnl_pct < 0 else "success",
         )
+
+        engine = ExecutionEngine(self._session)
+        broker = await engine.get_default_broker(pos.user_alias)
+        if broker:
+            await engine.stage_order(
+                pos.symbol,
+                "sell",
+                min(pos.quantity * exit_price, broker.max_order_usd),
+                user_alias=pos.user_alias,
+                broker_id=broker.id,
+                probability=0.0,
+                signal_reason=f"Signal vente : {reason_fr}",
+            )

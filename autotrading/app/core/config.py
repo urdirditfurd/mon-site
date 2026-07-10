@@ -36,5 +36,11 @@ class Settings(BaseSettings):
 
     api_secret_key: str = "change-me-in-production-lemon"
 
+    # Courtiers — sécurité
+    allow_live_trading: bool = False
+    max_order_usd: float = 500.0
+    default_broker_mode: str = "paper"
+    auto_stage_on_signal: bool = False
+
 
 settings = Settings()
