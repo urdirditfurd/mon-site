@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoTrading Lemon — Investir simplement</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <span class="badge">🍋 Phase Lemon — MVP</span>
+      <h1>Le marché mondial,<br /><em>simplifié pour vous</em></h1>
+      <p class="subtitle">
+        Nous analysons actions, ETF et Bitcoin en temps réel, calculons des probabilités,
+        et vous guidons — avec alertes quand il est temps d'acheter ou de vendre.
+      </p>
+      <div class="hero-actions">
+        <button id="btn-refresh" class="btn btn-primary">🔄 Actualiser l'analyse</button>
+        <span id="last-scan" class="meta">Dernier scan : —</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="disclaimer" id="disclaimer"></section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>💡 Meilleures opportunités</h2>
+        <p class="hint">Classées par probabilité de gain — adaptées aux débutants</p>
+        <div id="recommendations" class="rec-list">
+          <p class="loading">Analyse du marché en cours…</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📊 Mes positions suivies</h2>
+        <p class="hint">Suivi papier — nous vous prévenons quand vendre</p>
+        <div id="positions" class="pos-list">
+          <p class="empty">Aucune position. Cliquez « Suivre » sur une opportunité.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🔔 Notifications</h2>
+      <div id="notifications" class="notif-list"></div>
+    </section>
+
+    <section class="card universe">
+      <h2>🌍 Marchés surveillés</h2>
+      <div id="universe" class="universe-grid"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>AutoTrading Lemon — outil éducatif, pas un conseil en investissement.</p>
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

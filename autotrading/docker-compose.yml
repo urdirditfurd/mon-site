@@ -1,0 +1,24 @@
+services:
+  autotrading:
+    build: .
+    container_name: autotrading-lemon
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8100}:8100"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./data/autotrading.db
+      HOST: 0.0.0.0
+      PORT: 8100
+    volumes:
+      - autotrading_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  autotrading_data:
