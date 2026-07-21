@@ -1,198 +1,99 @@
-# Conte Factory — guide simple (1 journée)
+# Conte Factory — trame d’origine (inchangée)
 
-Objectif : produire des **contes longs** (jusqu’à 30 min+) pour YouTube, sans bloquer ton serveur, avec un tableau de bord le matin.
+Objectif : publier automatiquement des **vidéos IA de 30 minutes et plus**, générées à partir d’un script, sans bloquer le serveur grâce à une découpe modulaire.
 
-Ce dossier est une version **améliorée et réaliste** de ton plan. On garde l’idée (histoire → voix → images → montage → YouTube), mais on enlève ce qui ferait perdre la journée.
+```
+[1. Script & Déduplication]
+        ↓
+[2. Adaptation & Storyboard]
+        ↓
+[3. Moteur Vidéo & Audio]     ← vraie génération vidéo IA par scènes
+        ↓
+[4. Montage & Publication]    ← upload YouTube dès que le MP4 est prêt
+        ↓
+[5. Dashboard Matinal]
+```
+
+Sous-titres : **non requis** (l’audio porte la narration).
 
 ---
 
-## Ce qu’on a changé (et pourquoi)
+## Réévaluation du temps de création (trame conservée)
 
-| Ton idée initiale | Version “1 jour” | Pourquoi |
-|---|---|---|
-| Vidéo IA image par image 30 min | **Images + effet zoom/pan** (Ken Burns) | Une vraie vidéo IA de 30 min crame le GPU et le temps |
-| Whisper pour sous-titres | Sous-titres depuis le **script déjà découpé** | Plus rapide, gratuit, déjà synchronisé |
-| Publication auto dès le jour 1 | **Fichier prêt + bouton manuel** | Évite une mauvaise vidéo en public |
-| Tout dans un seul gros script | **6 modules + reprise possible** | Si ça plante à l’étape 4, tu ne recommences pas à zéro |
-| GPU obligatoire | Mode **demo** sans compte | Tu valides le pipeline avant de payer des APIs |
+Ton plan initial en 3 phases reste la bonne structure.  
+**Ce n’est pas un projet “1 journée”** si la contrainte de viabilité est bien : *une vraie vidéo IA ~30 min publiée*.
 
----
+### Phase 1 — Script & Audio
+**Charge :** faible  
+**Contenu :** histoire (LLM) + SQLite anti-doublon + voix off (Edge-TTS / XTTS)  
+**Blocage possible :** aucun critique  
+**Statut dans ce repo :** déjà amorcé
 
-## Vue d’ensemble (en français simple)
+### Phase 2 — Visuels IA & Assemblage
+**Charge :** très élevée (cœur du projet)  
+**Contenu :**
+- découpage du script en N scènes
+- génération **vidéo IA** par scène (API type FAL/Kling/Luma **ou** ComfyUI/AnimateDiff local GPU)
+- file d’attente + reprises si une scène échoue
+- FFmpeg : coller les clips + piste audio + musique
 
-```
-1. Inventer une histoire (et vérifier qu’elle n’existe pas déjà)
-2. Couper l’histoire en scènes + idée d’image pour chaque scène
-3. Faire lire l’histoire à voix haute (voix off)
-4. Créer une image par scène
-5. Coller images + voix + musique + sous-titres → fichier MP4
-6. (Plus tard) Envoyer sur YouTube après validation
-```
+**Ordre de grandeur pour 30 min :**
+- clips IA typiques = **5 à 10 s** chacun
+- 30 min ≈ **180 à 360 clips** à générer
+- coût API (ordre de grandeur Kling via FAL) : **~3× une vidéo de 10 min** → souvent **~90–120 €** par vidéo 30 min (variable selon modèle)
+- temps machine : souvent **plusieurs heures** (file API + rendu), d’où le lancement de nuit
 
-Le tableau de bord matinal te montre : dernière vidéo, erreurs, pause/reprise, bouton “créer”.
+**Blocages possibles :**
+- crédits API insuffisants
+- limite de parallélisme FAL (souvent 2 au début)
+- GPU local absent / trop faible si tu refuses l’API
 
----
-
-## Matin — Étape A : installer (15–20 min)
-
-Sur ton VPS (ou ton PC Linux) :
-
-```bash
-cd ~/mon-site   # ou le dossier du projet
-git pull
-cd conte-factory
-chmod +x scripts/install.sh
-./scripts/install.sh
-source .venv/bin/activate
-```
-
-Tu as besoin de : **Python**, **FFmpeg**, et une connexion internet (pour la voix Edge-TTS).
-
-Optionnel mais agréable : place un fichier musique douce (`.mp3`) dans `assets/music/` (libre de droits).
+### Phase 3 — Automatisation & Dashboard
+**Charge :** moyenne  
+**Contenu :** YouTube Data API (upload auto dès fin de montage) + Streamlit + Cron 02:00  
+**Blocage possible :** OAuth Google / quotas YouTube (à brancher une fois)
 
 ---
 
-## Matin — Étape B : test rapide (10–20 min)
+## Verdict clair
 
-Ne commence **pas** par 30 minutes. Fais un essai court :
-
-```bash
-source .venv/bin/activate
-python main.py --short --theme "un lapin courageux"
-```
-
-Tu dois obtenir un MP4 dans `data/exports/`.
-
-Ouvre le tableau de bord :
-
-```bash
-streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501
-```
-
-Puis ouvre dans le navigateur : `http://IP_DU_VPS:8501` (ou `localhost:8501` en local).
-
----
-
-## Après-midi — Étape C : vraie vidéo ~30 min
-
-1. Dans `.env`, garde au début :
-   - `CONTE_IMAGE_MODE=demo` (rapide)
-   - `CONTE_STORY_MODE=builtin` (pas de clé API)
-   - `CONTE_AUTO_PUBLISH=0` (sécurité)
-2. Lance :
-
-```bash
-python main.py --theme "retrouver la lune endormie"
-```
-
-3. Vérifie le fichier dans `data/exports/`.
-4. Si tu veux de **vraies illustrations IA** sans carte bancaire :
-
-```env
-CONTE_IMAGE_MODE=pollinations
-```
-
-5. Si tu as Mistral :
-
-```env
-CONTE_STORY_MODE=mistral
-MISTRAL_API_KEY=ta_cle
-```
-
----
-
-## Soir — Étape D : automatiser la nuit
-
-1. Vérifie que le test manuel marche.
-2. Ajoute le cron (exemple fourni) :
-
-```bash
-crontab -e
-# colle le contenu de scripts/cron-example.txt (adapte le chemin)
-```
-
-Chaque nuit à 2h, une nouvelle vidéo est préparée. **Elle n’est pas publiée toute seule** tant que `CONTE_AUTO_PUBLISH=0`.
-
-Le matin : ouvre le dashboard → regarde le rapport → uploade si OK.
-
----
-
-## YouTube (quand tu es prêt)
-
-1. Crée un projet Google Cloud + active YouTube Data API.
-2. Télécharge `client_secrets.json` dans `conte-factory/secrets/`.
-3. Installe les libs :
-
-```bash
-pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
-```
-
-4. Dans le dashboard, clique **Uploader YouTube** sur une vidéo au statut `pret`.
-   Ou : `python main.py --resume ID --only publish --publish`
-
-La première fois, une fenêtre / URL d’autorisation Google s’ouvre.
-
----
-
-## Commandes utiles
-
-| Besoin | Commande |
+| Objectif | Temps de mise en place (ordre de grandeur) |
 |---|---|
-| Test court | `python main.py --short` |
-| Vidéo complète | `python main.py` |
-| Reprendre après plantage | `python main.py --resume 3` |
-| Pause | `python main.py --pause` |
-| Reprendre la prod | `python main.py --resume-pipeline` |
-| Dashboard | `streamlit run dashboard.py` |
+| Pipeline complet **selon ta trame** (script → storyboard → **vidéo IA** → montage → **publish auto** → dashboard) | **~3 phases** comme dans ton plan initial — Phase 2 domine largement |
+| Première **vraie** vidéo IA courte (2–5 min) bout-en-bout + publish | Fin de Phase 2 partielle + Phase 3 upload |
+| Première **vraie** vidéo IA **~30 min** publiée | Phase 2 complète + budget API (ou GPU dédié) + une nuit de rendu |
+
+**Conclusion :** on garde ta trame. On n’utilise pas le raccourci “images + zoom”.  
+Le délai réaliste n’est pas “tout fini en une journée” : la Phase 2 (moteur vidéo IA longue durée) est le goulot. Les Phases 1 et 3 sont rapides en comparaison.
 
 ---
 
-## Organisation des fichiers d’un projet
+## Ce qu’il faut avoir avant de lancer Phase 2
 
-```
-data/videos/video_0001/
-  story.json          ← histoire
-  script.txt
-  storyboard.json     ← scènes + prompts
-  audio/              ← voix par scène + narration.mp3
-  images/             ← une image par scène
-  clips/              ← mini-vidéos zoom
-  subtitles.srt
-  publish.json        ← titre / description / tags
-data/exports/         ← MP4 final
-```
+1. Compte **FAL.ai** (crédits) **ou** VPS avec **GPU** + ComfyUI/AnimateDiff  
+2. Clé YouTube Data API + `client_secrets.json` (pour la publication auto)  
+3. Cron / lancement de nuit (le rendu 30 min ne doit pas saturer la journée)
 
 ---
 
-## Feuille de route “1 jour” (réaliste)
+## Enchaînement recommandé (trame originale)
 
-**Matin**
-- Install + test `--short`
-- Ouvrir le dashboard
+```
+Phase 1 : Script & Audio
+  ├── Setup VPS (Python, FFmpeg, Git)
+  ├── Histoire + SQLite anti-doublon
+  └── TTS (Edge-TTS ou XTTS)
 
-**Après-midi**
-- Lancer une vraie durée (30 min en mode demo)
-- Passer les images en `pollinations` si le rendu te plaît
-- Ajouter une musique de fond
+Phase 2 : Visuels IA & Assemblage
+  ├── Génération vidéo IA scène par scène (API ou ComfyUI)
+  ├── File d’attente + reprise sur erreur
+  ├── FFmpeg : clips IA + audio + musique
+  └── Test export ~30 min
 
-**Soir**
-- Brancher le cron
-- (Optionnel) brancher YouTube en privé d’abord
-
-**Pas pour le jour 1**
-- AnimateDiff / Sora / ComfyUI sur 30 min
-- Publication publique automatique sans relecture
-
----
-
-## Astuce anti-blocage serveur
-
-Chaque étape écrit sur le disque. Si le VPS redémarre pendant les images, tu fais :
-
-```bash
-python main.py --resume 12
+Phase 3 : Automatisation & Dashboard
+  ├── YouTube Data API → publish auto après montage
+  ├── Dashboard Streamlit
+  └── Cron 02:00
 ```
 
-Tu reprends sans régénérer l’histoire ni toute la voix.
-
-Pour ne pas saturer le CPU la journée : laisse le cron à **2h du matin**, et utilise le bouton **Pause** le jour si besoin.
+Le détail d’installation et les commandes : voir les modules dans ce dossier + `.env.example`.

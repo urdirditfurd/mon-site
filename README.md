@@ -2,18 +2,18 @@
 
 Application fullstack de génération de clips courts “social-ready”, inspirée d’un workflow type Klap (sans copie de code propriétaire).
 
-## Nouveau : Conte Factory (vidéos longues YouTube)
+## Nouveau : Conte Factory (vidéos longues YouTube — trame IA)
 
-Pipeline séparé pour **contes enfants 30 min+** (voix off + images + montage FFmpeg + dashboard matinal) :
+Pipeline séparée pour **contes enfants 30 min+** avec **génération vidéo IA** (FAL/Kling), audio TTS, montage FFmpeg et **publication YouTube auto** après rendu :
 
-→ Guide simple : [`conte-factory/GUIDE.md`](conte-factory/GUIDE.md)
+→ Réévaluation + trame : [`conte-factory/GUIDE.md`](conte-factory/GUIDE.md)
 
 ```bash
 cd conte-factory
 ./scripts/install.sh
-source .venv/bin/activate
-python main.py --micro    # mini test
-streamlit run dashboard.py
+# renseigner FAL_KEY (et secrets YouTube) dans .env
+python main.py --estimate
+python main.py --theme "conte magique"
 ```
 
 ## Nouveautés V4

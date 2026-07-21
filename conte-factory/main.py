@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Orchestrateur — lance le pipeline scène par scène, sans bloquer inutilement.
+"""Orchestrateur — trame d'origine.
+
+1 Script & dédup → 2 Storyboard → 3 Audio + Vidéo IA → 4 Montage → Publication auto → 5 Dashboard
 
 Usage :
-  python main.py                # une vidéo complète (mode demo)
   python main.py --theme "lapin"
-  python main.py --only sourcing
   python main.py --resume 3
-  python main.py --short        # test rapide ~3 min
+  python main.py --estimate
 """
 
 from __future__ import annotations
@@ -16,22 +16,29 @@ import sys
 import traceback
 from pathlib import Path
 
-# Permet d'importer config / db / modules depuis ce dossier
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import IMAGE_MODE, PAUSE_PIPELINE, TARGET_DURATION_MIN, ensure_dirs
+from config import (
+    AI_CLIP_SEC,
+    AUTO_PUBLISH,
+    FAL_CONCURRENCY,
+    PAUSE_PIPELINE,
+    TARGET_DURATION_MIN,
+    VIDEO_PROVIDER,
+    ensure_dirs,
+    estimate_ai_clips,
+)
 from db.database import get_video, init_db, is_paused, log_event, set_paused, update_video
 from modules.audio import generate_audio
-from modules.images import generate_images
 from modules.montage import assemble_video
-from modules.publish import prepare_publish_package, publish_youtube
+from modules.publish import publish_youtube
 from modules.sourcing import source_new_video
 from modules.storyboard import build_storyboard
+from modules.video_ai import generate_scene_videos
 
-
-STEPS = ("sourcing", "storyboard", "audio", "images", "montage", "publish")
+STEPS = ("sourcing", "storyboard", "audio", "video_ai", "montage", "publish")
 
 
 def _run_from(video_id: int, start_step: str, publish: bool) -> dict:
@@ -47,13 +54,16 @@ def _run_from(video_id: int, start_step: str, publish: bool) -> dict:
             result["steps"]["storyboard"] = build_storyboard(video_id)
         if start_idx <= STEPS.index("audio"):
             result["steps"]["audio"] = generate_audio(video_id)
-        if start_idx <= STEPS.index("images"):
-            result["steps"]["images"] = generate_images(video_id)
+        if start_idx <= STEPS.index("video_ai"):
+            result["steps"]["video_ai"] = generate_scene_videos(video_id)
         if start_idx <= STEPS.index("montage"):
             result["steps"]["montage"] = assemble_video(video_id)
-        if publish or start_step == "publish":
-            result["steps"]["publish"] = publish_youtube(video_id, force=publish)
+        # Publication automatique dès que le montage est terminé
+        if publish or AUTO_PUBLISH or start_step == "publish":
+            result["steps"]["publish"] = publish_youtube(video_id, force=True)
         else:
+            from modules.publish import prepare_publish_package
+
             result["steps"]["publish"] = prepare_publish_package(video_id)
     except Exception as exc:
         update_video(video_id, statut="erreur", erreur=str(exc))
@@ -67,7 +77,7 @@ def run_pipeline(
     theme: str | None = None,
     only: str | None = None,
     resume_id: int | None = None,
-    publish: bool = False,
+    publish: bool | None = None,
     short: bool = False,
     micro: bool = False,
 ) -> dict:
@@ -77,16 +87,14 @@ def run_pipeline(
     if PAUSE_PIPELINE or is_paused():
         return {"ok": False, "reason": "pipeline_en_pause", "hint": "Relancez depuis le dashboard."}
 
+    do_publish = AUTO_PUBLISH if publish is None else publish
+
     if short or micro:
-        # Surcharge légère pour un essai rapide
         import config as cfg
 
         if micro:
             cfg.TARGET_DURATION_MIN = 1.2
             cfg.SCENE_TARGET_SEC = 40
-            cfg.VIDEO_WIDTH = 1280
-            cfg.VIDEO_HEIGHT = 720
-            cfg.VIDEO_FPS = 24
         else:
             cfg.TARGET_DURATION_MIN = 3
             cfg.SCENE_TARGET_SEC = 45
@@ -96,7 +104,7 @@ def run_pipeline(
 
     if resume_id:
         start = only or "storyboard"
-        return {"ok": True, **_run_from(resume_id, start, publish)}
+        return {"ok": True, **_run_from(resume_id, start, do_publish)}
 
     if only and only != "sourcing":
         raise ValueError("Pour une étape seule hors sourcing, utilisez --resume ID")
@@ -109,24 +117,52 @@ def run_pipeline(
     if only == "sourcing":
         return sourced
 
-    return {"ok": True, "story": sourced.get("story"), **_run_from(video_id, "storyboard", publish)}
+    return {
+        "ok": True,
+        "story": sourced.get("story"),
+        **_run_from(video_id, "storyboard", do_publish),
+    }
+
+
+def print_estimate() -> None:
+    clips = estimate_ai_clips()
+    # Hypothèse rough : ~1–2 min wall-clock par clip avec file + concurrence limitée
+    minutes_low = (clips / max(1, FAL_CONCURRENCY)) * 1.0
+    minutes_high = (clips / max(1, FAL_CONCURRENCY)) * 2.5
+    print(
+        f"Cible: {TARGET_DURATION_MIN} min | clips IA ~{clips} × {AI_CLIP_SEC}s | "
+        f"provider={VIDEO_PROVIDER} | concurrence={FAL_CONCURRENCY}"
+    )
+    print(
+        f"Rendu estimé (ordre de grandeur): {minutes_low/60:.1f}–{minutes_high/60:.1f} h "
+        f"une fois le code prêt + crédits API OK"
+    )
+    print(
+        f"Coût API (ordre de grandeur, Kling via FAL): "
+        f"souvent ~3× une vidéo 10 min → budget à prévoir pour {TARGET_DURATION_MIN} min"
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Conte Factory — pipeline vidéo longue")
-    parser.add_argument("--theme", type=str, default=None, help="Thème du conte")
-    parser.add_argument("--only", type=str, default=None, help=f"Une seule étape: {', '.join(STEPS)}")
-    parser.add_argument("--resume", type=int, default=None, help="Reprendre un projet (id)")
-    parser.add_argument("--publish", action="store_true", help="Forcer l'upload YouTube")
-    parser.add_argument("--short", action="store_true", help="Test rapide (~3 min)")
-    parser.add_argument("--micro", action="store_true", help="Mini test (~2 scènes, HD légère)")
-    parser.add_argument("--pause", action="store_true", help="Mettre le pipeline en pause")
-    parser.add_argument("--resume-pipeline", action="store_true", help="Enlever la pause")
+    parser = argparse.ArgumentParser(description="Conte Factory — pipeline vidéo IA longue")
+    parser.add_argument("--theme", type=str, default=None)
+    parser.add_argument("--only", type=str, default=None)
+    parser.add_argument("--resume", type=int, default=None)
+    parser.add_argument("--publish", action="store_true", help="Forcer publish YouTube")
+    parser.add_argument("--no-publish", action="store_true", help="Désactiver publish pour ce run")
+    parser.add_argument("--short", action="store_true")
+    parser.add_argument("--micro", action="store_true")
+    parser.add_argument("--pause", action="store_true")
+    parser.add_argument("--resume-pipeline", action="store_true")
+    parser.add_argument("--estimate", action="store_true", help="Estimer clips / durée de rendu")
     args = parser.parse_args()
 
     ensure_dirs()
     init_db()
 
+    if args.estimate:
+        print_estimate()
+        return 0
     if args.pause:
         set_paused(True)
         print("Pipeline en pause.")
@@ -136,12 +172,20 @@ def main() -> int:
         print("Pipeline réactivé.")
         return 0
 
+    publish: bool | None
+    if args.no_publish:
+        publish = False
+    elif args.publish:
+        publish = True
+    else:
+        publish = None  # suit AUTO_PUBLISH
+
     try:
         result = run_pipeline(
             theme=args.theme,
             only=args.only,
             resume_id=args.resume,
-            publish=args.publish,
+            publish=publish,
             short=args.short or args.micro,
             micro=args.micro,
         )

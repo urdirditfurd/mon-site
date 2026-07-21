@@ -1,4 +1,8 @@
-"""Étape 5 — Montage FFmpeg : Ken Burns + audio + musique + sous-titres."""
+"""Étape 4 — Montage FFmpeg : clips vidéo IA + audio + musique → MP4 final.
+
+Pas de sous-titres (exigence projet : l'audio suffit).
+Publication YouTube déclenchée ensuite par l'orchestrateur.
+"""
 
 from __future__ import annotations
 
@@ -7,58 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from config import (
-    EXPORTS_DIR,
-    MUSIC_DIR,
-    MUSIC_VOLUME,
-    VIDEO_FPS,
-    VIDEO_HEIGHT,
-    VIDEO_WIDTH,
-)
+from config import EXPORTS_DIR, MUSIC_DIR, MUSIC_VOLUME, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH
 from db.database import get_video, log_event, update_video
-
-
-def _sec_to_srt(t: float) -> str:
-    h = int(t // 3600)
-    m = int((t % 3600) // 60)
-    s = int(t % 60)
-    ms = int(round((t - int(t)) * 1000))
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def _write_srt(board: dict[str, Any], out_path: Path) -> None:
-    cursor = 0.0
-    lines: list[str] = []
-    for i, scene in enumerate(board["scenes"], start=1):
-        dur = float(scene.get("duration_sec") or scene.get("target_duration_sec") or 5)
-        start = cursor
-        end = cursor + max(dur - 0.05, 0.2)
-        text = scene["narration"].replace("\n", " ").strip()
-        # Sous-titres courts pour enfants : découpe ~80 car.
-        chunks = []
-        words = text.split()
-        buf: list[str] = []
-        for w in words:
-            trial = (" ".join(buf + [w])).strip()
-            if len(trial) > 72 and buf:
-                chunks.append(" ".join(buf))
-                buf = [w]
-            else:
-                buf.append(w)
-        if buf:
-            chunks.append(" ".join(buf))
-        if not chunks:
-            chunks = [text]
-        piece = dur / len(chunks)
-        for j, chunk in enumerate(chunks):
-            a = start + j * piece
-            b = start + (j + 1) * piece
-            lines.append(str(len(lines) + 1))
-            lines.append(f"{_sec_to_srt(a)} --> {_sec_to_srt(b)}")
-            lines.append(chunk)
-            lines.append("")
-        cursor = end + 0.05
-    out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _find_music() -> Path | None:
@@ -69,73 +23,124 @@ def _find_music() -> Path | None:
     return None
 
 
-def _ken_burns_clip(image: Path, duration: float, out_mp4: Path, zoom_in: bool) -> None:
-    # Zoom/pan léger (effet Ken Burns) — léger pour rester fluide sur VPS CPU
-    frames = max(int(duration * VIDEO_FPS), 1)
-    z_start, z_end = (1.0, 1.12) if zoom_in else (1.12, 1.0)
-    z_expr = f"'{z_start}+({z_end}-{z_start})*on/{frames}'"
-    vf = (
-        f"scale={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2},"
-        f"zoompan=z={z_expr}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={frames}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
-        f"format=yuv420p"
-    )
+def _ffprobe_duration(path: Path) -> float:
+    out = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        text=True,
+    ).strip()
+    return float(out)
+
+
+def _fit_clip_to_duration(src: Path, duration: float, out: Path) -> None:
+    """Boucle / coupe un clip IA pour coller exactement à la durée audio de la scène."""
+    if out.exists():
+        return
+    # stream_loop puis -t pour caler la durée
     cmd = [
         "ffmpeg",
         "-y",
-        "-loop",
-        "1",
+        "-stream_loop",
+        "-1",
         "-i",
-        str(image),
-        "-vf",
-        vf,
+        str(src),
         "-t",
         f"{duration:.3f}",
+        "-vf",
+        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
+        f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps={VIDEO_FPS},format=yuv420p",
         "-an",
         "-c:v",
         "libx264",
-        "-pix_fmt",
-        "yuv420p",
         "-preset",
         "veryfast",
         "-crf",
-        "23",
-        str(out_mp4),
+        "22",
+        str(out),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def assemble_video(video_id: int, burn_subs: bool = True) -> dict[str, Any]:
+def _concat_parts(parts: list[Path], out: Path) -> None:
+    if len(parts) == 1:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(parts[0]), "-c", "copy", str(out)],
+            check=True,
+            capture_output=True,
+        )
+        return
+    list_file = out.with_suffix(".txt")
+    list_file.write_text(
+        "\n".join(f"file '{p.resolve()}'" for p in parts) + "\n", encoding="utf-8"
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c",
+            "copy",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def assemble_video(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
     projet = Path(video["chemin_projet"])
     board = json.loads((projet / "storyboard.json").read_text(encoding="utf-8"))
-    images_dir = projet / "images"
+    ai_dir = projet / "ai_clips"
     audio_dir = projet / "audio"
-    clips_dir = projet / "clips"
-    clips_dir.mkdir(parents=True, exist_ok=True)
+    fitted_dir = projet / "clips"
+    fitted_dir.mkdir(parents=True, exist_ok=True)
 
     narration = audio_dir / "narration.mp3"
     if not narration.exists():
         raise FileNotFoundError("narration.mp3 manquant — lancez l'audio d'abord.")
 
-    clip_paths: list[Path] = []
-    for i, scene in enumerate(board["scenes"]):
+    scene_clips: list[Path] = []
+    for scene in board["scenes"]:
+        idx = int(scene["index"])
         dur = float(scene.get("duration_sec") or 5)
-        img = images_dir / scene["image_file"]
-        if not img.exists():
-            raise FileNotFoundError(f"Image manquante: {img}")
-        clip = clips_dir / f"clip_{scene['index']:03d}.mp4"
-        if not clip.exists():
-            _ken_burns_clip(img, dur, clip, zoom_in=(i % 2 == 0))
-        clip_paths.append(clip)
+        files = scene.get("ai_clip_files") or []
+        if not files:
+            raise FileNotFoundError(
+                f"Aucun clip IA pour la scène {idx} — lancez le moteur vidéo IA."
+            )
+        parts = [ai_dir / name for name in files]
+        for p in parts:
+            if not p.exists():
+                raise FileNotFoundError(f"Clip IA manquant: {p}")
 
-    list_file = clips_dir / "concat.txt"
+        # Concatène les parts de la scène puis ajuste à la durée audio
+        raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+        fitted = fitted_dir / f"scene_{idx:03d}.mp4"
+        _concat_parts(parts, raw)
+        _fit_clip_to_duration(raw, dur, fitted)
+        scene_clips.append(fitted)
+
+    list_file = fitted_dir / "concat.txt"
     list_file.write_text(
-        "\n".join(f"file '{p.name}'" for p in clip_paths) + "\n", encoding="utf-8"
+        "\n".join(f"file '{p.name}'" for p in scene_clips) + "\n", encoding="utf-8"
     )
-    silent_video = clips_dir / "video_silent.mp4"
+    silent_video = fitted_dir / "video_silent.mp4"
     subprocess.run(
         [
             "ffmpeg",
@@ -151,45 +156,29 @@ def assemble_video(video_id: int, burn_subs: bool = True) -> dict[str, Any]:
             str(silent_video),
         ],
         check=True,
-        cwd=str(clips_dir),
+        cwd=str(fitted_dir),
         capture_output=True,
     )
-
-    srt_path = projet / "subtitles.srt"
-    _write_srt(board, srt_path)
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in video["titre"])[:60]
     final_path = EXPORTS_DIR / f"{video_id:04d}_{safe_title}.mp4"
 
     music = _find_music()
-    filter_parts = []
     inputs = ["-i", str(silent_video), "-i", str(narration)]
-    # [0:v] video, [1:a] narration
-    audio_map = "[1:a]"
+    filter_complex = None
     if music:
         inputs += ["-stream_loop", "-1", "-i", str(music)]
-        filter_parts.append(
-            f"[2:a]volume={MUSIC_VOLUME},aloop=loop=-1:size=2e+09[bg];"
+        filter_complex = (
+            f"[2:a]volume={MUSIC_VOLUME}[bg];"
             f"[1:a][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
-        audio_map = "[aout]"
-
-    if burn_subs:
-        # Escape path for subtitles filter
-        srt_esc = str(srt_path).replace("\\", "/").replace(":", "\\:")
-        vf = f"subtitles='{srt_esc}':force_style='FontSize=22,PrimaryColour=&H00FFFFFF&,Outline=2'"
-    else:
-        vf = "null"
 
     cmd = ["ffmpeg", "-y", *inputs]
-    if filter_parts:
-        cmd += ["-filter_complex", ";".join(filter_parts), "-map", "0:v", "-map", audio_map]
+    if filter_complex:
+        cmd += ["-filter_complex", filter_complex, "-map", "0:v", "-map", "[aout]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a"]
-
-    if burn_subs:
-        cmd += ["-vf", vf]
 
     cmd += [
         "-c:v",
@@ -197,7 +186,7 @@ def assemble_video(video_id: int, burn_subs: bool = True) -> dict[str, Any]:
         "-preset",
         "veryfast",
         "-crf",
-        "22",
+        "20",
         "-c:a",
         "aac",
         "-b:a",
@@ -209,31 +198,24 @@ def assemble_video(video_id: int, burn_subs: bool = True) -> dict[str, Any]:
     ]
     subprocess.run(cmd, check=True, capture_output=True)
 
-    # Métadonnées SEO
+    total = _ffprobe_duration(final_path)
     meta = {
         "titre": video["titre"],
-        "description": _build_description(video, board),
+        "description": (
+            f"🌙 {video['titre']}\n\n"
+            f"Conte généré par IA (~{total/60:.0f} min).\n"
+            f"Thème : {video.get('theme') or 'aventure magique'}.\n"
+            f"#conte #enfants #histoiredusoir\n"
+        ),
         "tags": _build_tags(video),
         "video": str(final_path),
-        "srt": str(srt_path),
-        "duree_sec": video.get("duree_sec"),
+        "duree_sec": total,
     }
     (projet / "publish.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    update_video(video_id, statut="pret", chemin_video=str(final_path))
-    log_event(video_id, "info", f"Montage terminé : {final_path.name}")
-    return {"ok": True, "video": str(final_path), "srt": str(srt_path), "meta": meta}
-
-
-def _build_description(video: dict[str, Any], board: dict[str, Any]) -> str:
-    minutes = (video.get("duree_sec") or 0) / 60
-    return (
-        f"🌙 {video['titre']}\n\n"
-        f"Un conte doux pour s'endormir (~{minutes:.0f} min).\n"
-        f"Thème : {video.get('theme') or 'aventure magique'}.\n\n"
-        f"Parfait pour le soir, en famille.\n"
-        f"#conte #enfants #histoiredusoir\n"
-    )
+    update_video(video_id, statut="pret", chemin_video=str(final_path), duree_sec=total)
+    log_event(video_id, "info", f"Montage terminé : {final_path.name} ({total/60:.1f} min)")
+    return {"ok": True, "video": str(final_path), "duree_sec": total, "meta": meta}
 
 
 def _build_tags(video: dict[str, Any]) -> list[str]:
