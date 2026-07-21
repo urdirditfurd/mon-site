@@ -1,6 +1,5 @@
-# Crée sur le Bureau Windows un raccourci nommé « video ia »
-# Usage (PowerShell) :
-#   cd mon-site\conte-factory
+# Creates Desktop shortcut named "video ia"
+# Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\install-desktop-shortcut.ps1
 
 $ErrorActionPreference = "Stop"
@@ -12,10 +11,9 @@ $Icon = Join-Path $Root "assets\video-ia-icon.png"
 $IcoTarget = Join-Path $Root "assets\video-ia-icon.ico"
 
 if (-not (Test-Path $Bat)) {
-  throw "Lanceur introuvable: $Bat"
+  throw "Launcher not found: $Bat"
 }
 
-# Convertit le PNG en ICO si possible (sinon icône Python / défaut)
 $IconLocation = $null
 if (Test-Path $Icon) {
   try {
@@ -31,7 +29,7 @@ if (Test-Path $Icon) {
     $iconBmp.Dispose()
     $IconLocation = "$IcoTarget,0"
   } catch {
-    Write-Host "Conversion ICO ignoree ($($_.Exception.Message)) — icone par defaut."
+    Write-Host "ICO conversion skipped - using default icon."
   }
 }
 
@@ -40,14 +38,14 @@ $Sc = $Wsh.CreateShortcut($ShortcutPath)
 $Sc.TargetPath = $Bat
 $Sc.WorkingDirectory = $Root
 $Sc.WindowStyle = 1
-$Sc.Description = "video ia — suivi pipeline Contes (Pinokio Wan + Conte Factory)"
+$Sc.Description = "video ia - Conte Factory + Pinokio Wan tracker"
 if ($IconLocation) {
   $Sc.IconLocation = $IconLocation
 }
 $Sc.Save()
 
 Write-Host ""
-Write-Host "OK — raccourci cree :"
+Write-Host "OK - shortcut created:"
 Write-Host "  $ShortcutPath"
-Write-Host "Double-cliquez « video ia » sur le Bureau pour ouvrir le suivi."
+Write-Host "Double-click 'video ia' on the Desktop to open the tracker."
 Write-Host ""
