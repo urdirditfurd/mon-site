@@ -155,59 +155,94 @@ def resolve_wan_python(engine: Path) -> str:
     return sys.executable
 
 
-def pinokio_wan_health() -> dict[str, Any]:
-    """État du moteur Pinokio Wan (Gradio + engine local)."""
+def pinokio_wan_health(deep: bool = False) -> dict[str, Any]:
+    """État réel Wan sur PINOKIO_WAN_URL (dashboard 8501 ↔ moteur 7860)."""
     info: dict[str, Any] = {
         "provider": "pinokio",
         "model": "Wan 2.1 T2V 1.3B",
         "gradio_url": PINOKIO_WAN_URL,
         "gradio_up": False,
+        "gradio_title": None,
+        "cuda": None,
+        "device": None,
         "engine": None,
         "engine_ok": False,
+        "ready_for_pipeline": False,
     }
     try:
-        resp = requests.get(PINOKIO_WAN_URL, timeout=3)
+        resp = requests.get(PINOKIO_WAN_URL.rstrip("/") + "/", timeout=2)
         info["gradio_up"] = resp.status_code < 500
+        info["gradio_status_code"] = resp.status_code
     except Exception as exc:
         info["gradio_error"] = str(exc)
+
+    if info["gradio_up"]:
+        try:
+            cfg = requests.get(PINOKIO_WAN_URL.rstrip("/") + "/config", timeout=2).json()
+            info["gradio_title"] = cfg.get("title") or cfg.get("space_id")
+        except Exception:
+            pass
+
     try:
         engine = resolve_wan_engine()
         info["engine"] = str(engine)
-        py = resolve_wan_python(engine)
-        out = subprocess.check_output(
-            [py, str(engine), "check"], text=True, timeout=120, stderr=subprocess.STDOUT
-        )
-        info["engine_check"] = json.loads(out.strip().splitlines()[-1] if out.strip() else "{}")
-        info["engine_ok"] = bool(info["engine_check"].get("ok", True))
+        if deep or not info["gradio_up"]:
+            py = resolve_wan_python(engine)
+            out = subprocess.check_output(
+                [py, str(engine), "check"],
+                text=True,
+                timeout=180,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "SULPHUR_SNAPDRAGON": "", "SULPHUR_ALLOW_CPU": "0"},
+            )
+            check = json.loads(out.strip().splitlines()[-1] if out.strip() else "{}")
+            info["engine_check"] = check
+            info["engine_ok"] = bool(check.get("ok", True))
+            info["cuda"] = check.get("cuda")
+            info["device"] = check.get("device")
     except Exception as exc:
         info["engine_error"] = str(exc)
+
+    info["ready_for_pipeline"] = bool(info["gradio_up"] or info["engine_ok"])
     return info
 
 
 def _generate_via_gradio(prompt: str, dest: Path) -> Path:
-    """Appelle l'UI Gradio Pinokio (Wan Snapdragon) si elle tourne."""
+    """Appelle Wan Gradio (ex: http://127.0.0.1:7860) — lien direct avec le dashboard."""
     try:
         from gradio_client import Client
     except ImportError as exc:
-        raise RuntimeError(
-            "Installez gradio_client : pip install gradio_client"
-        ) from exc
+        raise RuntimeError("Installez gradio_client : pip install gradio_client") from exc
 
     client = Client(PINOKIO_WAN_URL)
-    # Signature Gradio : prompt, resolution, num_frames, steps, seed
-    result = client.predict(
-        prompt,
-        PINOKIO_WAN_RESOLUTION,
-        int(PINOKIO_WAN_FRAMES),
-        int(PINOKIO_WAN_STEPS),
-        0,
-        api_name="/predict",
-    )
-    # result = (video_path, status) ou path seul
-    if isinstance(result, (list, tuple)):
-        video_path = result[0]
-    else:
-        video_path = result
+    last_err: Exception | None = None
+    result = None
+    for api_name in ("/predict", "/run_generation", None):
+        try:
+            if api_name:
+                result = client.predict(
+                    prompt,
+                    PINOKIO_WAN_RESOLUTION,
+                    int(PINOKIO_WAN_FRAMES),
+                    int(PINOKIO_WAN_STEPS),
+                    0,
+                    api_name=api_name,
+                )
+            else:
+                result = client.predict(
+                    prompt,
+                    PINOKIO_WAN_RESOLUTION,
+                    int(PINOKIO_WAN_FRAMES),
+                    int(PINOKIO_WAN_STEPS),
+                    0,
+                )
+            break
+        except Exception as exc:
+            last_err = exc
+    if result is None:
+        raise RuntimeError(f"Appel Gradio Wan échoué: {last_err}")
+
+    video_path = result[0] if isinstance(result, (list, tuple)) else result
     if not video_path or not Path(str(video_path)).exists():
         raise RuntimeError(f"Gradio n'a pas renvoyé de fichier: {result}")
     shutil.copy2(str(video_path), dest)
@@ -215,7 +250,7 @@ def _generate_via_gradio(prompt: str, dest: Path) -> Path:
 
 
 def _generate_via_engine(prompt: str, dest: Path) -> Path:
-    """Appelle directement wan_engine.py (même modèle que Pinokio)."""
+    """Appelle directement wan_engine.py (même venv NVIDIA)."""
     engine = resolve_wan_engine()
     py = resolve_wan_python(engine)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -232,13 +267,16 @@ def _generate_via_engine(prompt: str, dest: Path) -> Path:
         "--frames",
         str(int(PINOKIO_WAN_FRAMES)),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60 * 60)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60 * 60,
+        env={**os.environ, "SULPHUR_SNAPDRAGON": "", "SULPHUR_ALLOW_CPU": "0"},
+    )
     if proc.returncode != 0:
-        raise RuntimeError(
-            (proc.stderr or proc.stdout or f"exit {proc.returncode}")[-2000:]
-        )
+        raise RuntimeError((proc.stderr or proc.stdout or f"exit {proc.returncode}")[-2000:])
     if not dest.exists():
-        # parfois le JSON stdout contient outputPath
         try:
             body = json.loads(proc.stdout.strip().splitlines()[-1])
             src = Path(body.get("outputPath") or "")
@@ -255,7 +293,7 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
     if dest.exists() and dest.stat().st_size > 1000:
         return dest
 
-    # 1) Gradio Pinokio si allumé (Run dans Pinokio)
+    # Préférer Gradio vivant (connexion dashboard 8501 ↔ Wan 7860)
     try:
         resp = requests.get(PINOKIO_WAN_URL, timeout=2)
         if resp.status_code < 500:
@@ -263,7 +301,6 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
     except Exception:
         pass
 
-    # 2) Moteur local (même app Pinokio, sans UI)
     return _generate_via_engine(prompt, dest)
 
 
