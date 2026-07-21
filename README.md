@@ -4,16 +4,15 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 
 ## Nouveau : Conte Factory (vidéos longues YouTube — trame IA)
 
-Pipeline séparée pour **contes enfants 30 min+** avec **génération vidéo IA** (FAL/Kling), audio TTS, montage FFmpeg et **publication YouTube auto** après rendu :
+Pipeline : script → storyboard → **Wan 2.1 Pinokio** → montage → **publish auto** → icône bureau **video ia**.
 
-→ Réévaluation + trame : [`conte-factory/GUIDE.md`](conte-factory/GUIDE.md)
+→ [`conte-factory/GUIDE.md`](conte-factory/GUIDE.md) · app Pinokio [`pinokio/wan-snapdragon-arm`](pinokio/wan-snapdragon-arm)
 
 ```bash
-cd conte-factory
-./scripts/install.sh
-# renseigner FAL_KEY (et secrets YouTube) dans .env
+cd conte-factory && ./scripts/install.sh
+# Windows : powershell -File scripts\install-desktop-shortcut.ps1
+./scripts/install-desktop-shortcut.sh   # Linux → Bureau « video ia »
 python main.py --estimate
-python main.py --theme "conte magique"
 ```
 
 ## Nouveautés V4
