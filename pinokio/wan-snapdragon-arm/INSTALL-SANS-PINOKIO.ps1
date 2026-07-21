@@ -1,7 +1,7 @@
 # Wan WITHOUT Pinokio downloads (0/11 fix)
 # Paste ALL of this into PowerShell, then press Enter.
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $Root = Join-Path $env:USERPROFILE "mon-site\pinokio\wan-snapdragon-arm"
 $App  = Join-Path $Root "app"
 $Venv = Join-Path $App "env"
@@ -33,39 +33,56 @@ if (-not $Py) {
 }
 Write-Host "Python: $Py"
 
-if (Test-Path $Venv) {
-  Write-Host "Removing old broken venv..." -ForegroundColor Yellow
-  Remove-Item -Recurse -Force $Venv
+if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
+  Write-Host "==> Creating venv..." -ForegroundColor Cyan
+  & $Py -m venv $Venv
+} else {
+  Write-Host "venv already exists - reusing it." -ForegroundColor Cyan
 }
-Write-Host "==> Creating venv..." -ForegroundColor Cyan
-& $Py -m venv $Venv
+
 $Pip = Join-Path $Venv "Scripts\pip.exe"
 $Vpy = Join-Path $Venv "Scripts\python.exe"
+if (-not (Test-Path $Vpy)) { throw "venv python missing: $Vpy" }
+
+function Invoke-Pip {
+  param([Parameter(ValueFromRemainingArguments=$true)]$Args)
+  # Avoid PowerShell treating pip stderr WARNINGS as fatal errors
+  cmd /c "`"$Vpy`" -m pip $Args"
+  return $LASTEXITCODE
+}
 
 Write-Host "==> pip upgrade..." -ForegroundColor Cyan
-& $Vpy -m pip install -U pip setuptools wheel
+Invoke-Pip install -U pip setuptools wheel | Out-Null
 
 Write-Host "==> torch CPU (retry x3)..." -ForegroundColor Cyan
 $ok = $false
 for ($i=1; $i -le 3; $i++) {
   Write-Host "Attempt $i/3"
-  & $Pip uninstall -y torch torchvision torchaudio 2>$null | Out-Null
-  & $Pip install --timeout 100 --retries 5 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+  Invoke-Pip uninstall -y torch torchvision torchaudio | Out-Null
+  $code = Invoke-Pip install --timeout 100 --retries 5 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+  if ($code -eq 0) { $ok = $true; break }
   Start-Sleep -Seconds 5
 }
 if (-not $ok) { throw "torch download failed. Check internet / antivirus / VPN." }
 
 Write-Host "==> requirements..." -ForegroundColor Cyan
-& $Pip install --timeout 100 --retries 5 -r (Join-Path $App "requirements.txt")
-if ($LASTEXITCODE -ne 0) { throw "requirements failed" }
+$code = Invoke-Pip install --timeout 100 --retries 5 -r "`"$(Join-Path $App 'requirements.txt')`""
+if ($code -ne 0) {
+  # fallback without nested quotes issues
+  Push-Location $App
+  $code = cmd /c "`"$Vpy`" -m pip install --timeout 100 --retries 5 -r requirements.txt"
+  Pop-Location
+}
+if ($code -ne 0) { throw "requirements failed" }
 
 Write-Host "==> check..." -ForegroundColor Cyan
 $env:SULPHUR_SNAPDRAGON = "1"
 $env:SULPHUR_ALLOW_CPU = "1"
 Push-Location $App
 & $Vpy wan_engine.py check
+$checkCode = $LASTEXITCODE
 Pop-Location
+if ($checkCode -ne 0) { throw "wan_engine check failed" }
 
 Write-Host ""
 Write-Host "OK - local Wan ready WITHOUT Pinokio." -ForegroundColor Green
