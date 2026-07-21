@@ -1,19 +1,9 @@
 # Conte Factory
 
-Trame d’origine : script → storyboard → **vidéo IA Wan 2.1 (Pinokio)** → montage → **publication auto** → dashboard **video ia**.
+Trame : script → storyboard → **Wan vidéo IA** → montage → publish auto → dashboard **video ia**.
 
-- Réévaluation + guide : [GUIDE.md](./GUIDE.md)
-- App Pinokio : [`../pinokio/wan-snapdragon-arm`](../pinokio/wan-snapdragon-arm)
+**PC tour NVIDIA :** lis [GUIDE-1-JOUR-NVIDIA.md](./GUIDE-1-JOUR-NVIDIA.md)
 
-```bash
-./scripts/install.sh
-cp .env.example .env
-# Windows — icône Bureau « video ia » :
-#   powershell -ExecutionPolicy Bypass -File scripts\install-desktop-shortcut.ps1
-# Linux :
-./scripts/install-desktop-shortcut.sh
-
-python main.py --estimate
-# Pinokio → Wan Snapdragon ARM → Run, puis :
-python main.py --theme "un lapin courageux"
+```powershell
+irm https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/conte-factory-pipeline-0391/pinokio/wan-snapdragon-arm/INSTALL-NVIDIA.ps1 | iex
 ```
