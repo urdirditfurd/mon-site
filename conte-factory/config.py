@@ -35,18 +35,26 @@ VISUAL_STYLE = os.getenv(
     "friendly animals, enchanted forest, gentle camera motion, no text, no watermark",
 )
 
-# Moteur vidéo IA : fal (API) | sulphur (local GPU via moteur existant)
-VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "fal")
+# Moteur vidéo IA
+# pinokio = Wan 2.1 via Pinokio (recommandé pour ce projet)
+# fal     = cloud Kling (optionnel)
+VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "pinokio")
 FAL_KEY = os.getenv("FAL_KEY", os.getenv("FAL_API_KEY", ""))
 FAL_MODEL = os.getenv(
     "CONTE_FAL_MODEL",
     "fal-ai/kling-video/v1.6/standard/text-to-video",
 )
-# Durée d'un clip IA natif (Kling : 5 ou 10)
-AI_CLIP_SEC = int(os.getenv("CONTE_AI_CLIP_SEC", "10"))
-# Combien de jobs FAL en parallèle (souvent 2 sur compte neuf)
+AI_CLIP_SEC = int(os.getenv("CONTE_AI_CLIP_SEC", "20"))
 FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "2"))
 ASPECT_RATIO = os.getenv("CONTE_ASPECT_RATIO", "16:9")
+
+# Pinokio — Wan 2.1 Snapdragon / local
+PINOKIO_WAN_URL = os.getenv("PINOKIO_WAN_URL", "http://127.0.0.1:7860")
+PINOKIO_WAN_ENGINE = os.getenv("PINOKIO_WAN_ENGINE", "")
+PINOKIO_WAN_PYTHON = os.getenv("PINOKIO_WAN_PYTHON", "")
+PINOKIO_WAN_RESOLUTION = os.getenv("PINOKIO_WAN_RESOLUTION", "480p 16:9")
+PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "33"))
+PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "20"))
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")

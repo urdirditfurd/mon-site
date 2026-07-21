@@ -19,8 +19,8 @@ from config import (
     AI_CLIP_SEC,
     AUTO_PUBLISH,
     CHANNEL_NAME,
-    FAL_CONCURRENCY,
     FAL_KEY,
+    PINOKIO_WAN_URL,
     TARGET_DURATION_MIN,
     TTS_VOICE,
     VIDEO_PROVIDER,
@@ -30,14 +30,20 @@ from config import (
 from db.database import init_db, is_paused, list_videos, set_paused, stats
 from main import run_pipeline
 from modules.publish import publish_youtube
+from modules.video_ai import pinokio_wan_health
 
 ensure_dirs()
 init_db()
 
-st.set_page_config(page_title=f"{CHANNEL_NAME} — Matin", page_icon="🌙", layout="wide")
-st.title(f"🌙 {CHANNEL_NAME}")
-st.caption("Trame d’origine : script → storyboard → vidéo IA → montage → publication auto")
+st.set_page_config(
+    page_title="video ia",
+    page_icon=str(ROOT / "assets" / "video-ia-icon.png"),
+    layout="wide",
+)
+st.title(f"🎬 video ia — {CHANNEL_NAME}")
+st.caption("Suivi : Pinokio Wan 2.1 → Conte Factory → YouTube")
 
+health = pinokio_wan_health() if VIDEO_PROVIDER.lower().startswith(("pinokio", "wan")) else {}
 s = stats()
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Vidéos créées", s["total"])
@@ -47,11 +53,22 @@ c4.metric("Pipeline", "⏸ Pause" if s["pause"] else "▶ Actif")
 
 clips = estimate_ai_clips()
 st.info(
-    f"Cible {TARGET_DURATION_MIN} min ≈ **{clips} clips IA** × {AI_CLIP_SEC}s · "
-    f"provider `{VIDEO_PROVIDER}` · concurrence {FAL_CONCURRENCY} · "
-    f"publish auto={'oui' if AUTO_PUBLISH else 'non'} · "
-    f"clé FAL={'OK' if FAL_KEY else 'MANQUANTE'}"
+    f"Cible {TARGET_DURATION_MIN} min ≈ **{clips} clips IA** × ~{AI_CLIP_SEC}s · "
+    f"moteur `{VIDEO_PROVIDER}` · publish auto={'oui' if AUTO_PUBLISH else 'non'}"
 )
+
+if VIDEO_PROVIDER.lower().startswith(("pinokio", "wan")):
+    with st.expander("État Pinokio Wan 2.1", expanded=True):
+        st.write(f"**URL Gradio :** `{PINOKIO_WAN_URL}` — allumé : {'✅' if health.get('gradio_up') else '❌ (lancez Run dans Pinokio)'}")
+        st.write(f"**Moteur local :** `{health.get('engine') or '—'}` — check : {'✅' if health.get('engine_ok') else '⚠️'}")
+        if health.get("engine_error"):
+            st.caption(health["engine_error"])
+        if health.get("gradio_error"):
+            st.caption(health["gradio_error"])
+        st.markdown(
+            "App Pinokio recommandée : **`pinokio/wan-snapdragon-arm`** (Wan 2.1 T2V 1.3B). "
+            "Dans Pinokio → Install → **Run**, puis relancez une génération ici."
+        )
 
 st.divider()
 left, right = st.columns(2)
@@ -97,8 +114,15 @@ no_publish = st.checkbox("Ne pas publier sur ce run", value=False)
 if st.button("✨ Lancer génération + publish", type="primary", use_container_width=True):
     if is_paused():
         st.error("Pipeline en pause.")
-    elif not FAL_KEY and VIDEO_PROVIDER == "fal":
-        st.error("Ajoute FAL_KEY dans .env (génération vidéo IA obligatoire).")
+    elif VIDEO_PROVIDER == "fal" and not FAL_KEY:
+        st.error("Ajoute FAL_KEY dans .env.")
+    elif VIDEO_PROVIDER.lower().startswith(("pinokio", "wan")) and not (
+        health.get("gradio_up") or health.get("engine")
+    ):
+        st.error(
+            "Pinokio Wan introuvable. Installez `wan-snapdragon-arm`, cliquez Run, "
+            "ou définissez PINOKIO_WAN_ENGINE dans .env."
+        )
     else:
         with st.spinner("Génération en cours (peut durer des heures pour 30 min)…"):
             try:

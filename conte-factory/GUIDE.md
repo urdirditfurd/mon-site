@@ -18,6 +18,21 @@ Sous-titres : **non requis** (l’audio porte la narration).
 
 ---
 
+## Moteur vidéo IA choisi : Wan 2.1 (Pinokio)
+
+Parmi les apps text-to-video Pinokio du repo / guide Snapdragon, le plus adapté aux **contes enfants longs** est :
+
+| Critère | Choix |
+|---|---|
+| App | **`pinokio/wan-snapdragon-arm`** |
+| Modèle | **Wan 2.1 T2V 1.3B** |
+| Pourquoi | Déjà dans le projet, tourne sans NVIDIA (Snapdragon/CPU), style illustration ok pour contes, CLI + Gradio branchables |
+| Alternatives écartées | Hunyuan (trop lourd), Wan2GP CUDA (besoin NVIDIA), Kling FAL (payant, gardé en fallback) |
+
+Dans Conte Factory : `CONTE_VIDEO_PROVIDER=pinokio` (défaut).
+
+---
+
 ## Réévaluation du temps de création (trame conservée)
 
 Ton plan initial en 3 phases reste la bonne structure.  
@@ -33,20 +48,21 @@ Ton plan initial en 3 phases reste la bonne structure.
 **Charge :** très élevée (cœur du projet)  
 **Contenu :**
 - découpage du script en N scènes
-- génération **vidéo IA** par scène (API type FAL/Kling/Luma **ou** ComfyUI/AnimateDiff local GPU)
+- génération **vidéo IA Wan 2.1** via Pinokio (scène par scène)
 - file d’attente + reprises si une scène échoue
 - FFmpeg : coller les clips + piste audio + musique
 
-**Ordre de grandeur pour 30 min :**
-- clips IA typiques = **5 à 10 s** chacun
-- 30 min ≈ **180 à 360 clips** à générer
-- coût API (ordre de grandeur Kling via FAL) : **~3× une vidéo de 10 min** → souvent **~90–120 €** par vidéo 30 min (variable selon modèle)
-- temps machine : souvent **plusieurs heures** (file API + rendu), d’où le lancement de nuit
+**Ordre de grandeur pour 30 min (Wan Pinokio) :**
+- clips courts (~2 s de mouvement) bouclés pour coller à l’audio
+- ~180 segments à générer pour 30 min (selon `CONTE_AI_CLIP_SEC`)
+- **local Snapdragon/CPU :** souvent **plusieurs heures à plus d’une nuit** (5–15 min/clip)
+- **Colab GPU** (bouton Pinokio) : bien plus rapide par clip, mais session limitée
+- **FAL fallback :** plus rapide, crédits payants
 
 **Blocages possibles :**
-- crédits API insuffisants
-- limite de parallélisme FAL (souvent 2 au début)
-- GPU local absent / trop faible si tu refuses l’API
+- Pinokio Wan pas installé / pas lancé (Run)
+- RAM insuffisante (32 Go recommandé sur Snapdragon)
+- crédits API si fallback FAL
 
 ### Phase 3 — Automatisation & Dashboard
 **Charge :** moyenne  
@@ -70,9 +86,26 @@ Le délai réaliste n’est pas “tout fini en une journée” : la Phase 2 (mo
 
 ## Ce qu’il faut avoir avant de lancer Phase 2
 
-1. Compte **FAL.ai** (crédits) **ou** VPS avec **GPU** + ComfyUI/AnimateDiff  
-2. Clé YouTube Data API + `client_secrets.json` (pour la publication auto)  
+1. **Pinokio** + app **Wan Snapdragon ARM** installée et testée (bouton Run)
+2. Clé YouTube Data API + `client_secrets.json` (pour la publication auto)
 3. Cron / lancement de nuit (le rendu 30 min ne doit pas saturer la journée)
+
+### Icône bureau « video ia »
+
+Sur Windows (après `git pull`) :
+
+```powershell
+cd mon-site\conte-factory
+powershell -ExecutionPolicy Bypass -File scripts\install-desktop-shortcut.ps1
+```
+
+Sur Linux :
+
+```bash
+cd conte-factory && ./scripts/install-desktop-shortcut.sh
+```
+
+Double-clic sur **video ia** → ouvre le tableau de suivi (état Wan + pipeline + lancement).
 
 ---
 

@@ -126,20 +126,23 @@ def run_pipeline(
 
 def print_estimate() -> None:
     clips = estimate_ai_clips()
-    # Hypothèse rough : ~1–2 min wall-clock par clip avec file + concurrence limitée
-    minutes_low = (clips / max(1, FAL_CONCURRENCY)) * 1.0
-    minutes_high = (clips / max(1, FAL_CONCURRENCY)) * 2.5
+    provider = VIDEO_PROVIDER.lower()
+    if provider.startswith(("pinokio", "wan")):
+        # Wan local : souvent 5–15 min / clip sur CPU ; 1 à la fois
+        minutes_low = clips * 5
+        minutes_high = clips * 15
+        note = "Pinokio Wan 2.1 (1 clip à la fois, CPU/Snapdragon)"
+    else:
+        minutes_low = (clips / max(1, FAL_CONCURRENCY)) * 1.0
+        minutes_high = (clips / max(1, FAL_CONCURRENCY)) * 2.5
+        note = f"FAL concurrence={FAL_CONCURRENCY}"
     print(
-        f"Cible: {TARGET_DURATION_MIN} min | clips IA ~{clips} × {AI_CLIP_SEC}s | "
-        f"provider={VIDEO_PROVIDER} | concurrence={FAL_CONCURRENCY}"
+        f"Cible: {TARGET_DURATION_MIN} min | segments ~{clips} × {AI_CLIP_SEC}s | "
+        f"provider={VIDEO_PROVIDER} | {note}"
     )
     print(
         f"Rendu estimé (ordre de grandeur): {minutes_low/60:.1f}–{minutes_high/60:.1f} h "
-        f"une fois le code prêt + crédits API OK"
-    )
-    print(
-        f"Coût API (ordre de grandeur, Kling via FAL): "
-        f"souvent ~3× une vidéo 10 min → budget à prévoir pour {TARGET_DURATION_MIN} min"
+        f"une fois Pinokio Wan prêt"
     )
 
 

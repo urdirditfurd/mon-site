@@ -1,14 +1,19 @@
 # Conte Factory
 
-Pipeline **trame d’origine** : script → storyboard → **vidéo IA** → montage → **publication auto** → dashboard.
+Trame d’origine : script → storyboard → **vidéo IA Wan 2.1 (Pinokio)** → montage → **publication auto** → dashboard **video ia**.
 
-Lis d’abord la réévaluation du temps : [GUIDE.md](./GUIDE.md)
+- Réévaluation + guide : [GUIDE.md](./GUIDE.md)
+- App Pinokio : [`../pinokio/wan-snapdragon-arm`](../pinokio/wan-snapdragon-arm)
 
 ```bash
 ./scripts/install.sh
-source .venv/bin/activate
-cp .env.example .env   # renseigne FAL_KEY (+ secrets YouTube)
+cp .env.example .env
+# Windows — icône Bureau « video ia » :
+#   powershell -ExecutionPolicy Bypass -File scripts\install-desktop-shortcut.ps1
+# Linux :
+./scripts/install-desktop-shortcut.sh
+
 python main.py --estimate
+# Pinokio → Wan Snapdragon ARM → Run, puis :
 python main.py --theme "un lapin courageux"
-streamlit run dashboard.py
 ```
