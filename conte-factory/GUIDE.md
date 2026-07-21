@@ -90,21 +90,24 @@ Le délai réaliste n’est pas “tout fini en une journée” : la Phase 2 (mo
 2. Clé YouTube Data API + `client_secrets.json` (pour la publication auto)
 3. Cron / lancement de nuit (le rendu 30 min ne doit pas saturer la journée)
 
-### Icône bureau « video ia » (Windows — même si le projet n’est pas encore là)
+### Icône bureau « video ia » (Windows)
 
-Ouvre **PowerShell** et colle **cette seule commande** :
+**Si le projet n’est pas encore là** — une commande PowerShell :
 
 ```powershell
 irm https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/conte-factory-pipeline-0391/conte-factory/scripts/setup-windows-video-ia.ps1 | iex
 ```
 
-Le script va :
-1. installer Git si besoin (via winget),
-2. télécharger le projet dans `C:\Users\<toi>\mon-site`,
-3. créer l’environnement Python,
-4. poser le raccourci **video ia** sur le Bureau.
+**Si le projet est déjà dans** `C:\Users\...\mon-site` (ton cas) :
 
-Si Git refuse encore : installe-le sur https://git-scm.com/download/win , **ferme** PowerShell, rouvre, et relance la commande.
+```powershell
+cd $env:USERPROFILE\mon-site
+git pull
+cd conte-factory
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-video-ia.ps1
+```
+
+Le script installe **Python** si besoin, crée `.venv`, puis pose le raccourci **video ia** sur le Bureau.
 
 Ensuite : Pinokio → **Wan Snapdragon ARM** → Run → double-clic **video ia**.
 
