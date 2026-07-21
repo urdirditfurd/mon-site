@@ -1,20 +1,25 @@
-# Wan WITHOUT Pinokio downloads (0/11 fix)
-# Paste ALL of this into PowerShell, then press Enter.
-
+# Wan WITHOUT Pinokio - robust torch install (Snapdragon / x64)
 $ErrorActionPreference = "Continue"
 $Root = Join-Path $env:USERPROFILE "mon-site\pinokio\wan-snapdragon-arm"
 $App  = Join-Path $Root "app"
 $Venv = Join-Path $App "env"
 
 if (-not (Test-Path (Join-Path $App "wan_engine.py"))) {
-  Write-Host "Project missing. Run first:" -ForegroundColor Yellow
-  Write-Host '  cd $env:USERPROFILE\mon-site; git pull'
-  throw "wan_engine.py not found in $App"
+  throw "wan_engine.py not found. Run: cd `$env:USERPROFILE\mon-site; git pull"
 }
 
 Write-Host "Using: $Root" -ForegroundColor Cyan
 
-# Find real Python (not Windows Store stub)
+# Detect ARM64 (Snapdragon)
+$isArm = $false
+try {
+  $arch = (Get-CimInstance Win32_Processor).Architecture
+  # 12 = ARM64
+  if ($arch -eq 12) { $isArm = $true }
+} catch {}
+if ($env:PROCESSOR_ARCHITECTURE -match "ARM") { $isArm = $true }
+Write-Host ("CPU arch: " + $(if ($isArm) { "ARM64 / Snapdragon" } else { "x64 / other" }))
+
 $Py = $null
 foreach ($name in @("py", "python")) {
   $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -25,54 +30,74 @@ foreach ($name in @("py", "python")) {
     if ($LASTEXITCODE -eq 0 -and $out -and ($out -notmatch "WindowsApps")) { $Py = $out.Trim(); break }
   } catch {}
 }
-if (-not $Py) {
-  Write-Host "Installing Python 3.12 via winget..." -ForegroundColor Cyan
-  winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
-  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
-  $Py = (py -3 -c "import sys; print(sys.executable)").Trim()
-}
+if (-not $Py) { throw "Python not found" }
 Write-Host "Python: $Py"
 
 if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
   Write-Host "==> Creating venv..." -ForegroundColor Cyan
   & $Py -m venv $Venv
-} else {
-  Write-Host "venv already exists - reusing it." -ForegroundColor Cyan
 }
-
-$Pip = Join-Path $Venv "Scripts\pip.exe"
 $Vpy = Join-Path $Venv "Scripts\python.exe"
-if (-not (Test-Path $Vpy)) { throw "venv python missing: $Vpy" }
 
-function Invoke-Pip {
-  param([Parameter(ValueFromRemainingArguments=$true)]$Args)
-  # Avoid PowerShell treating pip stderr WARNINGS as fatal errors
-  cmd /c "`"$Vpy`" -m pip $Args"
-  return $LASTEXITCODE
+function Run-Pip {
+  param([string]$ArgLine)
+  Write-Host "pip $ArgLine" -ForegroundColor DarkGray
+  $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+  $pinfo.FileName = $Vpy
+  $pinfo.Arguments = "-m pip $ArgLine"
+  $pinfo.RedirectStandardOutput = $true
+  $pinfo.RedirectStandardError = $true
+  $pinfo.UseShellExecute = $false
+  $pinfo.CreateNoWindow = $true
+  $p = New-Object System.Diagnostics.Process
+  $p.StartInfo = $pinfo
+  [void]$p.Start()
+  $stdout = $p.StandardOutput.ReadToEnd()
+  $stderr = $p.StandardError.ReadToEnd()
+  $p.WaitForExit()
+  if ($stdout) { Write-Host $stdout }
+  if ($stderr) { Write-Host $stderr -ForegroundColor Yellow }
+  return $p.ExitCode
 }
 
 Write-Host "==> pip upgrade..." -ForegroundColor Cyan
-Invoke-Pip install -U pip setuptools wheel | Out-Null
+[void](Run-Pip "install -U pip setuptools wheel")
 
-Write-Host "==> torch CPU (retry x3)..." -ForegroundColor Cyan
-$ok = $false
-for ($i=1; $i -le 3; $i++) {
-  Write-Host "Attempt $i/3"
-  Invoke-Pip uninstall -y torch torchvision torchaudio | Out-Null
-  $code = Invoke-Pip install --timeout 100 --retries 5 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  if ($code -eq 0) { $ok = $true; break }
-  Start-Sleep -Seconds 5
+Write-Host "==> Installing torch..." -ForegroundColor Cyan
+$attempts = @()
+if ($isArm) {
+  $attempts += "--pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu"
+  $attempts += "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
+} else {
+  $attempts += "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
+  $attempts += "torch torchvision torchaudio"
 }
-if (-not $ok) { throw "torch download failed. Check internet / antivirus / VPN." }
+
+$ok = $false
+$n = 0
+foreach ($a in $attempts) {
+  $n++
+  Write-Host "Attempt $n : $a" -ForegroundColor Cyan
+  $code = Run-Pip "install --timeout 120 --retries 5 $a"
+  if ($code -eq 0) {
+    # verify import
+    & $Vpy -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+    if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+  }
+  Write-Host "Attempt $n failed (exit $code)" -ForegroundColor Yellow
+}
+
+if (-not $ok) {
+  Write-Host ""
+  Write-Host "Torch install FAILED on this PC." -ForegroundColor Red
+  Write-Host "Use Colab instead (no local torch needed):" -ForegroundColor Yellow
+  Write-Host '  irm https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/conte-factory-pipeline-0391/pinokio/wan-snapdragon-arm/OUVRIR-COLAB.ps1 | iex'
+  throw "torch failed"
+}
 
 Write-Host "==> requirements..." -ForegroundColor Cyan
-$code = Invoke-Pip install --timeout 100 --retries 5 -r "`"$(Join-Path $App 'requirements.txt')`""
-if ($code -ne 0) {
-  # fallback without nested quotes issues
-  Push-Location $App
-  $code = cmd /c "`"$Vpy`" -m pip install --timeout 100 --retries 5 -r requirements.txt"
-  Pop-Location
-}
+$req = Join-Path $App "requirements.txt"
+$code = Run-Pip "install --timeout 120 --retries 5 -r `"$req`""
 if ($code -ne 0) { throw "requirements failed" }
 
 Write-Host "==> check..." -ForegroundColor Cyan
@@ -80,12 +105,11 @@ $env:SULPHUR_SNAPDRAGON = "1"
 $env:SULPHUR_ALLOW_CPU = "1"
 Push-Location $App
 & $Vpy wan_engine.py check
-$checkCode = $LASTEXITCODE
+$code = $LASTEXITCODE
 Pop-Location
-if ($checkCode -ne 0) { throw "wan_engine check failed" }
+if ($code -ne 0) { throw "wan_engine check failed" }
 
 Write-Host ""
 Write-Host "OK - local Wan ready WITHOUT Pinokio." -ForegroundColor Green
-Write-Host "Start with:"
-Write-Host "  $Root\LANCER-WAN.bat"
+Write-Host "Start: $Root\LANCER-WAN.bat"
 Write-Host "Open http://127.0.0.1:7860"
