@@ -1,4 +1,4 @@
 @echo off
-REM video ia = Wan auto + dashboard 8501 (delegue au lanceur tout-en-un)
+REM video ia = Wan auto + dashboard 8501
 cd /d "%~dp0"
-call DEMARRER-VIDEO-IA.bat
+call DEMARRER-VIDEO-IA.bat %*

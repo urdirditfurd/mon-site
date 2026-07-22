@@ -1,27 +1,24 @@
-# Installe l'automatisation Windows 100% autonome
-# - Au demarrage de Windows : Wan + dashboard video ia
-# - Chaque nuit a 02:00 : pipeline complet (script -> YouTube)
-#
-# Usage:
-#   powershell -ExecutionPolicy Bypass -File scripts\install-windows-autostart.ps1
+# Installe automatisation Windows 100% autonome
+# Usage: powershell -ExecutionPolicy Bypass -File scripts\install-windows-autostart.ps1
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
-$DemarrerPs1 = Join-Path $PSScriptRoot "DEMARRER-VIDEO-IA.ps1"
-$PipelinePs1 = Join-Path $PSScriptRoot "run-scheduled-pipeline.ps1"
+$DemarrerBat = Join-Path $PSScriptRoot "DEMARRER-VIDEO-IA.bat"
+$PipelineBat = Join-Path $PSScriptRoot "run-scheduled-pipeline.bat"
 $TaskPrefix = "VideoIA"
 
 if (-not (Test-Path $VenvPy)) {
-  throw "Environnement Python manquant. Lance INSTALL-NVIDIA.ps1 d'abord."
+  throw "Environnement Python manquant. Lance INSTALL-NVIDIA.ps1 avant de continuer."
 }
 
 function Register-VideoIATask {
   param(
     [string]$Name,
     [string]$Description,
-    [string]$ScriptPath,
-    [string]$TriggerType,  # AtLogon | Daily
+    [string]$BatPath,
+    [string]$BatArgs = "",
+    [string]$TriggerType,
     [string]$Time = "02:00"
   )
   $taskName = "$TaskPrefix-$Name"
@@ -31,8 +28,8 @@ function Register-VideoIATask {
   }
 
   $action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`"" `
+    -Execute "cmd.exe" `
+    -Argument "/c `"$BatPath`" $BatArgs" `
     -WorkingDirectory $Root
 
   if ($TriggerType -eq "AtLogon") {
@@ -68,20 +65,22 @@ Write-Host ""
 Register-VideoIATask `
   -Name "Dashboard" `
   -Description "Demarre Wan GPU + dashboard video ia au login Windows" `
-  -ScriptPath $DemarrerPs1 `
+  -BatPath $DemarrerBat `
+  -BatArgs "quiet" `
   -TriggerType "AtLogon"
 
 Register-VideoIATask `
   -Name "PipelineNuit" `
-  -Description "Pipeline complet conte-factory chaque nuit (publication YouTube si configuree)" `
-  -ScriptPath $PipelinePs1 `
+  -Description "Pipeline complet conte-factory chaque nuit" `
+  -BatPath $PipelineBat `
   -TriggerType "Daily" `
   -Time "02:00"
 
 Write-Host ""
 Write-Host "Termine." -ForegroundColor Green
 Write-Host "  - Au login : Wan + http://127.0.0.1:8501"
-Write-Host "  - Chaque nuit 02:00 : python main.py (log dans data\scheduled.log)"
+Write-Host "  - Chaque nuit 02:00 : pipeline complet"
+Write-Host "  - Logs : data\scheduled.log et data\wan_server.log"
 Write-Host ""
-Write-Host "Verifier dans Planificateur de taches : VideoIA-Dashboard, VideoIA-PipelineNuit"
+Write-Host "Taches : VideoIA-Dashboard, VideoIA-PipelineNuit"
 Write-Host ""
