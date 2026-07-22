@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Desktop = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $Desktop "video ia.lnk"
-$Bat = Join-Path $PSScriptRoot "launch-video-ia.bat"
+$Bat = Join-Path $PSScriptRoot "DEMARRER-VIDEO-IA.bat"
 $Icon = Join-Path $Root "assets\video-ia-icon.png"
 $IcoTarget = Join-Path $Root "assets\video-ia-icon.ico"
 

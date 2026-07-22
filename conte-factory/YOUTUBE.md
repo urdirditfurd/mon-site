@@ -86,24 +86,20 @@ Ou dans **http://127.0.0.1:8501** → historique → **Uploader YouTube**
 
 ## 4) Automatisation chaque nuit (Windows)
 
-1. Ouvre **Planificateur de tâches**
-2. Créer une tâche de base → tous les jours **02:00**
-3. Action :
-   - Programme :  
-     `C:\Users\I&B\mon-site\conte-factory\.venv\Scripts\python.exe`
-   - Arguments : `main.py`
-   - Démarrer dans :  
-     `C:\Users\I&B\mon-site\conte-factory`
-4. Crée une 2ᵉ tâche à **01:50** pour Wan :
-   - Programme :  
-     `C:\Users\I&B\mon-site\pinokio\wan-snapdragon-arm\LANCER-WAN-NVIDIA.bat`
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\mon-site\conte-factory\scripts\install-windows-autostart.ps1"
+```
+
+- **Au login** : Wan GPU + dashboard http://127.0.0.1:8501
+- **Chaque nuit 02:00** : pipeline complet jusqu'à YouTube
+- Logs : `data\scheduled.log` et `data\wan_server.log`
 
 ---
 
 ## Ordre mental
 
 ```
-Wan allumé (7860)
+Wan auto (7860) via video ia ou planificateur
    → main.py (histoire + audio + clips Wan + montage)
       → modules/publish.py (upload YouTube)
          → dashboard 8501 (suivi)

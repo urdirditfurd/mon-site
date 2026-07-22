@@ -1,5 +1,8 @@
 # Plan 1 jour — PC tour NVIDIA (trame d’origine)
 
+> **Guide principal mis à jour :** voir [`PLAN-1-JOUR-COMPLET.md`](PLAN-1-JOUR-COMPLET.md)  
+> Wan se lance **automatiquement** avec l’icône Bureau **video ia** — plus besoin de `LANCER-WAN-NVIDIA.bat`.
+
 Objectif : pipeline YouTube contes **30 min+**  
 `Script → Storyboard → Vidéo IA + Audio → Montage → Publication auto → Dashboard`
 
@@ -45,11 +48,15 @@ Tu dois voir `cuda True` et le nom de ta carte graphique.
 
 ### Étape C — Lancer le moteur vidéo
 
+**Nouveau (recommandé) :** double-clic sur l’icône Bureau **video ia** — Wan démarre tout seul.
+
+Sinon manuellement :
+
 ```powershell
-& "$env:USERPROFILE\mon-site\pinokio\wan-snapdragon-arm\LANCER-WAN-NVIDIA.bat"
+& "$env:USERPROFILE\mon-site\conte-factory\scripts\DEMARRER-VIDEO-IA.bat"
 ```
 
-Ouvre http://127.0.0.1:7860 — **laisse la fenêtre ouverte**.
+Ouvre http://127.0.0.1:8501 (dashboard) et http://127.0.0.1:7860 (Wan).
 
 ### Étape D — Icône de suivi
 
@@ -110,14 +117,11 @@ cd $env:USERPROFILE\mon-site\conte-factory
 
 ### Planifier la nuit (Windows)
 
-1. Ouvre **Planificateur de tâches**
-2. Nouvelle tâche → tous les jours à **02:00**
-3. Action : démarrer un programme  
-   - Programme :  
-     `C:\Users\I&B\mon-site\conte-factory\.venv\Scripts\python.exe`  
-   - Arguments : `main.py`  
-   - Démarrer dans : `C:\Users\I&B\mon-site\conte-factory`
-4. Avant 02:00 : lance aussi `LANCER-WAN-NVIDIA.bat` (ou crée une 2ᵉ tâche 01:50)
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\mon-site\conte-factory\scripts\install-windows-autostart.ps1"
+```
+
+Cela configure Wan + dashboard au login, et le pipeline complet à 02:00.
 
 ---
 

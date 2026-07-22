@@ -1,7 +1,7 @@
-"""Dashboard video ia — branché en direct sur Wan (127.0.0.1:7860).
+"""Dashboard video ia — démarre Wan automatiquement, pilote le pipeline, suit YouTube.
 
-Lancer (Wan doit déjà tourner) :
-  streamlit run dashboard.py --server.port 8501
+Lancer (tout-en-un via l'icône Bureau « video ia ») :
+  scripts\\DEMARRER-VIDEO-IA.bat
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from config import (
     AI_CLIP_SEC,
     AUTO_PUBLISH,
+    AUTO_START_WAN,
     CHANNEL_NAME,
     EXPORTS_DIR,
     FAL_KEY,
@@ -26,6 +27,7 @@ from config import (
     TARGET_DURATION_MIN,
     TTS_VOICE,
     VIDEO_PROVIDER,
+    WAN_START_TIMEOUT_SEC,
     ensure_dirs,
     estimate_ai_clips,
 )
@@ -33,6 +35,7 @@ from db.database import init_db, is_paused, list_videos, set_paused, stats
 from main import run_pipeline
 from modules.publish import publish_youtube
 from modules.video_ai import pinokio_wan_health
+from modules.wan_service import start_wan, stop_wan, wan_status
 
 ensure_dirs()
 init_db()
@@ -43,8 +46,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Rafraîchissement auto des données réelles
-st_autorefresh = getattr(st, "fragment", None)
 try:
     from streamlit_autorefresh import st_autorefresh as _ar
 
@@ -54,14 +55,36 @@ except Exception:
 
 st.title(f"🎬 video ia — {CHANNEL_NAME}")
 st.caption(
-    f"Dashboard **8501** ↔ moteur Wan **{PINOKIO_WAN_URL}** → montage → YouTube"
+    "Un seul clic Bureau → Wan + dashboard + pipeline automatique jusqu'à YouTube"
 )
 
-health = pinokio_wan_health(deep=False)
+provider = VIDEO_PROVIDER.lower().strip()
+uses_wan = provider.startswith(("pinokio", "wan"))
+
+# --- Démarrage auto Wan au chargement ---
+if uses_wan and AUTO_START_WAN and "wan_boot_done" not in st.session_state:
+    with st.spinner("Démarrage automatique de Wan (GPU NVIDIA)…"):
+        boot = start_wan(wait_seconds=WAN_START_TIMEOUT_SEC)
+        st.session_state["wan_boot_done"] = True
+        st.session_state["wan_boot_result"] = boot
+
+if st.session_state.get("wan_boot_result"):
+    boot = st.session_state["wan_boot_result"]
+    if boot.get("ok"):
+        if boot.get("started"):
+            st.success("Wan démarré automatiquement — plus besoin de LANCER-WAN-NVIDIA.bat")
+        elif boot.get("already_running"):
+            st.info("Wan était déjà en ligne")
+    else:
+        st.error(
+            f"Wan n'a pas pu démarrer : {boot.get('error', 'erreur inconnue')}. "
+            f"Voir `{boot.get('log_file', 'data/wan_server.log')}`"
+        )
+
+health = wan_status()
 s = stats()
 wan_ok = bool(health.get("gradio_up"))
 
-# --- Bandeau connexion Wan (données réelles) ---
 b1, b2, b3, b4, b5 = st.columns(5)
 b1.metric("Wan Gradio", "🟢 EN LIGNE" if wan_ok else "🔴 HORS LIGNE")
 b2.metric("Vidéos créées", s["total"])
@@ -73,15 +96,34 @@ if wan_ok:
     st.success(
         f"Wan connecté : `{health.get('gradio_url')}`"
         + (f" — {health.get('gradio_title')}" if health.get("gradio_title") else "")
+        + (f" (PID {health.get('pid')})" if health.get("pid") else "")
     )
 else:
-    st.error(
-        "Wan n’est pas joignable. Lance d’abord :\n\n"
-        "`LANCER-WAN-NVIDIA.bat` puis recharge cette page.\n\n"
-        f"URL attendue : `{PINOKIO_WAN_URL}`"
+    st.warning(
+        "Wan n'est pas encore prêt. Utilise le bouton **Démarrer Wan** ci-dessous "
+        "ou relance l'icône Bureau **video ia**."
     )
     if health.get("gradio_error"):
         st.caption(health["gradio_error"])
+
+wan_ctrl1, wan_ctrl2, wan_ctrl3, wan_ctrl4 = st.columns(4)
+with wan_ctrl1:
+    if st.button("▶ Démarrer Wan", use_container_width=True, disabled=wan_ok):
+        with st.spinner("Démarrage Wan…"):
+            result = start_wan(wait_seconds=WAN_START_TIMEOUT_SEC)
+            st.session_state["wan_boot_result"] = result
+            st.rerun()
+with wan_ctrl2:
+    if st.button("⏹ Arrêter Wan", use_container_width=True, disabled=not health.get("managed")):
+        stop_wan()
+        st.session_state.pop("wan_boot_done", None)
+        st.session_state.pop("wan_boot_result", None)
+        st.rerun()
+with wan_ctrl3:
+    if st.button("🔄 Rafraîchir", use_container_width=True):
+        st.rerun()
+with wan_ctrl4:
+    st.link_button("Ouvrir Wan (7860)", PINOKIO_WAN_URL, use_container_width=True)
 
 with st.expander("Détails connexion Wan (live)", expanded=not wan_ok):
     st.json(
@@ -89,9 +131,14 @@ with st.expander("Détails connexion Wan (live)", expanded=not wan_ok):
             "gradio_up": health.get("gradio_up"),
             "gradio_url": health.get("gradio_url"),
             "gradio_title": health.get("gradio_title"),
+            "pid": health.get("pid"),
+            "process_alive": health.get("process_alive"),
+            "managed": health.get("managed"),
+            "log_file": health.get("log_file"),
             "engine": health.get("engine"),
             "ready_for_pipeline": health.get("ready_for_pipeline"),
             "provider": VIDEO_PROVIDER,
+            "auto_start_wan": AUTO_START_WAN,
             "target_min": TARGET_DURATION_MIN,
             "clips_estimes": estimate_ai_clips(),
             "ai_clip_sec": AI_CLIP_SEC,
@@ -99,23 +146,15 @@ with st.expander("Détails connexion Wan (live)", expanded=not wan_ok):
             "voix": TTS_VOICE,
         }
     )
-    c_ref, c_open, c_deep = st.columns(3)
-    with c_ref:
-        if st.button("🔄 Rafraîchir", use_container_width=True):
-            st.rerun()
-    with c_open:
-        st.link_button("Ouvrir Wan (7860)", PINOKIO_WAN_URL, use_container_width=True)
-    with c_deep:
-        if st.button("🔍 Check GPU profond", use_container_width=True):
-            st.session_state["deep_health"] = pinokio_wan_health(deep=True)
+    if st.button("🔍 Check GPU profond", key="deep_health_btn"):
+        st.session_state["deep_health"] = pinokio_wan_health(deep=True)
     if st.session_state.get("deep_health"):
         st.write(st.session_state["deep_health"])
 
 st.divider()
 
-# --- Intégration visuelle Wan dans le dashboard ---
-tab_pilot, tab_wan, tab_exports = st.tabs(
-    ["Pilototer le pipeline", "Wan en direct (7860)", "Exports réels"]
+tab_pilot, tab_wan, tab_exports, tab_auto = st.tabs(
+    ["Piloter le pipeline", "Wan en direct (7860)", "Exports réels", "Automatisation 100%"]
 )
 
 with tab_wan:
@@ -123,14 +162,14 @@ with tab_wan:
     if wan_ok:
         components.iframe(PINOKIO_WAN_URL, height=720, scrolling=True)
     else:
-        st.warning("Démarre Wan pour voir l’interface ici.")
+        st.warning("Clique **Démarrer Wan** — le moteur vidéo se lance tout seul.")
 
 with tab_exports:
     st.subheader("Fichiers MP4 générés (disque)")
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     exports = sorted(EXPORTS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not exports:
-        st.info("Aucun export pour l’instant — lance une génération.")
+        st.info("Aucun export pour l'instant — lance une génération.")
     else:
         for mp4 in exports[:8]:
             st.write(f"**{mp4.name}** — {mp4.stat().st_size / 1e6:.1f} Mo")
@@ -138,6 +177,38 @@ with tab_exports:
                 st.video(str(mp4))
             except Exception as exc:
                 st.caption(f"Lecture impossible: {exc}")
+
+with tab_auto:
+    st.subheader("Automatisation complète (script → YouTube)")
+    st.markdown(
+        """
+        **Architecture recommandée (PC NVIDIA, pas VPS sans GPU) :**
+
+        | Composant | Où ça tourne | Rôle |
+        |---|---|---|
+        | Wan 2.1 | PC tour NVIDIA | Génère les clips vidéo IA |
+        | Pipeline `main.py` | Même PC | Script → audio → montage → YouTube |
+        | Dashboard **video ia** | Même PC (port 8501) | Suivi matinal + contrôle |
+
+        > Un VPS OVH **sans carte graphique** ne peut pas faire tourner Wan.
+        > Garde le moteur vidéo sur ton PC NVIDIA ; le dashboard et le pipeline y tournent aussi.
+        > Pour un accès distant au dashboard : tunnel Cloudflare/ngrok (optionnel).
+        """
+    )
+    st.code(
+        r"""# Installation automatisation Windows (une fois)
+powershell -ExecutionPolicy Bypass -File scripts\install-windows-autostart.ps1
+
+# Ce que ça configure :
+# - Au démarrage Windows : Wan + dashboard video ia
+# - Chaque nuit 02:00 : pipeline complet jusqu'à YouTube""",
+        language="powershell",
+    )
+    st.markdown(
+        f"- Publication auto : **{'activée' if AUTO_PUBLISH else 'désactivée'}** (`CONTE_AUTO_PUBLISH`)\n"
+        f"- Démarrage auto Wan : **{'activé' if AUTO_START_WAN else 'désactivé'}** (`CONTE_AUTO_START_WAN`)\n"
+        f"- Guide détaillé : `PLAN-1-JOUR-COMPLET.md`"
+    )
 
 with tab_pilot:
     left, right = st.columns(2)
@@ -179,34 +250,37 @@ with tab_pilot:
         st.write(f"Voix `{TTS_VOICE}`")
 
     theme = st.text_input("Thème du conte", placeholder="ex: un dragon timide")
-    mode_short = st.checkbox("Test court (recommandé d’abord)", value=True)
-    no_publish = st.checkbox("Ne pas publier sur ce run", value=True)
+    mode_short = st.checkbox("Test court (recommandé d'abord)", value=True)
+    no_publish = st.checkbox("Ne pas publier sur ce run", value=not AUTO_PUBLISH)
 
+    pipeline_disabled = uses_wan and not wan_ok
     if st.button(
-        "✨ Lancer pipeline (Wan → audio → montage)",
+        "✨ Lancer pipeline complet (Wan → montage → YouTube)",
         type="primary",
         use_container_width=True,
-        disabled=not wan_ok and VIDEO_PROVIDER.lower().startswith(("pinokio", "wan")),
+        disabled=pipeline_disabled,
     ):
         if is_paused():
             st.error("Pipeline en pause.")
         elif VIDEO_PROVIDER == "fal" and not FAL_KEY:
             st.error("Ajoute FAL_KEY dans .env.")
-        elif VIDEO_PROVIDER.lower().startswith(("pinokio", "wan")) and not wan_ok:
-            st.error("Wan hors ligne — lance LANCER-WAN-NVIDIA.bat")
+        elif pipeline_disabled:
+            st.error("Wan hors ligne — clique Démarrer Wan")
         else:
             progress = st.progress(0, text="Démarrage…")
-            log_box = st.empty()
             try:
-                progress.progress(10, text="Script + storyboard + audio…")
+                progress.progress(10, text="Script + storyboard + audio + clips Wan…")
                 result = run_pipeline(
                     theme=theme or None,
                     short=mode_short,
                     publish=False if no_publish else None,
                 )
                 progress.progress(100, text="Terminé")
-                st.success("Pipeline terminé — données réelles ci-dessous.")
-                log_box.json(result)
+                if result.get("ok"):
+                    st.success("Pipeline terminé.")
+                else:
+                    st.warning(str(result))
+                st.json(result)
                 st.rerun()
             except Exception as exc:
                 progress.progress(100, text="Erreur")

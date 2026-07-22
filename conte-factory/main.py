@@ -23,10 +23,12 @@ if str(ROOT) not in sys.path:
 from config import (
     AI_CLIP_SEC,
     AUTO_PUBLISH,
+    AUTO_START_WAN,
     FAL_CONCURRENCY,
     PAUSE_PIPELINE,
     TARGET_DURATION_MIN,
     VIDEO_PROVIDER,
+    WAN_START_TIMEOUT_SEC,
     ensure_dirs,
     estimate_ai_clips,
 )
@@ -37,6 +39,7 @@ from modules.publish import publish_youtube
 from modules.sourcing import source_new_video
 from modules.storyboard import build_storyboard
 from modules.video_ai import generate_scene_videos
+from modules.wan_service import ensure_wan_running
 
 STEPS = ("sourcing", "storyboard", "audio", "video_ai", "montage", "publish")
 
@@ -86,6 +89,17 @@ def run_pipeline(
 
     if PAUSE_PIPELINE or is_paused():
         return {"ok": False, "reason": "pipeline_en_pause", "hint": "Relancez depuis le dashboard."}
+
+    provider = VIDEO_PROVIDER.lower().strip()
+    if AUTO_START_WAN and provider.startswith(("pinokio", "wan")):
+        wan = ensure_wan_running(wait_seconds=WAN_START_TIMEOUT_SEC)
+        if not wan.get("ok"):
+            return {
+                "ok": False,
+                "reason": "wan_indisponible",
+                "hint": "Ouvrez video ia sur le Bureau ou consultez data/wan_server.log",
+                "wan": wan,
+            }
 
     do_publish = AUTO_PUBLISH if publish is None else publish
 
