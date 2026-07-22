@@ -143,8 +143,11 @@ def resolve_wan_engine() -> Path:
 def resolve_wan_python(engine: Path) -> str:
     if PINOKIO_WAN_PYTHON:
         return PINOKIO_WAN_PYTHON
-    # Env Pinokio typique : ../env/Scripts/python.exe (Windows) ou ../env/bin/python
+    # INSTALL-NVIDIA : app/env/Scripts/python.exe
     for rel in (
+        Path("env") / "Scripts" / "python.exe",
+        Path("env") / "bin" / "python",
+        Path("env") / "bin" / "python3",
         Path("..") / "env" / "Scripts" / "python.exe",
         Path("..") / "env" / "bin" / "python",
         Path("..") / "env" / "bin" / "python3",

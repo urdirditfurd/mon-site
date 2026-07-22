@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demarre Wan depuis les scripts Windows (evite les problemes de guillemets PowerShell)."""
+"""Demarre Wan depuis les scripts Windows."""
 
 from __future__ import annotations
 
@@ -17,7 +17,10 @@ from modules.wan_service import ensure_wan_running
 
 def main() -> int:
     result = ensure_wan_running(wait_seconds=WAN_START_TIMEOUT_SEC)
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if not result.get("ok") and result.get("log_tail"):
+        print("\n--- Dernieres lignes wan_server.log ---", file=sys.stderr)
+        print(result["log_tail"], file=sys.stderr)
     return 0 if result.get("ok") else 1
 
 

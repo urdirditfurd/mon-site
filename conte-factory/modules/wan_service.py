@@ -21,6 +21,10 @@ def _wan_app_dir() -> Path:
     return resolve_wan_engine().parent
 
 
+def _wan_root_dir() -> Path:
+    return _wan_app_dir().parent
+
+
 def _read_pid() -> int | None:
     if not PID_FILE.exists():
         return None
@@ -32,7 +36,7 @@ def _read_pid() -> int | None:
         return None
 
 
-def _write_pid(pid: int) -> None:
+def _write_pid(pid: int | None) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(
         json.dumps({"pid": pid, "url": PINOKIO_WAN_URL}, indent=2),
@@ -65,6 +69,43 @@ def _is_process_alive(pid: int) -> bool:
         return False
 
 
+def _log_tail(lines: int = 30) -> str:
+    if not LOG_FILE.exists():
+        return ""
+    try:
+        content = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return ""
+    return "\n".join(content[-lines:])
+
+
+def _preflight() -> dict[str, Any]:
+    engine = resolve_wan_engine()
+    py = Path(resolve_wan_python(engine))
+    wan_root = _wan_root_dir()
+    service_bat = wan_root / "LANCER-WAN-SERVICE.bat"
+    nvidia_bat = wan_root / "LANCER-WAN-NVIDIA.bat"
+    info: dict[str, Any] = {
+        "engine": str(engine),
+        "python": str(py),
+        "python_exists": py.exists(),
+        "service_bat": str(service_bat),
+        "service_bat_exists": service_bat.exists(),
+        "nvidia_bat_exists": nvidia_bat.exists(),
+    }
+    if not py.exists():
+        info["error"] = (
+            "Python Wan introuvable. Relance INSTALL-NVIDIA.ps1 "
+            f"(attendu: {engine.parent / 'env' / 'Scripts' / 'python.exe'})"
+        )
+    elif "conte-factory" in str(py).replace("\\", "/").lower():
+        info["error"] = (
+            "Mauvais Python selectionne (venv conte-factory). "
+            "Relance INSTALL-NVIDIA.ps1 pour creer app/env."
+        )
+    return info
+
+
 def wan_status() -> dict[str, Any]:
     """État combiné : santé Gradio + processus local."""
     health = pinokio_wan_health(deep=False)
@@ -79,7 +120,61 @@ def wan_status() -> dict[str, Any]:
         "process_alive": alive,
         "log_file": str(LOG_FILE),
         "managed": bool(pid and alive),
+        "log_tail": _log_tail(12),
     }
+
+
+def _start_wan_windows(wan_root: Path) -> None:
+    service_bat = wan_root / "LANCER-WAN-SERVICE.bat"
+    fallback_bat = wan_root / "LANCER-WAN-NVIDIA.bat"
+    bat = service_bat if service_bat.exists() else fallback_bat
+    if not bat.exists():
+        raise FileNotFoundError(f"Aucun lanceur Wan trouve dans {wan_root}")
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(f"\n--- start_wan {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        log_handle.write(f"launcher: {bat}\n")
+
+    env = os.environ.copy()
+    env["WAN_SERVICE_LOG"] = str(LOG_FILE)
+    env["SULPHUR_SNAPDRAGON"] = ""
+    env["SULPHUR_ALLOW_CPU"] = "0"
+    env["WAN_MODEL_CACHE"] = str(wan_root / "models")
+    env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
+
+    # start /min : fenetre minimisee, stable avec chemins I&B (pas DETACHED_PROCESS)
+    subprocess.Popen(
+        ["cmd.exe", "/c", "start", "/min", "Wan21", str(bat)],
+        cwd=str(wan_root),
+        env=env,
+    )
+    _write_pid(None)
+
+
+def _start_wan_posix(wan_dir: Path, py: str, gradio_script: Path) -> int:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log_handle = LOG_FILE.open("a", encoding="utf-8")
+    log_handle.write(f"\n--- start_wan {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    log_handle.flush()
+
+    env = os.environ.copy()
+    env["SULPHUR_SNAPDRAGON"] = ""
+    env["SULPHUR_ALLOW_CPU"] = "0"
+    env["WAN_MODEL_CACHE"] = str(wan_dir.parent / "models")
+    env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
+
+    proc = subprocess.Popen(
+        [py, str(gradio_script)],
+        cwd=str(wan_dir),
+        env=env,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    _write_pid(proc.pid)
+    return proc.pid
 
 
 def start_wan(wait_seconds: int = 300, poll_interval: float = 5.0) -> dict[str, Any]:
@@ -93,50 +188,42 @@ def start_wan(wait_seconds: int = 300, poll_interval: float = 5.0) -> dict[str, 
             "ok": True,
             "started": False,
             "already_running": True,
-            "message": "Wan déjà en ligne",
+            "message": "Wan deja en ligne",
             **status,
+        }
+
+    preflight = _preflight()
+    if preflight.get("error"):
+        return {
+            "ok": False,
+            "started": False,
+            "error": preflight["error"],
+            "preflight": preflight,
+            "log_tail": _log_tail(),
         }
 
     pid = status.get("pid")
     if pid and status.get("process_alive"):
-        # Processus présent mais Gradio pas encore prêt — on attend
-        return _wait_for_gradio(wait_seconds, poll_interval, started=False, pid=pid)
+        return _wait_for_gradio(
+            wait_seconds, poll_interval, started=False, pid=pid, track_pid=True
+        )
 
-    engine = resolve_wan_engine()
     wan_dir = _wan_app_dir()
-    py = resolve_wan_python(engine)
     gradio_script = wan_dir / "gradio_server.py"
     if not gradio_script.exists():
         raise FileNotFoundError(f"gradio_server.py introuvable : {gradio_script}")
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    log_handle = LOG_FILE.open("a", encoding="utf-8")
-    log_handle.write(f"\n--- start_wan {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-    log_handle.flush()
-
-    env = os.environ.copy()
-    env["SULPHUR_SNAPDRAGON"] = ""
-    env["SULPHUR_ALLOW_CPU"] = "0"
-    env["WAN_MODEL_CACHE"] = str(wan_dir.parent / "models")
-    env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
-
-    popen_kwargs: dict[str, Any] = {
-        "cwd": str(wan_dir),
-        "env": env,
-        "stdout": log_handle,
-        "stderr": subprocess.STDOUT,
-    }
     if sys.platform == "win32":
-        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-    else:
-        popen_kwargs["start_new_session"] = True
+        _start_wan_windows(_wan_root_dir())
+        return _wait_for_gradio(
+            wait_seconds, poll_interval, started=True, pid=None, track_pid=False
+        )
 
-    proc = subprocess.Popen([py, str(gradio_script)], **popen_kwargs)
-    _write_pid(proc.pid)
-    log_handle.write(f"PID {proc.pid}\n")
-    log_handle.flush()
-
-    return _wait_for_gradio(wait_seconds, poll_interval, started=True, pid=proc.pid)
+    py = resolve_wan_python(resolve_wan_engine())
+    proc_pid = _start_wan_posix(wan_dir, py, gradio_script)
+    return _wait_for_gradio(
+        wait_seconds, poll_interval, started=True, pid=proc_pid, track_pid=True
+    )
 
 
 def _wait_for_gradio(
@@ -145,6 +232,7 @@ def _wait_for_gradio(
     *,
     started: bool,
     pid: int | None,
+    track_pid: bool,
 ) -> dict[str, Any]:
     deadline = time.time() + wait_seconds
     last_health: dict[str, Any] = {}
@@ -156,16 +244,17 @@ def _wait_for_gradio(
                 "started": started,
                 "already_running": not started,
                 "pid": pid,
-                "message": "Wan prêt" if started else "Wan déjà en cours de démarrage",
+                "message": "Wan pret" if started else "Wan deja en cours de demarrage",
                 **last_health,
             }
-        if pid and not _is_process_alive(pid):
+        if track_pid and pid and not _is_process_alive(pid):
             _clear_pid()
             return {
                 "ok": False,
                 "started": started,
-                "error": "Le processus Wan s'est arrêté avant d'être prêt",
+                "error": "Le processus Wan s'est arrete avant d'etre pret",
                 "log_file": str(LOG_FILE),
+                "log_tail": _log_tail(),
                 "pid": pid,
             }
         time.sleep(poll_interval)
@@ -175,6 +264,7 @@ def _wait_for_gradio(
         "started": started,
         "error": f"Timeout ({wait_seconds}s) — Wan pas joignable sur {PINOKIO_WAN_URL}",
         "log_file": str(LOG_FILE),
+        "log_tail": _log_tail(),
         "pid": pid,
         **last_health,
     }
@@ -184,11 +274,17 @@ def stop_wan() -> dict[str, Any]:
     """Arrête le processus Wan géré par ce module (si connu)."""
     pid = _read_pid()
     if not pid:
-        return {"ok": True, "stopped": False, "message": "Aucun processus Wan géré"}
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/FI", "WINDOWTITLE eq Wan21*", "/T", "/F"],
+                check=False,
+                capture_output=True,
+            )
+        return {"ok": True, "stopped": False, "message": "Aucun processus Wan gere"}
 
     if not _is_process_alive(pid):
         _clear_pid()
-        return {"ok": True, "stopped": False, "message": "Processus déjà arrêté"}
+        return {"ok": True, "stopped": False, "message": "Processus deja arrete"}
 
     try:
         if sys.platform == "win32":

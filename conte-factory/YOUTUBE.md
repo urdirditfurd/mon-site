@@ -1,6 +1,6 @@
-# YouTube — où est le script et comment brancher l’upload
+# YouTube — où est le script et comment brancher l'upload
 
-## Fichier d’upload YouTube
+## Fichier d'upload YouTube
 
 ```
 C:\Users\I&B\mon-site\conte-factory\modules\publish.py
@@ -42,18 +42,21 @@ CONTE_AUTO_PUBLISH=1
 CONTE_YOUTUBE_PRIVACY=private
 ```
 
-(`private` d’abord, puis `public` quand tu es à l’aise)
+(`private` d'abord, puis `public` quand tu es à l'aise)
 
 ---
 
-## 2) Lancer l’automatisation (manuel)
+## 2) Lancer l'automatisation (manuel)
 
-### Fenêtre 1 — Wan (obligatoire)
+### Tout-en-un (recommandé)
+Double-clic sur l'icône Bureau **video ia** — Wan + dashboard démarrent automatiquement.
+
+Ou :
 ```powershell
-& "$env:USERPROFILE\mon-site\pinokio\wan-snapdragon-arm\LANCER-WAN-NVIDIA.bat"
+& "$env:USERPROFILE\mon-site\conte-factory\scripts\DEMARRER-VIDEO-IA.bat"
 ```
 
-### Fenêtre 2 — Pipeline
+### Pipeline seul (Wan démarre tout seul)
 ```powershell
 cd $env:USERPROFILE\mon-site\conte-factory
 .\.venv\Scripts\activate
@@ -65,8 +68,7 @@ python main.py --short --theme "un lapin" --no-publish
 python main.py --theme "conte du soir"
 ```
 
-Ou double-clic :
-`conte-factory\scripts\LANCER-AUTOMATISATION.bat`
+Ou double-clic : `conte-factory\scripts\LANCER-AUTOMATISATION.bat`
 
 ---
 
@@ -78,7 +80,7 @@ cd $env:USERPROFILE\mon-site\conte-factory
 python main.py --resume 1 --only publish --publish
 ```
 
-(remplace `1` par l’id vu dans le dashboard)
+(remplace `1` par l'id vu dans le dashboard)
 
 Ou dans **http://127.0.0.1:8501** → historique → **Uploader YouTube**
 
