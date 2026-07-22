@@ -98,11 +98,34 @@ def _preflight() -> dict[str, Any]:
             "Python Wan introuvable. Relance INSTALL-NVIDIA.ps1 "
             f"(attendu: {engine.parent / 'env' / 'Scripts' / 'python.exe'})"
         )
-    elif "conte-factory" in str(py).replace("\\", "/").lower():
+        return info
+    if "conte-factory" in str(py).replace("\\", "/").lower():
         info["error"] = (
             "Mauvais Python selectionne (venv conte-factory). "
             "Relance INSTALL-NVIDIA.ps1 pour creer app/env."
         )
+        return info
+
+    try:
+        subprocess.run(
+            [str(py), "-c", "import gradio; import torch"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        info["gradio_ok"] = True
+    except subprocess.CalledProcessError as exc:
+        info["gradio_ok"] = False
+        err = (exc.stderr or exc.stdout or "").strip()
+        info["error"] = (
+            "Dependances Wan manquantes (gradio). "
+            f"Lance: pinokio\\wan-snapdragon-arm\\REPAIR-WAN-DEPS.bat — {err[-300:]}"
+        )
+    except Exception as exc:
+        info["gradio_ok"] = False
+        info["error"] = f"Verification Wan echouee: {exc}"
+
     return info
 
 

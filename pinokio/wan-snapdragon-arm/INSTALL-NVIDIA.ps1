@@ -114,6 +114,16 @@ Write-Host "==> requirements..." -ForegroundColor Cyan
 $code = Run-Pip "install --timeout 180 --retries 5 -r `"$req`""
 if ($code -ne 0) { throw "requirements failed" }
 
+Write-Host "==> Verifying gradio..." -ForegroundColor Cyan
+& $Vpy -c "import gradio; print('gradio', gradio.__version__)"
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "gradio missing, installing explicitly..." -ForegroundColor Yellow
+  $code = Run-Pip "install --timeout 300 --retries 5 gradio>=5.0.0"
+  if ($code -ne 0) { throw "gradio install failed" }
+  & $Vpy -c "import gradio; print('gradio', gradio.__version__)"
+  if ($LASTEXITCODE -ne 0) { throw "gradio still missing after install" }
+}
+
 # ffmpeg for Conte Factory
 $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if (-not $ff) {
