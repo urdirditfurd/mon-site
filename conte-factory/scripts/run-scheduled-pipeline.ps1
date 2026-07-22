@@ -4,6 +4,7 @@
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
+$StartWanPy = Join-Path $PSScriptRoot "start_wan.py"
 $LogFile = Join-Path $Root "data\scheduled.log"
 
 if (-not (Test-Path $VenvPy)) {
@@ -20,25 +21,14 @@ function Log([string]$Msg) {
 Log "=== Debut pipeline planifie ==="
 Set-Location $Root
 
-# Demarrer Wan
-$wanScript = @"
-import json, sys
-sys.path.insert(0, r'$Root')
-from modules.wan_service import ensure_wan_running
-from config import WAN_START_TIMEOUT_SEC
-r = ensure_wan_running(wait_seconds=WAN_START_TIMEOUT_SEC)
-print(json.dumps(r, ensure_ascii=False))
-sys.exit(0 if r.get('ok') else 1)
-"@
 Log "Demarrage Wan..."
-$wanOut = & $VenvPy -c $wanScript 2>&1
+$wanOut = & $VenvPy $StartWanPy 2>&1
 Log "Wan: $wanOut"
 if ($LASTEXITCODE -ne 0) {
   Log "ERREUR: Wan indisponible, pipeline annule"
   exit 1
 }
 
-# Pipeline complet avec publication auto (CONTE_AUTO_PUBLISH dans .env)
 Log "Lancement main.py..."
 & $VenvPy main.py 2>&1 | ForEach-Object { Log $_ }
 $code = $LASTEXITCODE
