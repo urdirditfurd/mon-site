@@ -130,6 +130,7 @@ def run_pipeline(
     duration_min: float | None = None,
     voice: str | None = None,
     subtitles: bool = False,
+    age_group: str = "1-9",
 ) -> dict:
     ensure_dirs()
     init_db()
@@ -157,18 +158,11 @@ def run_pipeline(
     do_publish = AUTO_PUBLISH if publish is None else publish
 
     import config as cfg
+    from config import scene_sec_for_audience
 
     if duration_min is not None:
         cfg.TARGET_DURATION_MIN = max(1.0, min(60.0, float(duration_min)))
-        # Scènes plus longues pour les vidéos longues → moins de clips Wan
-        if cfg.TARGET_DURATION_MIN >= 20:
-            cfg.SCENE_TARGET_SEC = 120
-        elif cfg.TARGET_DURATION_MIN >= 10:
-            cfg.SCENE_TARGET_SEC = 90
-        elif cfg.TARGET_DURATION_MIN >= 5:
-            cfg.SCENE_TARGET_SEC = 50
-        else:
-            cfg.SCENE_TARGET_SEC = 40
+        cfg.SCENE_TARGET_SEC = scene_sec_for_audience(age_group)
     elif short or micro:
         if micro:
             cfg.TARGET_DURATION_MIN = 1.2
@@ -193,7 +187,7 @@ def run_pipeline(
         raise ValueError("Pour une étape seule hors sourcing, utilisez --resume ID")
 
     set_progress(step="sourcing", message="Ecriture de l'histoire…")
-    sourced = source_new_video(theme)
+    sourced = source_new_video(theme, age_group=age_group)
     if not sourced.get("ok"):
         set_progress(
             step="error",
@@ -240,6 +234,13 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=None, help="Duree cible en minutes (1-60)")
     parser.add_argument("--voice", type=str, default=None, help="Edge-TTS voice id")
     parser.add_argument("--subtitles", action="store_true")
+    parser.add_argument(
+        "--age",
+        type=str,
+        default="1-9",
+        choices=["1-3", "4-6", "7-9", "1-9"],
+        help="Public cible enfants (rythme des scenes)",
+    )
     parser.add_argument("--pause", action="store_true")
     parser.add_argument("--resume-pipeline", action="store_true")
     parser.add_argument("--estimate", action="store_true")
@@ -279,6 +280,7 @@ def main() -> int:
             duration_min=args.duration,
             voice=args.voice,
             subtitles=args.subtitles,
+            age_group=args.age,
         )
     except Exception:
         traceback.print_exc()

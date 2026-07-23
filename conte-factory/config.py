@@ -22,7 +22,7 @@ SECRETS_DIR = ROOT / "secrets"
 # Durée cible (minutes). Le TTS décide la durée réelle.
 TARGET_DURATION_MIN = float(os.getenv("CONTE_TARGET_DURATION_MIN", "30"))
 # Durée narration cible par scène storyboard (secondes)
-SCENE_TARGET_SEC = float(os.getenv("CONTE_SCENE_TARGET_SEC", "60"))
+SCENE_TARGET_SEC = float(os.getenv("CONTE_SCENE_TARGET_SEC", "180"))
 
 # Voix Edge-TTS
 TTS_VOICE = os.getenv("CONTE_TTS_VOICE", "fr-FR-DeniseNeural")
@@ -89,37 +89,64 @@ def ensure_dirs() -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def scene_count_for_duration(duration_min: float | None = None) -> int:
-    """Moins de scènes = moins de clips Wan = beaucoup plus rapide.
+def scene_sec_for_audience(age_group: str = "1-9") -> float:
+    """Rythme visuel pour contes du soir (1–9 ans).
 
-    Le montage boucle chaque clip court pour coller à l'audio.
+    La voix porte l'attention ; le clip Wan boucle avec un léger mouvement.
+    Pas besoin d'un nouveau plan toutes les 15–60 s — ça sur-génère pour rien
+    et ça agite trop pour s'endormir.
+    """
+    key = (age_group or "1-9").strip().lower()
+    # secondes de narration / scène visuelle (= 1 clip Wan bouclé)
+    mapping = {
+        "1-3": 210.0,  # ~3,5 min — très calme (tout-petits)
+        "4-6": 180.0,  # ~3 min
+        "7-9": 150.0,  # ~2,5 min — un peu plus de variété
+        "1-9": 180.0,  # défaut bedtime large 1–9
+    }
+    return mapping.get(key, mapping["1-9"])
+
+
+def scene_count_for_duration(
+    duration_min: float | None = None,
+    age_group: str = "1-9",
+) -> int:
+    """Nombre de scènes = nombre de clips Wan (1 clip/scène, bouclé).
+
+    Ex. 30 min / public 1–9 → ~10 scènes (pas 15, encore moins 120).
     """
     minutes = duration_min if duration_min is not None else TARGET_DURATION_MIN
+    scene_sec = scene_sec_for_audience(age_group)
+
+    # Courtes vidéos : garder un minimum de décors sans remonter au rythme adulte
     if minutes <= 2:
-        scene_sec = 40
         minimum = 2
+        scene_sec = min(scene_sec, 50)
     elif minutes <= 5:
-        scene_sec = 50
-        minimum = 3
+        minimum = 2
+        scene_sec = min(scene_sec, 90)
     elif minutes <= 15:
-        scene_sec = 90
-        minimum = 6
+        minimum = 4
     else:
-        # 30 min → ~15 scènes (au lieu de 30–120 clips)
-        scene_sec = 120
-        minimum = 10
+        minimum = 6
+
     return max(minimum, int(round((minutes * 60) / scene_sec)))
 
 
-def estimate_ai_clips(duration_min: float | None = None) -> int:
-    """1 clip Wan par scène (bouclé au montage) — pas 1 clip toutes les 15 s."""
-    return scene_count_for_duration(duration_min)
+def estimate_ai_clips(
+    duration_min: float | None = None,
+    age_group: str = "1-9",
+) -> int:
+    """1 clip Wan par scène (bouclé au montage)."""
+    return scene_count_for_duration(duration_min, age_group=age_group)
 
 
-def estimate_render_minutes(duration_min: float | None = None) -> tuple[int, int]:
-    """Estimation temps GPU (minutes) pour une durée de video cible."""
-    clips = estimate_ai_clips(duration_min)
-    # RTX type 3080 : souvent ~45 s à 2 min / clip Wan 1.3B
+def estimate_render_minutes(
+    duration_min: float | None = None,
+    age_group: str = "1-9",
+) -> tuple[int, int]:
+    """Estimation temps GPU (minutes)."""
+    clips = estimate_ai_clips(duration_min, age_group=age_group)
     low = max(2, int(round(clips * 0.8 + 3)))
     high = max(5, int(round(clips * 2.2 + 5)))
     return low, high

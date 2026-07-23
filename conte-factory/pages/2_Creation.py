@@ -58,21 +58,42 @@ with st.form("create_form", clear_on_submit=False):
         index=0,
         horizontal=True,
     )
+    age_label = st.selectbox(
+        "Public (age)",
+        options=[
+            "1-9 ans (tous — rythme doux)",
+            "1-3 ans (plus calme)",
+            "4-6 ans (rythme moyen)",
+            "7-9 ans (un peu plus de variete)",
+        ],
+        index=0,
+        help="Adapte le nombre de changements d'image. L'histoire audio reste continue.",
+    )
+    age_map = {
+        "1-9 ans (tous — rythme doux)": "1-9",
+        "1-3 ans (plus calme)": "1-3",
+        "4-6 ans (rythme moyen)": "4-6",
+        "7-9 ans (un peu plus de variete)": "7-9",
+    }
+    age_group = age_map[age_label]
     subtitles = st.checkbox("Sous-titres", value=False)
     publish = st.checkbox("Publier sur YouTube a la fin", value=False)
 
-    scenes = estimate_ai_clips(float(duration))
-    est_low, est_high = estimate_render_minutes(float(duration))
+    scenes = estimate_ai_clips(float(duration), age_group=age_group)
+    est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     st.markdown(
         f"""
-**Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
-({scenes} scenes animees × 1 clip chacune, boucles pour atteindre {duration} min de film)
+**Scenes animees :** {scenes} (1 clip Wan / scene, bouclee sur la voix)  
+**Temps de creation estime :** environ **{est_low}–{est_high} minutes**
+
+Pour 1–9 ans, la **voix** porte l'histoire.  
+On change de decor toutes les ~2,5–3,5 min — assez pour rester doux, sans regenerer 100+ clips.
 """
     )
     if duration >= 20:
         st.caption(
-            "Astuce : pour un premier test, lance 2–5 minutes. "
-            "Une video de 30 min reste longue mais bien plus rapide qu'avant."
+            "Conseil : teste d'abord 3–5 minutes. "
+            "30 min en public 1–9 ≈ ~10 scenes Wan, pas 15 ni 120."
         )
 
     submitted = st.form_submit_button(
@@ -94,6 +115,7 @@ if submitted:
             voice=voice,
             subtitles=subtitles,
             publish=publish,
+            age_group=age_group,
         )
         if result.get("ok"):
             st.success("Generation lancee.")

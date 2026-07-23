@@ -8,7 +8,14 @@ from typing import Any
 
 import requests
 
-from config import MISTRAL_API_KEY, OLLAMA_URL, STORY_MODE, TARGET_DURATION_MIN, scene_count_for_duration
+from config import (
+    MISTRAL_API_KEY,
+    OLLAMA_URL,
+    STORY_MODE,
+    TARGET_DURATION_MIN,
+    scene_count_for_duration,
+    scene_sec_for_audience,
+)
 from db.database import create_video, find_by_hash, fingerprint, log_event, project_dir, similar_title_exists, update_video
 
 HEROES = [
@@ -48,7 +55,10 @@ LESSONS = [
 ]
 
 
-def _builtin_story(theme: str | None = None) -> dict[str, Any]:
+def _builtin_story(
+    theme: str | None = None,
+    age_group: str = "1-9",
+) -> dict[str, Any]:
     hero = random.choice(HEROES)
     place = random.choice(PLACES)
     if theme and theme.strip():
@@ -56,7 +66,7 @@ def _builtin_story(theme: str | None = None) -> dict[str, Any]:
     else:
         quest = random.choice(QUESTS)
     lesson = random.choice(LESSONS)
-    scenes_n = scene_count_for_duration()
+    scenes_n = scene_count_for_duration(age_group=age_group)
 
     hero_name = hero.split("nommé")[-1].split("nommée")[-1].strip().title()
     titre = f"L'aventure de {hero_name}"
@@ -112,15 +122,18 @@ def _builtin_story(theme: str | None = None) -> dict[str, Any]:
     }
 
 
-def _mistral_story(theme: str | None = None) -> dict[str, Any]:
+def _mistral_story(
+    theme: str | None = None,
+    age_group: str = "1-9",
+) -> dict[str, Any]:
     if not MISTRAL_API_KEY:
-        return _builtin_story(theme)
-    n = scene_count_for_duration()
-    prompt = f"""Écris un conte original pour enfants (3-8 ans), en français, d'environ {TARGET_DURATION_MIN} minutes à voix haute.
+        return _builtin_story(theme, age_group=age_group)
+    n = scene_count_for_duration(age_group=age_group)
+    prompt = f"""Écris un conte original pour enfants ({age_group} ans), en français, d'environ {TARGET_DURATION_MIN} minutes à voix haute.
 Thème demandé : {theme or "aventure douce et magique"}.
 Réponds UNIQUEMENT en JSON :
 {{"titre":"...","theme":"...","morale":"...","script":"texte long découpé en paragraphes","hero":"...","place":"..."}}
-Le script doit contenir environ {n} paragraphes riches, calmes, sans violence."""
+Le script doit contenir environ {n} paragraphes riches, calmes, sans violence (conte du soir)."""
     resp = requests.post(
         "https://api.mistral.ai/v1/chat/completions",
         headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
@@ -136,7 +149,7 @@ Le script doit contenir environ {n} paragraphes riches, calmes, sans violence.""
     content = resp.json()["choices"][0]["message"]["content"]
     data = json.loads(content)
     if not data.get("script"):
-        return _builtin_story(theme)
+        return _builtin_story(theme, age_group=age_group)
     return {
         "titre": data.get("titre") or "Conte magique",
         "theme": data.get("theme") or (theme or "aventure"),
@@ -147,11 +160,15 @@ Le script doit contenir environ {n} paragraphes riches, calmes, sans violence.""
     }
 
 
-def _ollama_story(theme: str | None = None) -> dict[str, Any]:
+def _ollama_story(
+    theme: str | None = None,
+    age_group: str = "1-9",
+) -> dict[str, Any]:
     try:
-        n = scene_count_for_duration()
+        n = scene_count_for_duration(age_group=age_group)
         prompt = (
-            f"Écris un conte enfants FR ~{TARGET_DURATION_MIN} min. Thème: {theme or 'magie douce'}. "
+            f"Écris un conte enfants FR ({age_group} ans) ~{TARGET_DURATION_MIN} min. "
+            f"Thème: {theme or 'magie douce'}. "
             f"JSON uniquement: titre, theme, morale, script ({n} paragraphes), hero, place."
         )
         resp = requests.post(
@@ -162,24 +179,33 @@ def _ollama_story(theme: str | None = None) -> dict[str, Any]:
         resp.raise_for_status()
         data = json.loads(resp.json().get("response") or "{}")
         if not data.get("script"):
-            return _builtin_story(theme)
+            return _builtin_story(theme, age_group=age_group)
         return data
     except Exception:
-        return _builtin_story(theme)
+        return _builtin_story(theme, age_group=age_group)
 
 
-def generate_story(theme: str | None = None) -> dict[str, Any]:
+def generate_story(
+    theme: str | None = None,
+    age_group: str = "1-9",
+) -> dict[str, Any]:
     mode = STORY_MODE.lower()
     if mode == "mistral":
-        return _mistral_story(theme)
+        return _mistral_story(theme, age_group=age_group)
     if mode == "ollama":
-        return _ollama_story(theme)
-    return _builtin_story(theme)
+        return _ollama_story(theme, age_group=age_group)
+    return _builtin_story(theme, age_group=age_group)
 
 
-def source_new_video(theme: str | None = None) -> dict[str, Any]:
+def source_new_video(
+    theme: str | None = None,
+    age_group: str = "1-9",
+) -> dict[str, Any]:
     """Crée un nouveau projet si l'histoire n'existe pas déjà."""
-    story = generate_story(theme)
+    age_group = (age_group or "1-9").strip().lower()
+    story = generate_story(theme, age_group=age_group)
+    target_scenes = scene_count_for_duration(age_group=age_group)
+    scene_target_sec = scene_sec_for_audience(age_group)
     script = str(story["script"]).strip()
     titre = str(story["titre"]).strip()
     hash_script = fingerprint(script)
@@ -213,8 +239,16 @@ def source_new_video(theme: str | None = None) -> dict[str, Any]:
         "place": story.get("place"),
         "script": script,
         "hash_script": hash_script,
+        "age_group": age_group,
+        "duration_min": TARGET_DURATION_MIN,
+        "target_scenes": target_scenes,
+        "scene_target_sec": scene_target_sec,
     }
     (projet / "story.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (projet / "script.txt").write_text(script, encoding="utf-8")
-    log_event(video_id, "info", "Script enregistré.")
+    log_event(
+        video_id,
+        "info",
+        f"Script enregistré ({target_scenes} scènes prévues, public {age_group}).",
+    )
     return {"ok": True, "video_id": video_id, "projet": str(projet), "story": payload}

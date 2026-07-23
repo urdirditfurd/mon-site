@@ -30,11 +30,11 @@ def start_generation_job(
     voice: str = "auto",
     subtitles: bool = False,
     publish: bool = False,
+    age_group: str = "1-9",
 ) -> dict[str, Any]:
     """Demarre main.py en sous-processus avec les options UI."""
     existing = get_job()
     if existing and existing.get("running"):
-        # Verifier si le PID vit encore
         pid = existing.get("pid")
         if pid and _pid_alive(int(pid)):
             return {"ok": False, "error": "Une generation est deja en cours", "job": existing}
@@ -50,6 +50,8 @@ def start_generation_job(
         str(float(duration_min)),
         "--voice",
         resolve_voice(voice),
+        "--age",
+        age_group,
     ]
     if subtitles:
         cmd.append("--subtitles")
@@ -61,7 +63,7 @@ def start_generation_job(
     log_path = ROOT / "data" / "job.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_f = log_path.open("a", encoding="utf-8")
-    log_f.write(f"\n=== JOB {theme} {duration_min}min ===\n")
+    log_f.write(f"\n=== JOB {theme} {duration_min}min age={age_group} ===\n")
     log_f.flush()
 
     creationflags = 0
@@ -85,6 +87,7 @@ def start_generation_job(
         "voice": voice,
         "subtitles": subtitles,
         "publish": publish,
+        "age_group": age_group,
         "log": str(log_path),
     }
     set_job(job)
