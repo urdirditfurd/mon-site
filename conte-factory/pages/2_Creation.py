@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -18,7 +19,7 @@ from modules.job_runner import (
     stop_generation_job,
 )
 from modules.progress import get_progress
-from ui_helpers import boot_app, nav_buttons, render_engine_status, render_sidebar
+from ui_helpers import boot_app, go_page, nav_buttons, render_engine_status, render_sidebar
 
 ctx = boot_app("video ia — Creation")
 render_sidebar("Creation")
@@ -123,10 +124,12 @@ if submitted:
         else:
             st.warning(result.get("error") or result)
 
-# --- Gros pourcentage ---
+# --- Gros pourcentage (relu depuis le fichier a chaque affichage) ---
 st.markdown("### Avancement de la creation")
+progress = get_progress()
 pct = float(progress.get("pct") or 0)
 label = progress.get("label") or progress.get("message") or "En attente"
+updated = progress.get("updated_at") or ""
 
 st.markdown(
     f"""
@@ -135,6 +138,7 @@ st.markdown(
   <div style="margin-top:8px;font-size:1.15rem;font-weight:700;color:#5A458C;">{label}</div>
   <div style="margin-top:6px;color:#6A6478;">{progress.get('message') or ''}</div>
   <div style="margin-top:4px;color:#8A8499;font-size:0.9rem;">{progress.get('detail') or ''}</div>
+  <div style="margin-top:4px;color:#A09AAC;font-size:0.8rem;">Maj: {updated}</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -151,7 +155,6 @@ if progress.get("video_id"):
     cols[1].metric("Projet", f"#{progress['video_id']}")
 cols[2].metric("Etape", str(progress.get("step") or "—"))
 
-# Checklist etapes
 steps_ui = [
     ("sourcing", "Histoire"),
     ("storyboard", "Scenes"),
@@ -174,7 +177,7 @@ for i, (key, name) in enumerate(steps_ui):
         mark = "○"
     elif cur_i > i or cur == "done":
         mark = "✓"
-    elif cur_i == i:
+    elif cur_i == i or (cur == "start" and i == 0):
         mark = "●"
     else:
         mark = "○"
@@ -184,14 +187,20 @@ st.caption(" → ".join(chips))
 if progress.get("error"):
     st.error(progress["error"])
 
-if running:
-    st.info("Generation en cours — le pourcentage se met a jour automatiquement.")
-    if st.button("Annuler la generation"):
-        stop_generation_job()
+ref_cols = st.columns(2)
+with ref_cols[0]:
+    if st.button("Actualiser le %", use_container_width=True):
         st.rerun()
+
+if running:
+    st.info("Generation en cours — rafraichissement auto toutes les 3 s.")
+    with ref_cols[1]:
+        if st.button("Annuler la generation", use_container_width=True):
+            stop_generation_job()
+            st.rerun()
+    time.sleep(3)
+    st.rerun()
 elif progress.get("step") == "done":
     st.success("Video terminee — retrouve-la dans Suivi pour la visionner.")
     if st.button("Voir dans Suivi"):
-        from ui_helpers import go_page
-
         go_page("pages/1_Tableau_de_bord.py")
