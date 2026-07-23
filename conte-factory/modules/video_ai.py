@@ -210,6 +210,23 @@ def pinokio_wan_health(deep: bool = False) -> dict[str, Any]:
     return info
 
 
+def _discover_gradio_api_names(client: Any) -> list[str]:
+    """Liste les endpoints Gradio disponibles (Gradio 4/5)."""
+    names: list[str] = ["/generate", "/run_generation", "/predict"]
+    try:
+        info = client.view_api(return_format="dict")
+        endpoints = (info or {}).get("named_endpoints") or {}
+        for key in endpoints:
+            name = str(key)
+            if not name.startswith("/"):
+                name = f"/{name}"
+            if name not in names:
+                names.insert(0, name)
+    except Exception:
+        pass
+    return names
+
+
 def _generate_via_gradio(prompt: str, dest: Path) -> Path:
     """Appelle Wan Gradio (ex: http://127.0.0.1:7860) — lien direct avec le dashboard."""
     try:
@@ -220,30 +237,35 @@ def _generate_via_gradio(prompt: str, dest: Path) -> Path:
     client = Client(PINOKIO_WAN_URL)
     last_err: Exception | None = None
     result = None
-    for api_name in ("/predict", "/run_generation", None):
+    api_names = _discover_gradio_api_names(client)
+    for api_name in api_names:
         try:
-            if api_name:
-                result = client.predict(
-                    prompt,
-                    PINOKIO_WAN_RESOLUTION,
-                    int(PINOKIO_WAN_FRAMES),
-                    int(PINOKIO_WAN_STEPS),
-                    0,
-                    api_name=api_name,
-                )
-            else:
-                result = client.predict(
-                    prompt,
-                    PINOKIO_WAN_RESOLUTION,
-                    int(PINOKIO_WAN_FRAMES),
-                    int(PINOKIO_WAN_STEPS),
-                    0,
-                )
+            result = client.predict(
+                prompt,
+                PINOKIO_WAN_RESOLUTION,
+                int(PINOKIO_WAN_FRAMES),
+                int(PINOKIO_WAN_STEPS),
+                0,
+                api_name=api_name,
+            )
             break
         except Exception as exc:
             last_err = exc
+            continue
     if result is None:
-        raise RuntimeError(f"Appel Gradio Wan échoué: {last_err}")
+        # Dernier essai sans api_name (certains clients Gradio)
+        try:
+            result = client.predict(
+                prompt,
+                PINOKIO_WAN_RESOLUTION,
+                int(PINOKIO_WAN_FRAMES),
+                int(PINOKIO_WAN_STEPS),
+                0,
+            )
+        except Exception as exc:
+            last_err = exc
+    if result is None:
+        raise RuntimeError(f"Appel Gradio Wan échoué (apis={api_names}): {last_err}")
 
     video_path = result[0] if isinstance(result, (list, tuple)) else result
     if not video_path or not Path(str(video_path)).exists():
@@ -296,11 +318,14 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
     if dest.exists() and dest.stat().st_size > 1000:
         return dest
 
-    # Préférer Gradio vivant (connexion dashboard 8501 ↔ Wan 7860)
+    # Préférer Gradio vivant ; si l'API échoue (ex: /predict absent) → wan_engine
     try:
         resp = requests.get(PINOKIO_WAN_URL, timeout=2)
         if resp.status_code < 500:
-            return _generate_via_gradio(prompt, dest)
+            try:
+                return _generate_via_gradio(prompt, dest)
+            except Exception:
+                pass
     except Exception:
         pass
 

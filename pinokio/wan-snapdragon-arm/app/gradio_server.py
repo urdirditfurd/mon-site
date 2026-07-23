@@ -163,6 +163,7 @@ with gr.Blocks(title=_title, theme=gr.themes.Soft()) as demo:
                 fn=run_generation,
                 inputs=[prompt, resolution, num_frames, steps, seed],
                 outputs=[video, status],
+                api_name="generate",
             )
 
         with gr.Tab("Colab gratuit (GPU cloud)"):
