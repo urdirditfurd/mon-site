@@ -32,7 +32,6 @@ from config import (
     ensure_dirs,
 )
 from db.database import (
-    STATUT_LABELS,
     init_db,
     is_paused,
     list_videos,
@@ -41,6 +40,22 @@ from db.database import (
     video_process_detail,
     video_title,
 )
+
+try:
+    from db.database import STATUT_LABELS
+except ImportError:
+    STATUT_LABELS = {
+        "nouveau": "Nouveau",
+        "script_ok": "Script pret",
+        "storyboard_ok": "Storyboard pret",
+        "audio_ok": "Audio pret",
+        "images_ok": "Clips IA prets",
+        "montage_ok": "Montage OK",
+        "pret": "Pret a publier",
+        "publie": "Publie YouTube",
+        "erreur": "Erreur",
+        "pause": "Pause",
+    }
 from main import run_pipeline
 from modules.publish import publish_youtube
 from modules.wan_service import start_wan, stop_wan, wan_status
