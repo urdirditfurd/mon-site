@@ -167,13 +167,17 @@ def _start_wan_windows(wan_root: Path) -> None:
     env["WAN_MODEL_CACHE"] = str(wan_root / "models")
     env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
 
-    # start /min : fenetre minimisee, stable avec chemins I&B (pas DETACHED_PROCESS)
-    subprocess.Popen(
-        ["cmd.exe", "/c", "start", "/min", "Wan21", str(bat)],
+    # Ne PAS utiliser: start /min Wan21 fichier.bat
+    # (Windows croit que Wan21 est un programme → "ne trouve pas Wan21")
+    # CREATE_NEW_CONSOLE lance le .bat dans une vraie fenetre cmd.
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    proc = subprocess.Popen(
+        ["cmd.exe", "/c", "call", str(bat)],
         cwd=str(wan_root),
         env=env,
+        creationflags=creationflags,
     )
-    _write_pid(None)
+    _write_pid(proc.pid)
 
 
 def _start_wan_posix(wan_dir: Path, py: str, gradio_script: Path) -> int:
@@ -297,12 +301,6 @@ def stop_wan() -> dict[str, Any]:
     """Arrête le processus Wan géré par ce module (si connu)."""
     pid = _read_pid()
     if not pid:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/FI", "WINDOWTITLE eq Wan21*", "/T", "/F"],
-                check=False,
-                capture_output=True,
-            )
         return {"ok": True, "stopped": False, "message": "Aucun processus Wan gere"}
 
     if not _is_process_alive(pid):
