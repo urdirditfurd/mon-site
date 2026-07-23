@@ -90,13 +90,36 @@ def ensure_dirs() -> None:
 
 
 def scene_count_for_duration(duration_min: float | None = None) -> int:
+    """Moins de scènes = moins de clips Wan = beaucoup plus rapide.
+
+    Le montage boucle chaque clip court pour coller à l'audio.
+    """
     minutes = duration_min if duration_min is not None else TARGET_DURATION_MIN
-    minimum = 2 if minutes <= 2 else 4 if minutes < 10 else 8
-    return max(minimum, int(round((minutes * 60) / SCENE_TARGET_SEC)))
+    if minutes <= 2:
+        scene_sec = 40
+        minimum = 2
+    elif minutes <= 5:
+        scene_sec = 50
+        minimum = 3
+    elif minutes <= 15:
+        scene_sec = 90
+        minimum = 6
+    else:
+        # 30 min → ~15 scènes (au lieu de 30–120 clips)
+        scene_sec = 120
+        minimum = 10
+    return max(minimum, int(round((minutes * 60) / scene_sec)))
 
 
 def estimate_ai_clips(duration_min: float | None = None) -> int:
-    """Nombre approximatif de clips IA (5–10 s) pour couvrir la durée."""
-    minutes = duration_min if duration_min is not None else TARGET_DURATION_MIN
-    clip = max(5, AI_CLIP_SEC)
-    return max(1, int(round((minutes * 60) / clip)))
+    """1 clip Wan par scène (bouclé au montage) — pas 1 clip toutes les 15 s."""
+    return scene_count_for_duration(duration_min)
+
+
+def estimate_render_minutes(duration_min: float | None = None) -> tuple[int, int]:
+    """Estimation temps GPU (minutes) pour une durée de video cible."""
+    clips = estimate_ai_clips(duration_min)
+    # RTX type 3080 : souvent ~45 s à 2 min / clip Wan 1.3B
+    low = max(2, int(round(clips * 0.8 + 3)))
+    high = max(5, int(round(clips * 2.2 + 5)))
+    return low, high

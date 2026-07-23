@@ -160,7 +160,15 @@ def run_pipeline(
 
     if duration_min is not None:
         cfg.TARGET_DURATION_MIN = max(1.0, min(60.0, float(duration_min)))
-        cfg.SCENE_TARGET_SEC = 60 if cfg.TARGET_DURATION_MIN >= 10 else 45
+        # Scènes plus longues pour les vidéos longues → moins de clips Wan
+        if cfg.TARGET_DURATION_MIN >= 20:
+            cfg.SCENE_TARGET_SEC = 120
+        elif cfg.TARGET_DURATION_MIN >= 10:
+            cfg.SCENE_TARGET_SEC = 90
+        elif cfg.TARGET_DURATION_MIN >= 5:
+            cfg.SCENE_TARGET_SEC = 50
+        else:
+            cfg.SCENE_TARGET_SEC = 40
     elif short or micro:
         if micro:
             cfg.TARGET_DURATION_MIN = 1.2
@@ -210,22 +218,14 @@ def run_pipeline(
 
 def print_estimate() -> None:
     clips = estimate_ai_clips()
-    provider = VIDEO_PROVIDER.lower()
-    if provider.startswith(("pinokio", "wan")):
-        minutes_low = clips * 1.5
-        minutes_high = clips * 4
-        note = "Wan NVIDIA local"
-    else:
-        minutes_low = (clips / max(1, FAL_CONCURRENCY)) * 1.0
-        minutes_high = (clips / max(1, FAL_CONCURRENCY)) * 2.5
-        note = f"FAL concurrence={FAL_CONCURRENCY}"
+    from config import estimate_render_minutes
+
+    low, high = estimate_render_minutes()
     print(
-        f"Cible: {TARGET_DURATION_MIN} min | segments ~{clips} × {AI_CLIP_SEC}s | "
-        f"provider={VIDEO_PROVIDER} | {note}"
+        f"Cible: {TARGET_DURATION_MIN} min | scenes/clips Wan ~{clips} "
+        f"(1 clip/scene, boucle audio) | provider={VIDEO_PROVIDER}"
     )
-    print(
-        f"Rendu estimé: {minutes_low/60:.1f}–{minutes_high/60:.1f} h"
-    )
+    print(f"Rendu estime GPU: {low}–{high} min")
 
 
 def main() -> int:

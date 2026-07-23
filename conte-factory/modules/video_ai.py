@@ -337,8 +337,12 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _clips_needed(duration_sec: float) -> int:
-    clip = max(5, AI_CLIP_SEC)
-    return max(1, int(math.ceil(float(duration_sec) / clip)))
+    """Toujours 1 clip par scène : FFmpeg boucle le clip sur la durée audio.
+
+    Avant : 60 s / 15 s = 4 clips × 30 scènes = 120 générations (énormément long).
+    """
+    _ = duration_sec
+    return 1
 
 
 def generate_scene_videos(video_id: int) -> dict[str, Any]:
