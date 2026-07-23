@@ -71,12 +71,13 @@ def _run_from(
             )
             result["steps"]["audio"] = generate_audio(video_id, voice=voice)
         if start_idx <= STEPS.index("video_ai"):
+            n_clips = max(1, estimate_ai_clips())
             set_progress(
                 step="video_ai",
                 video_id=video_id,
                 message="Generation des clips video…",
                 clips_done=0,
-                clips_total=1,
+                clips_total=n_clips,
             )
             result["steps"]["video_ai"] = generate_scene_videos(video_id)
         if start_idx <= STEPS.index("montage"):

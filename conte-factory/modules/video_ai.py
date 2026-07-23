@@ -409,8 +409,6 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
                 fut.result()
                 log_event(video_id, "info", f"Clips IA : {done}/{len(jobs)}")
                 try:
-                    from modules.progress import set_progress
-
                     set_progress(
                         step="video_ai",
                         video_id=video_id,
