@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR, PINOKIO_WAN_URL
+from modules.progress import set_progress
 from modules.video_ai import pinokio_wan_health, resolve_wan_engine, resolve_wan_python
 
 PID_FILE = DATA_DIR / "wan_server.pid"

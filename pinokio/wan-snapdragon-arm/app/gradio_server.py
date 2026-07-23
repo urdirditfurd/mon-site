@@ -44,8 +44,8 @@ def _status_header() -> str:
     if _HAS_CUDA:
         mode = f"NVIDIA CUDA — {_GPU_NAME}"
         tip = (
-            "**Mode GPU actif.** Sur RTX 3080, compte ~30 s à 2 min par clip court. "
-            "Tu peux monter Frames jusqu’à 49."
+            "**Mode GPU actif.** Sur RTX 3080 + float16, vise ~30 s–2 min / clip court "
+            "(17 frames × 12 steps). bfloat16 est très lent sur les RTX 30xx."
         )
     elif _IS_SNAPDRAGON:
         mode = "Snapdragon X Elite (CPU ARM)"
@@ -124,8 +124,8 @@ _local_help = (
     if _HAS_CUDA
     else "Génération locale CPU. Plus lent — branche le secteur. Colab = plus rapide."
 )
-_default_frames = 49 if _HAS_CUDA else 33
-_default_steps = 24 if _HAS_CUDA else 20
+_default_frames = 17 if _HAS_CUDA else 33
+_default_steps = 12 if _HAS_CUDA else 20
 
 with gr.Blocks(title=_title, theme=gr.themes.Soft()) as demo:
     gr.Markdown(_heading)

@@ -9,6 +9,7 @@ if not exist "%PY%" (
 )
 set SULPHUR_SNAPDRAGON=
 set SULPHUR_ALLOW_CPU=0
+set WAN_DTYPE=float16
 set WAN_MODEL_CACHE=%~dp0models
 set GRADIO_SERVER_PORT=7860
 echo.
