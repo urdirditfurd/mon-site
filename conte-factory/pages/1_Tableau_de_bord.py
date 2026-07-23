@@ -1,4 +1,4 @@
-"""Fenetre 1 — Tableau de bord (suivi + creation + YouTube)."""
+"""Fenetre 1 — Tableau de bord."""
 
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ from ui_helpers import (
     audio_preview_path,
     boot_app,
     fmt_min,
+    go_page,
     mp4_path,
+    nav_buttons,
     next_step_for,
     render_sidebar,
     render_wan_bar,
@@ -27,12 +29,22 @@ from ui_helpers import (
     video_title,
 )
 
-ctx = boot_app()
+ctx = boot_app("video ia — Tableau de bord")
 render_sidebar("Tableau de bord")
+nav_buttons("Tableau")
 
-st.title("1. Tableau de bord")
-st.caption("Suivi chaine · creation · publication YouTube")
-render_wan_bar(ctx)
+st.markdown(
+    """
+<div class="hero-card">
+  <div class="section-label">Fenetre 1</div>
+  <h2 style="margin:0;">Tableau de bord</h2>
+  <p>Suivi chaine · creation · publication YouTube</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+render_wan_bar(ctx, key_prefix="dash")
 
 s = stats()
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -42,7 +54,8 @@ m3.metric("Publiees YT", s["publiees"])
 m4.metric("En cours", s.get("en_cours", 0))
 m5.metric("Erreurs", s["erreurs"])
 
-st.page_link("pages/2_Technique.py", label="Ouvrir la fenetre Technique →", icon="🔧")
+if st.button("Aller a Technique →"):
+    go_page("pages/2_Technique.py")
 
 left, right = st.columns([1.3, 1])
 with left:
@@ -54,27 +67,27 @@ with left:
         st.write(f"**Titre :** {video_title(derniere)}")
         st.write(f"**Statut :** {statut_badge(derniere.get('statut'))}")
         st.write(f"**Theme :** {derniere.get('theme') or '—'}")
-        st.write(f"**Duree audio/video :** {fmt_min(derniere.get('duree_sec'))}")
+        st.write(f"**Duree :** {fmt_min(derniere.get('duree_sec'))}")
 
         mp4 = mp4_path(derniere)
         audio = audio_preview_path(derniere)
         if mp4:
-            st.success("MP4 pret — tu peux visionner ici :")
+            st.success("MP4 pret — visionne ici :")
             st.video(str(mp4))
         elif audio:
             st.warning(
-                "Pas encore de film MP4. L'audio est pret — "
-                "il manque encore les **clips Wan** + **montage**."
+                "Pas encore de film MP4. Audio pret — "
+                "il manque **clips Wan** + **montage**."
             )
             st.audio(str(audio))
             step = next_step_for(derniere.get("statut"))
             if step and st.button(
-                f"Continuer cette video (etape: {step})",
+                f"Continuer cette video ({step})",
                 type="primary",
                 key="resume_last",
             ):
                 if not ctx["wan_ok"] and step == "video_ai":
-                    st.error("Wan hors ligne — demarre Wan d'abord.")
+                    st.error("Wan hors ligne.")
                 else:
                     with st.spinner(f"Reprise depuis {step}…"):
                         try:
@@ -89,7 +102,7 @@ with left:
                         except Exception as exc:
                             st.exception(exc)
         else:
-            st.info("Aucun apercu audio/video pour l'instant.")
+            st.info("Aucun apercu pour l'instant.")
 
         if derniere.get("youtube_id"):
             yt = f"https://youtu.be/{derniere['youtube_id']}"
@@ -99,10 +112,10 @@ with left:
 
 with right:
     st.subheader("Indicateurs")
-    st.write(f"- Duree moyenne de creation : **{fmt_min(s.get('duree_creation_moyenne_sec'))}**")
+    st.write(f"- Creation moyenne : **{fmt_min(s.get('duree_creation_moyenne_sec'))}**")
     st.write(f"- Voix : `{TTS_VOICE}`")
-    st.write(f"- Duree cible : **{TARGET_DURATION_MIN} min**")
-    st.write(f"- Publication auto : **{'oui' if AUTO_PUBLISH else 'non'}**")
+    st.write(f"- Cible : **{TARGET_DURATION_MIN} min**")
+    st.write(f"- Publish auto : **{'oui' if AUTO_PUBLISH else 'non'}**")
     st.markdown("#### Alertes")
     if not s.get("alertes"):
         st.success("Rien a signaler.")
@@ -114,11 +127,11 @@ st.divider()
 st.subheader("Creer une video")
 pa, pb = st.columns(2)
 with pa:
-    if st.button("Mettre en pause", use_container_width=True):
+    if st.button("Pause", use_container_width=True):
         set_paused(True)
         st.rerun()
 with pb:
-    if st.button("Reprendre le pipeline", use_container_width=True):
+    if st.button("Reprendre", use_container_width=True):
         set_paused(False)
         st.rerun()
 
@@ -155,7 +168,7 @@ if st.button(
             )
             bar.progress(100, text="Termine")
             if result.get("ok"):
-                st.success("Creation terminee — le MP4 apparaitra ici si le montage a reussi.")
+                st.success("Creation terminee.")
             else:
                 st.warning(result)
             st.json(result)
@@ -165,35 +178,31 @@ if st.button(
 
 st.divider()
 st.subheader("Videos a reprendre / publier")
-videos = list_videos(30)
-if not videos:
-    st.caption("Aucune video.")
-else:
-    for v in videos:
-        if not v:
-            continue
-        cols = st.columns([3, 1.4, 1.2, 1.6])
-        cols[0].write(f"**#{v['id']}** {video_title(v)}")
-        cols[1].write(statut_badge(v.get("statut")))
-        cols[2].write(fmt_min(v.get("duree_sec")))
-        with cols[3]:
-            mp4 = mp4_path(v)
-            step = next_step_for(v.get("statut"))
-            if mp4:
-                if v.get("youtube_id"):
-                    st.link_button("YT", f"https://youtu.be/{v['youtube_id']}")
-                elif v.get("statut") in {"pret", "montage_ok", "video_prete"}:
-                    if st.button("Publier", key=f"pub_{v['id']}"):
-                        try:
-                            st.success(publish_youtube(int(v["id"]), force=True))
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
-            elif step and step != "publish":
-                if st.button("Continuer", key=f"cont_{v['id']}"):
+for v in list_videos(30):
+    if not v:
+        continue
+    cols = st.columns([3, 1.4, 1.2, 1.6])
+    cols[0].write(f"**#{v['id']}** {video_title(v)}")
+    cols[1].write(statut_badge(v.get("statut")))
+    cols[2].write(fmt_min(v.get("duree_sec")))
+    with cols[3]:
+        mp4 = mp4_path(v)
+        step = next_step_for(v.get("statut"))
+        if mp4:
+            if v.get("youtube_id"):
+                st.link_button("YT", f"https://youtu.be/{v['youtube_id']}")
+            elif v.get("statut") in {"pret", "montage_ok", "video_prete"}:
+                if st.button("Publier", key=f"pub_{v['id']}"):
                     try:
-                        with st.spinner(f"Reprise #{v['id']} ({step})…"):
-                            run_pipeline(resume_id=int(v["id"]), only=step, publish=False)
+                        st.success(publish_youtube(int(v["id"]), force=True))
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
+        elif step and step != "publish":
+            if st.button("Continuer", key=f"cont_{v['id']}"):
+                try:
+                    with st.spinner(f"Reprise #{v['id']} ({step})…"):
+                        run_pipeline(resume_id=int(v["id"]), only=step, publish=False)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))

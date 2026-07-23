@@ -1,4 +1,4 @@
-"""Fenetre 2 — Technique & historique (details de fabrication)."""
+"""Fenetre 2 — Technique & historique."""
 
 from __future__ import annotations
 
@@ -19,21 +19,34 @@ from ui_helpers import (
     audio_preview_path,
     boot_app,
     fmt_min,
+    go_page,
     mp4_path,
+    nav_buttons,
     render_sidebar,
     render_wan_bar,
     statut_badge,
     video_title,
 )
 
-ctx = boot_app()
+ctx = boot_app("video ia — Technique")
 render_sidebar("Technique")
+nav_buttons("Technique")
 
-st.title("2. Technique & historique")
-st.caption("Script · audio · clips Wan · montage · durees · journal")
-render_wan_bar(ctx)
+st.markdown(
+    """
+<div class="hero-card">
+  <div class="section-label">Fenetre 2</div>
+  <h2 style="margin:0;">Technique & historique</h2>
+  <p>Script · audio · clips Wan · montage · durees · journal</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
-st.page_link("pages/1_Tableau_de_bord.py", label="← Retour Tableau de bord", icon="📊")
+render_wan_bar(ctx, key_prefix="tech")
+
+if st.button("← Retour Tableau de bord"):
+    go_page("pages/1_Tableau_de_bord.py")
 
 videos = list_videos(50)
 if not videos:
@@ -62,13 +75,13 @@ c1, c2, c3, c4 = st.columns(4)
 c1.write(f"Storyboard : **{'OK' if detail.get('storyboard') else 'non'}**")
 c2.write(f"Audio TTS : **{'OK' if detail.get('audio') else 'non'}**")
 c3.write(f"Montage MP4 : **{'OK' if detail.get('montage') else 'non'}**")
-c4.write("Sous-titres : **non** (choix projet)")
+c4.write("Sous-titres : **non**")
 
 st.markdown("### Identifiants")
 st.write(f"- Theme : {v.get('theme') or '—'}")
 st.write(f"- Titre : {video_title(v)}")
 st.write(f"- Hash : `{str(v.get('hash_script') or '')[:18]}…`")
-st.write(f"- Dossier projet : `{v.get('chemin_projet') or '—'}`")
+st.write(f"- Projet : `{v.get('chemin_projet') or '—'}`")
 st.write(f"- Statut : {statut_badge(v.get('statut'))}")
 
 st.markdown("### Visionner")
@@ -78,10 +91,7 @@ if mp4:
     st.success("Film MP4 disponible")
     st.video(str(mp4))
 elif audio:
-    st.warning(
-        "Pas de MP4 final. Tu peux ecouter l'audio. "
-        "Sur le Tableau de bord, clique **Continuer** pour lancer Wan + montage."
-    )
+    st.warning("Pas de MP4. Ecoute l'audio, puis **Continuer** sur le Tableau de bord.")
     st.audio(str(audio))
 else:
     st.info("Rien a lire pour l'instant.")
@@ -116,7 +126,7 @@ st.subheader("Exports disque")
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 exports = sorted(EXPORTS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
 if not exports:
-    st.caption("Aucun MP4 dans data/exports — le montage n'a pas encore produit de film.")
+    st.caption("Aucun MP4 dans data/exports.")
 else:
     for mp4f in exports[:8]:
         st.write(f"**{mp4f.name}** — {mp4f.stat().st_size / 1e6:.1f} Mo")
