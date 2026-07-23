@@ -148,10 +148,10 @@ with gr.Blocks(title=_title, theme=gr.themes.Soft()) as demo:
                     )
                     with gr.Row():
                         num_frames = gr.Slider(
-                            17, 49, value=_default_frames, step=4, label="Frames (4n+1)"
+                            9, 49, value=_default_frames, step=4, label="Frames (4n+1)"
                         )
                         steps = gr.Slider(
-                            12, 30 if _HAS_CUDA else 24, value=_default_steps, step=1, label="Steps"
+                            8, 30 if _HAS_CUDA else 24, value=_default_steps, step=1, label="Steps"
                         )
                     seed = gr.Number(label="Seed (0 = aléatoire)", value=0, precision=0)
                     btn = gr.Button("Générer la vidéo", variant="primary")
