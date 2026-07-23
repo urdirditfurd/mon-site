@@ -1,4 +1,4 @@
-"""Accueil video ia — hub vers 2 fenetres (violet / gris clair)."""
+"""Accueil video ia — hub simple Suivi + Creation."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ui_helpers import boot_app, go_page, nav_buttons, render_sidebar, render_wan_bar
+from ui_helpers import boot_app, go_page, nav_buttons, render_engine_status, render_sidebar
 
-ctx = boot_app("video ia — Accueil")
+ctx = boot_app("video ia")
 render_sidebar("Accueil")
 nav_buttons("Accueil")
 
@@ -22,54 +22,48 @@ st.markdown(
 <div class="hero-card">
   <div class="section-label">Contes du Soir</div>
   <h1 style="margin:0 0 8px 0;">video ia</h1>
-  <p>Creation automatique : histoire → Wan → montage → YouTube</p>
+  <p>Cree une video a partir d'un theme, suis l'avancement, publie sur YouTube.</p>
   <span class="badge-soft">{ctx['channel']}</span>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-render_wan_bar(ctx, key_prefix="home")
+render_engine_status(ctx, "home")
 
-st.markdown("### Deux fenetres a ouvrir")
 a, b = st.columns(2)
 with a:
     st.markdown(
         """
 <div class="hero-card">
-  <h3>1. Tableau de bord</h3>
-  <p>Suivi des videos, publication YouTube, bouton de creation. Ideal le matin.</p>
+  <h3>Suivi</h3>
+  <p>Videos creees, statut, lecture, publication YouTube.</p>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    if st.button("Ouvrir Tableau de bord", type="primary", use_container_width=True):
+    if st.button("Ouvrir Suivi", type="primary", use_container_width=True):
         go_page("pages/1_Tableau_de_bord.py")
     st.markdown(
-        '<a class="nav-pill" href="/Tableau_de_bord" target="_blank">Nouvel onglet →</a>',
+        '<a class="nav-pill" href="/Tableau_de_bord" target="_blank">Nouvel onglet</a>',
         unsafe_allow_html=True,
     )
 with b:
     st.markdown(
         """
 <div class="hero-card">
-  <h3>2. Technique</h3>
-  <p>Historique, script, audio, clips Wan, montage, durees, journal d'erreurs.</p>
+  <h3>Creation</h3>
+  <p>Theme, duree, voix, sous-titres, barre de progression.</p>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    if st.button("Ouvrir Technique", type="primary", use_container_width=True):
-        go_page("pages/2_Technique.py")
+    if st.button("Ouvrir Creation", type="primary", use_container_width=True):
+        go_page("pages/2_Creation.py")
     st.markdown(
-        '<a class="nav-pill" href="/Technique" target="_blank">Nouvel onglet →</a>',
+        '<a class="nav-pill" href="/Creation" target="_blank">Nouvel onglet</a>',
         unsafe_allow_html=True,
     )
 
-st.info(
-    "Astuce : ouvre les deux liens « Nouvel onglet » pour avoir **2 fenetres** "
-    "cote a cote (suivi + technique)."
-)
-
 if not ctx["wan_ok"] and ctx["uses_wan"]:
-    st.warning("Wan hors ligne — demarre-le avant de creer une video.")
+    st.info("Le moteur video demarre en arriere-plan. Tu peux deja preparer ta creation.")

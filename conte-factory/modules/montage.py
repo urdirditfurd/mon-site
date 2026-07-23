@@ -1,7 +1,6 @@
 """Étape 4 — Montage FFmpeg : clips vidéo IA + audio + musique → MP4 final.
 
-Pas de sous-titres (exigence projet : l'audio suffit).
-Publication YouTube déclenchée ensuite par l'orchestrateur.
+Sous-titres optionnels (case a cocher dans Creation).
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config import EXPORTS_DIR, MUSIC_DIR, MUSIC_VOLUME, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, update_video, video_title
 
 
 def _find_music() -> Path | None:
@@ -40,11 +39,37 @@ def _ffprobe_duration(path: Path) -> float:
     return float(out)
 
 
+def _srt_timestamp(sec: float) -> str:
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = int(sec % 60)
+    ms = int((sec - int(sec)) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _write_srt(board: dict[str, Any], out: Path) -> Path:
+    lines: list[str] = []
+    t = 0.0
+    for i, scene in enumerate(board.get("scenes") or [], start=1):
+        dur = float(scene.get("duration_sec") or 5)
+        text = str(
+            scene.get("narration") or scene.get("texte") or scene.get("text") or ""
+        ).strip()
+        if not text:
+            text = f"Scene {i}"
+        wrapped = text if len(text) < 90 else text[:87] + "…"
+        lines.append(str(i))
+        lines.append(f"{_srt_timestamp(t)} --> {_srt_timestamp(t + dur)}")
+        lines.append(wrapped)
+        lines.append("")
+        t += dur
+    out.write_text("\n".join(lines), encoding="utf-8")
+    return out
+
+
 def _fit_clip_to_duration(src: Path, duration: float, out: Path) -> None:
-    """Boucle / coupe un clip IA pour coller exactement à la durée audio de la scène."""
     if out.exists():
         return
-    # stream_loop puis -t pour caler la durée
     cmd = [
         "ffmpeg",
         "-y",
@@ -100,12 +125,10 @@ def _concat_parts(parts: list[Path], out: Path) -> None:
     )
 
 
-def assemble_video(video_id: int) -> dict[str, Any]:
+def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    from db.database import video_title
-
     titre = video_title(video)
     projet = Path(video["chemin_projet"])
     board = json.loads((projet / "storyboard.json").read_text(encoding="utf-8"))
@@ -132,7 +155,6 @@ def assemble_video(video_id: int) -> dict[str, Any]:
             if not p.exists():
                 raise FileNotFoundError(f"Clip IA manquant: {p}")
 
-        # Concatène les parts de la scène puis ajuste à la durée audio
         raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
         fitted = fitted_dir / f"scene_{idx:03d}.mp4"
         _concat_parts(parts, raw)
@@ -183,6 +205,11 @@ def assemble_video(video_id: int) -> dict[str, Any]:
     else:
         cmd += ["-map", "0:v", "-map", "1:a"]
 
+    srt_path = None
+    if with_subtitles:
+        srt_path = projet / "subtitles.srt"
+        _write_srt(board, srt_path)
+
     cmd += [
         "-c:v",
         "libx264",
@@ -213,8 +240,12 @@ def assemble_video(video_id: int) -> dict[str, Any]:
         "tags": _build_tags(video),
         "video": str(final_path),
         "duree_sec": total,
+        "subtitles": bool(with_subtitles and srt_path and srt_path.exists()),
+        "srt": str(srt_path) if srt_path else None,
     }
-    (projet / "publish.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    (projet / "publish.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     update_video(video_id, statut="pret", chemin_video=str(final_path), duree_sec=total)
     log_event(video_id, "info", f"Montage terminé : {final_path.name} ({total/60:.1f} min)")

@@ -67,7 +67,7 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
 
     board = {
         "video_id": video_id,
-        "titre": story.get("titre") or video["titre"],
+        "titre": story.get("titre") or video_title(video),
         "scene_count": len(scenes),
         "scenes": scenes,
     }

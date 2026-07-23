@@ -2,11 +2,6 @@
 """Orchestrateur — trame d'origine.
 
 1 Script & dédup → 2 Storyboard → 3 Audio + Vidéo IA → 4 Montage → Publication auto → 5 Dashboard
-
-Usage :
-  python main.py --theme "lapin"
-  python main.py --resume 3
-  python main.py --estimate
 """
 
 from __future__ import annotations
@@ -35,6 +30,7 @@ from config import (
 from db.database import get_video, init_db, is_paused, log_event, set_paused, update_video
 from modules.audio import generate_audio
 from modules.montage import assemble_video
+from modules.progress import set_progress
 from modules.publish import publish_youtube
 from modules.sourcing import source_new_video
 from modules.storyboard import build_storyboard
@@ -44,7 +40,14 @@ from modules.wan_service import ensure_wan_running
 STEPS = ("sourcing", "storyboard", "audio", "video_ai", "montage", "publish")
 
 
-def _run_from(video_id: int, start_step: str, publish: bool) -> dict:
+def _run_from(
+    video_id: int,
+    start_step: str,
+    publish: bool,
+    *,
+    voice: str | None = None,
+    subtitles: bool = False,
+) -> dict:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo {video_id} introuvable")
@@ -54,23 +57,64 @@ def _run_from(video_id: int, start_step: str, publish: bool) -> dict:
 
     try:
         if start_idx <= STEPS.index("storyboard"):
+            set_progress(
+                step="storyboard",
+                video_id=video_id,
+                message="Decoupage des scenes…",
+            )
             result["steps"]["storyboard"] = build_storyboard(video_id)
         if start_idx <= STEPS.index("audio"):
-            result["steps"]["audio"] = generate_audio(video_id)
+            set_progress(
+                step="audio",
+                video_id=video_id,
+                message="Generation de la voix…",
+            )
+            result["steps"]["audio"] = generate_audio(video_id, voice=voice)
         if start_idx <= STEPS.index("video_ai"):
+            set_progress(
+                step="video_ai",
+                video_id=video_id,
+                message="Generation des clips video…",
+                clips_done=0,
+                clips_total=1,
+            )
             result["steps"]["video_ai"] = generate_scene_videos(video_id)
         if start_idx <= STEPS.index("montage"):
-            result["steps"]["montage"] = assemble_video(video_id)
-        # Publication automatique dès que le montage est terminé
+            set_progress(
+                step="montage",
+                video_id=video_id,
+                message="Assemblage du film…",
+            )
+            result["steps"]["montage"] = assemble_video(
+                video_id, with_subtitles=subtitles
+            )
         if publish or AUTO_PUBLISH or start_step == "publish":
+            set_progress(
+                step="publish",
+                video_id=video_id,
+                message="Publication YouTube…",
+            )
             result["steps"]["publish"] = publish_youtube(video_id, force=True)
         else:
             from modules.publish import prepare_publish_package
 
             result["steps"]["publish"] = prepare_publish_package(video_id)
+
+        set_progress(
+            step="done",
+            video_id=video_id,
+            message="Video prete",
+            detail="Tu peux la visionner dans le Tableau de bord",
+        )
     except Exception as exc:
         update_video(video_id, statut="erreur", erreur=str(exc))
         log_event(video_id, "error", str(exc))
+        set_progress(
+            step="error",
+            video_id=video_id,
+            message="Erreur pendant la generation",
+            error=str(exc)[:500],
+        )
         raise
 
     return result
@@ -83,6 +127,9 @@ def run_pipeline(
     publish: bool | None = None,
     short: bool = False,
     micro: bool = False,
+    duration_min: float | None = None,
+    voice: str | None = None,
+    subtitles: bool = False,
 ) -> dict:
     ensure_dirs()
     init_db()
@@ -92,20 +139,29 @@ def run_pipeline(
 
     provider = VIDEO_PROVIDER.lower().strip()
     if AUTO_START_WAN and provider.startswith(("pinokio", "wan")):
+        set_progress(step="start", message="Demarrage du moteur video…")
         wan = ensure_wan_running(wait_seconds=WAN_START_TIMEOUT_SEC)
         if not wan.get("ok"):
+            set_progress(
+                step="error",
+                message="Moteur video indisponible",
+                error=str(wan.get("error") or wan),
+            )
             return {
                 "ok": False,
                 "reason": "wan_indisponible",
-                "hint": "Ouvrez video ia sur le Bureau ou consultez data/wan_server.log",
+                "hint": "Relance video ia puis reessaie",
                 "wan": wan,
             }
 
     do_publish = AUTO_PUBLISH if publish is None else publish
 
-    if short or micro:
-        import config as cfg
+    import config as cfg
 
+    if duration_min is not None:
+        cfg.TARGET_DURATION_MIN = max(1.0, min(60.0, float(duration_min)))
+        cfg.SCENE_TARGET_SEC = 60 if cfg.TARGET_DURATION_MIN >= 10 else 45
+    elif short or micro:
         if micro:
             cfg.TARGET_DURATION_MIN = 1.2
             cfg.SCENE_TARGET_SEC = 40
@@ -118,23 +174,37 @@ def run_pipeline(
 
     if resume_id:
         start = only or "storyboard"
-        return {"ok": True, **_run_from(resume_id, start, do_publish)}
+        return {
+            "ok": True,
+            **_run_from(
+                resume_id, start, do_publish, voice=voice, subtitles=subtitles
+            ),
+        }
 
     if only and only != "sourcing":
         raise ValueError("Pour une étape seule hors sourcing, utilisez --resume ID")
 
+    set_progress(step="sourcing", message="Ecriture de l'histoire…")
     sourced = source_new_video(theme)
     if not sourced.get("ok"):
+        set_progress(
+            step="error",
+            message="Impossible de creer l'histoire",
+            error=str(sourced),
+        )
         return sourced
 
     video_id = int(sourced["video_id"])
+    set_progress(step="sourcing", video_id=video_id, message="Histoire prete", pct=8)
     if only == "sourcing":
         return sourced
 
     return {
         "ok": True,
         "story": sourced.get("story"),
-        **_run_from(video_id, "storyboard", do_publish),
+        **_run_from(
+            video_id, "storyboard", do_publish, voice=voice, subtitles=subtitles
+        ),
     }
 
 
@@ -142,10 +212,9 @@ def print_estimate() -> None:
     clips = estimate_ai_clips()
     provider = VIDEO_PROVIDER.lower()
     if provider.startswith(("pinokio", "wan")):
-        # Wan local : souvent 5–15 min / clip sur CPU ; 1 à la fois
-        minutes_low = clips * 5
-        minutes_high = clips * 15
-        note = "Pinokio Wan 2.1 (1 clip à la fois, CPU/Snapdragon)"
+        minutes_low = clips * 1.5
+        minutes_high = clips * 4
+        note = "Wan NVIDIA local"
     else:
         minutes_low = (clips / max(1, FAL_CONCURRENCY)) * 1.0
         minutes_high = (clips / max(1, FAL_CONCURRENCY)) * 2.5
@@ -155,8 +224,7 @@ def print_estimate() -> None:
         f"provider={VIDEO_PROVIDER} | {note}"
     )
     print(
-        f"Rendu estimé (ordre de grandeur): {minutes_low/60:.1f}–{minutes_high/60:.1f} h "
-        f"une fois Pinokio Wan prêt"
+        f"Rendu estimé: {minutes_low/60:.1f}–{minutes_high/60:.1f} h"
     )
 
 
@@ -165,13 +233,16 @@ def main() -> int:
     parser.add_argument("--theme", type=str, default=None)
     parser.add_argument("--only", type=str, default=None)
     parser.add_argument("--resume", type=int, default=None)
-    parser.add_argument("--publish", action="store_true", help="Forcer publish YouTube")
-    parser.add_argument("--no-publish", action="store_true", help="Désactiver publish pour ce run")
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--no-publish", action="store_true")
     parser.add_argument("--short", action="store_true")
     parser.add_argument("--micro", action="store_true")
+    parser.add_argument("--duration", type=float, default=None, help="Duree cible en minutes (1-60)")
+    parser.add_argument("--voice", type=str, default=None, help="Edge-TTS voice id")
+    parser.add_argument("--subtitles", action="store_true")
     parser.add_argument("--pause", action="store_true")
     parser.add_argument("--resume-pipeline", action="store_true")
-    parser.add_argument("--estimate", action="store_true", help="Estimer clips / durée de rendu")
+    parser.add_argument("--estimate", action="store_true")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -195,7 +266,7 @@ def main() -> int:
     elif args.publish:
         publish = True
     else:
-        publish = None  # suit AUTO_PUBLISH
+        publish = None
 
     try:
         result = run_pipeline(
@@ -205,6 +276,9 @@ def main() -> int:
             publish=publish,
             short=args.short or args.micro,
             micro=args.micro,
+            duration_min=args.duration,
+            voice=args.voice,
+            subtitles=args.subtitles,
         )
     except Exception:
         traceback.print_exc()

@@ -72,7 +72,7 @@ PAUSE_PIPELINE = os.getenv("CONTE_PAUSE", "0") == "1"
 
 # Démarrage auto de Wan quand on ouvre le dashboard ou le pipeline
 AUTO_START_WAN = os.getenv("CONTE_AUTO_START_WAN", "1") == "1"
-WAN_START_TIMEOUT_SEC = int(os.getenv("CONTE_WAN_START_TIMEOUT_SEC", "300"))
+WAN_START_TIMEOUT_SEC = int(os.getenv("CONTE_WAN_START_TIMEOUT_SEC", "600"))
 
 CHANNEL_NAME = os.getenv("CONTE_CHANNEL_NAME", "Contes du Soir")
 DEFAULT_TAGS = [

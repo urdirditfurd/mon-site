@@ -1,4 +1,4 @@
-"""Helpers UI — theme violet / gris clair + navigation compatible toutes versions Streamlit."""
+"""Helpers UI — mood #d0bdff / gris clair + navigation sans page_link."""
 
 from __future__ import annotations
 
@@ -48,54 +48,44 @@ RESUME_STEP = {
     "video_prete": "publish",
 }
 
+# Reference couleur utilisateur : #d0bdff
 THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap');
 
 :root {
-  --violet: #6B4EFF;
-  --violet-deep: #4A35C8;
-  --violet-soft: #EDE9FE;
-  --violet-mid: #A78BFA;
-  --grey-bg: #F3F1F7;
+  --lilac: #d0bdff;
+  --lilac-deep: #8B6FD4;
+  --lilac-ink: #3D2E6B;
+  --grey-bg: #F5F4F8;
   --grey-card: #FFFFFF;
-  --grey-line: #D8D4E4;
-  --grey-text: #5C5670;
-  --ink: #1F1833;
+  --grey-line: #E2DFEA;
+  --grey-text: #6A6478;
+  --ink: #2A2438;
 }
 
-html, body, [class*="css"] {
+html, body, [class*="css"]  {
   font-family: 'DM Sans', sans-serif;
   color: var(--ink);
 }
 
 .stApp {
   background:
-    radial-gradient(1200px 500px at 10% -10%, #EDE9FE 0%, transparent 55%),
-    radial-gradient(900px 400px at 100% 0%, #E8E4F5 0%, transparent 45%),
-    linear-gradient(180deg, #F7F5FB 0%, #F0EEF5 100%);
+    radial-gradient(1000px 420px at 8% -8%, #d0bdff 0%, transparent 55%),
+    radial-gradient(800px 360px at 100% 0%, #EDE6FF 0%, transparent 50%),
+    linear-gradient(180deg, #FAF9FC 0%, #F3F1F7 100%);
 }
 
 [data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #2B2148 0%, #3D2E6B 55%, #4A3A7A 100%);
-  border-right: 1px solid #5B4A8A;
+  background: linear-gradient(180deg, #3D2E6B 0%, #5A458C 100%);
+  border-right: 1px solid #6E5A9E;
 }
-[data-testid="stSidebar"] * {
-  color: #F3F1F7 !important;
-}
-[data-testid="stSidebar"] a {
-  color: #D6C9FF !important;
-  text-decoration: none;
-  font-weight: 600;
-}
-[data-testid="stSidebar"] .stMarkdown p {
-  color: #C9C2DC !important;
-}
+[data-testid="stSidebar"] * { color: #F7F5FB !important; }
+[data-testid="stSidebar"] a { color: #d0bdff !important; font-weight: 700; }
 
 h1, h2, h3 {
   font-family: 'Fraunces', Georgia, serif !important;
-  color: var(--ink) !important;
-  letter-spacing: -0.02em;
+  color: var(--lilac-ink) !important;
 }
 
 div[data-testid="stMetric"] {
@@ -103,85 +93,67 @@ div[data-testid="stMetric"] {
   border: 1px solid var(--grey-line);
   border-radius: 16px;
   padding: 12px 14px;
-  box-shadow: 0 8px 24px rgba(75, 53, 160, 0.06);
-}
-div[data-testid="stMetric"] label {
-  color: var(--grey-text) !important;
+  box-shadow: 0 8px 22px rgba(61, 46, 107, 0.05);
 }
 div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-  color: var(--violet-deep) !important;
+  color: var(--lilac-ink) !important;
   font-weight: 700;
 }
 
-.stButton > button {
-  background: linear-gradient(135deg, var(--violet) 0%, var(--violet-deep) 100%) !important;
-  color: white !important;
+.stButton > button[kind="primary"], .stButton > button {
+  background: linear-gradient(135deg, #d0bdff 0%, #8B6FD4 100%) !important;
+  color: #2A2438 !important;
   border: none !important;
-  border-radius: 12px !important;
-  font-weight: 600 !important;
-  box-shadow: 0 8px 20px rgba(107, 78, 255, 0.25);
-}
-.stButton > button:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 10px 24px rgba(107, 78, 255, 0.35);
+  border-radius: 14px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 8px 18px rgba(139, 111, 212, 0.28);
 }
 .stButton > button:disabled {
-  background: #C9C2DC !important;
-  color: #6B657F !important;
+  background: #E5E1EE !important;
+  color: #8A8499 !important;
   box-shadow: none !important;
 }
 
 .hero-card {
-  background: linear-gradient(135deg, #FFFFFF 0%, #F4F1FC 100%);
+  background: linear-gradient(135deg, #FFFFFF 0%, #F4EFFC 100%);
   border: 1px solid var(--grey-line);
   border-radius: 20px;
   padding: 22px 24px;
-  box-shadow: 0 12px 32px rgba(47, 30, 110, 0.07);
+  box-shadow: 0 12px 28px rgba(61, 46, 107, 0.06);
   margin-bottom: 1rem;
-}
-.hero-card h3 {
-  margin: 0 0 8px 0;
-  color: var(--violet-deep) !important;
-}
-.hero-card p {
-  color: var(--grey-text);
-  margin: 0 0 14px 0;
-}
-.nav-pill {
-  display: inline-block;
-  background: var(--violet-soft);
-  color: var(--violet-deep) !important;
-  border: 1px solid #D4CCF5;
-  border-radius: 999px;
-  padding: 10px 18px;
-  font-weight: 700;
-  text-decoration: none !important;
-  margin-right: 8px;
-  margin-bottom: 8px;
-}
-.nav-pill:hover {
-  background: #DDD6FE;
-}
-.badge-soft {
-  display: inline-block;
-  background: var(--violet-soft);
-  color: var(--violet-deep);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 0.85rem;
-  font-weight: 600;
 }
 .section-label {
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.75rem;
-  color: var(--violet-mid);
+  font-size: 0.72rem;
+  color: var(--lilac-deep);
   font-weight: 700;
-  margin-bottom: 6px;
 }
-hr {
-  border: none;
-  border-top: 1px solid var(--grey-line);
+.nav-pill {
+  display: inline-block;
+  background: #d0bdff;
+  color: #2A2438 !important;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 700;
+  text-decoration: none !important;
+  margin: 4px 6px 4px 0;
+}
+.badge-soft {
+  display: inline-block;
+  background: #d0bdff;
+  color: #2A2438;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.progress-box {
+  background: #fff;
+  border: 1px solid var(--grey-line);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin: 12px 0;
 }
 </style>
 """
@@ -216,13 +188,10 @@ def apply_theme() -> None:
 
 
 def go_page(path: str) -> None:
-    """Navigation compatible — evite st.page_link (bug url_pathname)."""
     try:
         st.switch_page(path)
     except Exception:
-        # Fallback markdown (multipage Streamlit)
         name = Path(path).stem
-        # 1_Tableau_de_bord → Tableau_de_bord
         slug = name.split("_", 1)[-1] if name[:1].isdigit() else name
         st.markdown(f"[Ouvrir {slug}](/{slug})")
 
@@ -234,20 +203,19 @@ def nav_buttons(current: str) -> None:
             go_page("dashboard.py")
     with c2:
         if st.button(
-            "1 · Tableau de bord",
+            "Suivi",
             use_container_width=True,
-            disabled=current == "Tableau",
-            type="primary" if current != "Tableau" else "secondary",
+            disabled=current == "Suivi",
         ):
             go_page("pages/1_Tableau_de_bord.py")
     with c3:
         if st.button(
-            "2 · Technique",
+            "Creation",
             use_container_width=True,
-            disabled=current == "Technique",
-            type="primary" if current != "Technique" else "secondary",
+            disabled=current == "Creation",
+            type="primary",
         ):
-            go_page("pages/2_Technique.py")
+            go_page("pages/2_Creation.py")
 
 
 def boot_app(page_title: str = "video ia") -> dict:
@@ -263,14 +231,15 @@ def boot_app(page_title: str = "video ia") -> dict:
     try:
         from streamlit_autorefresh import st_autorefresh as _ar
 
-        _ar(interval=12000, key="ui_refresh")
+        _ar(interval=4000, key="ui_refresh")
     except Exception:
         pass
 
     provider = VIDEO_PROVIDER.lower().strip()
     uses_wan = provider.startswith(("pinokio", "wan"))
+    # Demarre Wan en silence (pas besoin de montrer l'UI Gradio)
     if uses_wan and AUTO_START_WAN and "wan_boot_done" not in st.session_state:
-        with st.spinner("Demarrage Wan…"):
+        with st.spinner("Preparation du moteur video…"):
             st.session_state["wan_boot_result"] = start_wan(
                 wait_seconds=min(WAN_START_TIMEOUT_SEC, 90)
             )
@@ -290,13 +259,11 @@ def render_sidebar(active: str) -> None:
     st.sidebar.markdown("## video ia")
     st.sidebar.caption(CHANNEL_NAME)
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Deux fenetres")
+    st.sidebar.markdown("### Navigation")
     st.sidebar.markdown(
         """
-Ouvre chaque page dans un **onglet separe** (clic droit → nouvel onglet) :
-
-<a class="nav-pill" href="/Tableau_de_bord" target="_blank">📊 Tableau de bord</a><br/>
-<a class="nav-pill" href="/Technique" target="_blank">🔧 Technique</a>
+<a class="nav-pill" href="/Tableau_de_bord" target="_blank">Suivi</a><br/>
+<a class="nav-pill" href="/Creation" target="_blank">Creation</a>
 """,
         unsafe_allow_html=True,
     )
@@ -304,26 +271,16 @@ Ouvre chaque page dans un **onglet separe** (clic droit → nouvel onglet) :
     st.sidebar.markdown(f"**Page :** {active}")
 
 
-def render_wan_bar(ctx: dict, key_prefix: str = "wan") -> None:
-    health = ctx["health"]
+def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
+    """Statut moteur simplifie — sans lien Wan 7860."""
     wan_ok = ctx["wan_ok"]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Wan", "EN LIGNE" if wan_ok else "HORS LIGNE")
+    c1, c2 = st.columns([2, 1])
+    c1.metric("Moteur video", "Pret" if wan_ok else "En preparation…")
     with c2:
-        if st.button("Demarrer Wan", disabled=wan_ok, key=f"{key_prefix}_start"):
+        if not wan_ok and st.button("Relancer moteur", key=f"{key_prefix}_start"):
             st.session_state["wan_boot_result"] = start_wan(wait_seconds=WAN_START_TIMEOUT_SEC)
+            st.session_state["wan_boot_done"] = True
             st.rerun()
-    with c3:
-        if st.button(
-            "Arreter Wan",
-            disabled=not health.get("managed"),
-            key=f"{key_prefix}_stop",
-        ):
-            stop_wan()
-            st.session_state.pop("wan_boot_done", None)
-            st.rerun()
-    with c4:
-        st.link_button("Wan 7860", "http://127.0.0.1:7860")
 
 
 def audio_preview_path(video: dict) -> Path | None:

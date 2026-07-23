@@ -404,6 +404,19 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
             try:
                 fut.result()
                 log_event(video_id, "info", f"Clips IA : {done}/{len(jobs)}")
+                try:
+                    from modules.progress import set_progress
+
+                    set_progress(
+                        step="video_ai",
+                        video_id=video_id,
+                        message=f"Clip video {done}/{len(jobs)}",
+                        clips_done=done,
+                        clips_total=len(jobs),
+                        detail=f"Scene {job[0]} partie {job[1] + 1}",
+                    )
+                except Exception:
+                    pass
             except Exception as exc:
                 errors.append(f"scene {job[0]} part {job[1]}: {exc}")
 
