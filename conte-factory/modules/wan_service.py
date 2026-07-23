@@ -262,10 +262,26 @@ def _wait_for_gradio(
     track_pid: bool,
 ) -> dict[str, Any]:
     deadline = time.time() + wait_seconds
+    started_at = time.time()
     last_health: dict[str, Any] = {}
     while time.time() < deadline:
+        elapsed = int(time.time() - started_at)
+        # 0 → ~4 % pendant l'attente Wan (évite l'impression de plantage à 0 %)
+        soft_pct = min(4.0, round(elapsed / max(1, wait_seconds) * 4.0, 1))
+        set_progress(
+            step="start",
+            pct=soft_pct,
+            message="Demarrage du moteur video…",
+            detail=f"Chargement du modele GPU — {elapsed}s / {wait_seconds}s",
+        )
         last_health = pinokio_wan_health(deep=False)
         if last_health.get("gradio_up"):
+            set_progress(
+                step="start",
+                pct=5,
+                message="Moteur video pret",
+                detail="Lancement de l'histoire…",
+            )
             return {
                 "ok": True,
                 "started": started,

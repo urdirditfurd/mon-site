@@ -140,7 +140,12 @@ def run_pipeline(
 
     provider = VIDEO_PROVIDER.lower().strip()
     if AUTO_START_WAN and provider.startswith(("pinokio", "wan")):
-        set_progress(step="start", message="Demarrage du moteur video…")
+        set_progress(
+            step="start",
+            pct=1,
+            message="Demarrage du moteur video…",
+            detail="Premier demarrage = chargement modele (peut prendre plusieurs minutes)",
+        )
         wan = ensure_wan_running(wait_seconds=WAN_START_TIMEOUT_SEC)
         if not wan.get("ok"):
             set_progress(
