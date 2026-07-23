@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from config import SCENE_TARGET_SEC, VISUAL_STYLE
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, update_video, video_title
 
 
 def _split_paragraphs(script: str) -> list[str]:

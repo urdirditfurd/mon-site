@@ -104,6 +104,9 @@ def assemble_video(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
+    from db.database import video_title
+
+    titre = video_title(video)
     projet = Path(video["chemin_projet"])
     board = json.loads((projet / "storyboard.json").read_text(encoding="utf-8"))
     ai_dir = projet / "ai_clips"
@@ -161,7 +164,7 @@ def assemble_video(video_id: int) -> dict[str, Any]:
     )
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in video["titre"])[:60]
+    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in titre)[:60]
     final_path = EXPORTS_DIR / f"{video_id:04d}_{safe_title}.mp4"
 
     music = _find_music()
@@ -200,9 +203,9 @@ def assemble_video(video_id: int) -> dict[str, Any]:
 
     total = _ffprobe_duration(final_path)
     meta = {
-        "titre": video["titre"],
+        "titre": titre,
         "description": (
-            f"🌙 {video['titre']}\n\n"
+            f"🌙 {titre}\n\n"
             f"Conte généré par IA (~{total/60:.0f} min).\n"
             f"Thème : {video.get('theme') or 'aventure magique'}.\n"
             f"#conte #enfants #histoiredusoir\n"
