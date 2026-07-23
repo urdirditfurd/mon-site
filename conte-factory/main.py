@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import traceback
 from pathlib import Path
@@ -72,6 +73,14 @@ def _run_from(
             result["steps"]["audio"] = generate_audio(video_id, voice=voice)
         if start_idx <= STEPS.index("video_ai"):
             n_clips = max(1, estimate_ai_clips())
+            try:
+                projet = Path(video["chemin_projet"])
+                board_path = projet / "storyboard.json"
+                if board_path.exists():
+                    board = json.loads(board_path.read_text(encoding="utf-8"))
+                    n_clips = max(1, int(board.get("scene_count") or len(board.get("scenes") or [])))
+            except Exception:
+                pass
             set_progress(
                 step="video_ai",
                 video_id=video_id,
