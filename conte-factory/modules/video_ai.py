@@ -38,6 +38,7 @@ from config import (
     VIDEO_PROVIDER,
 )
 from db.database import get_video, log_event, update_video
+from modules.progress import set_progress
 
 FAL_QUEUE = "https://queue.fal.run"
 
