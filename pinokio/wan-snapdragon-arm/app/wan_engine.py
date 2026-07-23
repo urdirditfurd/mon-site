@@ -80,6 +80,22 @@ _PIPE = None
 _PIPE_META: dict | None = None
 
 
+def _log(msg: str) -> None:
+    """Print ASCII-safe logs (Windows cp1252 console breaks on ≤, —, …)."""
+    safe = (
+        msg.replace("≤", "<=")
+        .replace("≥", ">=")
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("…", "...")
+        .replace("×", "x")
+    )
+    try:
+        print(safe, flush=True)
+    except UnicodeEncodeError:
+        print(safe.encode("ascii", "replace").decode("ascii"), flush=True)
+
+
 def _cuda_dtype() -> torch.dtype:
     """RTX 30xx : float16 >> bfloat16 (BF16 peut être 10–50× plus lent)."""
     override = (os.environ.get("WAN_DTYPE") or "").strip().lower()
@@ -133,12 +149,11 @@ def get_pipe(cache_dir: str | None, device: str):
     _tune_cuda()
     dtype = _cuda_dtype() if device == "cuda" else torch.float32
     free_b, total_b = _vram_gb()
-    print(
+    _log(
         f"[wan_engine] device={device} dtype={dtype} "
         f"cuda={torch.cuda.is_available()} "
         f"gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a'} "
-        f"VRAM={free_b:.1f}/{total_b:.1f}Go",
-        flush=True,
+        f"VRAM={free_b:.1f}/{total_b:.1f}Go"
     )
 
     vae = AutoencoderKLWan.from_pretrained(
@@ -173,10 +188,7 @@ def get_pipe(cache_dir: str | None, device: str):
             # Offload : un module à la fois sur le GPU → évite le swap (139–270 s/step).
             pipe.enable_model_cpu_offload()
             placement = "cuda+cpu_offload"
-            print(
-                f"[wan_engine] enable_model_cpu_offload (GPU {total_b:.0f}Go ≤12Go)",
-                flush=True,
-            )
+            _log(f"[wan_engine] enable_model_cpu_offload (GPU {total_b:.0f}Go <=12Go)")
         else:
             pipe = pipe.to(device)
             placement = "cuda_full"
@@ -193,9 +205,8 @@ def get_pipe(cache_dir: str | None, device: str):
                     pass
 
     free_a, total_a = _vram_gb()
-    print(
-        f"[wan_engine] pipe ready placement={placement} VRAM free={free_a:.1f}/{total_a:.1f}Go",
-        flush=True,
+    _log(
+        f"[wan_engine] pipe ready placement={placement} VRAM free={free_a:.1f}/{total_a:.1f}Go"
     )
 
     _PIPE = pipe
@@ -253,18 +264,16 @@ def generate_video(
             f"Génération {device_label(device)}/{dtype_label} — {num_frames}f × {steps} steps…",
         )
 
-    print(
+    _log(
         f"[wan_engine] generate start device={device_label(device)} dtype={dtype_label} "
-        f"placement={placement} {width}x{height} frames={num_frames} steps={steps}",
-        flush=True,
+        f"placement={placement} {width}x{height} frames={num_frames} steps={steps}"
     )
     if device == "cuda":
         free, total = _vram_gb()
-        print(f"[wan_engine] VRAM free={free:.1f}Go / total={total:.1f}Go", flush=True)
+        _log(f"[wan_engine] VRAM free={free:.1f}Go / total={total:.1f}Go")
         if free < 0.5 and "offload" not in placement:
-            print(
-                "[wan_engine] WARNING: VRAM quasi pleine sans offload — risque de swap lent",
-                flush=True,
+            _log(
+                "[wan_engine] WARNING: VRAM almost full without offload - swap risk"
             )
 
     kwargs = {
@@ -285,10 +294,9 @@ def generate_video(
     frames = result.frames[0]
     elapsed = time.perf_counter() - t0
     per_step = elapsed / max(1, steps)
-    print(
+    _log(
         f"[wan_engine] denoising done in {elapsed:.1f}s "
-        f"({per_step:.1f}s/step) — cible <15s/step sur RTX 3080 10Go + offload",
-        flush=True,
+        f"({per_step:.1f}s/step) - target <15s/step on RTX 3080 10GB + offload"
     )
 
     if progress_callback:

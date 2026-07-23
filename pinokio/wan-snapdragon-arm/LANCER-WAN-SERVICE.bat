@@ -15,6 +15,8 @@ set WAN_DTYPE=float16
 set WAN_MODEL_CACHE=%~dp0models
 set GRADIO_SERVER_PORT=7860
 set HF_HUB_DISABLE_SYMLINKS_WARNING=1
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 if defined WAN_SERVICE_LOG (
   echo [%date% %time%] Demarrage gradio_server.py avec %PY%>>"%WAN_SERVICE_LOG%"
   "%PY%" gradio_server.py 1>>"%WAN_SERVICE_LOG%" 2>&1
