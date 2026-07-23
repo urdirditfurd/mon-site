@@ -9,9 +9,11 @@ if not exist "%PY%" (
 )
 set SULPHUR_SNAPDRAGON=
 set SULPHUR_ALLOW_CPU=0
+set SULPHUR_CPU_OFFLOAD=1
 set WAN_DTYPE=float16
 set WAN_MODEL_CACHE=%~dp0models
 set GRADIO_SERVER_PORT=7860
+set HF_HUB_DISABLE_SYMLINKS_WARNING=1
 echo.
 echo Wan NVIDIA - http://127.0.0.1:7860
 echo Keep this window open.

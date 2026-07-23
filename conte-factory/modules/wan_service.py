@@ -165,6 +165,9 @@ def _start_wan_windows(wan_root: Path) -> None:
     env["WAN_SERVICE_LOG"] = str(LOG_FILE)
     env["SULPHUR_SNAPDRAGON"] = ""
     env["SULPHUR_ALLOW_CPU"] = "0"
+    env["SULPHUR_CPU_OFFLOAD"] = env.get("SULPHUR_CPU_OFFLOAD") or "1"
+    env["WAN_DTYPE"] = env.get("WAN_DTYPE") or "float16"
+    env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     env["WAN_MODEL_CACHE"] = str(wan_root / "models")
     env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
 
@@ -190,6 +193,9 @@ def _start_wan_posix(wan_dir: Path, py: str, gradio_script: Path) -> int:
     env = os.environ.copy()
     env["SULPHUR_SNAPDRAGON"] = ""
     env["SULPHUR_ALLOW_CPU"] = "0"
+    env["SULPHUR_CPU_OFFLOAD"] = env.get("SULPHUR_CPU_OFFLOAD") or "1"
+    env["WAN_DTYPE"] = env.get("WAN_DTYPE") or "float16"
+    env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     env["WAN_MODEL_CACHE"] = str(wan_dir.parent / "models")
     env["GRADIO_SERVER_PORT"] = PINOKIO_WAN_URL.rsplit(":", 1)[-1].rstrip("/") or "7860"
 
