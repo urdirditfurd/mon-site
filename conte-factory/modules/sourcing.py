@@ -54,32 +54,79 @@ def _title_from_theme(theme: str) -> str:
     return short[0].upper() + short[1:] if short else "Conte du soir"
 
 
+def _hero_short_name(theme: str) -> str:
+    """Nom court pour la voix (évite de lire tout le prompt UI)."""
+    raw = re.sub(r"\s+", " ", (theme or "").strip())
+    if not raw:
+        return "une créature magique"
+    # « dragon violet qui vole… » → « dragon violet »
+    m = re.match(r"^(.+?)\s+qui\b", raw, flags=re.IGNORECASE)
+    if m:
+        short = m.group(1).strip(" ,.;:")
+        if 2 <= len(short) <= 60:
+            return short
+    if len(raw) <= 48:
+        return raw
+    return raw[:48].rsplit(" ", 1)[0].strip(" ,.;:") or raw[:40]
+
+
+def _theme_traits(theme: str) -> dict[str, str]:
+    """Traits du prompt pour dialogues cohérents (chant, couleurs, vol…)."""
+    t = (theme or "").lower()
+    color = "violet foncé" if "violet" in t else ("bleu" if "bleu" in t else "magique")
+    if any(w in t for w in ("chant", "chante", "chanson", "mélodie", "melodie")):
+        gift = "mon chant doux"
+        gift_verb = "chanter pour les nuages"
+        gift_show = f"J'ouvre la voix — mon chant {color} enveloppe le ciel."
+    elif any(w in t for w in ("feu", "crache", "flamme")):
+        gift = "mon feu doux"
+        gift_verb = "faire briller mon feu"
+        gift_show = f"Voici mon feu {color} ! J'illumine les nuages sans faire peur."
+    else:
+        gift = "ma magie douce"
+        gift_verb = "partager ma magie"
+        gift_show = f"Voici ma magie {color} ! Les nuages sourient."
+    place = "les nuages" if "nuage" in t else "le ciel du soir"
+    return {
+        "color": color,
+        "gift": gift,
+        "gift_verb": gift_verb,
+        "gift_show": gift_show,
+        "place": place,
+    }
+
+
 def _friend_name(subject: str) -> str:
     return "Lumi l'étoile"
 
 
 def _dialogue_scenes(subject: str, lesson: str, scenes_n: int) -> list[list[dict[str, str]]]:
     """Scènes = répliques jouées par les personnages (pas de narrateur VO)."""
-    s = subject
+    s = _hero_short_name(subject)
+    traits = _theme_traits(subject)
     ami = _friend_name(subject)
     n = max(4, int(scenes_n))
+    gift = traits["gift"]
+    gift_verb = traits["gift_verb"]
+    gift_show = traits["gift_show"]
+    place = traits["place"]
 
     # Paires de répliques progressives (héros / ami) — contenu unique
     pairs: list[list[dict[str, str]]] = [
         [
             {"speaker": "heros", "text": f"Bonsoir… C'est moi, {s}. Ce soir, je vais te raconter mon aventure."},
-            {"speaker": "ami", "text": f"Je t'écoute, {s} ! Montre-moi le ciel et ton courage."},
+            {"speaker": "ami", "text": f"Je t'écoute, {s} ! Montre-moi {place} et ton courage."},
         ],
         [
-            {"speaker": "heros", "text": f"Regarde ces nuages moelleux. Je, {s}, vais m'élancer tout doucement."},
+            {"speaker": "heros", "text": f"Regarde ces nuages moelleux. Moi, {s}, je m'élance tout doucement."},
             {"speaker": "ami", "text": f"Vas-y, {s}. Je vole juste à côté de toi."},
         ],
         [
-            {"speaker": "heros", "text": f"Le vent chante. Mes ailes — les ailes de {s} — battent la mesure."},
+            {"speaker": "heros", "text": f"Le vent murmure. Mes ailes battent la mesure — et j'aime {gift_verb}."},
             {"speaker": "ami", "text": "Quelles belles couleurs ! Continue, je te suis."},
         ],
         [
-            {"speaker": "heros", "text": f"Plus haut… Oh ! Une porte de nuages roses. Je, {s}, passe le premier."},
+            {"speaker": "heros", "text": f"Plus haut… Oh ! Une porte de nuages roses. Moi, {s}, je passe le premier."},
             {"speaker": "ami", "text": f"Après toi, {s}. Quel monde magique !"},
         ],
         [
@@ -87,7 +134,7 @@ def _dialogue_scenes(subject: str, lesson: str, scenes_n: int) -> list[list[dict
             {"speaker": "ami", "text": f"Je crois en toi, {s}. Dis-moi ce que tu veux accomplir."},
         ],
         [
-            {"speaker": "heros", "text": f"Je veux voler librement et cracher mon feu bleu, comme {s} sait le faire."},
+            {"speaker": "heros", "text": f"Je veux voler librement et partager {gift}, comme moi, {s}, je sais le faire."},
             {"speaker": "ami", "text": "Alors montre-moi. Doucement, pour les enfants qui écoutent."},
         ],
         [
@@ -99,8 +146,8 @@ def _dialogue_scenes(subject: str, lesson: str, scenes_n: int) -> list[list[dict
             {"speaker": "ami", "text": "Bravo ! Chaque geste est le tien, unique."},
         ],
         [
-            {"speaker": "heros", "text": "Une lumière bleue danse autour de moi. Elle me guide."},
-            {"speaker": "ami", "text": f"Suis-la, {s}. Elle aime ton feu bleu."},
+            {"speaker": "heros", "text": f"Une lumière danse autour de moi près de {place}. Elle me guide."},
+            {"speaker": "ami", "text": f"Suis-la, {s}. Elle aime {gift}."},
         ],
         [
             {"speaker": "heros", "text": f"Une étoile timide ! Bonjour petite étoile, je suis {s}."},
@@ -116,7 +163,7 @@ def _dialogue_scenes(subject: str, lesson: str, scenes_n: int) -> list[list[dict
             {"speaker": "ami", "text": "Montre ta magie ! Celle qui n'appartient qu'à toi."},
         ],
         [
-            {"speaker": "heros", "text": f"Voici mon feu bleu ! Moi, {s}, j'illumine les nuages."},
+            {"speaker": "heros", "text": gift_show},
             {"speaker": "ami", "text": "Magnifique ! Les nuages applaudissent presque."},
             {"speaker": "choeur", "text": f"Bravo {s} ! Bravo !"},
         ],
@@ -198,19 +245,22 @@ def _enrich_dialogue_to_duration(
 ) -> list[list[dict[str, str]]]:
     """Allonge les répliques jusqu'au budget mots — sans recycler l'arc."""
     target = _target_words(duration_min)
+    name = _hero_short_name(subject)
+    traits = _theme_traits(subject)
     extras_heros = [
-        f"Je sens le vent sur mon visage — le visage de {subject}.",
-        f"Chaque battement d'aile dit mon nom : {subject}.",
+        f"Je sens le vent sur mon visage — moi, {name}.",
+        f"Chaque battement d'aile dit mon nom : {name}.",
+        f"J'aime {traits['gift_verb']}, tout doucement.",
         "Je parle doucement, pour que tu m'entendes bien.",
         "Regarde bien ce que je fais maintenant.",
         "Je ne suis pas un autre animal : c'est vraiment moi.",
     ]
     extras_ami = [
-        f"Je te vois clairement, {subject}.",
+        f"Je te vois clairement, {name}.",
         "Continue, je reste avec toi.",
         "Les enfants t'écoutent avec le cœur.",
-        "C'est beau, et ce n'est pas effrayant.",
-        f"Raconte encore un peu, {subject}.",
+        f"Ton {traits['gift']} est beau, et ce n'est pas effrayant.",
+        f"Raconte encore un peu, {name}.",
     ]
 
     def total_words() -> int:
@@ -244,11 +294,12 @@ def _builtin_story(
 ) -> dict[str, Any]:
     minutes = float(duration_min if duration_min is not None else TARGET_DURATION_MIN)
     subject = (theme or "une créature magique douce").strip()
-    hero = subject
-    place = "un ciel de nuages moelleux"
+    hero = _hero_short_name(subject)
+    traits = _theme_traits(subject)
+    place = f"un ciel près de {traits['place']}"
     lesson = random.choice(LESSONS)
     scenes_n = scene_count_for_duration(minutes, age_group=age_group)
-    titre = _title_from_theme(subject)
+    titre = _title_from_theme(hero)
 
     dialogue_scenes = _enrich_dialogue_to_duration(
         _dialogue_scenes(subject, lesson, scenes_n),
@@ -264,6 +315,7 @@ def _builtin_story(
         "script": script,
         "dialogue_scenes": dialogue_scenes,
         "hero": hero,
+        "hero_description": subject,
         "friend": _friend_name(subject),
         "place": place,
         "age_group": age_group,
@@ -421,6 +473,7 @@ def source_new_video(
         "theme": story.get("theme"),
         "morale": story.get("morale"),
         "hero": story.get("hero"),
+        "hero_description": story.get("hero_description") or story.get("theme"),
         "friend": story.get("friend"),
         "place": story.get("place"),
         "script": script,

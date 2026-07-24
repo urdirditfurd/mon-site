@@ -24,7 +24,8 @@ def _find_music(preference: str = "berceuse") -> Path | None:
             files = sorted(MUSIC_DIR.glob(ext))
             if files:
                 return files[0]
-        return None
+        # Pas de fichier dans assets/music → berceuse générée (évite vidéo muette)
+        pref = "berceuse"
     # berceuse générée (libre)
     MUSIC_DIR.mkdir(parents=True, exist_ok=True)
     lullaby = MUSIC_DIR / "berceuse_douce.ogg"

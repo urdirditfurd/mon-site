@@ -15,6 +15,7 @@ from config import (
     scene_sec_for_audience,
 )
 from db.database import get_video, log_event, update_video, video_title
+from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
 
 
 _SPEAKER_RE = re.compile(
@@ -105,10 +106,10 @@ def _visual_prompt(
     story: dict[str, Any],
     part: int = 0,
 ) -> str:
-    from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
-
     hero = str(story.get("hero") or story.get("theme") or "a magical character")
-    theme = str(story.get("theme") or hero)
+    theme = str(
+        story.get("hero_description") or story.get("theme") or hero
+    )
     friend = str(story.get("friend") or "a friendly star companion")
     place = str(story.get("place") or "an enchanted sky with soft clouds")
     style = str(story.get("visual_style") or VISUAL_STYLE)
@@ -128,7 +129,7 @@ def _visual_prompt(
     return (
         f"{style}. "
         f"Animated children's film shot at cinematic 24fps feel (NOT a still photo, NOT hyper-real 60fps). "
-        f"Main subject MUST be: {theme}. Same character: {hero}. Friend: {friend}. "
+        f"Main subject MUST be: {theme}. Same character name: {hero}. Friend: {friend}. "
         f"Setting: {place}. "
         f"Action: {who}. Dialogue vibe: {snippet}. "
         f"Motion: {motion}. "
@@ -139,8 +140,6 @@ def _visual_prompt(
 
 
 def build_storyboard(video_id: int) -> dict[str, Any]:
-    from modules.youth_spec import normalize_age, youth_profile
-
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
@@ -198,6 +197,7 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "duration_min": duration_min,
         "theme": story.get("theme"),
         "hero": story.get("hero"),
+        "hero_description": story.get("hero_description") or story.get("theme"),
         "friend": story.get("friend"),
         "style_key": story.get("style_key"),
         "visual_style": story.get("visual_style"),

@@ -10,22 +10,20 @@ import json
 from pathlib import Path
 from typing import Any
 
+from modules.creative_options import style_prompt
 from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
 
 
 def _portrait_prompt(role: str, description: str, style_key: str, age_group: str) -> str:
-    from modules.creative_options import style_prompt
-
     profile = youth_profile(age_group)
     base_style = style_prompt(style_key)
     who = description.strip() or "a friendly magical creature"
     role_label = "main hero" if role == "heros" else "cute friend companion"
+    # Style UI (aquarelle…) + visage lisible pour lip-sync (pas forcer Pixar)
     return (
-        f"Cute 3D Pixar style illustration, vibrant pastel colors, bright soft lighting, "
-        f"front view character portrait, clear facial features, friendly expression, "
-        f"clean soft background, highly detailed children's character, 8k render. "
-        f"{base_style}. "
+        f"{base_style}, front view character portrait, clear facial features, "
+        f"friendly expression, clean soft background, highly detailed children's character. "
         f"Subject ({role_label}): {who}. "
         f"Medium close-up, face clearly visible and large enough for lip-sync, "
         f"looking at camera, mouth slightly closed, eyes open, "
@@ -40,9 +38,14 @@ def ensure_character_refs(projet: Path, board: dict[str, Any]) -> dict[str, Path
     refs_dir.mkdir(parents=True, exist_ok=True)
     meta_path = refs_dir / "refs.json"
 
-    hero = str(board.get("hero") or board.get("theme") or "magical hero")
+    hero = str(
+        board.get("hero_description")
+        or board.get("theme")
+        or board.get("hero")
+        or "magical hero"
+    )
     friend = str(board.get("friend") or "Lumi the friendly star")
-    style_key = str(board.get("style_key") or "3d_mignon")
+    style_key = str(board.get("style_key") or "aquarelle")
     age = normalize_age(str(board.get("age_group") or "1-10"))
     theme_key = str(board.get("theme") or hero)
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000

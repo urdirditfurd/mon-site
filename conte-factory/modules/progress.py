@@ -29,7 +29,7 @@ STEP_LABELS = {
     "sourcing": "Ecriture de l'histoire",
     "storyboard": "Decoupage des scenes",
     "audio": "Generation de la voix",
-    "video_ai": "Generation des images animees",
+    "video_ai": "Lip-sync / portraits",
     "montage": "Assemblage du film",
     "publish": "Publication YouTube",
     "done": "Termine",

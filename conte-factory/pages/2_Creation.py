@@ -14,10 +14,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import estimate_ai_clips, estimate_render_minutes
+from config import VIDEO_PROVIDER, estimate_ai_clips, estimate_render_minutes
 from modules.creative_options import MUSIC_OPTIONS
 from modules import job_runner as job_runner_mod
 from modules.progress import get_progress
+from modules.youth_spec import youth_profile
 from ui_helpers import boot_app, go_page, nav_buttons, render_engine_status, render_sidebar
 
 # Recharge le module a chaque run Streamlit (evite TypeError style_key apres git pull)
@@ -53,7 +54,8 @@ running = bool(job.get("running") and status.get("alive"))
 with st.form("create_form", clear_on_submit=False):
     theme = st.text_input(
         "Theme ou prompt",
-        placeholder="ex: un dragon violet fonce qui vole et crache du feu bleu",
+        value=st.session_state.get("last_theme", ""),
+        placeholder="ex: un dragon violet fonce qui vole et chante dans les nuages",
         help="Decris EXACTEMENT le heros / l'action. L'histoire parlera de ca.",
     )
     duration = st.slider(
@@ -108,7 +110,7 @@ with st.form("create_form", clear_on_submit=False):
             "4-6 ans (rythme moyen, palette riche)",
             "7-10 ans (rythme cinema narratif)",
         ],
-        index=0,
+        index=3,
         help="FPS 24, mix voix prioritaire, couleurs et rythme adaptes a l'age.",
     )
     age_map = {
@@ -127,6 +129,7 @@ with st.form("create_form", clear_on_submit=False):
             "Aucune",
         ],
         index=0,
+        help="Si 'fichier' sans MP3 dans assets/music, berceuse generee automatiquement.",
     )
     music_map = {
         "Berceuse douce (generee, libre)": "berceuse",
@@ -140,9 +143,6 @@ with st.form("create_form", clear_on_submit=False):
 
     scenes = estimate_ai_clips(float(duration), age_group=age_group)
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
-    from config import VIDEO_PROVIDER
-    from modules.youth_spec import youth_profile
-
     provider = VIDEO_PROVIDER.lower().strip()
     yp = youth_profile(age_group)
     if provider in {"talking", "lipsync", "talk"}:
@@ -177,6 +177,7 @@ if submitted:
     elif ctx["uses_wan"] and not ctx["wan_ok"]:
         st.error("Moteur video pas encore pret — attends puis reessaie.")
     else:
+        st.session_state["last_theme"] = theme.strip()
         payload = {
             "theme": theme.strip(),
             "duration_min": float(duration),
@@ -204,7 +205,7 @@ if submitted:
             filtered = {k: v for k, v in payload.items() if k in params}
         result = start_generation_job(**filtered)
         if result.get("ok"):
-            st.success("Generation lancee.")
+            st.success("Generation lancee — regarde le % ci-dessous.")
             st.rerun()
         else:
             st.warning(result.get("error") or result)
@@ -215,6 +216,15 @@ progress = get_progress()
 pct = float(progress.get("pct") or 0)
 label = progress.get("label") or progress.get("message") or "En attente"
 updated = progress.get("updated_at") or ""
+step = str(progress.get("step") or "idle")
+
+if step in {"idle", ""} and not running:
+    st.info(
+        "Remplis le formulaire puis clique **Generer la video**. "
+        "Le pourcentage se met a jour ici (Histoire → Voix → Lip-sync → Montage)."
+    )
+elif running and step in {"start", "idle"}:
+    st.info("Demarrage du pipeline… le % va bouger dans quelques secondes.")
 
 st.markdown(
     f"""
@@ -233,7 +243,7 @@ st.progress(min(1.0, pct / 100.0))
 cols = st.columns(3)
 if progress.get("clips_total"):
     cols[0].metric(
-        "Clips",
+        "Repliques",
         f"{progress.get('clips_done') or 0}/{progress.get('clips_total')}",
     )
 if progress.get("video_id"):
@@ -244,7 +254,7 @@ steps_ui = [
     ("sourcing", "Histoire"),
     ("storyboard", "Scenes"),
     ("audio", "Voix"),
-    ("video_ai", "Images animees"),
+    ("video_ai", "Lip-sync"),
     ("montage", "Montage"),
     ("done", "Termine"),
 ]
@@ -271,6 +281,14 @@ st.caption(" → ".join(chips))
 
 if progress.get("error"):
     st.error(progress["error"])
+    log_path = ROOT / "data" / "job.log"
+    if log_path.exists():
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2500:]
+            with st.expander("Journal technique (fin du log)"):
+                st.code(tail or "(vide)")
+        except Exception:
+            pass
 
 ref_cols = st.columns(2)
 with ref_cols[0]:
