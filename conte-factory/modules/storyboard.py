@@ -1,4 +1,4 @@
-"""Étape 2 — Découper le script en scènes + prompts visuels."""
+"""Étape 2 — Scènes dialogues + prompts visuels (personnages qui parlent)."""
 
 from __future__ import annotations
 
@@ -17,117 +17,117 @@ from config import (
 from db.database import get_video, log_event, update_video, video_title
 
 
-def _sentences(text: str) -> list[str]:
-    parts = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text) if s.strip()]
-    return parts or ([text.strip()] if text.strip() else [])
+_SPEAKER_RE = re.compile(
+    r"^\[(?P<sp>HEROS|HÉROS|AMI|CHOEUR|CHŒUR|NARRATEUR)\]\s*(?P<text>.+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
-def _split_words(text: str, parts: int) -> list[str]:
-    words = text.split()
-    if parts <= 1 or len(words) < parts * 2:
-        return [text]
-    size = max(1, len(words) // parts)
-    out: list[str] = []
-    for i in range(parts):
-        start = i * size
-        end = len(words) if i == parts - 1 else (i + 1) * size
-        chunk = " ".join(words[start:end]).strip()
-        if chunk:
-            out.append(chunk)
-    return out or [text]
+def _normalize_speaker(raw: str) -> str:
+    key = (raw or "heros").strip().lower()
+    key = key.replace("é", "e").replace("œ", "oe")
+    if key in {"heros", "hero", "héros"}:
+        return "heros"
+    if key in {"ami", "amie", "friend"}:
+        return "ami"
+    if key in {"choeur", "chorus"}:
+        return "choeur"
+    return "heros"
 
 
-def _chunk_to_n(script: str, target_n: int) -> list[str]:
-    """Regroupe le script en au plus `target_n` scènes (ordre préservé)."""
-    target_n = max(1, int(target_n))
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", script) if p.strip()]
-    if not paragraphs:
-        return [script.strip() or ""]
+def _parse_dialogue_block(block: str) -> list[dict[str, str]]:
+    lines: list[dict[str, str]] = []
+    for match in _SPEAKER_RE.finditer(block):
+        text = (match.group("text") or "").strip()
+        if text:
+            lines.append(
+                {"speaker": _normalize_speaker(match.group("sp")), "text": text}
+            )
+    if lines:
+        return lines
+    # Fallback : tout le bloc dit par le héros
+    clean = " ".join(block.split())
+    if clean:
+        return [{"speaker": "heros", "text": clean}]
+    return []
 
-    units: list[str] = []
-    for para in paragraphs:
-        units.extend(_sentences(para))
-    if not units:
-        return [script.strip() or ""]
 
-    # Pas assez d'unités : découper les plus longues
-    while len(units) < target_n:
-        longest_i = max(range(len(units)), key=lambda i: len(units[i].split()))
-        words = units[longest_i].split()
-        if len(words) < 8:
+def _dialogue_from_story(story: dict[str, Any], target_n: int) -> list[list[dict[str, str]]]:
+    raw = story.get("dialogue_scenes")
+    if isinstance(raw, list) and raw:
+        scenes: list[list[dict[str, str]]] = []
+        for item in raw:
+            if isinstance(item, list) and item:
+                cleaned = []
+                for line in item:
+                    if not isinstance(line, dict):
+                        continue
+                    text = str(line.get("text") or "").strip()
+                    if not text:
+                        continue
+                    cleaned.append(
+                        {
+                            "speaker": _normalize_speaker(str(line.get("speaker") or "heros")),
+                            "text": text,
+                        }
+                    )
+                if cleaned:
+                    scenes.append(cleaned)
+        if scenes:
+            return scenes[:target_n] if len(scenes) >= target_n else scenes
+
+    script = str(story.get("script") or "")
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", script) if b.strip()]
+    scenes = [_parse_dialogue_block(b) for b in blocks]
+    scenes = [s for s in scenes if s]
+    if not scenes:
+        scenes = [[{"speaker": "heros", "text": script.strip() or "..."}]]
+    # Ajuster au nombre de scènes cible
+    while len(scenes) < target_n and scenes:
+        # découper la plus longue
+        longest_i = max(range(len(scenes)), key=lambda i: sum(len(x["text"]) for x in scenes[i]))
+        long = scenes[longest_i]
+        if len(long) < 2:
             break
-        mid = len(words) // 2
-        units[longest_i : longest_i + 1] = [
-            " ".join(words[:mid]),
-            " ".join(words[mid:]),
-        ]
-
-    if len(units) <= target_n:
-        return units
-
-    # Trop d'unités : fusionner en `target_n` blocs équilibrés (mots)
-    total_words = sum(max(1, len(u.split())) for u in units)
-    ideal = total_words / target_n
-    chunks: list[str] = []
-    buf: list[str] = []
-    buf_words = 0
-    slots_left = target_n
-
-    for idx, unit in enumerate(units):
-        w = max(1, len(unit.split()))
-        units_after = len(units) - idx - 1
-        can_flush = bool(buf) and slots_left > 1 and units_after >= (slots_left - 1)
-        should_flush = can_flush and buf_words + w > ideal and buf_words >= ideal * 0.55
-
-        if should_flush:
-            chunks.append(" ".join(buf).strip())
-            buf = [unit]
-            buf_words = w
-            slots_left -= 1
-        else:
-            buf.append(unit)
-            buf_words += w
-
-        if slots_left == 1:
-            # tout le reste dans le dernier slot
-            rest = units[idx + 1 :]
-            if rest:
-                buf.extend(rest)
-            break
-
-    if buf:
-        chunks.append(" ".join(buf).strip())
-
-    while len(chunks) > target_n and len(chunks) >= 2:
-        chunks[-2] = f"{chunks[-2]} {chunks[-1]}".strip()
-        chunks.pop()
-
-    if len(chunks) < target_n and chunks:
-        # Répartir encore un peu si possible
-        need = target_n - len(chunks)
-        longest_i = max(range(len(chunks)), key=lambda i: len(chunks[i].split()))
-        pieces = _split_words(chunks[longest_i], need + 1)
-        if len(pieces) > 1:
-            chunks[longest_i : longest_i + 1] = pieces
-
-    return chunks[:target_n] if len(chunks) >= target_n else (chunks or [script.strip()])
+        mid = len(long) // 2
+        scenes[longest_i : longest_i + 1] = [long[:mid], long[mid:]]
+    if len(scenes) > target_n:
+        # fusionner la fin
+        while len(scenes) > target_n:
+            scenes[-2] = scenes[-2] + scenes[-1]
+            scenes.pop()
+    return scenes
 
 
-def _visual_prompt(narration: str, index: int, story: dict[str, Any]) -> str:
+def _visual_prompt(
+    dialogue: list[dict[str, str]],
+    index: int,
+    story: dict[str, Any],
+    part: int = 0,
+) -> str:
     hero = str(story.get("hero") or story.get("theme") or "a magical character")
     theme = str(story.get("theme") or hero)
-    place = str(story.get("place") or "an enchanted sky")
+    friend = str(story.get("friend") or "a friendly star companion")
+    place = str(story.get("place") or "an enchanted sky with soft clouds")
     style = str(story.get("visual_style") or VISUAL_STYLE)
-    # Extraire un moment concret (début de la narration)
-    snippet = narration[:220].replace("\n", " ").strip()
-    # Forcer la cohérence personnage / thème sur CHAQUE image
+    speakers = {d.get("speaker") for d in dialogue}
+    who = "hero speaking to friend" if "ami" in speakers else "hero speaking expressively"
+    snippet = " ".join(d.get("text", "")[:80] for d in dialogue[:2])
+    motions = [
+        "gentle camera push-in, wings moving, mouth animating while speaking",
+        "slow orbit around characters, expressive gestures, breathing motion",
+        "dynamic flying through clouds, speaking and smiling, blue fire accents if dragon",
+        "soft parallax, characters reacting to each other, lively eyes and mouth",
+    ]
+    motion = motions[(index + part) % len(motions)]
     return (
         f"{style}. "
-        f"Main subject MUST be: {theme}. "
-        f"Same character appearance in every shot: {hero}. "
+        f"Animated children's film shot (NOT a still photo). "
+        f"Main subject MUST be: {theme}. Same character: {hero}. Friend: {friend}. "
         f"Setting: {place}. "
-        f"Scene {index + 1} keyframe showing: {snippet}. "
-        f"Cinematic children's illustration, high detail, coherent character design, "
+        f"Action: {who}. Dialogue vibe: {snippet}. "
+        f"Motion: {motion}. "
+        f"Continuous motion, cinematic lighting, coherent character design, "
         f"no text, no watermark, no logo, no unrelated animals"
     )
 
@@ -154,14 +154,16 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         or SCENE_TARGET_SEC
     )
 
-    narrations = _chunk_to_n(story["script"], target_n)
+    dialogue_scenes = _dialogue_from_story(story, target_n)
     scenes = []
-    for i, narration in enumerate(narrations):
+    for i, dialogue in enumerate(dialogue_scenes):
+        narration = " ".join(f"{d['text']}" for d in dialogue)
         scenes.append(
             {
                 "index": i + 1,
                 "narration": narration,
-                "visual_prompt": _visual_prompt(narration, i, story),
+                "dialogue": dialogue,
+                "visual_prompt": _visual_prompt(dialogue, i, story),
                 "target_duration_sec": scene_sec,
             }
         )
@@ -173,10 +175,12 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "duration_min": duration_min,
         "theme": story.get("theme"),
         "hero": story.get("hero"),
+        "friend": story.get("friend"),
         "style_key": story.get("style_key"),
         "visual_style": story.get("visual_style"),
         "aspect": story.get("aspect") or "16:9",
         "music": story.get("music") or "berceuse",
+        "format": "dialogue",
         "scene_count": len(scenes),
         "scenes": scenes,
     }
@@ -186,6 +190,6 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     log_event(
         video_id,
         "info",
-        f"Storyboard : {len(scenes)} scènes (public {age_group}, ~{scene_sec:.0f}s/scène).",
+        f"Storyboard dialogue : {len(scenes)} scènes (public {age_group}).",
     )
     return board

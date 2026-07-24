@@ -12,15 +12,19 @@ from config import ROOT
 from modules.progress import clear_job, get_job, get_progress, set_job, set_progress
 
 VOICE_MAP = {
-    "femme": "fr-FR-DeniseNeural",
-    "homme": "fr-FR-HenriNeural",
-    "auto": "fr-FR-DeniseNeural",
+    "femme": "femme",
+    "homme": "homme",
+    "auto": "auto",
 }
 
 
 def resolve_voice(choice: str) -> str:
+    """Conserve femme/homme/auto pour le mode dialogues multi-voix."""
     key = (choice or "auto").strip().lower()
-    return VOICE_MAP.get(key, VOICE_MAP["auto"])
+    if key in VOICE_MAP:
+        return VOICE_MAP[key]
+    # Legacy : id Edge-TTS passé tel quel (audio.py le mappe)
+    return choice.strip() if choice else "auto"
 
 
 # API Creation — si l'UI voit une erreur style_key, c'est un vieux job_runner en cache.

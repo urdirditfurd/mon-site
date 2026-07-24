@@ -36,7 +36,10 @@ from config import (
     PINOKIO_WAN_STEPS,
     PINOKIO_WAN_URL,
     ROOT,
+    TARGET_DURATION_MIN,
     VIDEO_PROVIDER,
+    WAN_CLIP_SPAN_SEC,
+    wan_clip_budget,
 )
 from db.database import get_video, log_event, update_video
 from modules.image_ai import generate_scene_image
@@ -294,6 +297,8 @@ def _generate_via_engine(prompt: str, dest: Path) -> Path:
         PINOKIO_WAN_RESOLUTION,
         "--frames",
         str(int(PINOKIO_WAN_FRAMES)),
+        "--steps",
+        str(int(PINOKIO_WAN_STEPS)),
     ]
     proc = subprocess.run(
         cmd,
@@ -339,14 +344,20 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
 # Orchestration scènes
 # ---------------------------------------------------------------------------
 
-def _clips_needed(duration_sec: float) -> int:
-    """Toujours 1 visuel par scène (image ou clip).
+def _clips_needed(duration_sec: float, provider: str, remaining_budget: int) -> int:
+    """Nombre de clips Wan distincts pour couvrir la durée audio de la scène.
 
-    Durée = narration réelle. Pas de boucle du même clip pour « remplir »
-    les 5 minutes : le montage fige la dernière frame si besoin.
+    Wan 1.3B sur 3080 ≈ 0.8 s de motion / clip → plusieurs clips enchaînés
+    (prompts différents) = vraie vidéo, sans rejouer le même clip en boucle.
     """
-    _ = duration_sec
-    return 1
+    if provider == "images":
+        return 1
+    if remaining_budget <= 0:
+        return 0
+    span = max(8.0, float(WAN_CLIP_SPAN_SEC))
+    n = max(1, int(math.ceil(float(duration_sec) / span)))
+    n = min(n, 3)  # max 3 clips / scène
+    return min(n, remaining_budget)
 
 
 def generate_scene_videos(video_id: int) -> dict[str, Any]:
@@ -362,7 +373,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     elif provider != "fal":
         raise RuntimeError(
             f"Provider inconnu: {VIDEO_PROVIDER}. "
-            "Utilisez images (rapide, recommandé), pinokio (Wan) ou fal."
+            "Utilisez pinokio (Wan, recommandé), images (rapide) ou fal."
         )
 
     projet = Path(video["chemin_projet"])
@@ -371,48 +382,66 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     clips_dir = projet / "ai_clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    # Format image selon aspect board
     from modules.creative_options import format_size
     from modules.image_ai import set_image_output_size
+    from modules.storyboard import _visual_prompt
 
     aw, ah = format_size(str(board.get("aspect") or "16:9"))
-    # Images un peu plus petites que le master pour vitesse, ratio conservé
     img_w = min(1280, aw)
     img_h = int(round(img_w * ah / aw))
     set_image_output_size(img_w, img_h)
 
     theme_key = str(board.get("theme") or board.get("hero") or "conte")
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
+    duration_min = float(board.get("duration_min") or TARGET_DURATION_MIN)
+    budget = wan_clip_budget(duration_min) if provider in {"pinokio", "fal"} else 10_000
+    remaining = budget
+
+    # Story dict minimal pour regenerer prompts par partie
+    story_ctx = {
+        "hero": board.get("hero"),
+        "theme": board.get("theme"),
+        "friend": board.get("friend"),
+        "place": "enchanted sky",
+        "visual_style": board.get("visual_style"),
+    }
 
     jobs: list[tuple[int, int, str, Path, int]] = []
     for scene in board["scenes"]:
         idx = int(scene["index"])
         dur = float(scene.get("duration_sec") or scene.get("target_duration_sec") or AI_CLIP_SEC)
-        n = _clips_needed(dur)
-        prompt = scene["visual_prompt"]
+        n = _clips_needed(dur, provider, remaining)
+        if provider != "images":
+            if n <= 0:
+                n = 1 if remaining > 0 else 1
+            remaining = max(0, remaining - n)
+
+        dialogue = scene.get("dialogue") or [
+            {"speaker": "heros", "text": scene.get("narration") or ""}
+        ]
         scene_files: list[str] = []
         for part in range(n):
             if provider == "images":
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.png"
-                part_prompt = prompt
-                # Seed proche pour cohérence personnage, +offset par scène
+                part_prompt = _visual_prompt(dialogue, idx - 1, story_ctx, part=part)
                 seed = (base_seed + idx * 17 + part) % 1_000_000
             else:
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.mp4"
-                part_prompt = (
-                    f"{prompt}, shot variation {part + 1}, continuous storytelling motion, "
-                    f"gentle animation for children"
+                part_prompt = _visual_prompt(dialogue, idx - 1, story_ctx, part=part)
+                part_prompt += (
+                    f", shot {part + 1}/{n}, continuous motion, speaking character animation, "
+                    f"cinematic children's movie frame"
                 )
-                seed = 0
+                seed = (base_seed + idx * 31 + part * 7) % 1_000_000
             jobs.append((idx, part, part_prompt, out, seed))
             scene_files.append(out.name)
         scene["ai_clip_files"] = scene_files
         scene["ai_clips_planned"] = n
-
+        scene["visual_prompt"] = scene_files and jobs[-1][2] or scene.get("visual_prompt")
     log_event(
         video_id,
         "info",
-        f"Génération visuelle ({provider}) : {len(jobs)} asset(s).",
+        f"Génération visuelle ({provider}) : {len(jobs)} asset(s), budget Wan={budget}.",
     )
 
     if provider == "images":
@@ -425,7 +454,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
 
     def _worker(item: tuple[int, int, str, Path, int]) -> None:
         _idx, _part, prompt, out, seed = item
-        if provider == "images":
+        if out.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
             generate_scene_image(prompt, out, seed=seed, width=img_w, height=img_h)
         elif provider == "pinokio":
             _generate_one_pinokio_clip(prompt, out)
@@ -440,7 +469,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
             job = futures[fut]
             try:
                 fut.result()
-                label = "Image" if provider == "images" else "Clip video"
+                label = "Image" if job[3].suffix.lower() in {".png", ".jpg", ".jpeg"} else "Clip Wan"
                 log_event(video_id, "info", f"{label} : {done}/{len(jobs)}")
                 try:
                     set_progress(

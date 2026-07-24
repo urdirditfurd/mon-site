@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=False)
 
 DATA_DIR = Path(os.getenv("CONTE_DATA_DIR", ROOT / "data"))
 VIDEOS_DIR = DATA_DIR / "videos"
@@ -37,10 +37,10 @@ VISUAL_STYLE = os.getenv(
 )
 
 # Moteur visuel
-# images  = 1 image IA / scène + zoom doux FFmpeg (RAPIDE — recommandé)
-# pinokio = Wan 2.1 T2V (lent sur RTX 3080 10Go)
+# pinokio = Wan 2.1 T2V (vraie vidéo — défaut qualité)
+# images  = illustrations + Ken Burns (rapide, diaporama)
 # fal     = cloud Kling (optionnel)
-VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "images")
+VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "pinokio")
 FAL_KEY = os.getenv("FAL_KEY", os.getenv("FAL_API_KEY", ""))
 FAL_MODEL = os.getenv(
     "CONTE_FAL_MODEL",
@@ -51,13 +51,15 @@ FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "3"))
 ASPECT_RATIO = os.getenv("CONTE_ASPECT_RATIO", "16:9")
 IMAGE_BACKEND = os.getenv("CONTE_IMAGE_BACKEND", "auto")  # auto|pollinations|local|pillow
 
-# Pinokio — Wan 2.1 Snapdragon / local (optionnel si CONTE_VIDEO_PROVIDER=images)
+# Pinokio — Wan 2.1 (RTX 3080 : float16 + offload + clips courts enchainés)
 PINOKIO_WAN_URL = os.getenv("PINOKIO_WAN_URL", "http://127.0.0.1:7860")
 PINOKIO_WAN_ENGINE = os.getenv("PINOKIO_WAN_ENGINE", "")
 PINOKIO_WAN_PYTHON = os.getenv("PINOKIO_WAN_PYTHON", "")
 PINOKIO_WAN_RESOLUTION = os.getenv("PINOKIO_WAN_RESOLUTION", "480p 16:9")
 PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
+# Secondes d'audio couvertes par 1 clip Wan (plusieurs clips / scène)
+WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -73,8 +75,8 @@ AUTO_PUBLISH = os.getenv("CONTE_AUTO_PUBLISH", "1") == "1"
 YOUTUBE_PRIVACY = os.getenv("CONTE_YOUTUBE_PRIVACY", "private")
 PAUSE_PIPELINE = os.getenv("CONTE_PAUSE", "0") == "1"
 
-# Démarrage auto de Wan (uniquement utile si CONTE_VIDEO_PROVIDER=pinokio)
-AUTO_START_WAN = os.getenv("CONTE_AUTO_START_WAN", "0") == "1"
+# Démarrage auto de Wan (défaut ON si provider pinokio)
+AUTO_START_WAN = os.getenv("CONTE_AUTO_START_WAN", "1") == "1"
 WAN_START_TIMEOUT_SEC = int(os.getenv("CONTE_WAN_START_TIMEOUT_SEC", "600"))
 
 CHANNEL_NAME = os.getenv("CONTE_CHANNEL_NAME", "Contes du Soir")
@@ -93,14 +95,10 @@ def ensure_dirs() -> None:
 
 
 def scene_sec_for_audience(age_group: str = "1-9") -> float:
-    """Rythme visuel : 1 image / scène (mode rapide images).
-
-    Plus de changements pour éviter 2 images figées sur toute la vidéo.
-    """
+    """Durée audio moyenne par scène (dialogues personnages)."""
     key = (age_group or "1-9").strip().lower()
-    # secondes de narration / scène visuelle
     mapping = {
-        "1-3": 45.0,   # calme mais assez de décors
+        "1-3": 45.0,
         "4-6": 35.0,
         "7-9": 30.0,
         "1-9": 40.0,
@@ -112,11 +110,7 @@ def scene_count_for_duration(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> int:
-    """Nombre de scènes = nombre d'images (1 / scène).
-
-    Ex. 5 min / 1–9 → ~8 images (pas 2).
-    Tradeoff : un peu plus long à générer, mais vraiment une « vidéo ».
-    """
+    """Nombre de scènes dialogues (plusieurs clips Wan possibles / scène)."""
     minutes = duration_min if duration_min is not None else TARGET_DURATION_MIN
     scene_sec = scene_sec_for_audience(age_group)
 
@@ -131,20 +125,36 @@ def scene_count_for_duration(
         scene_sec = max(scene_sec, 50)
     elif minutes <= 30:
         minimum = 16
-        scene_sec = max(scene_sec, 80)  # ~22 images / 30 min
+        scene_sec = max(scene_sec, 80)
     else:
         minimum = 20
-        scene_sec = max(scene_sec, 120)  # ~30 images / 60 min
+        scene_sec = max(scene_sec, 120)
 
     count = max(minimum, int(round((minutes * 60) / scene_sec)))
-    return min(count, 36)  # garde-fou temps de generation <1h
+    return min(count, 36)
+
+
+def wan_clip_budget(duration_min: float | None = None) -> int:
+    """Plafond clips Wan pour rester <1h sur RTX 3080 (~2–3 min/clip)."""
+    minutes = float(duration_min if duration_min is not None else TARGET_DURATION_MIN)
+    if minutes <= 5:
+        return 12
+    if minutes <= 15:
+        return 16
+    if minutes <= 30:
+        return 20
+    return 24
 
 
 def estimate_ai_clips(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> int:
-    """1 visuel par scène (image ou clip Wan) — durée = audio, sans boucle récit."""
+    """Nombre de jobs visuels estimés (Wan = budget clips, images = scènes)."""
+    provider = VIDEO_PROVIDER.lower().strip()
+    if provider in {"pinokio", "wan", "wan21", "wan-snapdragon", "fal"}:
+        return wan_clip_budget(duration_min)
+    _ = age_group
     return scene_count_for_duration(duration_min, age_group=age_group)
 
 
@@ -156,11 +166,11 @@ def estimate_render_minutes(
     clips = estimate_ai_clips(duration_min, age_group=age_group)
     provider = VIDEO_PROVIDER.lower().strip()
     if provider in {"images", "image", "still", "stills", "invideo"}:
-        # Plus de scènes (~8 pour 5 min) : ~20–50 s / image + TTS
         low = max(3, int(round(clips * 0.35 + 2)))
         high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
-    # Wan / FAL (lent)
-    low = max(2, int(round(clips * 0.8 + 3)))
-    high = max(5, int(round(clips * 2.2 + 5)))
-    return low, high
+    # Wan 3080 : ~2–3.5 min / clip court + TTS/montage
+    low = max(15, int(round(clips * 1.8 + 5)))
+    high = max(25, int(round(clips * 3.2 + 8)))
+    # Garde-fou affichage < 70 min pour 5–30 min de film
+    return min(low, 55), min(high, 70)

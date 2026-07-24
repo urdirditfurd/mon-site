@@ -94,10 +94,11 @@ with st.form("create_form", clear_on_submit=False):
         aspect_key = aspect_map[aspect]
 
     voice = st.radio(
-        "Voix",
+        "Voix du heros (l'ami a l'autre voix)",
         options=["femme", "homme", "auto"],
         index=0,
         horizontal=True,
+        help="Les personnages parlent directement (plus de narrateur unique).",
     )
     age_label = st.selectbox(
         "Public (age)",
@@ -138,14 +139,21 @@ with st.form("create_form", clear_on_submit=False):
 
     scenes = estimate_ai_clips(float(duration), age_group=age_group)
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
+    from config import VIDEO_PROVIDER
+
+    provider = VIDEO_PROVIDER.lower().strip()
+    if provider.startswith(("pinokio", "wan")):
+        mode_txt = f"**Vraie video Wan** : ~{scenes} clips animes (dialogues personnages)"
+    else:
+        mode_txt = f"**Mode images** : {scenes} illustrations (plus rapide, moins « film »)"
     st.markdown(
         f"""
-**Scenes illustrees :** {scenes} (1 image / scene, mouvements varies)  
+{mode_txt}  
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-L'histoire et les images suivent ton theme.  
-La duree vient du script + voix (pas de video rejouee en boucle).
+Dialogues heros/ami (pas de voix off narrateur).  
+Duree = longueur des dialogues (vise la duree demandee, sans boucle).
 """
     )
 

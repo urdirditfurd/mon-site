@@ -68,23 +68,34 @@ def _run_from(
             set_progress(
                 step="audio",
                 video_id=video_id,
-                message="Generation de la voix…",
+                message="Generation des dialogues…",
             )
             result["steps"]["audio"] = generate_audio(video_id, voice=voice)
         if start_idx <= STEPS.index("video_ai"):
+            from config import wan_clip_budget
+
             n_clips = max(1, estimate_ai_clips())
             try:
                 projet = Path(video["chemin_projet"])
                 board_path = projet / "storyboard.json"
                 if board_path.exists():
                     board = json.loads(board_path.read_text(encoding="utf-8"))
-                    n_clips = max(1, int(board.get("scene_count") or len(board.get("scenes") or [])))
+                    planned = sum(
+                        int(s.get("ai_clips_planned") or 0) for s in (board.get("scenes") or [])
+                    )
+                    if planned > 0:
+                        n_clips = planned
+                    else:
+                        n_clips = max(
+                            1,
+                            wan_clip_budget(float(board.get("duration_min") or TARGET_DURATION_MIN)),
+                        )
             except Exception:
                 pass
             set_progress(
                 step="video_ai",
                 video_id=video_id,
-                message="Generation des clips video…",
+                message="Generation des clips video Wan…",
                 clips_done=0,
                 clips_total=n_clips,
             )
@@ -246,8 +257,8 @@ def print_estimate() -> None:
 
     low, high = estimate_render_minutes()
     print(
-        f"Cible: {TARGET_DURATION_MIN} min | scenes/clips ~{clips} "
-        f"(1 clip/scene, duree = audio, sans boucle) | provider={VIDEO_PROVIDER}"
+        f"Cible: {TARGET_DURATION_MIN} min | clips Wan budget ~{clips} "
+        f"(dialogues personnages, sans boucle) | provider={VIDEO_PROVIDER}"
     )
     print(f"Rendu estime GPU: {low}–{high} min")
 

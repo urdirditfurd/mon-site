@@ -163,10 +163,11 @@ def _image_to_motion_clip(src: Path, duration: float, out: Path, motion: str = "
 
 
 def _fit_clip_to_duration(src: Path, duration: float, out: Path, motion: str = "zoom_in") -> None:
-    """Aligne un clip sur la durée audio SANS rejouer l'action en boucle.
+    """Aligne sur la durée audio SANS rejouer l'action en boucle.
 
-    Si le clip est plus court : on joue une fois, puis on fige la dernière image
-    (tpad). Jamais de -stream_loop sur le contenu narratif.
+    1) Si assez long → coupe
+    2) Si un peu court → ralentit jusqu'à ×2.2 (motion visible)
+    3) Si encore trop court → ralentit + freeze dernière frame (dernier recours)
     """
     if out.exists():
         return
@@ -187,47 +188,58 @@ def _fit_clip_to_duration(src: Path, duration: float, out: Path, motion: str = "
     )
 
     if src_dur >= duration - 0.05:
-        # Assez long : couper à la durée exacte (pas de boucle)
+        vf = scale_pad
         cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(src),
-            "-t",
-            f"{duration:.3f}",
-            "-vf",
-            scale_pad,
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            str(out),
+            "ffmpeg", "-y", "-i", str(src),
+            "-t", f"{duration:.3f}", "-vf", vf, "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out),
         ]
     else:
-        # Trop court : une seule lecture + freeze dernière frame (pas de reprise)
-        pad_sec = max(0.05, duration - src_dur)
+        # Ralentir (max ×2.2) pour garder du mouvement, puis freeze si besoin
+        max_slow = 2.2
+        slow_factor = min(max_slow, duration / src_dur)
+        slowed_dur = src_dur * slow_factor
+        pad_sec = max(0.0, duration - slowed_dur)
+        # setpts: facteur >1 = plus lent
+        vf = f"{scale_pad},setpts={slow_factor:.4f}*PTS"
+        if pad_sec > 0.05:
+            vf += f",tpad=stop_mode=clone:stop_duration={pad_sec:.3f}"
         cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(src),
-            "-vf",
-            f"{scale_pad},tpad=stop_mode=clone:stop_duration={pad_sec:.3f}",
-            "-t",
-            f"{duration:.3f}",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            str(out),
+            "ffmpeg", "-y", "-i", str(src),
+            "-vf", vf, "-t", f"{duration:.3f}", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out),
         ]
     subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _concat_parts_xfade(parts: list[Path], out: Path) -> None:
+    """Enchaîne plusieurs clips Wan avec fondus courts (= vraie vidéo continue)."""
+    if len(parts) == 1:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(parts[0]), "-c", "copy", str(out)],
+            check=True,
+            capture_output=True,
+        )
+        return
+    if len(parts) == 2:
+        # xfade simple
+        try:
+            d0 = max(0.3, _ffprobe_duration(parts[0]) - 0.25)
+            filter_complex = (
+                f"[0:v][1:v]xfade=transition=fade:duration=0.25:offset={d0:.3f},format=yuv420p"
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(parts[0]), "-i", str(parts[1]),
+                "-filter_complex", filter_complex,
+                "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                str(out),
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            return
+        except Exception:
+            pass
+    _concat_parts(parts, out)
 
 
 def _concat_parts(parts: list[Path], out: Path) -> None:
@@ -303,17 +315,45 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         motion = motions[(idx - 1) % len(motions)]
         if len(parts) == 1 and _is_image(parts[0]):
             _image_to_motion_clip(parts[0], dur, fitted, motion=motion)
-        else:
-            raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+        elif all(_is_image(p) for p in parts):
+            # Plusieurs images : Ken Burns chacune puis concat
             video_parts: list[Path] = []
+            slice_dur = max(1.5, dur / len(parts))
+            for i, p in enumerate(parts):
+                tmp = fitted_dir / f"scene_{idx:03d}_img{i:02d}.mp4"
+                _image_to_motion_clip(p, slice_dur, tmp, motion=motions[(idx + i) % len(motions)])
+                video_parts.append(tmp)
+            raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+            _concat_parts(video_parts, raw)
+            _fit_clip_to_duration(raw, dur, fitted, motion=motion)
+        else:
+            # Clips Wan : normaliser puis xfade, puis fit durée audio
+            norm_parts: list[Path] = []
             for i, p in enumerate(parts):
                 if _is_image(p):
                     tmp = fitted_dir / f"scene_{idx:03d}_img{i:02d}.mp4"
                     _image_to_motion_clip(p, max(2.0, dur / len(parts)), tmp, motion=motion)
-                    video_parts.append(tmp)
+                    norm_parts.append(tmp)
                 else:
-                    video_parts.append(p)
-            _concat_parts(video_parts, raw)
+                    # Normalise résolution/fps sans étirer encore
+                    tmp = fitted_dir / f"scene_{idx:03d}_n{i:02d}.mp4"
+                    if not tmp.exists():
+                        subprocess.run(
+                            [
+                                "ffmpeg", "-y", "-i", str(p),
+                                "-vf",
+                                f"scale={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
+                                f"pad={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+                                f"fps={VIDEO_FPS},format=yuv420p",
+                                "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                                str(tmp),
+                            ],
+                            check=True,
+                            capture_output=True,
+                        )
+                    norm_parts.append(tmp)
+            raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+            _concat_parts_xfade(norm_parts, raw)
             _fit_clip_to_duration(raw, dur, fitted, motion=motion)
         scene_clips.append(fitted)
 

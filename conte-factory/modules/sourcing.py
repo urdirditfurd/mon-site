@@ -42,145 +42,198 @@ def _word_count(text: str) -> int:
 
 
 def _target_words(duration_min: float) -> int:
-    # Marge +8 % pour atteindre la durée après pauses TTS
-    return max(80, int(round(duration_min * WORDS_PER_MINUTE * 1.08)))
+    # Marge +25 % : dialogues + pauses TTS → viser la durée réelle demandée
+    return max(100, int(round(duration_min * WORDS_PER_MINUTE * 1.25)))
 
 
 def _title_from_theme(theme: str) -> str:
     clean = re.sub(r"\s+", " ", (theme or "").strip())
     if not clean:
         return "Conte du soir"
-    # Titre court lisible
     short = clean[:70].rstrip(" ,.;:")
     return short[0].upper() + short[1:] if short else "Conte du soir"
 
 
-def _unique_story_beats(subject: str, lesson: str, scenes_n: int) -> list[str]:
-    """Histoire linéaire UNIQUE — jamais de recyclage des mêmes scènes en boucle."""
+def _friend_name(subject: str) -> str:
+    return "Lumi l'étoile"
+
+
+def _dialogue_scenes(subject: str, lesson: str, scenes_n: int) -> list[list[dict[str, str]]]:
+    """Scènes = répliques jouées par les personnages (pas de narrateur VO)."""
     s = subject
+    ami = _friend_name(subject)
     n = max(4, int(scenes_n))
 
-    # Moments distincts (assez pour 36 scènes max) — progression claire
-    moments = [
-        f"Il était une fois {s}. Ce soir, l'histoire parle uniquement de {s}, pas d'un autre héros.",
-        f"Au réveil du conte, {s} découvrait un ciel doux. Les nuages formaient un chemin juste pour {s}.",
-        f"{s} respira profondément. On voyait chaque détail de {s}, exactement comme demandé.",
-        f"Puis {s} s'élança dans les airs. Le vent chantait, et {s} avançait avec un courage calme.",
-        f"Plus haut, {s} traversa une porte de nuages roses. Derrière, un monde nouveau attendait {s}.",
-        f"Un ami lumineux salua {s}. Ensemble, ils parlèrent de ce que {s} voulait accomplir.",
-        f"L'ami murmura : « Je crois en toi, {s}. » Et {s} sourit, rassuré.",
-        f"Soudain, un petit obstacle bloqua le passage. {s} s'arrêta, sans paniquer.",
-        f"{s} observa, chercha, puis trouva une idée douce. C'était typique de {s}.",
-        f"Avec patience, {s} contourna l'obstacle. Chaque geste montrait encore {s}.",
-        f"Une lumière bleue dansa autour de {s}. Elle guidait {s} vers la suite de l'aventure.",
-        f"Au milieu du ciel, {s} croisa une étoile timide. L'étoile demanda de l'aide à {s}.",
-        f"{s} accepta. Aider faisait partie de la nature de {s}.",
-        f"Ensemble, {s} et l'étoile avancèrent. Le chemin devenait plus clair grâce à {s}.",
-        f"Un vent capricieux secoua les nuages. {s} tint bon, solide et tendre à la fois.",
-        f"{s} se souvint d'une force intérieure. Ce souvenir donna des ailes à {s}.",
-        f"Alors {s} montra ce qui le rendait unique — la magie propre à {s}.",
-        f"Les nuages applaudirent presque. On n'avait d'yeux que pour {s}.",
-        f"Un dernier défi apparut, plus doux qu'effrayant. {s} le regarda sans peur.",
-        f"{s} trouva la solution en écoutant son cœur. C'était la vraie force de {s}.",
-        f"Enfin, {s} réussit. Le ciel s'ouvrit en couleurs chaudes autour de {s}.",
-        f"Des voix amies murmurèrent : « Bravo, {s} ! » {s} rayonnait de joie calme.",
-        f"Sur le chemin du retour, {s} repensa à chaque étape. L'aventure avait grandi {s}.",
-        f"{s} comprit une belle vérité : {lesson}. Cette leçon appartenait à {s}.",
-        f"La nuit enveloppa {s} comme une couverture. Tout était paisible autour de {s}.",
-        f"Avant de dormir, on revoyait {s} une dernière fois, fier et serein.",
-        f"Et depuis ce soir, quand on pense à {s}, on se sent en sécurité.",
-        f"Bonne nuit — le rêve continue avec {s}, sans recommencer l'histoire depuis le début.",
-        f"Dans le silence, {s} veillait encore un instant, gardien doux du conte.",
-        f"Les étoiles clignèrent pour {s}. Puis tout s'endormit autour de {s}.",
-        f"Fin de l'aventure de {s} — une seule histoire, racontée jusqu'au bout.",
-        f"On ferma les yeux en pensant à {s}, heureux d'avoir suivi {s} sans boucle.",
-        f"Demain, peut-être une nouvelle histoire. Ce soir, c'était celle de {s}.",
-        f"Le dernier nuage s'effaça derrière {s}. Le conte de {s} était complet.",
-        f"Ainsi s'acheva le voyage de {s}, unique et sans répétition.",
-        f"Dors bien — {s} reste dans ton cœur, jusqu'au prochain conte.",
+    # Paires de répliques progressives (héros / ami) — contenu unique
+    pairs: list[list[dict[str, str]]] = [
+        [
+            {"speaker": "heros", "text": f"Bonsoir… C'est moi, {s}. Ce soir, je vais te raconter mon aventure."},
+            {"speaker": "ami", "text": f"Je t'écoute, {s} ! Montre-moi le ciel et ton courage."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Regarde ces nuages moelleux. Je, {s}, vais m'élancer tout doucement."},
+            {"speaker": "ami", "text": f"Vas-y, {s}. Je vole juste à côté de toi."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Le vent chante. Mes ailes — les ailes de {s} — battent la mesure."},
+            {"speaker": "ami", "text": "Quelles belles couleurs ! Continue, je te suis."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Plus haut… Oh ! Une porte de nuages roses. Je, {s}, passe le premier."},
+            {"speaker": "ami", "text": f"Après toi, {s}. Quel monde magique !"},
+        ],
+        [
+            {"speaker": "heros", "text": f"Toi, {ami}, tu es mon ami. Ensemble on est plus forts."},
+            {"speaker": "ami", "text": f"Je crois en toi, {s}. Dis-moi ce que tu veux accomplir."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Je veux voler librement et cracher mon feu bleu, comme {s} sait le faire."},
+            {"speaker": "ami", "text": "Alors montre-moi. Doucement, pour les enfants qui écoutent."},
+        ],
+        [
+            {"speaker": "heros", "text": "Attends… Un petit nuage bloque le passage. J'ai un doute."},
+            {"speaker": "ami", "text": f"Respire, {s}. Tu as déjà traversé tant de choses."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Tu as raison. Moi, {s}, je contourne l'obstacle avec patience."},
+            {"speaker": "ami", "text": "Bravo ! Chaque geste est le tien, unique."},
+        ],
+        [
+            {"speaker": "heros", "text": "Une lumière bleue danse autour de moi. Elle me guide."},
+            {"speaker": "ami", "text": f"Suis-la, {s}. Elle aime ton feu bleu."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Une étoile timide ! Bonjour petite étoile, je suis {s}."},
+            {"speaker": "ami", "text": "Elle a besoin d'aide. On l'accompagne ?"},
+            {"speaker": "heros", "text": "Oui. Aider fait partie de qui je suis."},
+        ],
+        [
+            {"speaker": "heros", "text": "Le vent devient capricieux… Mais je tiens bon."},
+            {"speaker": "ami", "text": f"Solide et tendre à la fois — c'est toi, {s}."},
+        ],
+        [
+            {"speaker": "heros", "text": "Je me souviens de ma force intérieure. Mes ailes s'ouvrent grand."},
+            {"speaker": "ami", "text": "Montre ta magie ! Celle qui n'appartient qu'à toi."},
+        ],
+        [
+            {"speaker": "heros", "text": f"Voici mon feu bleu ! Moi, {s}, j'illumine les nuages."},
+            {"speaker": "ami", "text": "Magnifique ! Les nuages applaudissent presque."},
+            {"speaker": "choeur", "text": f"Bravo {s} ! Bravo !"},
+        ],
+        [
+            {"speaker": "heros", "text": "Un dernier défi… Je n'ai pas peur. J'écoute mon cœur."},
+            {"speaker": "ami", "text": f"C'est ta vraie force, {s}."},
+        ],
+        [
+            {"speaker": "heros", "text": "J'ai réussi ! Le ciel s'ouvre en couleurs chaudes."},
+            {"speaker": "ami", "text": f"Tu rayonnes, {s}. Quelle joie calme !"},
+            {"speaker": "choeur", "text": f"Bravo, {s} !"},
+        ],
+        [
+            {"speaker": "heros", "text": f"Sur le chemin du retour, je comprends : {lesson}."},
+            {"speaker": "ami", "text": "Cette leçon t'appartient. Et elle réchauffe les cœurs."},
+        ],
+        [
+            {"speaker": "heros", "text": "La nuit m'enveloppe comme une couverture. Tout est paisible."},
+            {"speaker": "ami", "text": f"Bonne nuit, {s}. On pense à toi en sécurité."},
+        ],
+        [
+            {"speaker": "heros", "text": "Avant de dormir, je te dis merci d'avoir voyagé avec moi."},
+            {"speaker": "ami", "text": "Une seule histoire, jusqu'au bout — sans recommencer."},
+            {"speaker": "heros", "text": f"Dors bien. Moi, {s}, je veille un instant… puis je rêve."},
+        ],
     ]
 
-    if n <= len(moments):
-        # Indices strictement croissants répartis sur l'arc complet
-        chosen: list[str] = []
+    # Répartir n scènes sur l'arc sans recyclage
+    if n <= len(pairs):
+        chosen: list[list[dict[str, str]]] = []
         used: set[int] = set()
         for i in range(n):
-            idx = int(round(i * (len(moments) - 1) / max(1, n - 1)))
-            while idx in used and idx < len(moments) - 1:
+            idx = int(round(i * (len(pairs) - 1) / max(1, n - 1)))
+            while idx in used and idx < len(pairs) - 1:
                 idx += 1
             while idx in used and idx > 0:
                 idx -= 1
             used.add(idx)
-            chosen.append(moments[idx])
+            chosen.append(pairs[idx])
         return chosen
 
-    chosen = moments[:]
-    extra_i = 0
-    while len(chosen) < n:
-        extra_i += 1
-        chosen.append(
-            f"Chapitre bonus {extra_i} : {s} découvrit un détail inédit du paysage, "
-            f"jamais vu auparavant, et {s} avança encore un peu plus loin dans le conte."
+    out = [list(p) for p in pairs]
+    extra = 0
+    while len(out) < n:
+        extra += 1
+        out.append(
+            [
+                {
+                    "speaker": "heros",
+                    "text": (
+                        f"Chapitre bonus {extra} : je découvre un détail du ciel "
+                        f"jamais vu, et moi {s} j'avance encore un peu."
+                    ),
+                },
+                {
+                    "speaker": "ami",
+                    "text": f"Oui {s}, continue — c'est nouveau, pas une reprise.",
+                },
+            ]
         )
-    return chosen[:n]
+    return out[:n]
 
 
-def _expand_to_duration(
-    beats: list[str],
+def _lines_to_script(scenes: list[list[dict[str, str]]]) -> str:
+    blocks: list[str] = []
+    for scene in scenes:
+        lines = []
+        for line in scene:
+            sp = str(line.get("speaker") or "heros").upper()
+            lines.append(f"[{sp}] {line.get('text') or ''}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _enrich_dialogue_to_duration(
+    scenes: list[list[dict[str, str]]],
     subject: str,
-    scenes_n: int,
     duration_min: float,
-) -> list[str]:
-    """Produit `scenes_n` paragraphes UNIQUE pour viser duration_min — sans boucler l'histoire."""
+) -> list[list[dict[str, str]]]:
+    """Allonge les répliques jusqu'au budget mots — sans recycler l'arc."""
     target = _target_words(duration_min)
-    # Enrichissements distincts (pas les mêmes phrases recyclées en boucle narrative)
-    detail_pool = [
-        f"On prenait le temps d'observer {subject}, sans se presser.",
-        f"La lumière caressait {subject}, tout était calme et magique.",
-        f"Les enfants imaginaient {subject} encore plus clairement.",
-        f"Un silence doux entourait {subject}, comme une berceuse.",
-        f"Le ciel changeait de teinte autour de {subject}.",
-        f"Rien n'était effrayant : {subject} inspirait confiance et tendresse.",
-        f"On entendait à peine le vent près de {subject}.",
-        f"Chaque couleur racontait un peu plus {subject}.",
-        f"Le décor restait cohérent avec {subject}, scène après scène.",
-        f"Un souffle tiède accompagnait {subject}.",
-        f"Loin d'être une reprise, ce moment avançait l'histoire de {subject}.",
-        f"La suite appartenait encore à {subject}, jamais une copie du début.",
+    extras_heros = [
+        f"Je sens le vent sur mon visage — le visage de {subject}.",
+        f"Chaque battement d'aile dit mon nom : {subject}.",
+        "Je parle doucement, pour que tu m'entendes bien.",
+        "Regarde bien ce que je fais maintenant.",
+        "Je ne suis pas un autre animal : c'est vraiment moi.",
+    ]
+    extras_ami = [
+        f"Je te vois clairement, {subject}.",
+        "Continue, je reste avec toi.",
+        "Les enfants t'écoutent avec le cœur.",
+        "C'est beau, et ce n'est pas effrayant.",
+        f"Raconte encore un peu, {subject}.",
     ]
 
-    # Beats déjà uniques et dimensionnés à scenes_n
-    paragraphs = list(beats[:scenes_n])
-    while len(paragraphs) < scenes_n:
-        k = len(paragraphs) + 1
-        paragraphs.append(
-            f"Moment {k} : {subject} poursuivit son chemin vers une découverte nouvelle."
-        )
+    def total_words() -> int:
+        return _word_count(_lines_to_script(scenes))
 
-    words_each = max(40, target // max(1, scenes_n))
-    for i in range(len(paragraphs)):
-        extras: list[str] = []
-        # Ajouter des détails DIFFÉRENTS par scène (index décalé, pas de modulo sur le même cycle narratif)
-        need = words_each - _word_count(paragraphs[i])
-        guard = 0
-        while need > 8 and guard < 12:
-            extras.append(detail_pool[(i * 3 + guard) % len(detail_pool)])
-            need = words_each - _word_count(paragraphs[i] + " " + " ".join(extras))
-            guard += 1
-        if extras:
-            paragraphs[i] = f"{paragraphs[i]} {' '.join(extras)}"
-
-    # Si encore trop court globalement : allonger chaque scène un peu, sans répéter l'arc
     guard = 0
-    while _word_count(" ".join(paragraphs)) < target and guard < 60:
-        idx = guard % len(paragraphs)
-        paragraphs[idx] = (
-            f"{paragraphs[idx]} "
-            f"{detail_pool[(idx + guard) % len(detail_pool)]}"
-        )
+    while total_words() < target and guard < 100:
+        si = guard % len(scenes)
+        scene = scenes[si]
+        speaker = "heros" if guard % 2 == 0 else "ami"
+        pool = extras_heros if speaker == "heros" else extras_ami
+        bit = pool[(si + guard) % len(pool)]
+        # Enrichir une réplique existante du bon speaker, sinon ajouter
+        enriched = False
+        for line in scene:
+            if line.get("speaker") == speaker:
+                line["text"] = f"{line['text']} {bit}"
+                enriched = True
+                break
+        if not enriched:
+            scene.append({"speaker": speaker, "text": bit})
         guard += 1
-
-    return paragraphs[:scenes_n]
+    return scenes
 
 
 def _builtin_story(
@@ -191,23 +244,27 @@ def _builtin_story(
 ) -> dict[str, Any]:
     minutes = float(duration_min if duration_min is not None else TARGET_DURATION_MIN)
     subject = (theme or "une créature magique douce").strip()
-    # Le thème utilisateur EST le sujet (pas un lapin aléatoire)
     hero = subject
     place = "un ciel de nuages moelleux"
     lesson = random.choice(LESSONS)
     scenes_n = scene_count_for_duration(minutes, age_group=age_group)
     titre = _title_from_theme(subject)
 
-    beats = _unique_story_beats(subject, lesson, scenes_n)
-    paragraphs = _expand_to_duration(beats, subject, scenes_n, minutes)
-    script = "\n\n".join(paragraphs)
+    dialogue_scenes = _enrich_dialogue_to_duration(
+        _dialogue_scenes(subject, lesson, scenes_n),
+        subject,
+        minutes,
+    )
+    script = _lines_to_script(dialogue_scenes)
 
     return {
         "titre": titre,
         "theme": subject,
         "morale": lesson,
         "script": script,
+        "dialogue_scenes": dialogue_scenes,
         "hero": hero,
+        "friend": _friend_name(subject),
         "place": place,
         "age_group": age_group,
         "duration_min": minutes,
@@ -215,6 +272,7 @@ def _builtin_story(
         "style_key": style_key,
         "visual_style": style_prompt(style_key),
         "word_count": _word_count(script),
+        "format": "dialogue",
     }
 
 
@@ -230,12 +288,12 @@ def _mistral_story(
     n = scene_count_for_duration(minutes, age_group=age_group)
     words = _target_words(minutes)
     subject = (theme or "aventure douce et magique").strip()
-    prompt = f"""Écris un conte ORIGINAL pour enfants ({age_group} ans), en français.
-Durée cible à voix haute : environ {minutes} minutes (~{words} mots).
-Le sujet PRINCIPAL et UNIQUE de l'histoire DOIT être exactement : « {subject} ».
-Le héros est ce sujet (pas un autre animal inventé). Répète le sujet dans chaque paragraphe.
+    prompt = f"""Écris un conte DIALOGUÉ pour enfants ({age_group} ans), en français.
+Durée cible parlée : ~{minutes} minutes (~{words} mots).
+Sujet UNIQUE obligatoire : « {subject} » (c'est le héros qui parle).
+Format : {n} scènes. Chaque scène = répliques [HEROS] / [AMI] (pas de narrateur).
 Réponds UNIQUEMENT en JSON :
-{{"titre":"...","theme":"...","morale":"...","script":"texte découpé en {n} paragraphes","hero":"...","place":"..."}}
+{{"titre":"...","theme":"...","morale":"...","script":"[HEROS] ...\\n[AMI] ...\\n\\n[HEROS] ...","hero":"...","place":"..."}}
 Ton calme, sans violence, adapté au coucher."""
     resp = requests.post(
         "https://api.mistral.ai/v1/chat/completions",
@@ -279,9 +337,9 @@ def _ollama_story(
         n = scene_count_for_duration(minutes, age_group=age_group)
         subject = (theme or "magie douce").strip()
         prompt = (
-            f"Conte enfants FR ({age_group} ans) ~{minutes} min. "
-            f"Sujet UNIQUE obligatoire: {subject}. "
-            f"JSON: titre, theme, morale, script ({n} paragraphes parlant de {subject}), hero, place."
+            f"Conte DIALOGUE enfants FR ({age_group} ans) ~{minutes} min. "
+            f"Sujet UNIQUE: {subject}. Format [HEROS]/[AMI], {n} scenes. "
+            f"JSON: titre, theme, morale, script, hero, place."
         )
         resp = requests.post(
             f"{OLLAMA_URL}/api/generate",
@@ -360,8 +418,11 @@ def source_new_video(
         "theme": story.get("theme"),
         "morale": story.get("morale"),
         "hero": story.get("hero"),
+        "friend": story.get("friend"),
         "place": story.get("place"),
         "script": script,
+        "dialogue_scenes": story.get("dialogue_scenes") or [],
+        "format": story.get("format") or "dialogue",
         "hash_script": hash_script,
         "age_group": age_group,
         "duration_min": minutes,

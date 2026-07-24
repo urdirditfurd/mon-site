@@ -1,4 +1,4 @@
-"""Styles visuels, formats et musique — options utilisateur Creation."""
+"""Styles visuels, formats, musique et voix personnages."""
 
 from __future__ import annotations
 
@@ -40,8 +40,28 @@ MUSIC_OPTIONS: dict[str, str] = {
     "fichier": "Fichier libre de droit dans assets/music/",
 }
 
-# Mots / minute narration enfants (voix ralentie)
-WORDS_PER_MINUTE = float(os.getenv("CONTE_WORDS_PER_MIN", "125"))
+# Voix Edge-TTS pour dialogues personnages (pas un narrateur unique)
+CHARACTER_VOICES: dict[str, dict[str, str]] = {
+    "femme": {
+        "heros": "fr-FR-DeniseNeural",
+        "ami": "fr-FR-HenriNeural",
+        "choeur": "fr-FR-DeniseNeural",
+    },
+    "homme": {
+        "heros": "fr-FR-HenriNeural",
+        "ami": "fr-FR-DeniseNeural",
+        "choeur": "fr-FR-HenriNeural",
+    },
+    "auto": {
+        "heros": "fr-FR-DeniseNeural",
+        "ami": "fr-FR-HenriNeural",
+        "choeur": "fr-FR-DeniseNeural",
+    },
+}
+
+# Mots / minute ÉCRITS pour atteindre la durée parlée (dialogues + pauses)
+# Edge-TTS FR enfants parle plus vite que 125 wpm → viser plus haut.
+WORDS_PER_MINUTE = float(os.getenv("CONTE_WORDS_PER_MIN", "155"))
 
 
 def style_prompt(style_key: str) -> str:
@@ -52,3 +72,8 @@ def style_prompt(style_key: str) -> str:
 def format_size(format_key: str) -> tuple[int, int]:
     key = (format_key or "16:9").strip()
     return FORMAT_PRESETS.get(key, FORMAT_PRESETS["16:9"])
+
+
+def voices_for_preference(preference: str = "auto") -> dict[str, str]:
+    key = (preference or "auto").strip().lower()
+    return dict(CHARACTER_VOICES.get(key, CHARACTER_VOICES["auto"]))
