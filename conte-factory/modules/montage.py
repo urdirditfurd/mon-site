@@ -106,27 +106,41 @@ def _is_image(path: Path) -> bool:
     return path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
-def _image_to_motion_clip(src: Path, duration: float, out: Path, motion: str = "zoom_in") -> None:
-    """Mouvement doux varié (zoom / pan) — évite le même effet « grossit » partout."""
+def _image_to_motion_clip(
+    src: Path,
+    duration: float,
+    out: Path,
+    motion: str = "zoom_in",
+    *,
+    zoom_delta: float = 0.00028,
+    fps: int | None = None,
+) -> None:
+    """Mouvement doux (Ken Burns) — vitesse adaptée à la tranche d'âge."""
     if out.exists():
         return
     duration = max(1.0, float(duration))
-    frames = max(VIDEO_FPS, int(round(duration * VIDEO_FPS)))
-    # Expressions zoompan selon le type de mouvement
+    use_fps = int(fps or cfg.VIDEO_FPS or VIDEO_FPS)
+    # Clamp 24–30 (spec jeunesse — jamais 60)
+    use_fps = max(24, min(30, use_fps))
+    frames = max(use_fps, int(round(duration * use_fps)))
+    zd = max(0.00012, float(zoom_delta))
+    z_max = 1.0 + zd * frames * 0.35
+    z_max = min(1.10, max(1.04, z_max))
+
     if motion == "zoom_out":
-        z = "if(eq(on,1),1.12,max(1.0,1.12-0.00035*on))"
+        z = f"if(eq(on,1),{z_max:.4f},max(1.0,{z_max:.4f}-{zd:.6f}*on))"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
     elif motion == "pan_right":
-        z = "1.08"
+        z = "1.06"
         x = "min((iw-iw/zoom)*on/{0}, iw-iw/zoom)".format(max(1, frames - 1))
         y = "ih/2-(ih/zoom/2)"
     elif motion == "pan_left":
-        z = "1.08"
+        z = "1.06"
         x = "max((iw-iw/zoom)*(1-on/{0}), 0)".format(max(1, frames - 1))
         y = "ih/2-(ih/zoom/2)"
     else:  # zoom_in
-        z = "min(1.0+0.00035*on,1.12)"
+        z = f"min(1.0+{zd:.6f}*on,{z_max:.4f})"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
 
@@ -134,7 +148,7 @@ def _image_to_motion_clip(src: Path, duration: float, out: Path, motion: str = "
         f"scale={cfg.VIDEO_WIDTH * 2}:{cfg.VIDEO_HEIGHT * 2}:force_original_aspect_ratio=increase,"
         f"crop={cfg.VIDEO_WIDTH * 2}:{cfg.VIDEO_HEIGHT * 2},"
         f"zoompan=z='{z}':x='{x}':y='{y}':"
-        f"d={frames}:s={cfg.VIDEO_WIDTH}x{cfg.VIDEO_HEIGHT}:fps={VIDEO_FPS},"
+        f"d={frames}:s={cfg.VIDEO_WIDTH}x{cfg.VIDEO_HEIGHT}:fps={use_fps},"
         f"format=yuv420p"
     )
     cmd = [
@@ -184,7 +198,7 @@ def _fit_clip_to_duration(src: Path, duration: float, out: Path, motion: str = "
     scale_pad = (
         f"scale={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
         f"pad={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-        f"fps={VIDEO_FPS},format=yuv420p"
+        f"fps={max(24, min(30, int(cfg.VIDEO_FPS or VIDEO_FPS)))},format=yuv420p"
     )
 
     if src_dur >= duration - 0.05:
@@ -275,6 +289,12 @@ def _concat_parts(parts: list[Path], out: Path) -> None:
 
 def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any]:
     from modules.creative_options import format_size
+    from modules.youth_spec import (
+        export_size,
+        kenburns_zoom_delta,
+        normalize_age,
+        youth_profile,
+    )
 
     video = get_video(video_id)
     if not video:
@@ -282,10 +302,30 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     titre = video_title(video)
     projet = Path(video["chemin_projet"])
     board = json.loads((projet / "storyboard.json").read_text(encoding="utf-8"))
-    # Appliquer le format choisi (16:9 / 9:16 / 1:1)
-    w, h = format_size(str(board.get("aspect") or "16:9"))
+
+    age = normalize_age(str(board.get("age_group") or "1-10"))
+    profile = youth_profile(age)
+    # Spec jeunesse : FPS 24–30, résolution selon âge, musique -12 dB
+    use_fps = max(24, min(30, int(profile.get("fps") or 24)))
+    cfg.VIDEO_FPS = use_fps
+    export_4k = bool(getattr(cfg, "EXPORT_4K", False))
+    w, h = export_size(profile, export_4k=export_4k)
+    # Respecter aussi le format UI (9:16 / 1:1) si choisi
+    aspect = str(board.get("aspect") or profile.get("aspect") or "16:9")
+    if aspect != "16:9":
+        w, h = format_size(aspect)
+        # Pour 9:16 / 1:1 : rester Full HD équivalent (pas 4K portrait lourd)
+        if max(w, h) > 1920 and not export_4k:
+            scale = 1920 / max(w, h)
+            w, h = int(round(w * scale)), int(round(h * scale))
+            if w % 2:
+                w += 1
+            if h % 2:
+                h += 1
     cfg.VIDEO_WIDTH = w
     cfg.VIDEO_HEIGHT = h
+    music_vol = float(profile.get("music_volume") or cfg.MUSIC_VOLUME)
+    zoom_delta = kenburns_zoom_delta(profile)
 
     ai_dir = projet / "ai_clips"
     audio_dir = projet / "audio"
@@ -297,7 +337,13 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         raise FileNotFoundError("narration.mp3 manquant — lancez l'audio d'abord.")
 
     scene_clips: list[Path] = []
-    motions = ["zoom_in", "pan_right", "zoom_out", "pan_left"]
+    # 1-3 ans : mouvements très lents ; 7-10 : un peu plus de variété
+    if age == "1-3":
+        motions = ["zoom_in", "pan_right", "zoom_in", "pan_left"]
+    else:
+        motions = ["zoom_in", "pan_right", "zoom_out", "pan_left"]
+
+    shot_min = float(profile.get("shot_sec_min") or 3.0)
     for scene in board["scenes"]:
         idx = int(scene["index"])
         dur = float(scene.get("duration_sec") or 5)
@@ -314,28 +360,42 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         fitted = fitted_dir / f"scene_{idx:03d}.mp4"
         motion = motions[(idx - 1) % len(motions)]
         if len(parts) == 1 and _is_image(parts[0]):
-            _image_to_motion_clip(parts[0], dur, fitted, motion=motion)
+            _image_to_motion_clip(
+                parts[0], dur, fitted, motion=motion, zoom_delta=zoom_delta, fps=use_fps
+            )
         elif all(_is_image(p) for p in parts):
-            # Plusieurs images : Ken Burns chacune puis concat
             video_parts: list[Path] = []
-            slice_dur = max(1.5, dur / len(parts))
+            # Plans longs pour les petits : ne pas découper sous shot_min
+            slice_dur = max(shot_min, dur / len(parts))
             for i, p in enumerate(parts):
                 tmp = fitted_dir / f"scene_{idx:03d}_img{i:02d}.mp4"
-                _image_to_motion_clip(p, slice_dur, tmp, motion=motions[(idx + i) % len(motions)])
+                _image_to_motion_clip(
+                    p,
+                    slice_dur,
+                    tmp,
+                    motion=motions[(idx + i) % len(motions)],
+                    zoom_delta=zoom_delta,
+                    fps=use_fps,
+                )
                 video_parts.append(tmp)
             raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
             _concat_parts(video_parts, raw)
             _fit_clip_to_duration(raw, dur, fitted, motion=motion)
         else:
-            # Clips Wan : normaliser puis xfade, puis fit durée audio
             norm_parts: list[Path] = []
             for i, p in enumerate(parts):
                 if _is_image(p):
                     tmp = fitted_dir / f"scene_{idx:03d}_img{i:02d}.mp4"
-                    _image_to_motion_clip(p, max(2.0, dur / len(parts)), tmp, motion=motion)
+                    _image_to_motion_clip(
+                        p,
+                        max(shot_min, dur / len(parts)),
+                        tmp,
+                        motion=motion,
+                        zoom_delta=zoom_delta,
+                        fps=use_fps,
+                    )
                     norm_parts.append(tmp)
                 else:
-                    # Normalise résolution/fps sans étirer encore
                     tmp = fitted_dir / f"scene_{idx:03d}_n{i:02d}.mp4"
                     if not tmp.exists():
                         subprocess.run(
@@ -344,7 +404,7 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
                                 "-vf",
                                 f"scale={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
                                 f"pad={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-                                f"fps={VIDEO_FPS},format=yuv420p",
+                                f"fps={use_fps},format=yuv420p",
                                 "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                                 str(tmp),
                             ],
@@ -353,6 +413,7 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
                         )
                     norm_parts.append(tmp)
             raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+            # 1-3 ans : fondus plus longs / soft ; 7-10 : xfade court
             _concat_parts_xfade(norm_parts, raw)
             _fit_clip_to_duration(raw, dur, fitted, motion=motion)
         scene_clips.append(fitted)
@@ -390,9 +451,11 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     filter_complex = None
     if music:
         inputs += ["-stream_loop", "-1", "-i", str(music)]
+        # Spec : musique a -12 dB sous les voix ; voix restent prioritaires
         filter_complex = (
-            f"[2:a]volume={MUSIC_VOLUME}[bg];"
-            f"[1:a][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            f"[1:a]volume=1.0[vox];"
+            f"[2:a]volume={music_vol:.4f}[bg];"
+            f"[vox][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
 
     cmd = ["ffmpeg", "-y", *inputs]
@@ -444,7 +507,14 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     )
 
     update_video(video_id, statut="pret", chemin_video=str(final_path), duree_sec=total)
-    log_event(video_id, "info", f"Montage terminé : {final_path.name} ({total/60:.1f} min)")
+    log_event(
+        video_id,
+        "info",
+        (
+            f"Montage jeunesse {age} : {final_path.name} ({total/60:.1f} min) "
+            f"{w}x{h}@{use_fps}fps musique={music_vol:.2f} (-12dB)."
+        ),
+    )
     return {"ok": True, "video": str(final_path), "duree_sec": total, "meta": meta}
 
 

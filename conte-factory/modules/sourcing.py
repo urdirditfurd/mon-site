@@ -238,7 +238,7 @@ def _enrich_dialogue_to_duration(
 
 def _builtin_story(
     theme: str | None = None,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     duration_min: float | None = None,
     style_key: str = "aquarelle",
 ) -> dict[str, Any]:
@@ -278,7 +278,7 @@ def _builtin_story(
 
 def _mistral_story(
     theme: str | None = None,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     duration_min: float | None = None,
     style_key: str = "aquarelle",
 ) -> dict[str, Any]:
@@ -328,7 +328,7 @@ Ton calme, sans violence, adapté au coucher."""
 
 def _ollama_story(
     theme: str | None = None,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     duration_min: float | None = None,
     style_key: str = "aquarelle",
 ) -> dict[str, Any]:
@@ -363,7 +363,7 @@ def _ollama_story(
 
 def generate_story(
     theme: str | None = None,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     duration_min: float | None = None,
     style_key: str = "aquarelle",
 ) -> dict[str, Any]:
@@ -377,14 +377,17 @@ def generate_story(
 
 def source_new_video(
     theme: str | None = None,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     duration_min: float | None = None,
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",
 ) -> dict[str, Any]:
     """Crée un nouveau projet si l'histoire n'existe pas déjà."""
-    age_group = (age_group or "1-9").strip().lower()
+    age_group = (age_group or "1-10").strip().lower()
+    from modules.youth_spec import normalize_age
+
+    age_group = normalize_age(age_group)
     minutes = float(duration_min if duration_min is not None else TARGET_DURATION_MIN)
     story = generate_story(
         theme, age_group=age_group, duration_min=minutes, style_key=style_key

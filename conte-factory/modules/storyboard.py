@@ -105,34 +105,42 @@ def _visual_prompt(
     story: dict[str, Any],
     part: int = 0,
 ) -> str:
+    from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
+
     hero = str(story.get("hero") or story.get("theme") or "a magical character")
     theme = str(story.get("theme") or hero)
     friend = str(story.get("friend") or "a friendly star companion")
     place = str(story.get("place") or "an enchanted sky with soft clouds")
     style = str(story.get("visual_style") or VISUAL_STYLE)
+    age = normalize_age(str(story.get("age_group") or "1-10"))
+    profile = youth_profile(age)
     speakers = {d.get("speaker") for d in dialogue}
     who = "hero speaking to friend" if "ami" in speakers else "hero speaking expressively"
     snippet = " ".join(d.get("text", "")[:80] for d in dialogue[:2])
+    # Motions douces — jamais saccadées (spec jeunesse)
     motions = [
-        "gentle camera push-in, wings moving, mouth animating while speaking",
-        "slow orbit around characters, expressive gestures, breathing motion",
-        "dynamic flying through clouds, speaking and smiling, blue fire accents if dragon",
-        "soft parallax, characters reacting to each other, lively eyes and mouth",
+        "slow ample push-in, wings moving gently, mouth animating while speaking",
+        "very slow orbit, soft gestures, calm breathing motion",
+        "gentle flying through clouds, speaking and smiling, smooth continuous motion",
+        "soft parallax, characters reacting warmly, lively but calm eyes and mouth",
     ]
     motion = motions[(index + part) % len(motions)]
     return (
         f"{style}. "
-        f"Animated children's film shot (NOT a still photo). "
+        f"Animated children's film shot at cinematic 24fps feel (NOT a still photo, NOT hyper-real 60fps). "
         f"Main subject MUST be: {theme}. Same character: {hero}. Friend: {friend}. "
         f"Setting: {place}. "
         f"Action: {who}. Dialogue vibe: {snippet}. "
         f"Motion: {motion}. "
-        f"Continuous motion, cinematic lighting, coherent character design, "
-        f"no text, no watermark, no logo, no unrelated animals"
+        f"{youth_visual_suffix(profile)} "
+        f"Wide readable framing, continuous smooth motion, coherent character design, "
+        f"no text, no watermark, no logo, no unrelated animals, no neon colors, no pure black void"
     )
 
 
 def build_storyboard(video_id: int) -> dict[str, Any]:
+    from modules.youth_spec import normalize_age, youth_profile
+
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
@@ -142,7 +150,8 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         raise FileNotFoundError("story.json manquant — relancez l'étape sourcing.")
 
     story = json.loads(story_path.read_text(encoding="utf-8"))
-    age_group = str(story.get("age_group") or "1-9")
+    age_group = normalize_age(str(story.get("age_group") or "1-10"))
+    profile = youth_profile(age_group)
     duration_min = float(story.get("duration_min") or TARGET_DURATION_MIN)
     target_n = int(
         story.get("target_scenes")
@@ -150,6 +159,7 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     )
     scene_sec = float(
         story.get("scene_target_sec")
+        or profile.get("scene_target_sec")
         or scene_sec_for_audience(age_group)
         or SCENE_TARGET_SEC
     )
@@ -163,8 +173,10 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
                 "index": i + 1,
                 "narration": narration,
                 "dialogue": dialogue,
-                "visual_prompt": _visual_prompt(dialogue, i, story),
+                "visual_prompt": _visual_prompt(dialogue, i, {**story, "age_group": age_group}),
                 "target_duration_sec": scene_sec,
+                "shot_sec_min": profile["shot_sec_min"],
+                "shot_sec_max": profile["shot_sec_max"],
             }
         )
 
@@ -172,13 +184,24 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "video_id": video_id,
         "titre": story.get("titre") or video_title(video),
         "age_group": age_group,
+        "youth_profile": {
+            "label": profile["label"],
+            "fps": profile["fps"],
+            "width": profile["width"],
+            "height": profile["height"],
+            "shot_sec_min": profile["shot_sec_min"],
+            "shot_sec_max": profile["shot_sec_max"],
+            "wan_clip_span_sec": profile["wan_clip_span_sec"],
+            "music_volume": profile["music_volume"],
+            "resolution_label": profile["resolution_label"],
+        },
         "duration_min": duration_min,
         "theme": story.get("theme"),
         "hero": story.get("hero"),
         "friend": story.get("friend"),
         "style_key": story.get("style_key"),
         "visual_style": story.get("visual_style"),
-        "aspect": story.get("aspect") or "16:9",
+        "aspect": story.get("aspect") or profile.get("aspect") or "16:9",
         "music": story.get("music") or "berceuse",
         "format": "dialogue",
         "scene_count": len(scenes),
@@ -190,6 +213,9 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     log_event(
         video_id,
         "info",
-        f"Storyboard dialogue : {len(scenes)} scènes (public {age_group}).",
+        (
+            f"Storyboard jeunesse {age_group} : {len(scenes)} scènes, "
+            f"{profile['fps']} fps, plans {profile['shot_sec_min']}-{profile['shot_sec_max']}s."
+        ),
     )
     return board

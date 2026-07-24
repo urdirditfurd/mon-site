@@ -156,7 +156,7 @@ def run_pipeline(
     duration_min: float | None = None,
     voice: str | None = None,
     subtitles: bool = False,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",
@@ -278,8 +278,8 @@ def main() -> int:
     parser.add_argument(
         "--age",
         type=str,
-        default="1-9",
-        choices=["1-3", "4-6", "7-9", "1-9"],
+        default="1-10",
+        choices=["1-3", "4-6", "7-10", "1-10", "7-9", "1-9"],
         help="Public cible enfants (rythme des scenes)",
     )
     parser.add_argument(

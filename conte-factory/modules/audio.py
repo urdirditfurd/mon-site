@@ -124,8 +124,12 @@ def generate_audio(
     if voice in {"femme", "homme", "auto"}:
         pref = voice
     voice_map = voices_for_preference(pref)
-    rate = rate or TTS_RATE
-    pitch = pitch or TTS_PITCH
+    from modules.youth_spec import normalize_age, youth_profile
+
+    age = normalize_age(str(board.get("age_group") or "1-10"))
+    yprofile = youth_profile(age)
+    rate = rate or str(yprofile.get("tts_rate") or TTS_RATE)
+    pitch = pitch or str(yprofile.get("tts_pitch") or TTS_PITCH)
     hero_name = str(board.get("hero") or board.get("theme") or "héros")
     target_sec = float(board.get("duration_min") or TARGET_DURATION_MIN) * 60.0
 

@@ -38,7 +38,7 @@ def start_generation_job(
     voice: str = "auto",
     subtitles: bool = False,
     publish: bool = False,
-    age_group: str = "1-9",
+    age_group: str = "1-10",
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",

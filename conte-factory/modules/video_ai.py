@@ -344,19 +344,16 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
 # Orchestration scènes
 # ---------------------------------------------------------------------------
 
-def _clips_needed(duration_sec: float, provider: str, remaining_budget: int) -> int:
-    """Nombre de clips Wan distincts pour couvrir la durée audio de la scène.
-
-    Wan 1.3B sur 3080 ≈ 0.8 s de motion / clip → plusieurs clips enchaînés
-    (prompts différents) = vraie vidéo, sans rejouer le même clip en boucle.
-    """
+def _clips_needed(duration_sec: float, provider: str, remaining_budget: int, span_sec: float) -> int:
+    """Nombre de clips Wan distincts selon le rythme jeunesse (plans 2–10 s)."""
     if provider == "images":
         return 1
     if remaining_budget <= 0:
         return 0
-    span = max(8.0, float(WAN_CLIP_SPAN_SEC))
+    span = max(2.0, float(span_sec))
     n = max(1, int(math.ceil(float(duration_sec) / span)))
-    n = min(n, 3)  # max 3 clips / scène
+    # 1-3 ans : plans longs → moins de cuts ; 7-10 : plus de plans
+    n = min(n, 4)
     return min(n, remaining_budget)
 
 
@@ -397,6 +394,16 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     budget = wan_clip_budget(duration_min) if provider in {"pinokio", "fal"} else 10_000
     remaining = budget
 
+    from modules.youth_spec import normalize_age, youth_profile
+
+    age = normalize_age(str(board.get("age_group") or "1-10"))
+    yprofile = youth_profile(age)
+    span_sec = float(
+        (board.get("youth_profile") or {}).get("wan_clip_span_sec")
+        or yprofile["wan_clip_span_sec"]
+        or WAN_CLIP_SPAN_SEC
+    )
+
     # Story dict minimal pour regenerer prompts par partie
     story_ctx = {
         "hero": board.get("hero"),
@@ -404,13 +411,14 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         "friend": board.get("friend"),
         "place": "enchanted sky",
         "visual_style": board.get("visual_style"),
+        "age_group": age,
     }
 
     jobs: list[tuple[int, int, str, Path, int]] = []
     for scene in board["scenes"]:
         idx = int(scene["index"])
         dur = float(scene.get("duration_sec") or scene.get("target_duration_sec") or AI_CLIP_SEC)
-        n = _clips_needed(dur, provider, remaining)
+        n = _clips_needed(dur, provider, remaining, span_sec)
         if provider != "images":
             if n <= 0:
                 n = 1 if remaining > 0 else 1

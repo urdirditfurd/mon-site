@@ -101,20 +101,21 @@ with st.form("create_form", clear_on_submit=False):
         help="Les personnages parlent directement (plus de narrateur unique).",
     )
     age_label = st.selectbox(
-        "Public (age)",
+        "Public (age) — spec jeunesse obligatoire",
         options=[
-            "1-9 ans (tous — rythme doux)",
-            "1-3 ans (plus calme)",
-            "4-6 ans (rythme moyen)",
-            "7-9 ans (un peu plus de variete)",
+            "1-10 ans (tous — rythme doux)",
+            "1-3 ans (plans longs, couleurs primaires)",
+            "4-6 ans (rythme moyen, palette riche)",
+            "7-10 ans (rythme cinema narratif)",
         ],
         index=0,
+        help="FPS 24, mix voix prioritaire, couleurs et rythme adaptes a l'age.",
     )
     age_map = {
-        "1-9 ans (tous — rythme doux)": "1-9",
-        "1-3 ans (plus calme)": "1-3",
-        "4-6 ans (rythme moyen)": "4-6",
-        "7-9 ans (un peu plus de variete)": "7-9",
+        "1-10 ans (tous — rythme doux)": "1-10",
+        "1-3 ans (plans longs, couleurs primaires)": "1-3",
+        "4-6 ans (rythme moyen, palette riche)": "4-6",
+        "7-10 ans (rythme cinema narratif)": "7-10",
     }
     age_group = age_map[age_label]
 
@@ -140,8 +141,10 @@ with st.form("create_form", clear_on_submit=False):
     scenes = estimate_ai_clips(float(duration), age_group=age_group)
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     from config import VIDEO_PROVIDER
+    from modules.youth_spec import youth_profile
 
     provider = VIDEO_PROVIDER.lower().strip()
+    yp = youth_profile(age_group)
     if provider.startswith(("pinokio", "wan")):
         mode_txt = f"**Vraie video Wan** : ~{scenes} clips animes (dialogues personnages)"
     else:
@@ -149,11 +152,11 @@ with st.form("create_form", clear_on_submit=False):
     st.markdown(
         f"""
 {mode_txt}  
+**Spec jeunesse :** {yp['label']} · **{yp['fps']} FPS** · **{yp['resolution_label']}** · plans {yp['shot_sec_min']:.0f}-{yp['shot_sec_max']:.0f}s · musique -12 dB  
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-Dialogues heros/ami (pas de voix off narrateur).  
-Duree = longueur des dialogues (vise la duree demandee, sans boucle).
+Dialogues heros/ami. Duree = dialogues (sans boucle).
 """
     )
 
