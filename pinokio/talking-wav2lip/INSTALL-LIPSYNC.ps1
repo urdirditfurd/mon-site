@@ -68,16 +68,19 @@ if ($LASTEXITCODE -ne 0) {
 
 # 2) Le reste depuis PyPI normal (PAS l'index torch)
 Write-Host "Install gradio + deps PyPI..."
-& $Py -m pip install `
-  "gradio>=4.0,<6" `
-  gradio_client `
-  opencv-python `
-  "numpy<2.3" `
-  librosa `
-  soundfile `
-  huggingface_hub `
-  requests `
-  pillow
+$Req = Join-Path $env:TEMP "lipsync-install-req.txt"
+@"
+gradio>=4.0,!=6.*
+gradio_client
+opencv-python
+numpy>=1.23,<2.3
+librosa
+soundfile
+huggingface_hub
+requests
+pillow
+"@ | Set-Content -Path $Req -Encoding ASCII
+& $Py -m pip install -r $Req
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Echec pip deps" -ForegroundColor Red
@@ -85,7 +88,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Verifie gradio
-& $Py -c "import gradio; print('gradio', gradio.__version__)"
+& $Py -c "import gradio as g; print('gradio', g.__version__)"
 if ($LASTEXITCODE -ne 0) {
   Write-Host "gradio toujours manquant" -ForegroundColor Red
   exit 1
@@ -101,44 +104,37 @@ $CkptDir = Join-Path $Wav2Lip "checkpoints"
 New-Item -ItemType Directory -Force -Path $CkptDir | Out-Null
 $Ckpt = Join-Path $CkptDir "wav2lip_gan.pth"
 
-if (-not (Test-Path $Ckpt)) {
+if (-not (Test-Path $Ckpt) -or ((Get-Item $Ckpt).Length -lt 1000000)) {
   Write-Host "Telechargement checkpoint wav2lip_gan.pth ..."
   $downloaded = $false
-  # Plusieurs miroirs
   $urls = @(
-    "https://huggingface.co/numz/wav2lip_studio/resolve/main/wav2lip_gan.pth",
-    "https://huggingface.co/Nekochu/Wav2Lip/resolve/main/wav2lip_gan.pth"
+    "https://huggingface.co/Nekochu/Wav2Lip/resolve/main/wav2lip_gan.pth",
+    "https://huggingface.co/camenduru/Wav2Lip/resolve/main/checkpoints/wav2lip_gan.pth",
+    "https://github.com/Rudrabha/Wav2Lip/releases/download/v1.0/wav2lip_gan.pth"
   )
   foreach ($url in $urls) {
     try {
       Write-Host "  essai: $url"
-      & $Py -c @"
-from huggingface_hub import hf_hub_download
-import shutil
-p = hf_hub_download(repo_id='numz/wav2lip_studio', filename='wav2lip_gan.pth')
-shutil.copy(p, r'$Ckpt')
-print('OK', p)
-"@
-      if (Test-Path $Ckpt) { $downloaded = $true; break }
-    } catch {
-      Write-Host "  echec miroir HF API" -ForegroundColor Yellow
-    }
-    try {
       Invoke-WebRequest -Uri $url -OutFile $Ckpt -UseBasicParsing
       if ((Test-Path $Ckpt) -and ((Get-Item $Ckpt).Length -gt 1000000)) {
         $downloaded = $true
+        Write-Host "Checkpoint OK: $Ckpt" -ForegroundColor Green
         break
       }
     } catch {
-      Write-Host "  echec download direct" -ForegroundColor Yellow
+      Write-Host "  echec download" -ForegroundColor Yellow
     }
+  }
+  if (-not $downloaded) {
+    try {
+      & $Py -c "from huggingface_hub import hf_hub_download; import shutil; p=hf_hub_download(repo_id='Nekochu/Wav2Lip', filename='wav2lip_gan.pth'); shutil.copy(p, r'$Ckpt'); print('OK')"
+      if ((Test-Path $Ckpt) -and ((Get-Item $Ckpt).Length -gt 1000000)) { $downloaded = $true }
+    } catch {}
   }
   if (-not $downloaded) {
     Write-Host "Checkpoint auto echoue. Place manuellement wav2lip_gan.pth dans:" -ForegroundColor Yellow
     Write-Host $CkptDir
     Write-Host "Sans checkpoint: fallback portrait+audio (video OK, lip-sync faible)."
-  } else {
-    Write-Host "Checkpoint OK: $Ckpt" -ForegroundColor Green
   }
 } else {
   Write-Host "Checkpoint deja present." -ForegroundColor Green
