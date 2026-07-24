@@ -15,6 +15,12 @@ Application locale pour animer un portrait enfant avec l'audio des dialogues.
 powershell -ExecutionPolicy Bypass -File C:\ConteFactory\pinokio\talking-wav2lip\INSTALL-LIPSYNC.ps1
 ```
 
+Si `gradio` manque apres une ancienne install :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\ConteFactory\pinokio\talking-wav2lip\FIX-LIPSYNC-DEPS.ps1
+```
+
 Puis :
 
 ```powershell
