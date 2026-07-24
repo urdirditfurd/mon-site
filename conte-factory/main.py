@@ -98,13 +98,17 @@ def _run_from(
             result["steps"]["montage"] = assemble_video(
                 video_id, with_subtitles=subtitles
             )
+        publish_note = ""
         if publish or AUTO_PUBLISH or start_step == "publish":
             set_progress(
                 step="publish",
                 video_id=video_id,
                 message="Publication YouTube…",
             )
-            result["steps"]["publish"] = publish_youtube(video_id, force=True)
+            pub = publish_youtube(video_id, force=True)
+            result["steps"]["publish"] = pub
+            if pub.get("skipped"):
+                publish_note = str(pub.get("reason") or "Publication ignoree")
         else:
             from modules.publish import prepare_publish_package
 
@@ -114,7 +118,8 @@ def _run_from(
             step="done",
             video_id=video_id,
             message="Video prete",
-            detail="Tu peux la visionner dans le Tableau de bord",
+            detail=publish_note
+            or "Tu peux la visionner dans le Tableau de bord",
         )
     except Exception as exc:
         update_video(video_id, statut="erreur", erreur=str(exc))
