@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR
-from modules.i2v_ai import PINOKIO_I2V_URL, i2v_health, resolve_i2v_engine, resolve_i2v_python
+from modules.i2v_ai import (
+    PINOKIO_I2V_FRAMES,
+    PINOKIO_I2V_GUIDANCE,
+    PINOKIO_I2V_STEPS,
+    PINOKIO_I2V_URL,
+    WAN_I2V_BACKEND,
+    i2v_health,
+    resolve_i2v_engine,
+    resolve_i2v_python,
+)
 
 PID_FILE = DATA_DIR / "i2v_server.pid"
 LOG_FILE = DATA_DIR / "i2v_server.log"
@@ -50,13 +59,12 @@ def ensure_i2v_running(wait_seconds: int = 300) -> dict[str, Any]:
             "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),
             "SULPHUR_CPU_OFFLOAD": os.environ.get("SULPHUR_CPU_OFFLOAD", "1"),
             "CONTE_I2V_LOWVRAM": "1",
-            "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", "ltx"),
+            "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", WAN_I2V_BACKEND),
             "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
             "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
             "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
             "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "848"),
             "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "480"),
-            "GRADIO_SERVER_PORT": "7861",
             "PYTHONUNBUFFERED": "1",
         },
         creationflags=creationflags,

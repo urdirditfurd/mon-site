@@ -105,7 +105,12 @@ def start_generation_job(
         cwd=str(ROOT),
         stdout=log_f,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        },
         creationflags=creationflags,
     )
     job = {
@@ -135,11 +140,14 @@ def refresh_job_status() -> dict[str, Any]:
     if job.get("running") and not alive:
         # Process fini
         if progress.get("step") not in {"done", "error"}:
-            # Sortie anormale
+            log_hint = _job_log_tail(job.get("log"), max_chars=800)
+            err = "Processus termine sans statut final"
+            if log_hint:
+                err = f"{err}\n\n{log_hint}"
             set_progress(
                 step="error",
                 message="La generation s'est arretee",
-                error="Processus termine sans statut final",
+                error=err[:500],
                 video_id=progress.get("video_id"),
             )
             progress = get_progress()
@@ -148,6 +156,21 @@ def refresh_job_status() -> dict[str, Any]:
     elif job and not alive:
         job["running"] = False
     return {"job": job, "progress": progress, "alive": alive}
+
+
+def _job_log_tail(log_path: str | None, max_chars: int = 800) -> str:
+    if not log_path:
+        log_path = str(ROOT / "data" / "job.log")
+    path = Path(log_path)
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+        if not text:
+            return ""
+        return text[-max_chars:]
+    except Exception:
+        return ""
 
 
 def _pid_alive(pid: int) -> bool:

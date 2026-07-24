@@ -166,6 +166,11 @@ def run_pipeline(
     init_db()
 
     if PAUSE_PIPELINE or is_paused():
+        set_progress(
+            step="error",
+            message="Pipeline en pause",
+            error="Desactive la pause dans le Tableau de bord puis relance.",
+        )
         return {"ok": False, "reason": "pipeline_en_pause", "hint": "Relancez depuis le dashboard."}
 
     provider = VIDEO_PROVIDER.lower().strip()
@@ -203,14 +208,17 @@ def run_pipeline(
                 message="Demarrage I2V rapide (LTX/Wan 1.3B)…",
                 detail="16 steps · 848x480 · 81 frames — cible 1-2 min/scene",
             )
-            i2v = ensure_i2v_running(wait_seconds=min(180, I2V_START_TIMEOUT_SEC))
+            try:
+                i2v = ensure_i2v_running(wait_seconds=min(120, I2V_START_TIMEOUT_SEC))
+            except Exception as exc:
+                i2v = {"ok": False, "ready": False, "error": str(exc)}
+            # Soft-fail : CLI i2v_engine peut tourner sans Gradio
             if not i2v.get("ok") and not i2v.get("ready"):
-                # Soft: CLI peut encore fonctionner sans Gradio
                 set_progress(
                     step="start",
                     pct=3,
-                    message="I2V Gradio absent — tentative CLI directe…",
-                    detail=str(i2v.get("error") or ""),
+                    message="I2V Gradio absent — CLI directe plus tard…",
+                    detail=str(i2v.get("error") or "")[:300],
                 )
 
     if provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}:
@@ -381,12 +389,32 @@ def main() -> int:
             aspect=args.aspect,
             music=args.music,
         )
-    except Exception:
+    except Exception as exc:
         traceback.print_exc()
+        try:
+            set_progress(
+                step="error",
+                message="Erreur pendant la generation",
+                error=str(exc)[:500],
+            )
+        except Exception:
+            pass
         return 1
 
     print(result)
-    return 0 if result.get("ok", True) else 2
+    if not result.get("ok", True):
+        # Garantit un statut UI meme si une branche a oublie set_progress(error)
+        from modules.progress import get_progress
+
+        prog = get_progress()
+        if prog.get("step") not in {"done", "error"}:
+            set_progress(
+                step="error",
+                message="Generation interrompue",
+                error=str(result.get("error") or result.get("reason") or result)[:500],
+            )
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
