@@ -33,10 +33,10 @@ if (Test-Path (Join-Path $wanT2vEnv "Scripts\python.exe")) {
   & $py -m pip install "diffusers>=0.33.0" transformers accelerate sentencepiece protobuf pillow imageio imageio-ffmpeg opencv-python-headless gradio
 }
 
-Write-Host "Verifie WanImageToVideoPipeline..." -ForegroundColor Cyan
-& $py -c "from diffusers import WanImageToVideoPipeline; print('OK', WanImageToVideoPipeline)"
+Write-Host "Verifie pipelines I2V (LTX + Wan)..." -ForegroundColor Cyan
+& $py -c "from diffusers import LTXImageToVideoPipeline, WanImageToVideoPipeline; print('LTX OK'); print('Wan I2V OK')"
 
 Write-Host ""
-Write-Host "Premier run telecharge le modele (~5-8 Go) depuis Hugging Face." -ForegroundColor Yellow
-Write-Host "Lance ensuite: .\LANCER-I2V.bat  (http://127.0.0.1:7861)" -ForegroundColor Green
-Write-Host "Puis dans conte-factory: .\scripts\SWITCH-TO-I2V.ps1" -ForegroundColor Green
+Write-Host "Params rapides: WAN_I2V_BACKEND=ltx, 16 steps, 848x480, 81 frames" -ForegroundColor Yellow
+Write-Host "Lance: .\LANCER-I2V.bat  (http://127.0.0.1:7861)" -ForegroundColor Green
+Write-Host "Puis: .\conte-factory\scripts\SWITCH-TO-I2V.ps1" -ForegroundColor Green

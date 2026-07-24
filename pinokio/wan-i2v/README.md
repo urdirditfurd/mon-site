@@ -1,11 +1,24 @@
-# Wan Image-to-Video — vraie animation (pas Wav2Lip / diaporama)
-#
-# Pipeline: TTS → image scene Pixar → Wan I2V 1.3B → FFmpeg
-# Port Gradio: http://127.0.0.1:7861
-#
-# Install:
-#   powershell -ExecutionPolicy Bypass -File INSTALL-I2V.ps1
-#   .\LANCER-I2V.bat
-#
-# Modele: engineerA314/Wan2.1-Fun-V1.1-1.3B-InP-Diffusers
-# RTX 3080 10 Go: float16 + CPU offload, ~49–65 frames (~3–4 s) / scene
+# Wan / LTX Image-to-Video — RAPIDE (RTX 3080 10 Go)
+
+Cible : **1–2 minutes max par scène**.
+
+## Params plafonnés
+| Param | Valeur |
+|-------|--------|
+| Backend | `ltx` (défaut) ou `wan` (Fun 1.3B) |
+| Steps | **16** (max 20) |
+| Résolution | **848×480** (upscale 1080p au montage) |
+| Frames | **81** (~3.4 s @ 24 fps) |
+| CFG | 5.5 (Wan) / 3.5 (LTX) |
+| VRAM | `CONTE_I2V_LOWVRAM=1` + SDPA |
+
+## Install
+```powershell
+powershell -ExecutionPolicy Bypass -File INSTALL-I2V.ps1
+powershell -ExecutionPolicy Bypass -File ..\..\conte-factory\scripts\SWITCH-TO-I2V.ps1
+.\LANCER-I2V.bat
+```
+
+Port : http://127.0.0.1:7861
+
+Si LTX échoue : mets `WAN_I2V_BACKEND=wan` dans `.env`.

@@ -12,7 +12,6 @@ if not errorlevel 1 (
   exit /b 0
 )
 
-REM Reutilise le venv Wan T2V s'il existe, sinon env local
 if exist "env\Scripts\python.exe" (
   set "PYTHON=env\Scripts\python.exe"
 ) else if exist "%~dp0..\wan-snapdragon-arm\app\env\Scripts\python.exe" (
@@ -28,10 +27,19 @@ if exist "env\Scripts\python.exe" (
 set GRADIO_SERVER_PORT=%PORT%
 set WAN_DTYPE=float16
 set SULPHUR_CPU_OFFLOAD=1
+set CONTE_I2V_LOWVRAM=1
+if not defined WAN_I2V_BACKEND set WAN_I2V_BACKEND=ltx
+if not defined PINOKIO_I2V_FRAMES set PINOKIO_I2V_FRAMES=81
+if not defined PINOKIO_I2V_STEPS set PINOKIO_I2V_STEPS=16
+if not defined PINOKIO_I2V_WIDTH set PINOKIO_I2V_WIDTH=848
+if not defined PINOKIO_I2V_HEIGHT set PINOKIO_I2V_HEIGHT=480
+if not defined PINOKIO_I2V_GUIDANCE set PINOKIO_I2V_GUIDANCE=5.5
+
 echo.
-echo Demarrage Wan I2V sur %URL%
+echo Demarrage I2V RAPIDE sur %URL%
+echo Backend=%WAN_I2V_BACKEND% steps=%PINOKIO_I2V_STEPS% frames=%PINOKIO_I2V_FRAMES% %PINOKIO_I2V_WIDTH%x%PINOKIO_I2V_HEIGHT%
+echo Cible: 1-2 min / scene
 echo Python: %PYTHON%
-echo Laisse cette fenetre ouverte pendant la generation.
 echo.
 "%PYTHON%" gradio_server.py
 if errorlevel 1 pause

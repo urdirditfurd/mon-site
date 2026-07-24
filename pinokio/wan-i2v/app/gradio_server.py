@@ -1,4 +1,4 @@
-"""Gradio Wan I2V — image + prompt motion → MP4 animé (port 7861)."""
+"""Gradio I2V rapide — LTX / Wan 1.3B (port 7861). Cible <2 min / clip."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ from pathlib import Path
 
 import gradio as gr
 
-from i2v_engine import RESOLUTION_PRESETS, check_environment, generate_i2v
+from i2v_engine import (
+    MAX_FRAMES,
+    MAX_STEPS,
+    RESOLUTION_PRESETS,
+    check_environment,
+    generate_i2v,
+)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -19,12 +25,10 @@ PORT = int(os.environ.get("GRADIO_SERVER_PORT", "7861"))
 def run(image, prompt, num_frames, steps, seed, progress=gr.Progress()):
     if image is None:
         raise gr.Error("Image de depart requise")
-    prompt = (prompt or "").strip()
-    if not prompt:
-        prompt = (
-            "cute Pixar 3D character, natural movement, breathing, blinking, "
-            "gentle head tilt, cinematic camera pan, lively background"
-        )
+    prompt = (prompt or "").strip() or (
+        "cute Pixar 3D character, natural movement, breathing, blinking, "
+        "gentle head tilt, cinematic camera pan, lively background"
+    )
     out = OUTPUT_DIR / f"i2v_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
     cache = os.environ.get("WAN_MODEL_CACHE") or str(
         Path(__file__).resolve().parent.parent / "models"
@@ -39,21 +43,26 @@ def run(image, prompt, num_frames, steps, seed, progress=gr.Progress()):
         output_path=str(out),
         resolution_key="480p 16:9",
         num_frames=int(num_frames),
-        fps=16,
+        fps=24,
         steps=int(steps),
         seed=int(seed) if seed is not None else None,
         cache_dir=cache,
         progress_callback=on_progress,
     )
-    return str(result["outputPath"]), result.get("mode", "wan_i2v"), f"{result.get('clipDurationSec')}s"
+    return (
+        str(result["outputPath"]),
+        f"{result.get('backend')}/{result.get('mode')}",
+        f"{result.get('seconds')}s · {result.get('clipDurationSec')}s clip",
+    )
 
 
 _env = check_environment()
 _header = (
-    f"### video ia — Wan I2V (vraie animation)\n"
-    f"Modele: `{_env.get('model')}` · GPU: {_env.get('gpu') or _env.get('device')} · "
-    f"VRAM {_env.get('vramFreeGb')}/{_env.get('vramTotalGb')} Go\n"
-    f"**Pas de diaporama** : image → clip anime (mouvement perso + camera + decor)."
+    f"### video ia — I2V RAPIDE (cible <2 min/scene)\n"
+    f"Backend: `{_env.get('backendDefault')}` · GPU: {_env.get('gpu') or _env.get('device')} · "
+    f"VRAM {_env.get('vramFreeGb')}/{_env.get('vramTotalGb')} Go · "
+    f"{_env.get('maxSteps')} steps · {_env.get('resolution')} · {_env.get('maxFrames')} frames\n"
+    f"**lowvram + SDPA** — upscale 1080p au montage FFmpeg."
 )
 
 demo = gr.Interface(
@@ -68,16 +77,16 @@ demo = gr.Interface(
                 "lively background, smooth animation"
             ),
         ),
-        gr.Slider(17, 81, value=49, step=4, label="Frames (49~3s, 65~4s, 81~5s @16fps)"),
-        gr.Slider(10, 40, value=20, step=1, label="Steps"),
+        gr.Slider(17, 97, value=min(81, MAX_FRAMES), step=8, label="Frames (81 = ~3.4s @24fps)"),
+        gr.Slider(8, 20, value=min(16, MAX_STEPS), step=1, label="Steps (max 20)"),
         gr.Number(value=42, label="Seed", precision=0),
     ],
     outputs=[
         gr.Video(label="Clip I2V anime"),
-        gr.Textbox(label="Mode"),
-        gr.Textbox(label="Duree"),
+        gr.Textbox(label="Backend"),
+        gr.Textbox(label="Temps"),
     ],
-    title="video ia — Wan Image-to-Video",
+    title="video ia — I2V Fast (LTX / Wan 1.3B)",
     description=_header,
 )
 

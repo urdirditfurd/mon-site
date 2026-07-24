@@ -200,8 +200,8 @@ def run_pipeline(
             set_progress(
                 step="start",
                 pct=2,
-                message="Demarrage Wan Image-to-Video…",
-                detail="Vraie animation (pas diaporama). Premier chargement modele ~5-10 min.",
+                message="Demarrage I2V rapide (LTX/Wan 1.3B)…",
+                detail="16 steps · 848x480 · 81 frames — cible 1-2 min/scene",
             )
             i2v = ensure_i2v_running(wait_seconds=min(180, I2V_START_TIMEOUT_SEC))
             if not i2v.get("ok") and not i2v.get("ready"):

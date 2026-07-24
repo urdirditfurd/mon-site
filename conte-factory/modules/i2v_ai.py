@@ -16,9 +16,11 @@ from config import ROOT
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "49"))
-PINOKIO_I2V_STEPS = int(os.getenv("PINOKIO_I2V_STEPS", "20"))
+PINOKIO_I2V_FRAMES = min(97, int(os.getenv("PINOKIO_I2V_FRAMES", "81")))
+PINOKIO_I2V_STEPS = min(20, int(os.getenv("PINOKIO_I2V_STEPS", "16")))
 PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "480p 16:9")
+PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.5"))
+WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")
 
 MOTION_PROMPT = (
     "character natural movement, breathing, blinking eyes, gentle head tilt, "
@@ -160,6 +162,11 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
             **os.environ,
             "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),
             "SULPHUR_CPU_OFFLOAD": os.environ.get("SULPHUR_CPU_OFFLOAD", "1"),
+            "CONTE_I2V_LOWVRAM": os.environ.get("CONTE_I2V_LOWVRAM", "1"),
+            "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", WAN_I2V_BACKEND),
+            "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
+            "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
+            "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
             "PYTHONUNBUFFERED": "1",
         },
     )

@@ -319,9 +319,9 @@ def render_sidebar(active: str) -> None:
 def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
     """Statut moteur simplifie."""
     if ctx.get("uses_i2v"):
-        st.metric("Moteur video", "Wan I2V (vraie animation)")
+        st.metric("Moteur video", "I2V rapide (LTX / Wan 1.3B)")
         st.caption(
-            "TTS → image scene Pixar → Wan Image-to-Video → montage. "
+            "16 steps · 848×480 · 81 frames · lowvram — cible 1–2 min/scène. "
             "Port 7861 si LANCER-I2V tourne."
         )
         return
