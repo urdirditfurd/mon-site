@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from config import ensure_dirs
 from db.database import fingerprint, init_db, similar_title_exists
-from modules.storyboard import _split_paragraphs
+from modules.sourcing import _hero_short_name
 
 
 class TestBasics(unittest.TestCase):
@@ -24,10 +24,11 @@ class TestBasics(unittest.TestCase):
         b = fingerprint("hello world")
         self.assertEqual(a, b)
 
-    def test_split_paragraphs(self) -> None:
-        text = "A. B. C. D. E. F. G. H. I. J."
-        parts = _split_paragraphs(text)
-        self.assertGreaterEqual(len(parts), 1)
+    def test_hero_short_name(self) -> None:
+        name = _hero_short_name(
+            "dragon violet foncé qui vole dans les nuages et qui chante"
+        )
+        self.assertEqual(name, "dragon violet foncé")
 
     def test_similar_title(self) -> None:
         # Ne doit pas planter sur base vide
