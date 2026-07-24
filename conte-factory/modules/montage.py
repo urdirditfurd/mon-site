@@ -512,7 +512,7 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         "info",
         (
             f"Montage jeunesse {age} : {final_path.name} ({total/60:.1f} min) "
-            f"{w}x{h}@{use_fps}fps musique={music_vol:.2f} (-12dB)."
+            f"{w}x{h}@{use_fps}fps musique={music_vol:.2f} (-14dB)."
         ),
     )
     return {"ok": True, "video": str(final_path), "duree_sec": total, "meta": meta}

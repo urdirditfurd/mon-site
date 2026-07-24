@@ -145,18 +145,22 @@ with st.form("create_form", clear_on_submit=False):
 
     provider = VIDEO_PROVIDER.lower().strip()
     yp = youth_profile(age_group)
-    if provider.startswith(("pinokio", "wan")):
-        mode_txt = f"**Vraie video Wan** : ~{scenes} clips animes (dialogues personnages)"
+    if provider in {"talking", "lipsync", "talk"}:
+        mode_txt = (
+            f"**Pipeline talking** : TTS → portrait → lip-sync (~{scenes} repliques)"
+        )
+    elif provider.startswith(("pinokio", "wan")):
+        mode_txt = f"**Wan T2V brut** : ~{scenes} clips (sans lip-sync)"
     else:
-        mode_txt = f"**Mode images** : {scenes} illustrations (plus rapide, moins « film »)"
+        mode_txt = f"**Mode images** : {scenes} illustrations"
     st.markdown(
         f"""
 {mode_txt}  
-**Spec jeunesse :** {yp['label']} · **{yp['fps']} FPS** · **{yp['resolution_label']}** · plans {yp['shot_sec_min']:.0f}-{yp['shot_sec_max']:.0f}s · musique -12 dB  
+**Spec jeunesse :** {yp['label']} · **{yp['fps']} FPS** · **{yp['resolution_label']}** · plans {yp['shot_sec_min']:.0f}-{yp['shot_sec_max']:.0f}s · musique -14 dB  
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-Dialogues heros/ami. Duree = dialogues (sans boucle).
+Personnages qui parlent (multi-voix). Portrait coherent + lip-sync si Wav2Lip installe.
 """
     )
 

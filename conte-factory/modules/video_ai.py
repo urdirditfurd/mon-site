@@ -363,6 +363,11 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         raise ValueError(f"Vidéo introuvable: {video_id}")
 
     provider = VIDEO_PROVIDER.lower().strip()
+    if provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}:
+        from modules.talking_pipeline import generate_talking_videos
+
+        return generate_talking_videos(video_id)
+
     if provider in {"pinokio", "wan", "wan21", "wan-snapdragon"}:
         provider = "pinokio"
     elif provider in {"images", "image", "still", "stills", "invideo"}:
@@ -370,7 +375,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     elif provider != "fal":
         raise RuntimeError(
             f"Provider inconnu: {VIDEO_PROVIDER}. "
-            "Utilisez pinokio (Wan, recommandé), images (rapide) ou fal."
+            "Utilisez talking (recommande), pinokio, images ou fal."
         )
 
     projet = Path(video["chemin_projet"])

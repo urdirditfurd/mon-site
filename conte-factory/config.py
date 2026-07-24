@@ -37,10 +37,11 @@ VISUAL_STYLE = os.getenv(
 )
 
 # Moteur visuel
-# pinokio = Wan 2.1 T2V (vraie vidéo — défaut qualité)
-# images  = illustrations + Ken Burns (rapide, diaporama)
+# talking = pipeline 4 etapes (TTS -> portrait -> lip-sync -> FFmpeg) — recommandé
+# pinokio = Wan 2.1 T2V brut (sans lip-sync)
+# images  = illustrations + Ken Burns
 # fal     = cloud Kling (optionnel)
-VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "pinokio")
+VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "talking")
 FAL_KEY = os.getenv("FAL_KEY", os.getenv("FAL_API_KEY", ""))
 FAL_MODEL = os.getenv(
     "CONTE_FAL_MODEL",
@@ -51,15 +52,20 @@ FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "3"))
 ASPECT_RATIO = os.getenv("CONTE_ASPECT_RATIO", "16:9")
 IMAGE_BACKEND = os.getenv("CONTE_IMAGE_BACKEND", "auto")  # auto|pollinations|local|pillow
 
-# Pinokio — Wan 2.1 (RTX 3080 : float16 + offload + clips courts enchainés)
+# Pinokio — Wan 2.1 T2V (optionnel si provider=talking)
 PINOKIO_WAN_URL = os.getenv("PINOKIO_WAN_URL", "http://127.0.0.1:7860")
 PINOKIO_WAN_ENGINE = os.getenv("PINOKIO_WAN_ENGINE", "")
 PINOKIO_WAN_PYTHON = os.getenv("PINOKIO_WAN_PYTHON", "")
 PINOKIO_WAN_RESOLUTION = os.getenv("PINOKIO_WAN_RESOLUTION", "480p 16:9")
 PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
-# Secondes d'audio couvertes par 1 clip Wan (plusieurs clips / scène)
 WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
+
+# Lip-sync Pinokio (Wav2Lip gratuit / InfiniteTalk si installé)
+PINOKIO_LIPSYNC_URL = os.getenv("PINOKIO_LIPSYNC_URL", "http://127.0.0.1:7870")
+PINOKIO_LIPSYNC_ENGINE = os.getenv("PINOKIO_LIPSYNC_ENGINE", "")
+AUTO_START_LIPSYNC = os.getenv("CONTE_AUTO_START_LIPSYNC", "1") == "1"
+LIPSYNC_START_TIMEOUT_SEC = int(os.getenv("CONTE_LIPSYNC_TIMEOUT_SEC", "300"))
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -69,9 +75,9 @@ VIDEO_WIDTH = int(os.getenv("CONTE_VIDEO_WIDTH", "1920"))
 VIDEO_HEIGHT = int(os.getenv("CONTE_VIDEO_HEIGHT", "1080"))
 # Spec jeunesse : 24–30 FPS (jamais 60). Défaut cinéma doux 24.
 VIDEO_FPS = int(os.getenv("CONTE_VIDEO_FPS", "24"))
-# Musique à -12 dB sous les voix ≈ 0.25
-MUSIC_VOLUME = float(os.getenv("CONTE_MUSIC_VOLUME", "0.25"))
-# Export 4K pour 4–10 ans (upscale depuis source Wan 480p — tradeoff poids fichier)
+# Musique à -14 dB sous les voix ≈ 0.20
+MUSIC_VOLUME = float(os.getenv("CONTE_MUSIC_VOLUME", "0.20"))
+# Export 4K pour 4–10 ans (upscale — tradeoff poids fichier)
 EXPORT_4K = os.getenv("CONTE_EXPORT_4K", "0") == "1"
 
 # Publication auto dès la fin du montage (exigence de viabilité)
@@ -158,7 +164,7 @@ def estimate_ai_clips(
 ) -> int:
     """Nombre de jobs visuels estimés (Wan = budget clips, images = scènes)."""
     provider = VIDEO_PROVIDER.lower().strip()
-    if provider in {"pinokio", "wan", "wan21", "wan-snapdragon", "fal"}:
+    if provider in {"pinokio", "wan", "wan21", "wan-snapdragon", "fal", "talking", "lipsync"}:
         return wan_clip_budget(duration_min)
     return scene_count_for_duration(duration_min, age_group=age_group)
 
@@ -174,6 +180,11 @@ def estimate_render_minutes(
         low = max(3, int(round(clips * 0.35 + 2)))
         high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
+    if provider in {"talking", "lipsync", "talk"}:
+        # Portrait + lip-sync / replique : plus rapide que Wan T2V si Wav2Lip
+        low = max(8, int(round(clips * 0.6 + 4)))
+        high = max(15, int(round(clips * 1.5 + 8)))
+        return min(low, 50), min(high, 65)
     low = max(15, int(round(clips * 1.8 + 5)))
     high = max(25, int(round(clips * 3.2 + 8)))
     return min(low, 55), min(high, 70)

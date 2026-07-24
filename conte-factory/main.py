@@ -37,6 +37,7 @@ from modules.sourcing import source_new_video
 from modules.storyboard import build_storyboard
 from modules.video_ai import generate_scene_videos
 from modules.wan_service import ensure_wan_running
+from modules.lipsync_service import ensure_lipsync_running
 
 STEPS = ("sourcing", "storyboard", "audio", "video_ai", "montage", "publish")
 
@@ -95,7 +96,7 @@ def _run_from(
             set_progress(
                 step="video_ai",
                 video_id=video_id,
-                message="Generation des clips video Wan…",
+                message="Generation clips talking (portrait + lip-sync)…",
                 clips_done=0,
                 clips_total=n_clips,
             )
@@ -188,6 +189,19 @@ def run_pipeline(
                 "hint": "Relance video ia puis reessaie",
                 "wan": wan,
             }
+
+    if provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}:
+        from config import AUTO_START_LIPSYNC, LIPSYNC_START_TIMEOUT_SEC
+
+        if AUTO_START_LIPSYNC:
+            set_progress(
+                step="start",
+                pct=2,
+                message="Demarrage moteur lip-sync…",
+                detail="Wav2Lip / InfiniteTalk (fallback portrait si absent)",
+            )
+            # Soft-fail : le pipeline talking a un fallback portrait+audio
+            ensure_lipsync_running(wait_seconds=min(90, LIPSYNC_START_TIMEOUT_SEC))
 
     do_publish = AUTO_PUBLISH if publish is None else publish
 

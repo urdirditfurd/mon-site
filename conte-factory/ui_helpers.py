@@ -237,6 +237,7 @@ def boot_app(page_title: str = "video ia") -> dict:
 
     provider = VIDEO_PROVIDER.lower().strip()
     uses_wan = provider.startswith(("pinokio", "wan"))
+    uses_talking = provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}
     uses_images = provider in {"images", "image", "still", "stills", "invideo"}
     # Demarre Wan seulement si mode Wan explicite
     if uses_wan and AUTO_START_WAN and "wan_boot_done" not in st.session_state:
@@ -249,8 +250,10 @@ def boot_app(page_title: str = "video ia") -> dict:
     health = wan_status() if uses_wan else {"gradio_up": False}
     return {
         "health": health,
-        "wan_ok": True if uses_images else bool(health.get("gradio_up")),
+        # talking / images : UI jamais bloquee (fallback portrait si lipsync down)
+        "wan_ok": True if (uses_images or uses_talking) else bool(health.get("gradio_up")),
         "uses_wan": uses_wan,
+        "uses_talking": uses_talking,
         "uses_images": uses_images,
         "channel": CHANNEL_NAME,
         "root": ROOT,

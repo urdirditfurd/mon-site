@@ -5,16 +5,16 @@ Critères techniques/artistiques appliqués à chaque génération :
 - Résolution / format selon l'âge
 - Colorimétrie adaptée
 - Rythme de plans selon l'attention
-- Mix audio : musique à -12 dB sous les voix
+- Mix audio : musique à -14 dB sous les voix
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# -12 dB = 10^(-12/20) ≈ 0.251
-MUSIC_DB_BELOW_VOICE = -12.0
-MUSIC_LINEAR_VS_VOICE = 10 ** (MUSIC_DB_BELOW_VOICE / 20.0)  # ~0.251
+# -14 dB = 10^(-14/20) ≈ 0.200
+MUSIC_DB_BELOW_VOICE = -14.0
+MUSIC_LINEAR_VS_VOICE = 10 ** (MUSIC_DB_BELOW_VOICE / 20.0)  # ~0.200
 
 
 def normalize_age(age_group: str | None) -> str:
