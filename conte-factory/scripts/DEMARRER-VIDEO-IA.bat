@@ -49,8 +49,13 @@ if exist "%ROOT%\..\pinokio\talking-wav2lip\app\gradio_server.py" set "LIP_APP=%
 
 if /i "%PROVIDER%"=="talking" if defined LIP_APP (
   if exist "%LIP_APP%\env\Scripts\python.exe" (
-    echo ==^> Lip-sync en arriere-plan ^(7870^)...
-    start "video-ia-lipsync" /MIN cmd /c "cd /d "%LIP_APP%" && set GRADIO_SERVER_PORT=7870 && env\Scripts\python.exe gradio_server.py"
+    powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:7870/' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -ge 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+    if not errorlevel 1 (
+      echo ==^> Lip-sync deja pret sur 7870
+    ) else (
+      echo ==^> Lip-sync en arriere-plan ^(7870^)...
+      start "video-ia-lipsync" /MIN cmd /c "cd /d "%LIP_APP%" && set GRADIO_SERVER_PORT=7870 && env\Scripts\python.exe gradio_server.py"
+    )
   )
 )
 

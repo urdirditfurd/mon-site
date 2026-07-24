@@ -47,6 +47,34 @@ demo = gr.Interface(
 )
 
 if __name__ == "__main__":
+    import socket
+    import sys
+    import urllib.request
+
+    def _port_open(host: str, port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex((host, port)) == 0
+
+    def _http_ok(url: str) -> bool:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                return 200 <= int(resp.status) < 500
+        except Exception:
+            return False
+
+    if _http_ok(f"http://127.0.0.1:{PORT}/"):
+        print(f"Lip-sync deja pret sur http://127.0.0.1:{PORT} — rien a relancer.")
+        sys.exit(0)
+
+    if _port_open("127.0.0.1", PORT):
+        print(
+            f"Port {PORT} occupe par un autre processus. "
+            f"Ferme l'ancienne fenetre lip-sync ou: "
+            f"netstat -ano | findstr :{PORT}"
+        )
+        sys.exit(2)
+
     demo.queue(default_concurrency_limit=1).launch(
         server_name="127.0.0.1",
         server_port=PORT,
