@@ -1,6 +1,8 @@
 @echo off
-REM video ia - demarre Wan + dashboard (sans PowerShell, compatible I&B)
+REM video ia - demarrage RAPIDE du dashboard (ne bloque plus sur Wan)
 cd /d "%~dp0.."
+set "ROOT=%CD%"
+set "CF_ROOT=%CD%\.."
 
 if /i "%~1"=="quiet" set VIDEOIA_QUIET=1
 
@@ -11,22 +13,50 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 
-echo.
-echo ========================================
-echo   video ia - demarrage tout-en-un
-echo ========================================
-echo.
-
-echo ==^> Demarrage Wan GPU NVIDIA...
-".venv\Scripts\python.exe" scripts\start_wan.py
-if errorlevel 1 (
-  echo ERREUR: Wan ne s est pas demarre. Voir data\wan_server.log
-  echo Tu peux quand meme ouvrir le dashboard pour reessayer.
+set "PROVIDER=talking"
+set "AUTO_WAN=0"
+if exist ".env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+    if /i "%%A"=="CONTE_VIDEO_PROVIDER" set "PROVIDER=%%B"
+    if /i "%%A"=="CONTE_AUTO_START_WAN" set "AUTO_WAN=%%B"
+  )
 )
 
 echo.
-echo ==^> Dashboard video ia : http://127.0.0.1:8501
-echo     Wan integre     : http://127.0.0.1:7860
+echo ========================================
+echo   video ia - demarrage rapide
+echo ========================================
+echo   Provider: %PROVIDER%
+echo.
+
+set "NEED_WAN=0"
+if /i "%PROVIDER%"=="pinokio" set "NEED_WAN=1"
+if /i "%PROVIDER%"=="wan" set "NEED_WAN=1"
+if /i "%PROVIDER%"=="wan21" set "NEED_WAN=1"
+if /i "%AUTO_WAN%"=="0" set "NEED_WAN=0"
+if /i "%AUTO_WAN%"=="false" set "NEED_WAN=0"
+
+if "%NEED_WAN%"=="1" (
+  echo ==^> Wan en arriere-plan ^(non bloquant^)...
+  start "video-ia-wan" /MIN "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\start_wan.py"
+) else (
+  echo ==^> Wan ignore - ouverture immediate du dashboard
+)
+
+set "LIP_APP="
+if exist "%CF_ROOT%\pinokio\talking-wav2lip\app\gradio_server.py" set "LIP_APP=%CF_ROOT%\pinokio\talking-wav2lip\app"
+if exist "%ROOT%\..\pinokio\talking-wav2lip\app\gradio_server.py" set "LIP_APP=%ROOT%\..\pinokio\talking-wav2lip\app"
+
+if /i "%PROVIDER%"=="talking" if defined LIP_APP (
+  if exist "%LIP_APP%\env\Scripts\python.exe" (
+    echo ==^> Lip-sync en arriere-plan ^(7870^)...
+    start "video-ia-lipsync" /MIN cmd /c "cd /d "%LIP_APP%" && set GRADIO_SERVER_PORT=7870 && env\Scripts\python.exe gradio_server.py"
+  )
+)
+
+echo.
+echo ==^> Dashboard: http://127.0.0.1:8501
+echo     Ouverture...
 echo.
 
 set STREAMLIT_BROWSER_GATHER_USAGE_STATS=false

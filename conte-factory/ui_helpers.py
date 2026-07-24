@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import streamlit as st
@@ -228,10 +229,12 @@ def boot_app(page_title: str = "video ia") -> dict:
         initial_sidebar_state="expanded",
     )
     apply_theme()
+    # Autorefresh uniquement sur Creation (progres), pas partout — accelere l'ouverture
     try:
         from streamlit_autorefresh import st_autorefresh as _ar
 
-        _ar(interval=4000, key="ui_refresh")
+        if "Creation" in page_title or "creation" in page_title.lower():
+            _ar(interval=4000, key="ui_refresh")
     except Exception:
         pass
 
@@ -239,18 +242,28 @@ def boot_app(page_title: str = "video ia") -> dict:
     uses_wan = provider.startswith(("pinokio", "wan"))
     uses_talking = provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}
     uses_images = provider in {"images", "image", "still", "stills", "invideo"}
-    # Demarre Wan seulement si mode Wan explicite
-    if uses_wan and AUTO_START_WAN and "wan_boot_done" not in st.session_state:
-        with st.spinner("Preparation du moteur video…"):
-            st.session_state["wan_boot_result"] = start_wan(
-                wait_seconds=min(WAN_START_TIMEOUT_SEC, 90)
-            )
-            st.session_state["wan_boot_done"] = True
 
-    health = wan_status() if uses_wan else {"gradio_up": False}
+    # Ne JAMAIS bloquer l'UI sur Wan au boot (demarrage async via .bat / bouton)
+    # Ancien comportement: wait jusqu'a 90s → "video ia met longtemps a s'ouvrir"
+    health = {"gradio_up": False}
+    if uses_wan:
+        try:
+            health = wan_status()
+        except Exception:
+            health = {"gradio_up": False}
+        if AUTO_START_WAN and "wan_boot_done" not in st.session_state:
+            # Declenche en arriere-plan sans attendre
+            st.session_state["wan_boot_done"] = True
+            try:
+                threading.Thread(
+                    target=lambda: start_wan(wait_seconds=min(WAN_START_TIMEOUT_SEC, 120)),
+                    daemon=True,
+                ).start()
+            except Exception:
+                pass
+
     return {
         "health": health,
-        # talking / images : UI jamais bloquee (fallback portrait si lipsync down)
         "wan_ok": True if (uses_images or uses_talking) else bool(health.get("gradio_up")),
         "uses_wan": uses_wan,
         "uses_talking": uses_talking,
@@ -278,6 +291,10 @@ def render_sidebar(active: str) -> None:
 
 def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
     """Statut moteur simplifie — sans lien Wan 7860."""
+    if ctx.get("uses_talking"):
+        st.metric("Moteur video", "Talking (portrait + lip-sync)")
+        st.caption("Dashboard pret. Lip-sync sur 7870 si LANCER-LIPSYNC tourne.")
+        return
     if ctx.get("uses_images"):
         st.metric("Moteur video", "Images IA + montage (rapide)")
         st.caption("Mode rapide : 1 illustration / scene, zoom doux, assemblee sur la voix.")
