@@ -145,12 +145,16 @@ with st.form("create_form", clear_on_submit=False):
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     provider = VIDEO_PROVIDER.lower().strip()
     yp = youth_profile(age_group)
-    if provider in {"talking", "lipsync", "talk"}:
+    if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
         mode_txt = (
-            f"**Pipeline talking** : TTS → portrait → lip-sync (~{scenes} repliques)"
+            f"**Pipeline I2V** : TTS → image Pixar → Wan animation (~{scenes} scenes × 4–5s)"
+        )
+    elif provider in {"talking", "lipsync", "talk"}:
+        mode_txt = (
+            f"**Pipeline talking (legacy)** : TTS → portrait → lip-sync (~{scenes} repliques)"
         )
     elif provider.startswith(("pinokio", "wan")):
-        mode_txt = f"**Wan T2V brut** : ~{scenes} clips (sans lip-sync)"
+        mode_txt = f"**Wan T2V brut** : ~{scenes} clips (sans image de depart)"
     else:
         mode_txt = f"**Mode images** : {scenes} illustrations"
     st.markdown(
@@ -160,7 +164,7 @@ with st.form("create_form", clear_on_submit=False):
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-Personnages qui parlent (multi-voix). Portrait coherent + lip-sync si Wav2Lip installe.
+Vraie animation : personnage qui bouge, camera, decor vivant (Wan I2V) — pas un diaporama.
 """
     )
 
@@ -254,7 +258,7 @@ steps_ui = [
     ("sourcing", "Histoire"),
     ("storyboard", "Scenes"),
     ("audio", "Voix"),
-    ("video_ai", "Lip-sync"),
+    ("video_ai", "Animation I2V"),
     ("montage", "Montage"),
     ("done", "Termine"),
 ]

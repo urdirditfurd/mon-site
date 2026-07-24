@@ -239,20 +239,44 @@ def boot_app(page_title: str = "video ia") -> dict:
         pass
 
     provider = VIDEO_PROVIDER.lower().strip()
-    uses_wan = provider.startswith(("pinokio", "wan"))
+    uses_wan = provider.startswith(("pinokio", "wan")) and provider not in {
+        "wan_i2v",
+    }
+    uses_i2v = provider in {"i2v", "wan_i2v", "image2video", "img2vid"}
     uses_talking = provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}
     uses_images = provider in {"images", "image", "still", "stills", "invideo"}
 
-    # Ne JAMAIS bloquer l'UI sur Wan au boot (demarrage async via .bat / bouton)
-    # Ancien comportement: wait jusqu'a 90s → "video ia met longtemps a s'ouvrir"
+    # Ne JAMAIS bloquer l'UI sur Wan/I2V au boot
     health = {"gradio_up": False}
-    if uses_wan:
+    if uses_i2v:
+        try:
+            from modules.i2v_ai import i2v_health
+
+            health = i2v_health()
+            health["gradio_up"] = bool(health.get("gradio_up") or health.get("ready"))
+        except Exception:
+            health = {"gradio_up": False, "ready": False}
+        if "i2v_boot_done" not in st.session_state:
+            st.session_state["i2v_boot_done"] = True
+            try:
+                from config import AUTO_START_I2V, I2V_START_TIMEOUT_SEC
+                from modules.i2v_service import ensure_i2v_running
+
+                if AUTO_START_I2V:
+                    threading.Thread(
+                        target=lambda: ensure_i2v_running(
+                            wait_seconds=min(I2V_START_TIMEOUT_SEC, 180)
+                        ),
+                        daemon=True,
+                    ).start()
+            except Exception:
+                pass
+    elif uses_wan:
         try:
             health = wan_status()
         except Exception:
             health = {"gradio_up": False}
         if AUTO_START_WAN and "wan_boot_done" not in st.session_state:
-            # Declenche en arriere-plan sans attendre
             st.session_state["wan_boot_done"] = True
             try:
                 threading.Thread(
@@ -264,8 +288,11 @@ def boot_app(page_title: str = "video ia") -> dict:
 
     return {
         "health": health,
-        "wan_ok": True if (uses_images or uses_talking) else bool(health.get("gradio_up")),
+        "wan_ok": True
+        if (uses_images or uses_talking or uses_i2v)
+        else bool(health.get("gradio_up")),
         "uses_wan": uses_wan,
+        "uses_i2v": uses_i2v,
         "uses_talking": uses_talking,
         "uses_images": uses_images,
         "channel": CHANNEL_NAME,
@@ -290,10 +317,17 @@ def render_sidebar(active: str) -> None:
 
 
 def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
-    """Statut moteur simplifie — sans lien Wan 7860."""
+    """Statut moteur simplifie."""
+    if ctx.get("uses_i2v"):
+        st.metric("Moteur video", "Wan I2V (vraie animation)")
+        st.caption(
+            "TTS → image scene Pixar → Wan Image-to-Video → montage. "
+            "Port 7861 si LANCER-I2V tourne."
+        )
+        return
     if ctx.get("uses_talking"):
-        st.metric("Moteur video", "Talking (portrait + lip-sync)")
-        st.caption("Dashboard pret. Lip-sync sur 7870 si LANCER-LIPSYNC tourne.")
+        st.metric("Moteur video", "Talking (legacy lip-sync)")
+        st.caption("Mode legacy. Prefere SWITCH-TO-I2V pour une vraie animation.")
         return
     if ctx.get("uses_images"):
         st.metric("Moteur video", "Images IA + montage (rapide)")

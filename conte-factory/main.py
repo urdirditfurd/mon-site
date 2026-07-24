@@ -96,7 +96,7 @@ def _run_from(
             set_progress(
                 step="video_ai",
                 video_id=video_id,
-                message="Generation clips talking (portrait + lip-sync)…",
+                message="Generation clips animes (Image-to-Video)…",
                 clips_done=0,
                 clips_total=n_clips,
             )
@@ -169,7 +169,9 @@ def run_pipeline(
         return {"ok": False, "reason": "pipeline_en_pause", "hint": "Relancez depuis le dashboard."}
 
     provider = VIDEO_PROVIDER.lower().strip()
-    if AUTO_START_WAN and provider.startswith(("pinokio", "wan")):
+    if AUTO_START_WAN and provider.startswith(("pinokio", "wan")) and provider not in {
+        "wan_i2v",
+    }:
         set_progress(
             step="start",
             pct=1,
@@ -189,6 +191,27 @@ def run_pipeline(
                 "hint": "Relance video ia puis reessaie",
                 "wan": wan,
             }
+
+    if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        from config import AUTO_START_I2V, I2V_START_TIMEOUT_SEC
+        from modules.i2v_service import ensure_i2v_running
+
+        if AUTO_START_I2V:
+            set_progress(
+                step="start",
+                pct=2,
+                message="Demarrage Wan Image-to-Video…",
+                detail="Vraie animation (pas diaporama). Premier chargement modele ~5-10 min.",
+            )
+            i2v = ensure_i2v_running(wait_seconds=min(180, I2V_START_TIMEOUT_SEC))
+            if not i2v.get("ok") and not i2v.get("ready"):
+                # Soft: CLI peut encore fonctionner sans Gradio
+                set_progress(
+                    step="start",
+                    pct=3,
+                    message="I2V Gradio absent — tentative CLI directe…",
+                    detail=str(i2v.get("error") or ""),
+                )
 
     if provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}:
         from config import AUTO_START_LIPSYNC, LIPSYNC_START_TIMEOUT_SEC

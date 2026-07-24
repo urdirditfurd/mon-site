@@ -37,11 +37,12 @@ VISUAL_STYLE = os.getenv(
 )
 
 # Moteur visuel
-# talking = pipeline 4 etapes (TTS -> portrait -> lip-sync -> FFmpeg) — recommandé
-# pinokio = Wan 2.1 T2V brut (sans lip-sync)
+# i2v     = TTS → image scène Pixar → Wan I2V (vraie animation) — recommandé
+# talking = portrait + Wav2Lip (legacy / tête parlante)
+# pinokio = Wan T2V brut (sans image de départ)
 # images  = illustrations + Ken Burns
 # fal     = cloud Kling (optionnel)
-VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "talking")
+VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "i2v")
 FAL_KEY = os.getenv("FAL_KEY", os.getenv("FAL_API_KEY", ""))
 FAL_MODEL = os.getenv(
     "CONTE_FAL_MODEL",
@@ -52,7 +53,7 @@ FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "3"))
 ASPECT_RATIO = os.getenv("CONTE_ASPECT_RATIO", "16:9")
 IMAGE_BACKEND = os.getenv("CONTE_IMAGE_BACKEND", "auto")  # auto|pollinations|local|pillow
 
-# Pinokio — Wan 2.1 T2V (optionnel si provider=talking)
+# Pinokio — Wan 2.1 T2V (optionnel)
 PINOKIO_WAN_URL = os.getenv("PINOKIO_WAN_URL", "http://127.0.0.1:7860")
 PINOKIO_WAN_ENGINE = os.getenv("PINOKIO_WAN_ENGINE", "")
 PINOKIO_WAN_PYTHON = os.getenv("PINOKIO_WAN_PYTHON", "")
@@ -61,10 +62,19 @@ PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
 WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
 
-# Lip-sync Pinokio (Wav2Lip gratuit / InfiniteTalk si installé)
+# Wan I2V (Image-to-Video) — vraie animation
+PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
+PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
+PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
+PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "49"))
+PINOKIO_I2V_STEPS = int(os.getenv("PINOKIO_I2V_STEPS", "20"))
+AUTO_START_I2V = os.getenv("CONTE_AUTO_START_I2V", "1") == "1"
+I2V_START_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_TIMEOUT_SEC", "600"))
+
+# Lip-sync Pinokio (legacy Wav2Lip)
 PINOKIO_LIPSYNC_URL = os.getenv("PINOKIO_LIPSYNC_URL", "http://127.0.0.1:7870")
 PINOKIO_LIPSYNC_ENGINE = os.getenv("PINOKIO_LIPSYNC_ENGINE", "")
-AUTO_START_LIPSYNC = os.getenv("CONTE_AUTO_START_LIPSYNC", "1") == "1"
+AUTO_START_LIPSYNC = os.getenv("CONTE_AUTO_START_LIPSYNC", "0") == "1"
 LIPSYNC_START_TIMEOUT_SEC = int(os.getenv("CONTE_LIPSYNC_TIMEOUT_SEC", "300"))
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
@@ -162,8 +172,10 @@ def estimate_ai_clips(
     duration_min: float | None = None,
     age_group: str = "1-10",
 ) -> int:
-    """Nombre de jobs visuels estimés (Wan = budget clips, images = scènes)."""
+    """Nombre de jobs visuels estimés (I2V/Wan = scènes, images = scènes)."""
     provider = VIDEO_PROVIDER.lower().strip()
+    if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        return scene_count_for_duration(duration_min, age_group=age_group)
     if provider in {"pinokio", "wan", "wan21", "wan-snapdragon", "fal", "talking", "lipsync"}:
         return wan_clip_budget(duration_min)
     return scene_count_for_duration(duration_min, age_group=age_group)
@@ -180,8 +192,12 @@ def estimate_render_minutes(
         low = max(3, int(round(clips * 0.35 + 2)))
         high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
+    if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        # ~2–5 min / scène I2V sur RTX 3080 10 Go
+        low = max(20, int(round(clips * 2.0 + 8)))
+        high = max(35, int(round(clips * 4.5 + 12)))
+        return min(low, 90), min(high, 120)
     if provider in {"talking", "lipsync", "talk"}:
-        # Portrait + lip-sync / replique : plus rapide que Wan T2V si Wav2Lip
         low = max(8, int(round(clips * 0.6 + 4)))
         high = max(15, int(round(clips * 1.5 + 8)))
         return min(low, 50), min(high, 65)

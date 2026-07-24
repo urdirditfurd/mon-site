@@ -1,10 +1,8 @@
 """Étape moteur vidéo IA — génération réelle depuis le storyboard.
 
-Provider recommandé pour ce projet (Pinokio) :
-  **Wan 2.1 T2V 1.3B** via `pinokio/wan-snapdragon-arm`
-  → local (CPU/Snapdragon) ou Gradio Pinokio sur le port configuré.
-
-Fallback cloud optionnel : FAL/Kling (`CONTE_VIDEO_PROVIDER=fal`).
+Provider recommandé :
+  **i2v** = Wan 2.1 Fun 1.3B Image-to-Video (vraie animation locale RTX)
+  Legacy : talking (Wav2Lip), pinokio (T2V), images (Ken Burns), fal (cloud)
 """
 
 from __future__ import annotations
@@ -363,6 +361,11 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         raise ValueError(f"Vidéo introuvable: {video_id}")
 
     provider = VIDEO_PROVIDER.lower().strip()
+    if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        from modules.i2v_pipeline import generate_i2v_videos
+
+        return generate_i2v_videos(video_id)
+
     if provider in {"talking", "lipsync", "talk", "multitalk", "infinitetalk"}:
         from modules.talking_pipeline import generate_talking_videos
 
@@ -375,7 +378,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     elif provider != "fal":
         raise RuntimeError(
             f"Provider inconnu: {VIDEO_PROVIDER}. "
-            "Utilisez talking (recommande), pinokio, images ou fal."
+            "Utilisez i2v (recommande), talking, pinokio, images ou fal."
         )
 
     projet = Path(video["chemin_projet"])
