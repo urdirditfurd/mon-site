@@ -340,9 +340,10 @@ def _generate_one_pinokio_clip(prompt: str, dest: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _clips_needed(duration_sec: float) -> int:
-    """Toujours 1 clip par scène : FFmpeg boucle le clip sur la durée audio.
+    """Toujours 1 visuel par scène (image ou clip).
 
-    Avant : 60 s / 15 s = 4 clips × 30 scènes = 120 générations (énormément long).
+    Durée = narration réelle. Pas de boucle du même clip pour « remplir »
+    les 5 minutes : le montage fige la dernière frame si besoin.
     """
     _ = duration_sec
     return 1

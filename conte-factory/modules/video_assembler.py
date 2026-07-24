@@ -47,27 +47,56 @@ class VideoAssembler:
         return float(out)
 
     def _fit_clip(self, src: Path, duration: float, out: Path) -> None:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-stream_loop",
-            "-1",
-            "-i",
-            str(src),
-            "-t",
-            f"{duration:.3f}",
-            "-vf",
+        """Aligne sans rejouer le clip en boucle (freeze si trop court)."""
+        duration = max(1.0, float(duration))
+        try:
+            src_dur = max(0.1, self._ffprobe_duration(src))
+        except Exception:
+            src_dur = duration
+        scale_pad = (
             f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
-            f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps={VIDEO_FPS},format=yuv420p",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "22",
-            str(out),
-        ]
+            f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+            f"fps={VIDEO_FPS},format=yuv420p"
+        )
+        if src_dur >= duration - 0.05:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(src),
+                "-t",
+                f"{duration:.3f}",
+                "-vf",
+                scale_pad,
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "22",
+                str(out),
+            ]
+        else:
+            pad_sec = max(0.05, duration - src_dur)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(src),
+                "-vf",
+                f"{scale_pad},tpad=stop_mode=clone:stop_duration={pad_sec:.3f}",
+                "-t",
+                f"{duration:.3f}",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "22",
+                str(out),
+            ]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RuntimeError((proc.stderr or proc.stdout or "ffmpeg fit failed")[-1500:])

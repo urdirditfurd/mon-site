@@ -163,32 +163,70 @@ def _image_to_motion_clip(src: Path, duration: float, out: Path, motion: str = "
 
 
 def _fit_clip_to_duration(src: Path, duration: float, out: Path, motion: str = "zoom_in") -> None:
+    """Aligne un clip sur la durée audio SANS rejouer l'action en boucle.
+
+    Si le clip est plus court : on joue une fois, puis on fige la dernière image
+    (tpad). Jamais de -stream_loop sur le contenu narratif.
+    """
     if out.exists():
         return
     if _is_image(src):
         _image_to_motion_clip(src, duration, out, motion=motion)
         return
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-stream_loop",
-        "-1",
-        "-i",
-        str(src),
-        "-t",
-        f"{duration:.3f}",
-        "-vf",
+
+    duration = max(1.0, float(duration))
+    try:
+        src_dur = max(0.1, _ffprobe_duration(src))
+    except Exception:
+        src_dur = duration
+
+    scale_pad = (
         f"scale={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps={VIDEO_FPS},format=yuv420p",
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        str(out),
-    ]
+        f"pad={cfg.VIDEO_WIDTH}:{cfg.VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+        f"fps={VIDEO_FPS},format=yuv420p"
+    )
+
+    if src_dur >= duration - 0.05:
+        # Assez long : couper à la durée exacte (pas de boucle)
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-t",
+            f"{duration:.3f}",
+            "-vf",
+            scale_pad,
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            str(out),
+        ]
+    else:
+        # Trop court : une seule lecture + freeze dernière frame (pas de reprise)
+        pad_sec = max(0.05, duration - src_dur)
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-vf",
+            f"{scale_pad},tpad=stop_mode=clone:stop_duration={pad_sec:.3f}",
+            "-t",
+            f"{duration:.3f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            str(out),
+        ]
     subprocess.run(cmd, check=True, capture_output=True)
 
 

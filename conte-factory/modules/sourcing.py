@@ -55,51 +55,74 @@ def _title_from_theme(theme: str) -> str:
     return short[0].upper() + short[1:] if short else "Conte du soir"
 
 
-def _beat_templates(subject: str, lesson: str) -> list[str]:
-    """Beats narratifs qui REPETENT et développent le sujet demandé."""
+def _unique_story_beats(subject: str, lesson: str, scenes_n: int) -> list[str]:
+    """Histoire linéaire UNIQUE — jamais de recyclage des mêmes scènes en boucle."""
     s = subject
-    return [
-        (
-            f"Il était une fois {s}. "
-            f"Ce n'était pas une histoire d'un autre animal : c'était vraiment {s}, "
-            f"au cœur de notre conte. Avant de dormir, écoute bien ce qui lui arrive."
-        ),
-        (
-            f"Ce soir-là, {s} regardait le ciel. "
-            f"Les nuages bougeaient doucement, et {s} sentait une envie d'aventure. "
-            f"On voyait clairement {s}, exactement comme dans le thème de l'histoire."
-        ),
-        (
-            f"Alors {s} s'élança. "
-            f"On entendait le vent, on voyait le mouvement, et {s} avançait avec courage. "
-            f"Chaque détail rappelait {s} : les couleurs, le geste, l'élan."
-        ),
-        (
-            f"Sur le chemin, {s} rencontra un ami gentil. "
-            f"Ensemble, ils parlèrent de {s} et de ce qu'il voulait accomplir. "
-            f"L'ami dit : « Je suis fier de toi, {s} »."
-        ),
-        (
-            f"Mais un petit obstacle apparut. "
-            f"{s} eut un instant de doute. Puis {s} respira, se souvint de sa force, "
-            f"et continua. Car cette histoire parle bien de {s}."
-        ),
-        (
-            f"Avec douceur, {s} trouva une idée brillante. "
-            f"Il utilisa ce qui le rendait unique — justement ce qui fait de {s} un héros. "
-            f"Les nuages semblaient applaudir {s}."
-        ),
-        (
-            f"Enfin, {s} réussit. "
-            f"On le voyait rayonnant : {s} avait traversé l'aventure. "
-            f"Tout le monde murmura : « Bravo, {s} ! »"
-        ),
-        (
-            f"En rentrant, {s} comprit une belle vérité : {lesson}. "
-            f"Et depuis ce jour, quand on pense à {s}, on se sent en sécurité. "
-            f"Bonne nuit — l'histoire de {s} continue dans les rêves."
-        ),
+    n = max(4, int(scenes_n))
+
+    # Moments distincts (assez pour 36 scènes max) — progression claire
+    moments = [
+        f"Il était une fois {s}. Ce soir, l'histoire parle uniquement de {s}, pas d'un autre héros.",
+        f"Au réveil du conte, {s} découvrait un ciel doux. Les nuages formaient un chemin juste pour {s}.",
+        f"{s} respira profondément. On voyait chaque détail de {s}, exactement comme demandé.",
+        f"Puis {s} s'élança dans les airs. Le vent chantait, et {s} avançait avec un courage calme.",
+        f"Plus haut, {s} traversa une porte de nuages roses. Derrière, un monde nouveau attendait {s}.",
+        f"Un ami lumineux salua {s}. Ensemble, ils parlèrent de ce que {s} voulait accomplir.",
+        f"L'ami murmura : « Je crois en toi, {s}. » Et {s} sourit, rassuré.",
+        f"Soudain, un petit obstacle bloqua le passage. {s} s'arrêta, sans paniquer.",
+        f"{s} observa, chercha, puis trouva une idée douce. C'était typique de {s}.",
+        f"Avec patience, {s} contourna l'obstacle. Chaque geste montrait encore {s}.",
+        f"Une lumière bleue dansa autour de {s}. Elle guidait {s} vers la suite de l'aventure.",
+        f"Au milieu du ciel, {s} croisa une étoile timide. L'étoile demanda de l'aide à {s}.",
+        f"{s} accepta. Aider faisait partie de la nature de {s}.",
+        f"Ensemble, {s} et l'étoile avancèrent. Le chemin devenait plus clair grâce à {s}.",
+        f"Un vent capricieux secoua les nuages. {s} tint bon, solide et tendre à la fois.",
+        f"{s} se souvint d'une force intérieure. Ce souvenir donna des ailes à {s}.",
+        f"Alors {s} montra ce qui le rendait unique — la magie propre à {s}.",
+        f"Les nuages applaudirent presque. On n'avait d'yeux que pour {s}.",
+        f"Un dernier défi apparut, plus doux qu'effrayant. {s} le regarda sans peur.",
+        f"{s} trouva la solution en écoutant son cœur. C'était la vraie force de {s}.",
+        f"Enfin, {s} réussit. Le ciel s'ouvrit en couleurs chaudes autour de {s}.",
+        f"Des voix amies murmurèrent : « Bravo, {s} ! » {s} rayonnait de joie calme.",
+        f"Sur le chemin du retour, {s} repensa à chaque étape. L'aventure avait grandi {s}.",
+        f"{s} comprit une belle vérité : {lesson}. Cette leçon appartenait à {s}.",
+        f"La nuit enveloppa {s} comme une couverture. Tout était paisible autour de {s}.",
+        f"Avant de dormir, on revoyait {s} une dernière fois, fier et serein.",
+        f"Et depuis ce soir, quand on pense à {s}, on se sent en sécurité.",
+        f"Bonne nuit — le rêve continue avec {s}, sans recommencer l'histoire depuis le début.",
+        f"Dans le silence, {s} veillait encore un instant, gardien doux du conte.",
+        f"Les étoiles clignèrent pour {s}. Puis tout s'endormit autour de {s}.",
+        f"Fin de l'aventure de {s} — une seule histoire, racontée jusqu'au bout.",
+        f"On ferma les yeux en pensant à {s}, heureux d'avoir suivi {s} sans boucle.",
+        f"Demain, peut-être une nouvelle histoire. Ce soir, c'était celle de {s}.",
+        f"Le dernier nuage s'effaça derrière {s}. Le conte de {s} était complet.",
+        f"Ainsi s'acheva le voyage de {s}, unique et sans répétition.",
+        f"Dors bien — {s} reste dans ton cœur, jusqu'au prochain conte.",
     ]
+
+    if n <= len(moments):
+        # Indices strictement croissants répartis sur l'arc complet
+        chosen: list[str] = []
+        used: set[int] = set()
+        for i in range(n):
+            idx = int(round(i * (len(moments) - 1) / max(1, n - 1)))
+            while idx in used and idx < len(moments) - 1:
+                idx += 1
+            while idx in used and idx > 0:
+                idx -= 1
+            used.add(idx)
+            chosen.append(moments[idx])
+        return chosen
+
+    chosen = moments[:]
+    extra_i = 0
+    while len(chosen) < n:
+        extra_i += 1
+        chosen.append(
+            f"Chapitre bonus {extra_i} : {s} découvrit un détail inédit du paysage, "
+            f"jamais vu auparavant, et {s} avança encore un peu plus loin dans le conte."
+        )
+    return chosen[:n]
 
 
 def _expand_to_duration(
@@ -108,33 +131,52 @@ def _expand_to_duration(
     scenes_n: int,
     duration_min: float,
 ) -> list[str]:
-    """Produit `scenes_n` paragraphes assez riches pour viser duration_min."""
+    """Produit `scenes_n` paragraphes UNIQUE pour viser duration_min — sans boucler l'histoire."""
     target = _target_words(duration_min)
-    fillers = [
+    # Enrichissements distincts (pas les mêmes phrases recyclées en boucle narrative)
+    detail_pool = [
         f"On prenait le temps d'observer {subject}, sans se presser.",
         f"La lumière caressait {subject}, tout était calme et magique.",
         f"Les enfants imaginaient {subject} encore plus clairement.",
         f"Un silence doux entourait {subject}, comme une berceuse.",
-        f"Et {subject} avançait, pas après pas, scène après scène.",
+        f"Le ciel changeait de teinte autour de {subject}.",
         f"Rien n'était effrayant : {subject} inspirait confiance et tendresse.",
+        f"On entendait à peine le vent près de {subject}.",
+        f"Chaque couleur racontait un peu plus {subject}.",
+        f"Le décor restait cohérent avec {subject}, scène après scène.",
+        f"Un souffle tiède accompagnait {subject}.",
+        f"Loin d'être une reprise, ce moment avançait l'histoire de {subject}.",
+        f"La suite appartenait encore à {subject}, jamais une copie du début.",
     ]
 
-    paragraphs: list[str] = []
-    i = 0
+    # Beats déjà uniques et dimensionnés à scenes_n
+    paragraphs = list(beats[:scenes_n])
     while len(paragraphs) < scenes_n:
-        base = beats[i % len(beats)]
-        extra = " ".join(fillers[(i + k) % len(fillers)] for k in range(2))
-        paragraphs.append(f"{base} {extra}")
-        i += 1
+        k = len(paragraphs) + 1
+        paragraphs.append(
+            f"Moment {k} : {subject} poursuivit son chemin vers une découverte nouvelle."
+        )
 
-    # Enrichir jusqu'à atteindre le volume de mots cible
+    words_each = max(40, target // max(1, scenes_n))
+    for i in range(len(paragraphs)):
+        extras: list[str] = []
+        # Ajouter des détails DIFFÉRENTS par scène (index décalé, pas de modulo sur le même cycle narratif)
+        need = words_each - _word_count(paragraphs[i])
+        guard = 0
+        while need > 8 and guard < 12:
+            extras.append(detail_pool[(i * 3 + guard) % len(detail_pool)])
+            need = words_each - _word_count(paragraphs[i] + " " + " ".join(extras))
+            guard += 1
+        if extras:
+            paragraphs[i] = f"{paragraphs[i]} {' '.join(extras)}"
+
+    # Si encore trop court globalement : allonger chaque scène un peu, sans répéter l'arc
     guard = 0
-    while _word_count(" ".join(paragraphs)) < target and guard < 80:
+    while _word_count(" ".join(paragraphs)) < target and guard < 60:
         idx = guard % len(paragraphs)
         paragraphs[idx] = (
             f"{paragraphs[idx]} "
-            f"{fillers[guard % len(fillers)]} "
-            f"Oui, cette scène parle encore de {subject}."
+            f"{detail_pool[(idx + guard) % len(detail_pool)]}"
         )
         guard += 1
 
@@ -156,7 +198,7 @@ def _builtin_story(
     scenes_n = scene_count_for_duration(minutes, age_group=age_group)
     titre = _title_from_theme(subject)
 
-    beats = _beat_templates(subject, lesson)
+    beats = _unique_story_beats(subject, lesson, scenes_n)
     paragraphs = _expand_to_duration(beats, subject, scenes_n, minutes)
     script = "\n\n".join(paragraphs)
 

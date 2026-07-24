@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import sys
 import time
 from pathlib import Path
@@ -14,13 +16,16 @@ if str(ROOT) not in sys.path:
 
 from config import estimate_ai_clips, estimate_render_minutes
 from modules.creative_options import MUSIC_OPTIONS
-from modules.job_runner import (
-    refresh_job_status,
-    start_generation_job,
-    stop_generation_job,
-)
+from modules import job_runner as job_runner_mod
 from modules.progress import get_progress
 from ui_helpers import boot_app, go_page, nav_buttons, render_engine_status, render_sidebar
+
+# Recharge le module a chaque run Streamlit (evite TypeError style_key apres git pull)
+job_runner_mod = importlib.reload(job_runner_mod)
+start_generation_job = job_runner_mod.start_generation_job
+refresh_job_status = job_runner_mod.refresh_job_status
+stop_generation_job = job_runner_mod.stop_generation_job
+JOB_RUNNER_API = int(getattr(job_runner_mod, "JOB_RUNNER_API", 1))
 
 ctx = boot_app("video ia — Creation")
 render_sidebar("Creation")
@@ -139,8 +144,8 @@ with st.form("create_form", clear_on_submit=False):
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-L'histoire et les images suivent ton theme mot pour mot.  
-La duree audio vise la duree demandee (voix adoucie).
+L'histoire et les images suivent ton theme.  
+La duree vient du script + voix (pas de video rejouee en boucle).
 """
     )
 
@@ -157,17 +162,32 @@ if submitted:
     elif ctx["uses_wan"] and not ctx["wan_ok"]:
         st.error("Moteur video pas encore pret — attends puis reessaie.")
     else:
-        result = start_generation_job(
-            theme=theme.strip(),
-            duration_min=float(duration),
-            voice=voice,
-            subtitles=subtitles,
-            publish=publish,
-            age_group=age_group,
-            style_key=style_key,
-            aspect=aspect_key,
-            music=music,
+        payload = {
+            "theme": theme.strip(),
+            "duration_min": float(duration),
+            "voice": voice,
+            "subtitles": subtitles,
+            "publish": publish,
+            "age_group": age_group,
+            "style_key": style_key,
+            "aspect": aspect_key,
+            "music": music,
+        }
+        params = inspect.signature(start_generation_job).parameters
+        has_var_kw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
         )
+        if has_var_kw or "style_key" in params:
+            filtered = payload if has_var_kw else {
+                k: v for k, v in payload.items() if k in params
+            }
+        else:
+            st.warning(
+                "Ancien job_runner detecte (sans style/format/musique). "
+                "Fais git pull puis arrete/relance video ia."
+            )
+            filtered = {k: v for k, v in payload.items() if k in params}
+        result = start_generation_job(**filtered)
         if result.get("ok"):
             st.success("Generation lancee.")
             st.rerun()

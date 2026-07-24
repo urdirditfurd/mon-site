@@ -144,7 +144,7 @@ def estimate_ai_clips(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> int:
-    """1 visuel par scène (image ou clip Wan), bouclé au montage."""
+    """1 visuel par scène (image ou clip Wan) — durée = audio, sans boucle récit."""
     return scene_count_for_duration(duration_min, age_group=age_group)
 
 

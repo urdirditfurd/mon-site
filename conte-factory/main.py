@@ -246,8 +246,8 @@ def print_estimate() -> None:
 
     low, high = estimate_render_minutes()
     print(
-        f"Cible: {TARGET_DURATION_MIN} min | scenes/clips Wan ~{clips} "
-        f"(1 clip/scene, boucle audio) | provider={VIDEO_PROVIDER}"
+        f"Cible: {TARGET_DURATION_MIN} min | scenes/clips ~{clips} "
+        f"(1 clip/scene, duree = audio, sans boucle) | provider={VIDEO_PROVIDER}"
     )
     print(f"Rendu estime GPU: {low}–{high} min")
 

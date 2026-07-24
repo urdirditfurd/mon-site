@@ -23,6 +23,10 @@ def resolve_voice(choice: str) -> str:
     return VOICE_MAP.get(key, VOICE_MAP["auto"])
 
 
+# API Creation — si l'UI voit une erreur style_key, c'est un vieux job_runner en cache.
+JOB_RUNNER_API = 2
+
+
 def start_generation_job(
     *,
     theme: str,
@@ -34,8 +38,18 @@ def start_generation_job(
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",
+    **_extra: Any,
 ) -> dict[str, Any]:
-    """Demarre main.py en sous-processus avec les options UI."""
+    """Demarre main.py en sous-processus avec les options UI.
+
+    **_extra absorbe d'anciens/nouveaux kwargs pour eviter TypeError
+    si Streamlit a un module partiellement desynchronise.
+    """
+    _ = _extra
+    style_key = str(style_key or "aquarelle").strip() or "aquarelle"
+    aspect = str(aspect or "16:9").strip() or "16:9"
+    music = str(music or "berceuse").strip() or "berceuse"
+
     existing = get_job()
     if existing and existing.get("running"):
         pid = existing.get("pid")

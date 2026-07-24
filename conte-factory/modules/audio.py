@@ -1,4 +1,8 @@
-"""Étape 3 — Voix off Edge-TTS plus naturelle + durées réelles par scène."""
+"""Étape 3 — Voix off Edge-TTS plus naturelle + durées réelles par scène.
+
+La durée finale = somme des scènes TTS (contenu unique).
+On ne boucle JAMAIS l'audio pour atteindre la durée cible.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from config import TTS_PITCH, TTS_RATE, TTS_VOICE
+from config import TARGET_DURATION_MIN, TTS_PITCH, TTS_RATE, TTS_VOICE
 from db.database import get_video, log_event, update_video
 
 
@@ -107,6 +111,18 @@ def generate_audio(
     subprocess.run(cmd, check=True, cwd=str(audio_dir), capture_output=True)
 
     total = sum(t["duration_sec"] for t in timings)
+    target_sec = float(board.get("duration_min") or TARGET_DURATION_MIN) * 60.0
+    # Jamais de boucle audio : on signale si trop court (script à enrichir à la source)
+    if target_sec > 0 and total < target_sec * 0.85:
+        log_event(
+            video_id,
+            "warn",
+            (
+                f"Audio {total/60:.1f} min < cible {target_sec/60:.1f} min "
+                f"(pas de boucle — relancer une nouvelle génération si besoin)."
+            ),
+        )
+
     board["timings"] = timings
     board["total_audio_sec"] = round(total, 3)
     board_path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
