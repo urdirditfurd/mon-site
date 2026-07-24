@@ -9,6 +9,7 @@ Fallback cloud optionnel : FAL/Kling (`CONTE_VIDEO_PROVIDER=fal`).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -369,7 +370,20 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     clips_dir = projet / "ai_clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs: list[tuple[int, int, str, Path]] = []
+    # Format image selon aspect board
+    from modules.creative_options import format_size
+    from modules.image_ai import set_image_output_size
+
+    aw, ah = format_size(str(board.get("aspect") or "16:9"))
+    # Images un peu plus petites que le master pour vitesse, ratio conservé
+    img_w = min(1280, aw)
+    img_h = int(round(img_w * ah / aw))
+    set_image_output_size(img_w, img_h)
+
+    theme_key = str(board.get("theme") or board.get("hero") or "conte")
+    base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
+
+    jobs: list[tuple[int, int, str, Path, int]] = []
     for scene in board["scenes"]:
         idx = int(scene["index"])
         dur = float(scene.get("duration_sec") or scene.get("target_duration_sec") or AI_CLIP_SEC)
@@ -379,17 +393,17 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         for part in range(n):
             if provider == "images":
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.png"
-                part_prompt = (
-                    f"{prompt}, storybook keyframe, soft light, calm composition, "
-                    f"variation {part + 1}"
-                )
+                part_prompt = prompt
+                # Seed proche pour cohérence personnage, +offset par scène
+                seed = (base_seed + idx * 17 + part) % 1_000_000
             else:
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.mp4"
                 part_prompt = (
                     f"{prompt}, shot variation {part + 1}, continuous storytelling motion, "
                     f"gentle animation for children"
                 )
-            jobs.append((idx, part, part_prompt, out))
+                seed = 0
+            jobs.append((idx, part, part_prompt, out, seed))
             scene_files.append(out.name)
         scene["ai_clip_files"] = scene_files
         scene["ai_clips_planned"] = n
@@ -408,10 +422,10 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         workers = max(1, FAL_CONCURRENCY)
     errors: list[str] = []
 
-    def _worker(item: tuple[int, int, str, Path]) -> None:
-        _idx, _part, prompt, out = item
+    def _worker(item: tuple[int, int, str, Path, int]) -> None:
+        _idx, _part, prompt, out, seed = item
         if provider == "images":
-            generate_scene_image(prompt, out)
+            generate_scene_image(prompt, out, seed=seed, width=img_w, height=img_h)
         elif provider == "pinokio":
             _generate_one_pinokio_clip(prompt, out)
         else:

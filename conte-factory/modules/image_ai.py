@@ -30,37 +30,56 @@ from config import (
 )
 
 IMAGE_BACKEND = os.getenv("CONTE_IMAGE_BACKEND", "auto").strip().lower()
-IMAGE_WIDTH = int(os.getenv("CONTE_IMAGE_WIDTH", str(min(1280, VIDEO_WIDTH))))
-IMAGE_HEIGHT = int(os.getenv("CONTE_IMAGE_HEIGHT", str(min(720, VIDEO_HEIGHT))))
+IMAGE_WIDTH = int(os.getenv("CONTE_IMAGE_WIDTH", "1280"))
+IMAGE_HEIGHT = int(os.getenv("CONTE_IMAGE_HEIGHT", "720"))
 POLLINATIONS_MODEL = os.getenv("CONTE_POLLINATIONS_MODEL", "flux")
 
 
-def _safe_prompt(prompt: str, max_len: int = 420) -> str:
+def set_image_output_size(width: int, height: int) -> None:
+    global IMAGE_WIDTH, IMAGE_HEIGHT
+    IMAGE_WIDTH = max(640, int(width))
+    IMAGE_HEIGHT = max(640, int(height))
+
+
+def _safe_prompt(prompt: str, max_len: int = 550) -> str:
     text = " ".join((prompt or "").split())
     if not text:
         text = f"{VISUAL_STYLE}, magical children's storybook scene"
-    if VISUAL_STYLE.lower() not in text.lower():
-        text = f"{VISUAL_STYLE}, {text}"
-    # Renforcer le style conte (pas de texte à l'écran)
-    text = f"{text}, soft storybook illustration, calm bedtime mood, no text, no watermark, no logo"
+    # Qualité + cohérence
+    text = (
+        f"{text}, masterpiece children's illustration, sharp focus, consistent character, "
+        f"rich colors, calm bedtime mood, no text, no watermark, no logo, no UI"
+    )
     return text[:max_len]
 
 
-def generate_scene_image(prompt: str, dest: Path) -> Path:
+def generate_scene_image(
+    prompt: str,
+    dest: Path,
+    *,
+    seed: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> Path:
     """Produit une image PNG pour une scène."""
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 2000:
         return dest
 
+    if width and height:
+        set_image_output_size(width, height)
+
     prompt = _safe_prompt(prompt)
+    if seed is None:
+        seed = int(hashlib.md5(prompt[:120].encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
     errors: list[str] = []
 
     backends = _backends_order()
     for name in backends:
         try:
             if name == "pollinations":
-                _via_pollinations(prompt, dest)
+                _via_pollinations(prompt, dest, seed=seed)
             elif name == "local":
                 _via_local_sd(prompt, dest)
             elif name == "pillow":
@@ -72,7 +91,6 @@ def generate_scene_image(prompt: str, dest: Path) -> Path:
         except Exception as exc:
             errors.append(f"{name}: {exc}")
 
-    # Dernier recours
     _via_pillow(prompt, dest)
     if dest.exists() and dest.stat().st_size > 500:
         return dest
@@ -90,9 +108,8 @@ def _backends_order() -> list[str]:
     return ["pollinations", "local", "pillow"]
 
 
-def _via_pollinations(prompt: str, dest: Path) -> None:
+def _via_pollinations(prompt: str, dest: Path, seed: int = 42) -> None:
     encoded = urllib.parse.quote(prompt)
-    seed = int(hashlib.md5(prompt.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width={IMAGE_WIDTH}&height={IMAGE_HEIGHT}"
@@ -104,7 +121,6 @@ def _via_pollinations(prompt: str, dest: Path) -> None:
     if "image" not in ctype and len(resp.content) < 2000:
         raise RuntimeError(f"Reponse non-image ({ctype})")
     dest.write_bytes(resp.content)
-    # Normaliser en PNG
     img = Image.open(io.BytesIO(dest.read_bytes())).convert("RGB")
     img = img.resize((IMAGE_WIDTH, IMAGE_HEIGHT), Image.Resampling.LANCZOS)
     img.save(dest, format="PNG", optimize=True)

@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config import estimate_ai_clips, estimate_render_minutes
+from modules.creative_options import MUSIC_OPTIONS
 from modules.job_runner import (
     refresh_job_status,
     start_generation_job,
@@ -47,12 +48,46 @@ running = bool(job.get("running") and status.get("alive"))
 with st.form("create_form", clear_on_submit=False):
     theme = st.text_input(
         "Theme ou prompt",
-        placeholder="ex: un dragon timide qui apprend a voler",
-        help="Decris l'histoire en une phrase.",
+        placeholder="ex: un dragon violet fonce qui vole et crache du feu bleu",
+        help="Decris EXACTEMENT le heros / l'action. L'histoire parlera de ca.",
     )
     duration = st.slider(
         "Duree de la video (minutes)", min_value=1, max_value=60, value=5
     )
+    c1, c2 = st.columns(2)
+    with c1:
+        style_label = st.selectbox(
+            "Style visuel",
+            options=[
+                "Aquarelle conte",
+                "Anime doux",
+                "3D mignon",
+                "Conte classique",
+                "Papier decoupe",
+            ],
+            index=0,
+        )
+        style_map = {
+            "Aquarelle conte": "aquarelle",
+            "Anime doux": "anime_doux",
+            "3D mignon": "3d_mignon",
+            "Conte classique": "conte_classique",
+            "Papier decoupe": "papier_decoupe",
+        }
+        style_key = style_map[style_label]
+    with c2:
+        aspect = st.selectbox(
+            "Format",
+            options=["16:9 (YouTube)", "9:16 (Shorts/TikTok)", "1:1 (carre)"],
+            index=0,
+        )
+        aspect_map = {
+            "16:9 (YouTube)": "16:9",
+            "9:16 (Shorts/TikTok)": "9:16",
+            "1:1 (carre)": "1:1",
+        }
+        aspect_key = aspect_map[aspect]
+
     voice = st.radio(
         "Voix",
         options=["femme", "homme", "auto"],
@@ -68,7 +103,6 @@ with st.form("create_form", clear_on_submit=False):
             "7-9 ans (un peu plus de variete)",
         ],
         index=0,
-        help="Adapte le nombre de changements d'image. L'histoire audio reste continue.",
     )
     age_map = {
         "1-9 ans (tous — rythme doux)": "1-9",
@@ -77,6 +111,23 @@ with st.form("create_form", clear_on_submit=False):
         "7-9 ans (un peu plus de variete)": "7-9",
     }
     age_group = age_map[age_label]
+
+    music_label = st.selectbox(
+        "Musique",
+        options=[
+            "Berceuse douce (generee, libre)",
+            "Fichier libre de droit (assets/music)",
+            "Aucune",
+        ],
+        index=0,
+    )
+    music_map = {
+        "Berceuse douce (generee, libre)": "berceuse",
+        "Fichier libre de droit (assets/music)": "fichier",
+        "Aucune": "aucune",
+    }
+    music = music_map[music_label]
+
     subtitles = st.checkbox("Sous-titres", value=False)
     publish = st.checkbox("Publier sur YouTube a la fin", value=False)
 
@@ -84,18 +135,14 @@ with st.form("create_form", clear_on_submit=False):
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     st.markdown(
         f"""
-**Scenes illustrees :** {scenes} (1 image IA / scene, zoom doux sur la voix)  
-**Temps de creation estime :** environ **{est_low}–{est_high} minutes**
+**Scenes illustrees :** {scenes} (1 image / scene, mouvements varies)  
+**Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
+**Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
-Mode rapide (comme Invideo) : on genere les **images**, puis FFmpeg assemble le film.  
-Script, voix et sous-titres restent identiques — beaucoup plus rapide que Wan T2V.
+L'histoire et les images suivent ton theme mot pour mot.  
+La duree audio vise la duree demandee (voix adoucie).
 """
     )
-    if duration >= 20:
-        st.caption(
-            "Conseil : 30–60 min restent realistes en mode images "
-            "(quelques minutes a ~20 min selon le nombre de scenes)."
-        )
 
     submitted = st.form_submit_button(
         "Generer la video",
@@ -117,6 +164,9 @@ if submitted:
             subtitles=subtitles,
             publish=publish,
             age_group=age_group,
+            style_key=style_key,
+            aspect=aspect_key,
+            music=music,
         )
         if result.get("ok"):
             st.success("Generation lancee.")

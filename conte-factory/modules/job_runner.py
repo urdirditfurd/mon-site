@@ -31,6 +31,9 @@ def start_generation_job(
     subtitles: bool = False,
     publish: bool = False,
     age_group: str = "1-9",
+    style_key: str = "aquarelle",
+    aspect: str = "16:9",
+    music: str = "berceuse",
 ) -> dict[str, Any]:
     """Demarre main.py en sous-processus avec les options UI."""
     existing = get_job()
@@ -52,6 +55,12 @@ def start_generation_job(
         resolve_voice(voice),
         "--age",
         age_group,
+        "--style",
+        style_key,
+        "--aspect",
+        aspect,
+        "--music",
+        music,
     ]
     if subtitles:
         cmd.append("--subtitles")
@@ -63,7 +72,10 @@ def start_generation_job(
     log_path = ROOT / "data" / "job.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_f = log_path.open("a", encoding="utf-8")
-    log_f.write(f"\n=== JOB {theme} {duration_min}min age={age_group} ===\n")
+    log_f.write(
+        f"\n=== JOB {theme} {duration_min}min age={age_group} "
+        f"style={style_key} aspect={aspect} music={music} ===\n"
+    )
     log_f.flush()
 
     creationflags = 0
@@ -88,6 +100,9 @@ def start_generation_job(
         "subtitles": subtitles,
         "publish": publish,
         "age_group": age_group,
+        "style_key": style_key,
+        "aspect": aspect,
+        "music": music,
         "log": str(log_path),
     }
     set_job(job)

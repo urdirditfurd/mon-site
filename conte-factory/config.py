@@ -24,9 +24,10 @@ TARGET_DURATION_MIN = float(os.getenv("CONTE_TARGET_DURATION_MIN", "30"))
 # Durée narration cible par scène storyboard (secondes)
 SCENE_TARGET_SEC = float(os.getenv("CONTE_SCENE_TARGET_SEC", "180"))
 
-# Voix Edge-TTS
+# Voix Edge-TTS — plus douce / moins mécanique
 TTS_VOICE = os.getenv("CONTE_TTS_VOICE", "fr-FR-DeniseNeural")
-TTS_RATE = os.getenv("CONTE_TTS_RATE", "-5%")
+TTS_RATE = os.getenv("CONTE_TTS_RATE", "-18%")
+TTS_PITCH = os.getenv("CONTE_TTS_PITCH", "-2Hz")
 
 # Style visuel fixe pour cohérence entre clips IA
 VISUAL_STYLE = os.getenv(
@@ -92,19 +93,17 @@ def ensure_dirs() -> None:
 
 
 def scene_sec_for_audience(age_group: str = "1-9") -> float:
-    """Rythme visuel pour contes du soir (1–9 ans).
+    """Rythme visuel : 1 image / scène (mode rapide images).
 
-    La voix porte l'attention ; le clip Wan boucle avec un léger mouvement.
-    Pas besoin d'un nouveau plan toutes les 15–60 s — ça sur-génère pour rien
-    et ça agite trop pour s'endormir.
+    Plus de changements pour éviter 2 images figées sur toute la vidéo.
     """
     key = (age_group or "1-9").strip().lower()
-    # secondes de narration / scène visuelle (= 1 clip Wan bouclé)
+    # secondes de narration / scène visuelle
     mapping = {
-        "1-3": 210.0,  # ~3,5 min — très calme (tout-petits)
-        "4-6": 180.0,  # ~3 min
-        "7-9": 150.0,  # ~2,5 min — un peu plus de variété
-        "1-9": 180.0,  # défaut bedtime large 1–9
+        "1-3": 45.0,   # calme mais assez de décors
+        "4-6": 35.0,
+        "7-9": 30.0,
+        "1-9": 40.0,
     }
     return mapping.get(key, mapping["1-9"])
 
@@ -113,26 +112,32 @@ def scene_count_for_duration(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> int:
-    """Nombre de scènes = nombre de clips Wan (1 clip/scène, bouclé).
+    """Nombre de scènes = nombre d'images (1 / scène).
 
-    Ex. 30 min / public 1–9 → ~10 scènes (pas 15, encore moins 120).
+    Ex. 5 min / 1–9 → ~8 images (pas 2).
+    Tradeoff : un peu plus long à générer, mais vraiment une « vidéo ».
     """
     minutes = duration_min if duration_min is not None else TARGET_DURATION_MIN
     scene_sec = scene_sec_for_audience(age_group)
 
-    # Courtes vidéos : garder un minimum de décors sans remonter au rythme adulte
     if minutes <= 2:
-        minimum = 2
-        scene_sec = min(scene_sec, 50)
-    elif minutes <= 5:
-        minimum = 2
-        scene_sec = min(scene_sec, 90)
-    elif minutes <= 15:
         minimum = 4
+        scene_sec = min(scene_sec, 30)
+    elif minutes <= 5:
+        minimum = 8
+        scene_sec = min(scene_sec, 40)
+    elif minutes <= 15:
+        minimum = 12
+        scene_sec = max(scene_sec, 50)
+    elif minutes <= 30:
+        minimum = 16
+        scene_sec = max(scene_sec, 80)  # ~22 images / 30 min
     else:
-        minimum = 6
+        minimum = 20
+        scene_sec = max(scene_sec, 120)  # ~30 images / 60 min
 
-    return max(minimum, int(round((minutes * 60) / scene_sec)))
+    count = max(minimum, int(round((minutes * 60) / scene_sec)))
+    return min(count, 36)  # garde-fou temps de generation <1h
 
 
 def estimate_ai_clips(
@@ -151,9 +156,9 @@ def estimate_render_minutes(
     clips = estimate_ai_clips(duration_min, age_group=age_group)
     provider = VIDEO_PROVIDER.lower().strip()
     if provider in {"images", "image", "still", "stills", "invideo"}:
-        # Images + Ken Burns : ~20–60 s / scène + TTS/montage
-        low = max(2, int(round(clips * 0.4 + 1)))
-        high = max(4, int(round(clips * 1.2 + 3)))
+        # Plus de scènes (~8 pour 5 min) : ~20–50 s / image + TTS
+        low = max(3, int(round(clips * 0.35 + 2)))
+        high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
     # Wan / FAL (lent)
     low = max(2, int(round(clips * 0.8 + 3)))

@@ -146,6 +146,9 @@ def run_pipeline(
     voice: str | None = None,
     subtitles: bool = False,
     age_group: str = "1-9",
+    style_key: str = "aquarelle",
+    aspect: str = "16:9",
+    music: str = "berceuse",
 ) -> dict:
     ensure_dirs()
     init_db()
@@ -207,7 +210,14 @@ def run_pipeline(
         raise ValueError("Pour une étape seule hors sourcing, utilisez --resume ID")
 
     set_progress(step="sourcing", message="Ecriture de l'histoire…")
-    sourced = source_new_video(theme, age_group=age_group)
+    sourced = source_new_video(
+        theme,
+        age_group=age_group,
+        duration_min=cfg.TARGET_DURATION_MIN,
+        style_key=style_key,
+        aspect=aspect,
+        music=music,
+    )
     if not sourced.get("ok"):
         set_progress(
             step="error",
@@ -261,6 +271,24 @@ def main() -> int:
         choices=["1-3", "4-6", "7-9", "1-9"],
         help="Public cible enfants (rythme des scenes)",
     )
+    parser.add_argument(
+        "--style",
+        type=str,
+        default="aquarelle",
+        choices=["aquarelle", "anime_doux", "3d_mignon", "conte_classique", "papier_decoupe"],
+    )
+    parser.add_argument(
+        "--aspect",
+        type=str,
+        default="16:9",
+        choices=["16:9", "9:16", "1:1"],
+    )
+    parser.add_argument(
+        "--music",
+        type=str,
+        default="berceuse",
+        choices=["aucune", "berceuse", "fichier"],
+    )
     parser.add_argument("--pause", action="store_true")
     parser.add_argument("--resume-pipeline", action="store_true")
     parser.add_argument("--estimate", action="store_true")
@@ -301,6 +329,9 @@ def main() -> int:
             voice=args.voice,
             subtitles=args.subtitles,
             age_group=args.age,
+            style_key=args.style,
+            aspect=args.aspect,
+            music=args.music,
         )
     except Exception:
         traceback.print_exc()

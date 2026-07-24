@@ -114,12 +114,21 @@ def _chunk_to_n(script: str, target_n: int) -> list[str]:
 
 
 def _visual_prompt(narration: str, index: int, story: dict[str, Any]) -> str:
-    hero = story.get("hero") or "a cute animal hero"
-    place = story.get("place") or "an enchanted forest"
-    snippet = narration[:180].replace("\n", " ")
+    hero = str(story.get("hero") or story.get("theme") or "a magical character")
+    theme = str(story.get("theme") or hero)
+    place = str(story.get("place") or "an enchanted sky")
+    style = str(story.get("visual_style") or VISUAL_STYLE)
+    # Extraire un moment concret (début de la narration)
+    snippet = narration[:220].replace("\n", " ").strip()
+    # Forcer la cohérence personnage / thème sur CHAQUE image
     return (
-        f"{VISUAL_STYLE}, scene {index + 1}, featuring {hero}, setting inspired by {place}, "
-        f"story moment: {snippet}, single keyframe illustration"
+        f"{style}. "
+        f"Main subject MUST be: {theme}. "
+        f"Same character appearance in every shot: {hero}. "
+        f"Setting: {place}. "
+        f"Scene {index + 1} keyframe showing: {snippet}. "
+        f"Cinematic children's illustration, high detail, coherent character design, "
+        f"no text, no watermark, no logo, no unrelated animals"
     )
 
 
@@ -162,6 +171,12 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "titre": story.get("titre") or video_title(video),
         "age_group": age_group,
         "duration_min": duration_min,
+        "theme": story.get("theme"),
+        "hero": story.get("hero"),
+        "style_key": story.get("style_key"),
+        "visual_style": story.get("visual_style"),
+        "aspect": story.get("aspect") or "16:9",
+        "music": story.get("music") or "berceuse",
         "scene_count": len(scenes),
         "scenes": scenes,
     }
