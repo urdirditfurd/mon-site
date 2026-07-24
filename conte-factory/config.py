@@ -31,24 +31,26 @@ TTS_RATE = os.getenv("CONTE_TTS_RATE", "-5%")
 # Style visuel fixe pour cohérence entre clips IA
 VISUAL_STYLE = os.getenv(
     "CONTE_VISUAL_STYLE",
-    "children's storybook animation, soft watercolor, warm colors, "
-    "friendly animals, enchanted forest, gentle camera motion, no text, no watermark",
+    "children's storybook illustration, soft watercolor, warm colors, "
+    "friendly animals, enchanted forest, calm bedtime mood, no text, no watermark",
 )
 
-# Moteur vidéo IA
-# pinokio = Wan 2.1 via Pinokio (recommandé pour ce projet)
+# Moteur visuel
+# images  = 1 image IA / scène + zoom doux FFmpeg (RAPIDE — recommandé)
+# pinokio = Wan 2.1 T2V (lent sur RTX 3080 10Go)
 # fal     = cloud Kling (optionnel)
-VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "pinokio")
+VIDEO_PROVIDER = os.getenv("CONTE_VIDEO_PROVIDER", "images")
 FAL_KEY = os.getenv("FAL_KEY", os.getenv("FAL_API_KEY", ""))
 FAL_MODEL = os.getenv(
     "CONTE_FAL_MODEL",
     "fal-ai/kling-video/v1.6/standard/text-to-video",
 )
 AI_CLIP_SEC = int(os.getenv("CONTE_AI_CLIP_SEC", "20"))
-FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "2"))
+FAL_CONCURRENCY = int(os.getenv("CONTE_FAL_CONCURRENCY", "3"))
 ASPECT_RATIO = os.getenv("CONTE_ASPECT_RATIO", "16:9")
+IMAGE_BACKEND = os.getenv("CONTE_IMAGE_BACKEND", "auto")  # auto|pollinations|local|pillow
 
-# Pinokio — Wan 2.1 Snapdragon / local
+# Pinokio — Wan 2.1 Snapdragon / local (optionnel si CONTE_VIDEO_PROVIDER=images)
 PINOKIO_WAN_URL = os.getenv("PINOKIO_WAN_URL", "http://127.0.0.1:7860")
 PINOKIO_WAN_ENGINE = os.getenv("PINOKIO_WAN_ENGINE", "")
 PINOKIO_WAN_PYTHON = os.getenv("PINOKIO_WAN_PYTHON", "")
@@ -70,8 +72,8 @@ AUTO_PUBLISH = os.getenv("CONTE_AUTO_PUBLISH", "1") == "1"
 YOUTUBE_PRIVACY = os.getenv("CONTE_YOUTUBE_PRIVACY", "private")
 PAUSE_PIPELINE = os.getenv("CONTE_PAUSE", "0") == "1"
 
-# Démarrage auto de Wan quand on ouvre le dashboard ou le pipeline
-AUTO_START_WAN = os.getenv("CONTE_AUTO_START_WAN", "1") == "1"
+# Démarrage auto de Wan (uniquement utile si CONTE_VIDEO_PROVIDER=pinokio)
+AUTO_START_WAN = os.getenv("CONTE_AUTO_START_WAN", "0") == "1"
 WAN_START_TIMEOUT_SEC = int(os.getenv("CONTE_WAN_START_TIMEOUT_SEC", "600"))
 
 CHANNEL_NAME = os.getenv("CONTE_CHANNEL_NAME", "Contes du Soir")
@@ -137,7 +139,7 @@ def estimate_ai_clips(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> int:
-    """1 clip Wan par scène (bouclé au montage)."""
+    """1 visuel par scène (image ou clip Wan), bouclé au montage."""
     return scene_count_for_duration(duration_min, age_group=age_group)
 
 
@@ -145,8 +147,15 @@ def estimate_render_minutes(
     duration_min: float | None = None,
     age_group: str = "1-9",
 ) -> tuple[int, int]:
-    """Estimation temps GPU (minutes)."""
+    """Estimation temps de création (minutes) selon le provider."""
     clips = estimate_ai_clips(duration_min, age_group=age_group)
+    provider = VIDEO_PROVIDER.lower().strip()
+    if provider in {"images", "image", "still", "stills", "invideo"}:
+        # Images + Ken Burns : ~20–60 s / scène + TTS/montage
+        low = max(2, int(round(clips * 0.4 + 1)))
+        high = max(4, int(round(clips * 1.2 + 3)))
+        return low, high
+    # Wan / FAL (lent)
     low = max(2, int(round(clips * 0.8 + 3)))
     high = max(5, int(round(clips * 2.2 + 5)))
     return low, high

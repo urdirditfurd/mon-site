@@ -119,7 +119,7 @@ def _visual_prompt(narration: str, index: int, story: dict[str, Any]) -> str:
     snippet = narration[:180].replace("\n", " ")
     return (
         f"{VISUAL_STYLE}, scene {index + 1}, featuring {hero}, setting inspired by {place}, "
-        f"story moment: {snippet}"
+        f"story moment: {snippet}, single keyframe illustration"
     )
 
 

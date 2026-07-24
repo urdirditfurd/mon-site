@@ -84,17 +84,17 @@ with st.form("create_form", clear_on_submit=False):
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     st.markdown(
         f"""
-**Scenes animees :** {scenes} (1 clip Wan / scene, bouclee sur la voix)  
+**Scenes illustrees :** {scenes} (1 image IA / scene, zoom doux sur la voix)  
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**
 
-Pour 1–9 ans, la **voix** porte l'histoire.  
-On change de decor toutes les ~2,5–3,5 min — assez pour rester doux, sans regenerer 100+ clips.
+Mode rapide (comme Invideo) : on genere les **images**, puis FFmpeg assemble le film.  
+Script, voix et sous-titres restent identiques — beaucoup plus rapide que Wan T2V.
 """
     )
     if duration >= 20:
         st.caption(
-            "Conseil : teste d'abord 3–5 minutes. "
-            "30 min en public 1–9 ≈ ~10 scenes Wan, pas 15 ni 120."
+            "Conseil : 30–60 min restent realistes en mode images "
+            "(quelques minutes a ~20 min selon le nombre de scenes)."
         )
 
     submitted = st.form_submit_button(

@@ -67,8 +67,55 @@ def _write_srt(board: dict[str, Any], out: Path) -> Path:
     return out
 
 
+def _is_image(path: Path) -> bool:
+    return path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _image_to_motion_clip(src: Path, duration: float, out: Path) -> None:
+    """Ken Burns doux : zoom lent sur une image fixe (style Invideo rapide)."""
+    if out.exists():
+        return
+    duration = max(1.0, float(duration))
+    frames = max(VIDEO_FPS, int(round(duration * VIDEO_FPS)))
+    # Zoom très léger (1.0 → ~1.12) pour rester calme (bedtime)
+    vf = (
+        f"scale={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2}:force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2},"
+        f"zoompan=z='min(1.0+0.00035*on,1.12)':"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"d={frames}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
+        f"format=yuv420p"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        str(src),
+        "-t",
+        f"{duration:.3f}",
+        "-vf",
+        vf,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        "-pix_fmt",
+        "yuv420p",
+        str(out),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
 def _fit_clip_to_duration(src: Path, duration: float, out: Path) -> None:
     if out.exists():
+        return
+    if _is_image(src):
+        _image_to_motion_clip(src, duration, out)
         return
     cmd = [
         "ffmpeg",
@@ -155,10 +202,22 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
             if not p.exists():
                 raise FileNotFoundError(f"Clip IA manquant: {p}")
 
-        raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
         fitted = fitted_dir / f"scene_{idx:03d}.mp4"
-        _concat_parts(parts, raw)
-        _fit_clip_to_duration(raw, dur, fitted)
+        if len(parts) == 1 and _is_image(parts[0]):
+            _image_to_motion_clip(parts[0], dur, fitted)
+        else:
+            raw = fitted_dir / f"scene_{idx:03d}_raw.mp4"
+            # Si mélange image/vidéo improbable : convertir images d'abord
+            video_parts: list[Path] = []
+            for i, p in enumerate(parts):
+                if _is_image(p):
+                    tmp = fitted_dir / f"scene_{idx:03d}_img{i:02d}.mp4"
+                    _image_to_motion_clip(p, max(2.0, dur / len(parts)), tmp)
+                    video_parts.append(tmp)
+                else:
+                    video_parts.append(p)
+            _concat_parts(video_parts, raw)
+            _fit_clip_to_duration(raw, dur, fitted)
         scene_clips.append(fitted)
 
     list_file = fitted_dir / "concat.txt"

@@ -38,6 +38,7 @@ from config import (
     VIDEO_PROVIDER,
 )
 from db.database import get_video, log_event, update_video
+from modules.image_ai import generate_scene_image
 from modules.progress import set_progress
 
 FAL_QUEUE = "https://queue.fal.run"
@@ -354,9 +355,12 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     provider = VIDEO_PROVIDER.lower().strip()
     if provider in {"pinokio", "wan", "wan21", "wan-snapdragon"}:
         provider = "pinokio"
+    elif provider in {"images", "image", "still", "stills", "invideo"}:
+        provider = "images"
     elif provider != "fal":
         raise RuntimeError(
-            f"Provider inconnu: {VIDEO_PROVIDER}. Utilisez pinokio (recommandé) ou fal."
+            f"Provider inconnu: {VIDEO_PROVIDER}. "
+            "Utilisez images (rapide, recommandé), pinokio (Wan) ou fal."
         )
 
     projet = Path(video["chemin_projet"])
@@ -373,11 +377,18 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         prompt = scene["visual_prompt"]
         scene_files: list[str] = []
         for part in range(n):
-            out = clips_dir / f"scene_{idx:03d}_part{part:02d}.mp4"
-            part_prompt = (
-                f"{prompt}, shot variation {part + 1}, continuous storytelling motion, "
-                f"gentle animation for children"
-            )
+            if provider == "images":
+                out = clips_dir / f"scene_{idx:03d}_part{part:02d}.png"
+                part_prompt = (
+                    f"{prompt}, storybook keyframe, soft light, calm composition, "
+                    f"variation {part + 1}"
+                )
+            else:
+                out = clips_dir / f"scene_{idx:03d}_part{part:02d}.mp4"
+                part_prompt = (
+                    f"{prompt}, shot variation {part + 1}, continuous storytelling motion, "
+                    f"gentle animation for children"
+                )
             jobs.append((idx, part, part_prompt, out))
             scene_files.append(out.name)
         scene["ai_clip_files"] = scene_files
@@ -386,16 +397,22 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     log_event(
         video_id,
         "info",
-        f"Génération vidéo IA ({provider}) : {len(jobs)} clips.",
+        f"Génération visuelle ({provider}) : {len(jobs)} asset(s).",
     )
 
-    # Pinokio Wan : souvent 1 job à la fois (RAM/CPU). FAL : concurrence configurable.
-    workers = 1 if provider == "pinokio" else max(1, FAL_CONCURRENCY)
+    if provider == "images":
+        workers = max(1, min(3, FAL_CONCURRENCY))
+    elif provider == "pinokio":
+        workers = 1
+    else:
+        workers = max(1, FAL_CONCURRENCY)
     errors: list[str] = []
 
     def _worker(item: tuple[int, int, str, Path]) -> None:
         _idx, _part, prompt, out = item
-        if provider == "pinokio":
+        if provider == "images":
+            generate_scene_image(prompt, out)
+        elif provider == "pinokio":
             _generate_one_pinokio_clip(prompt, out)
         else:
             _generate_one_fal_clip(prompt, out)
@@ -408,12 +425,13 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
             job = futures[fut]
             try:
                 fut.result()
-                log_event(video_id, "info", f"Clips IA : {done}/{len(jobs)}")
+                label = "Image" if provider == "images" else "Clip video"
+                log_event(video_id, "info", f"{label} : {done}/{len(jobs)}")
                 try:
                     set_progress(
                         step="video_ai",
                         video_id=video_id,
-                        message=f"Clip video {done}/{len(jobs)}",
+                        message=f"{label} {done}/{len(jobs)}",
                         clips_done=done,
                         clips_total=len(jobs),
                         detail=f"Scene {job[0]} partie {job[1] + 1}",
@@ -425,16 +443,21 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
 
     if errors:
         update_video(video_id, statut="erreur", erreur="; ".join(errors[:5]))
-        log_event(video_id, "error", f"{len(errors)} clip(s) en échec")
+        log_event(video_id, "error", f"{len(errors)} asset(s) en échec")
         raise RuntimeError(f"Échecs génération IA ({len(errors)}): {errors[0]}")
 
     board_path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
     update_video(video_id, statut="images_ok")
-    log_event(video_id, "info", f"Vidéo IA prête ({provider}) : {len(jobs)} clips.")
+    model_name = {
+        "images": "images+kenburns",
+        "pinokio": "Wan 2.1 T2V 1.3B",
+        "fal": FAL_MODEL,
+    }.get(provider, provider)
+    log_event(video_id, "info", f"Visuels prêts ({provider}) : {len(jobs)}.")
     return {
         "ok": True,
         "provider": provider,
-        "model": "Wan 2.1 T2V 1.3B" if provider == "pinokio" else FAL_MODEL,
+        "model": model_name,
         "clips": len(jobs),
         "dir": str(clips_dir),
     }

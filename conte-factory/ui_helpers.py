@@ -237,7 +237,8 @@ def boot_app(page_title: str = "video ia") -> dict:
 
     provider = VIDEO_PROVIDER.lower().strip()
     uses_wan = provider.startswith(("pinokio", "wan"))
-    # Demarre Wan en silence (pas besoin de montrer l'UI Gradio)
+    uses_images = provider in {"images", "image", "still", "stills", "invideo"}
+    # Demarre Wan seulement si mode Wan explicite
     if uses_wan and AUTO_START_WAN and "wan_boot_done" not in st.session_state:
         with st.spinner("Preparation du moteur video…"):
             st.session_state["wan_boot_result"] = start_wan(
@@ -245,11 +246,12 @@ def boot_app(page_title: str = "video ia") -> dict:
             )
             st.session_state["wan_boot_done"] = True
 
-    health = wan_status()
+    health = wan_status() if uses_wan else {"gradio_up": False}
     return {
         "health": health,
-        "wan_ok": bool(health.get("gradio_up")),
+        "wan_ok": True if uses_images else bool(health.get("gradio_up")),
         "uses_wan": uses_wan,
+        "uses_images": uses_images,
         "channel": CHANNEL_NAME,
         "root": ROOT,
     }
@@ -273,6 +275,10 @@ def render_sidebar(active: str) -> None:
 
 def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
     """Statut moteur simplifie — sans lien Wan 7860."""
+    if ctx.get("uses_images"):
+        st.metric("Moteur video", "Images IA + montage (rapide)")
+        st.caption("Mode rapide : 1 illustration / scene, zoom doux, assemblee sur la voix.")
+        return
     wan_ok = ctx["wan_ok"]
     c1, c2 = st.columns([2, 1])
     c1.metric("Moteur video", "Pret" if wan_ok else "En preparation…")
