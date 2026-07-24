@@ -32,13 +32,16 @@ def publish_youtube(video_id: int, force: bool = False) -> dict[str, Any]:
     Upload YouTube Data API v3.
     Nécessite client_secrets.json + token OAuth dans conte-factory/secrets/.
     Par défaut : ne publie que si AUTO_PUBLISH=1 ou force=True.
+
+    Si les libs / secrets manquent : on ne plante pas le pipeline —
+    la vidéo reste prête en local (statut pret).
     """
     if not AUTO_PUBLISH and not force:
         meta = prepare_publish_package(video_id)
         return {
             "ok": True,
             "skipped": True,
-            "reason": "Publication désactivée (sécurité J1). Validez dans le dashboard.",
+            "reason": "Publication désactivée. Validez dans le dashboard.",
             "meta": meta,
         }
 
@@ -52,16 +55,25 @@ def publish_youtube(video_id: int, force: bool = False) -> dict[str, Any]:
         raise FileNotFoundError(f"Fichier vidéo introuvable: {video_file}")
 
     try:
+        from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
-        from google.auth.transport.requests import Request
-    except ImportError as exc:
-        raise RuntimeError(
-            "Installez les libs YouTube : pip install google-api-python-client "
+    except ImportError:
+        prepared = prepare_publish_package(video_id)
+        msg = (
+            "Libs YouTube absentes — video prete en local. "
+            "Pour publier plus tard: pip install google-api-python-client "
             "google-auth-oauthlib google-auth-httplib2"
-        ) from exc
+        )
+        log_event(video_id, "warn", msg)
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": msg,
+            "meta": prepared,
+        }
 
     secrets_dir = Path(__file__).resolve().parent.parent / "secrets"
     client = secrets_dir / "client_secrets.json"
@@ -69,9 +81,18 @@ def publish_youtube(video_id: int, force: bool = False) -> dict[str, Any]:
     scopes = ["https://www.googleapis.com/auth/youtube.upload"]
 
     if not client.exists():
-        raise FileNotFoundError(
-            f"Placez client_secrets.json dans {secrets_dir} (Google Cloud Console)."
+        prepared = prepare_publish_package(video_id)
+        msg = (
+            f"client_secrets.json manquant dans {secrets_dir} — "
+            "video prete en local, publication YouTube ignoree."
         )
+        log_event(video_id, "warn", msg)
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": msg,
+            "meta": prepared,
+        }
 
     creds = None
     if token.exists():
