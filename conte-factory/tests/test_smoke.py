@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from config import ensure_dirs
 from db.database import fingerprint, init_db, similar_title_exists
+from modules.audio import _normalize_tts_pitch, _normalize_tts_rate
 from modules.sourcing import _hero_short_name
 
 
@@ -29,6 +30,12 @@ class TestBasics(unittest.TestCase):
             "dragon violet foncé qui vole dans les nuages et qui chante"
         )
         self.assertEqual(name, "dragon violet foncé")
+
+    def test_tts_pitch_signed(self) -> None:
+        # Edge-TTS refuse '0Hz' sans signe
+        self.assertEqual(_normalize_tts_pitch("0Hz"), "+0Hz")
+        self.assertEqual(_normalize_tts_pitch("-1Hz"), "-1Hz")
+        self.assertEqual(_normalize_tts_rate("8%"), "-8%")
 
     def test_similar_title(self) -> None:
         # Ne doit pas planter sur base vide

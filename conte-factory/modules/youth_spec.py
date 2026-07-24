@@ -126,7 +126,7 @@ def youth_profile(age_group: str | None = "1-10") -> dict[str, Any]:
                 "scene_target_sec": 28.0,
                 "kenburns_speed": "medium",
                 "tts_rate": "-8%",
-                "tts_pitch": "0Hz",
+                "tts_pitch": "+0Hz",
                 "color_prompt": (
                     "cinematic children's color grade, emotional palette, "
                     "warm for safety/joy, cooler accents for gentle suspense, "

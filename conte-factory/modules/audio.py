@@ -17,6 +17,7 @@ from typing import Any
 from config import TARGET_DURATION_MIN, TTS_PITCH, TTS_RATE, TTS_VOICE
 from db.database import get_video, log_event, update_video
 from modules.creative_options import voices_for_preference
+from modules.youth_spec import normalize_age, youth_profile
 
 
 def _ffprobe_duration(path: Path) -> float:
@@ -42,14 +43,38 @@ def _soften_text(text: str) -> str:
     return t.strip()
 
 
+def _normalize_tts_rate(rate: str | None) -> str:
+    """Edge-TTS exige un signe : +0% / -12% (jamais '0%' seul)."""
+    raw = (rate or TTS_RATE or "-12%").strip()
+    m = re.fullmatch(r"([+-]?)(\d+)\s*%", raw)
+    if not m:
+        return "-12%"
+    sign, num = m.group(1), m.group(2)
+    if not sign:
+        sign = "+" if num == "0" else "-"
+    return f"{sign}{num}%"
+
+
+def _normalize_tts_pitch(pitch: str | None) -> str:
+    """Edge-TTS exige un signe : +0Hz / -1Hz (jamais '0Hz' → Invalid pitch)."""
+    raw = (pitch or TTS_PITCH or "+0Hz").strip()
+    m = re.fullmatch(r"([+-]?)(\d+)\s*[Hh][Zz]", raw)
+    if not m:
+        return "+0Hz"
+    sign, num = m.group(1), m.group(2)
+    if not sign:
+        sign = "+"
+    return f"{sign}{num}Hz"
+
+
 async def _synthesize(text: str, out_path: Path, voice: str, rate: str, pitch: str) -> None:
     import edge_tts
 
     communicate = edge_tts.Communicate(
         text=_soften_text(text),
         voice=voice,
-        rate=rate,
-        pitch=pitch,
+        rate=_normalize_tts_rate(rate),
+        pitch=_normalize_tts_pitch(pitch),
     )
     await communicate.save(str(out_path))
 
@@ -124,12 +149,11 @@ def generate_audio(
     if voice in {"femme", "homme", "auto"}:
         pref = voice
     voice_map = voices_for_preference(pref)
-    from modules.youth_spec import normalize_age, youth_profile
 
     age = normalize_age(str(board.get("age_group") or "1-10"))
     yprofile = youth_profile(age)
-    rate = rate or str(yprofile.get("tts_rate") or TTS_RATE)
-    pitch = pitch or str(yprofile.get("tts_pitch") or TTS_PITCH)
+    rate = _normalize_tts_rate(rate or str(yprofile.get("tts_rate") or TTS_RATE))
+    pitch = _normalize_tts_pitch(pitch or str(yprofile.get("tts_pitch") or TTS_PITCH))
     hero_name = str(board.get("hero") or board.get("theme") or "héros")
     target_sec = float(board.get("duration_min") or TARGET_DURATION_MIN) * 60.0
 
