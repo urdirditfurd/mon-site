@@ -94,34 +94,72 @@ def i2v_health() -> dict[str, Any]:
     return info
 
 
-def _via_gradio(image: Path, prompt: str, dest: Path) -> dict[str, Any]:
+def _discover_gradio_api_names(client: Any) -> list[str]:
+    names: list[str] = ["/generate", "/predict", "/run", "/i2v"]
+    try:
+        info = getattr(client, "view_api", None)
+        raw = info(return_format="dict") if callable(info) else None
+        if isinstance(raw, dict):
+            for key in ("named_endpoints", "endpoints"):
+                block = raw.get(key) or {}
+                if isinstance(block, dict):
+                    for name in block.keys():
+                        n = str(name)
+                        if not n.startswith("/"):
+                            n = "/" + n
+                        if n not in names:
+                            names.insert(0, n)
+    except Exception:
+        pass
+    # Déduplique en gardant l'ordre
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _via_gradio(image: Path, prompt: str, dest: Path, seed: int | None = None) -> dict[str, Any]:
     from gradio_client import Client, handle_file
 
     client = Client(PINOKIO_I2V_URL)
     last_err: Exception | None = None
-    for api_name in ("/predict", "/run", "/generate"):
+    seed_val = float(seed if seed is not None else 42)
+    args = (
+        handle_file(str(image)),
+        prompt,
+        float(PINOKIO_I2V_FRAMES),
+        float(PINOKIO_I2V_STEPS),
+        seed_val,
+    )
+    api_names = _discover_gradio_api_names(client)
+
+    def _save_result(result: Any) -> dict[str, Any]:
+        video_path = result[0] if isinstance(result, (list, tuple)) else result
+        if not video_path:
+            raise RuntimeError("Gradio I2V sans fichier video")
+        src = Path(str(video_path))
+        if not src.exists():
+            raise FileNotFoundError(src)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(src.read_bytes())
+        return {"ok": True, "outputPath": str(dest), "mode": "gradio_i2v"}
+
+    for api_name in api_names:
         try:
-            result = client.predict(
-                handle_file(str(image)),
-                prompt,
-                float(PINOKIO_I2V_FRAMES),
-                float(PINOKIO_I2V_STEPS),
-                42,
-                api_name=api_name,
-            )
-            # outputs: video path, mode, duration
-            video_path = result[0] if isinstance(result, (list, tuple)) else result
-            if not video_path:
-                raise RuntimeError("Gradio I2V sans fichier video")
-            src = Path(str(video_path))
-            if not src.exists():
-                raise FileNotFoundError(src)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(src.read_bytes())
-            return {"ok": True, "outputPath": str(dest), "mode": "gradio_i2v"}
+            result = client.predict(*args, api_name=api_name)
+            return _save_result(result)
         except Exception as exc:
             last_err = exc
             continue
+    # Dernier essai sans api_name
+    try:
+        result = client.predict(*args)
+        return _save_result(result)
+    except Exception as exc:
+        last_err = exc
     raise RuntimeError(f"Gradio I2V echoue: {last_err}")
 
 
@@ -146,7 +184,7 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
         "--frames",
         str(PINOKIO_I2V_FRAMES),
         "--fps",
-        "16",
+        "24",
         "--steps",
         str(PINOKIO_I2V_STEPS),
     ]
@@ -201,11 +239,20 @@ def animate_scene_i2v(
         motion = f"{motion}, {MOTION_PROMPT}".strip(", ")
 
     health = i2v_health()
+    errors: list[str] = []
     if health.get("gradio_up"):
-        return _via_gradio(image, motion, dest)
-    if health.get("engine"):
-        return _via_cli(image, motion, dest, seed=seed)
+        try:
+            return _via_gradio(image, motion, dest, seed=seed)
+        except Exception as exc:
+            errors.append(f"gradio: {exc}")
+    if health.get("engine") or resolve_i2v_engine():
+        try:
+            return _via_cli(image, motion, dest, seed=seed)
+        except Exception as exc:
+            errors.append(f"cli: {exc}")
+    detail = " | ".join(errors) if errors else "aucun moteur"
     raise RuntimeError(
-        "Moteur I2V indisponible. Installe pinokio/wan-i2v (INSTALL-I2V.ps1) "
-        "puis lance LANCER-I2V.bat (port 7861)."
+        "Moteur I2V indisponible. Installe pinokio/wan-i2v (INSTALL-I2V.ps1), "
+        "relance LANCER-I2V.bat (port 7861). "
+        f"Detail: {detail}"
     )

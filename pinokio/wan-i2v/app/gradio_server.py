@@ -1,4 +1,4 @@
-"""Gradio I2V rapide — LTX / Wan 1.3B (port 7861). Cible <2 min / clip."""
+"""Gradio I2V rapide — LTX / Wan 1.3B (port 7861). API explicite /generate."""
 
 from __future__ import annotations
 
@@ -9,13 +9,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from i2v_engine import (
-    MAX_FRAMES,
-    MAX_STEPS,
-    RESOLUTION_PRESETS,
-    check_environment,
-    generate_i2v,
-)
+from i2v_engine import MAX_FRAMES, MAX_STEPS, check_environment, generate_i2v
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -42,9 +36,9 @@ def run(image, prompt, num_frames, steps, seed, progress=gr.Progress()):
         prompt=prompt,
         output_path=str(out),
         resolution_key="480p 16:9",
-        num_frames=int(num_frames),
+        num_frames=int(num_frames or 81),
         fps=24,
-        steps=int(steps),
+        steps=int(steps or 16),
         seed=int(seed) if seed is not None else None,
         cache_dir=cache,
         progress_callback=on_progress,
@@ -62,33 +56,38 @@ _header = (
     f"Backend: `{_env.get('backendDefault')}` · GPU: {_env.get('gpu') or _env.get('device')} · "
     f"VRAM {_env.get('vramFreeGb')}/{_env.get('vramTotalGb')} Go · "
     f"{_env.get('maxSteps')} steps · {_env.get('resolution')} · {_env.get('maxFrames')} frames\n"
-    f"**lowvram + SDPA** — upscale 1080p au montage FFmpeg."
+    f"**API:** `/generate` · lowvram + SDPA — upscale 1080p au montage."
 )
 
-demo = gr.Interface(
-    fn=run,
-    inputs=[
-        gr.Image(type="filepath", label="Image scene (storyboard)"),
-        gr.Textbox(
-            label="Prompt motion",
-            value=(
-                "cute Pixar style character speaking happily, natural movement, "
-                "breathing, blinking eyes, gentle head tilt, cinematic camera pan, "
-                "lively background, smooth animation"
-            ),
-        ),
-        gr.Slider(17, 97, value=min(81, MAX_FRAMES), step=8, label="Frames (81 = ~3.4s @24fps)"),
-        gr.Slider(8, 20, value=min(16, MAX_STEPS), step=1, label="Steps (max 20)"),
-        gr.Number(value=42, label="Seed", precision=0),
-    ],
-    outputs=[
-        gr.Video(label="Clip I2V anime"),
-        gr.Textbox(label="Backend"),
-        gr.Textbox(label="Temps"),
-    ],
-    title="video ia — I2V Fast (LTX / Wan 1.3B)",
-    description=_header,
-)
+with gr.Blocks(title="video ia — I2V Fast") as demo:
+    gr.Markdown(_header)
+    with gr.Row():
+        image = gr.Image(type="filepath", label="Image scene (storyboard)")
+        with gr.Column():
+            prompt = gr.Textbox(
+                label="Prompt motion",
+                value=(
+                    "cute Pixar style character speaking happily, natural movement, "
+                    "breathing, blinking eyes, gentle head tilt, cinematic camera pan, "
+                    "lively background, smooth animation"
+                ),
+            )
+            num_frames = gr.Slider(
+                17, 97, value=min(81, MAX_FRAMES), step=8, label="Frames (81 ~ 3.4s @24fps)"
+            )
+            steps = gr.Slider(8, 20, value=min(16, MAX_STEPS), step=1, label="Steps (max 20)")
+            seed = gr.Number(value=42, label="Seed", precision=0)
+            btn = gr.Button("Generer clip I2V", variant="primary")
+    video = gr.Video(label="Clip I2V anime")
+    mode = gr.Textbox(label="Backend")
+    timing = gr.Textbox(label="Temps")
+    # api_name explicite pour gradio_client (evite /predict introuvable)
+    btn.click(
+        fn=run,
+        inputs=[image, prompt, num_frames, steps, seed],
+        outputs=[video, mode, timing],
+        api_name="generate",
+    )
 
 if __name__ == "__main__":
     import socket
