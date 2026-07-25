@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from db.database import list_videos, set_paused, stats
+from modules.job_runner import start_resume_job
 from modules.progress import get_progress
 from modules.publish import publish_youtube
 from ui_helpers import (
@@ -27,7 +28,6 @@ from ui_helpers import (
     statut_badge,
     video_title,
 )
-from main import run_pipeline
 
 ctx = boot_app("video ia — Suivi")
 render_sidebar("Suivi")
@@ -46,7 +46,6 @@ st.markdown(
 
 render_engine_status(ctx, "suivi")
 
-# Mini bandeau si generation en cours
 prog = get_progress()
 if prog.get("running"):
     st.info(
@@ -90,16 +89,22 @@ else:
     if mp4:
         st.video(str(mp4))
     elif audio:
-        st.warning("Film pas encore pret — audio disponible.")
+        st.warning("Film pas encore pret — audio disponible. Reprends l'animation I2V.")
         st.audio(str(audio))
-        step = next_step_for(derniere.get("statut"))
-        if step and st.button(f"Continuer ({step})"):
-            with st.spinner("Reprise…"):
-                try:
-                    run_pipeline(resume_id=int(derniere["id"]), only=step, publish=False)
-                    st.rerun()
-                except Exception as exc:
-                    st.exception(exc)
+        step = next_step_for(derniere.get("statut")) or "video_ai"
+        if st.button(
+            f"Continuer I2V + montage (#{derniere['id']})",
+            type="primary",
+            use_container_width=True,
+        ):
+            result = start_resume_job(
+                video_id=int(derniere["id"]), only=step, publish=False
+            )
+            if result.get("ok"):
+                st.success("Reprise lancee en arriere-plan.")
+                go_page("pages/2_Creation.py")
+            else:
+                st.warning(result.get("error") or result)
     if derniere.get("youtube_id"):
         st.link_button("Voir sur YouTube", f"https://youtu.be/{derniere['youtube_id']}")
     if derniere.get("erreur"):
@@ -125,11 +130,15 @@ for v in list_videos(40):
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
-        elif next_step_for(v.get("statut")) not in (None, "publish"):
+        else:
             step = next_step_for(v.get("statut"))
-            if st.button("Continuer", key=f"c_{v['id']}"):
-                try:
-                    run_pipeline(resume_id=int(v["id"]), only=step, publish=False)
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+            if step and step != "publish":
+                if st.button(f"Continuer ({step})", key=f"c_{v['id']}"):
+                    result = start_resume_job(
+                        video_id=int(v["id"]), only=step, publish=False
+                    )
+                    if result.get("ok"):
+                        st.success("Reprise lancee — vois Creation pour le %.")
+                        go_page("pages/2_Creation.py")
+                    else:
+                        st.warning(result.get("error") or result)

@@ -75,6 +75,10 @@ def _run_from(
         if start_idx <= STEPS.index("video_ai"):
             from config import wan_clip_budget
 
+            try:
+                update_video(video_id, statut="audio_ok", erreur=None)
+            except Exception:
+                pass
             n_clips = max(1, estimate_ai_clips())
             try:
                 projet = Path(video["chemin_projet"])

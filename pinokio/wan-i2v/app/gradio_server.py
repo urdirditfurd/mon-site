@@ -81,12 +81,12 @@ with gr.Blocks(title="video ia — I2V Fast") as demo:
     video = gr.Video(label="Clip I2V anime")
     mode = gr.Textbox(label="Backend")
     timing = gr.Textbox(label="Temps")
-    # api_name explicite pour gradio_client (evite /predict introuvable)
+    # api_name="run" = compatible Gradio+queue (observe sur Windows)
     btn.click(
         fn=run,
         inputs=[image, prompt, num_frames, steps, seed],
         outputs=[video, mode, timing],
-        api_name="generate",
+        api_name="run",
     )
 
 if __name__ == "__main__":

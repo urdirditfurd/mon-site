@@ -132,6 +132,77 @@ def start_generation_job(
     return job
 
 
+def start_resume_job(
+    *,
+    video_id: int,
+    only: str = "video_ai",
+    publish: bool = False,
+) -> dict[str, Any]:
+    """Reprend un projet existant (ex: #36 audio_ok → video_ai) en arriere-plan."""
+    existing = get_job()
+    if existing and existing.get("running"):
+        pid = existing.get("pid")
+        if pid and _pid_alive(int(pid)):
+            return {"ok": False, "error": "Une generation est deja en cours", "job": existing}
+
+    step = (only or "video_ai").strip()
+    set_progress(
+        step=step if step in {"storyboard", "audio", "video_ai", "montage", "publish"} else "video_ai",
+        message=f"Reprise projet #{video_id} ({step})…",
+        video_id=int(video_id),
+        detail="Scenes deja generees seront ignorees",
+    )
+    py = sys.executable
+    cmd = [
+        py,
+        str(ROOT / "main.py"),
+        "--resume",
+        str(int(video_id)),
+        "--only",
+        step,
+    ]
+    if publish:
+        cmd.append("--publish")
+    else:
+        cmd.append("--no-publish")
+
+    log_path = ROOT / "data" / "job.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_f = log_path.open("a", encoding="utf-8")
+    log_f.write(f"\n=== RESUME #{video_id} only={step} ===\n")
+    log_f.flush()
+
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(ROOT),
+        stdout=log_f,
+        stderr=subprocess.STDOUT,
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+            "CONTE_I2V_PREFER_CLI": os.environ.get("CONTE_I2V_PREFER_CLI", "1"),
+        },
+        creationflags=creationflags,
+    )
+    job = {
+        "ok": True,
+        "running": True,
+        "pid": proc.pid,
+        "resume_id": int(video_id),
+        "only": step,
+        "publish": publish,
+        "log": str(log_path),
+    }
+    set_job(job)
+    return job
+
+
 def refresh_job_status() -> dict[str, Any]:
     job = get_job() or {}
     progress = get_progress()

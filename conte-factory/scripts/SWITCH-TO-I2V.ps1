@@ -35,6 +35,7 @@ $content = Set-EnvKey $content "PINOKIO_I2V_WIDTH" "848"
 $content = Set-EnvKey $content "PINOKIO_I2V_HEIGHT" "480"
 $content = Set-EnvKey $content "PINOKIO_I2V_GUIDANCE" "5.5"
 $content = Set-EnvKey $content "CONTE_I2V_LOWVRAM" "1"
+$content = Set-EnvKey $content "CONTE_I2V_PREFER_CLI" "1"
 $content = Set-EnvKey $content "WAN_DTYPE" "float16"
 $content = Set-EnvKey $content "SULPHUR_CPU_OFFLOAD" "1"
 

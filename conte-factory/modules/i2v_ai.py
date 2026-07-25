@@ -1,4 +1,4 @@
-"""Client Image-to-Video local (Wan Fun 1.3B InP via Gradio / CLI)."""
+"""Client Image-to-Video local (LTX / Wan Fun 1.3B via CLI prioritaire, Gradio optionnel)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,14 @@ PINOKIO_I2V_STEPS = min(20, int(os.getenv("PINOKIO_I2V_STEPS", "16")))
 PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "480p 16:9")
 PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.5"))
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")
+# CLI = plus fiable pour jobs longs (Gradio /run peut planter ou bloquer des heures)
+PREFER_CLI = os.getenv("CONTE_I2V_PREFER_CLI", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "900"))  # 15 min max
 
 MOTION_PROMPT = (
     "character natural movement, breathing, blinking eyes, gentle head tilt, "
@@ -52,7 +62,6 @@ def resolve_i2v_python(engine: Path | None = None) -> str:
         local = engine.parent / "env" / "Scripts" / "python.exe"
         if local.exists():
             return str(local)
-        # Reuse Wan T2V env
         t2v = (
             engine.parent.parent.parent
             / "wan-snapdragon-arm"
@@ -76,6 +85,7 @@ def i2v_health() -> dict[str, Any]:
         "engine": None,
         "ready": False,
         "mode": "missing",
+        "prefer_cli": PREFER_CLI,
     }
     try:
         resp = requests.get(PINOKIO_I2V_URL.rstrip("/") + "/", timeout=2)
@@ -85,21 +95,23 @@ def i2v_health() -> dict[str, Any]:
     engine = resolve_i2v_engine()
     if engine:
         info["engine"] = str(engine)
-    if info["gradio_up"]:
+    if engine:
+        info["ready"] = True
+        info["mode"] = "cli" if PREFER_CLI or not info["gradio_up"] else "gradio"
+    elif info["gradio_up"]:
         info["ready"] = True
         info["mode"] = "gradio"
-    elif engine:
-        info["ready"] = True
-        info["mode"] = "cli"
     return info
 
 
 def _discover_gradio_api_names(client: Any) -> list[str]:
-    names: list[str] = ["/generate", "/predict", "/run", "/i2v"]
+    # /run = endpoint reel observe sur Gradio+queue (Windows utilisateur)
+    names: list[str] = ["/run", "/generate", "/predict", "/i2v"]
     try:
         info = getattr(client, "view_api", None)
         raw = info(return_format="dict") if callable(info) else None
         if isinstance(raw, dict):
+            discovered: list[str] = []
             for key in ("named_endpoints", "endpoints"):
                 block = raw.get(key) or {}
                 if isinstance(block, dict):
@@ -107,11 +119,11 @@ def _discover_gradio_api_names(client: Any) -> list[str]:
                         n = str(name)
                         if not n.startswith("/"):
                             n = "/" + n
-                        if n not in names:
-                            names.insert(0, n)
+                        discovered.append(n)
+            # Endpoints decouverts en tete
+            names = discovered + names
     except Exception:
         pass
-    # Déduplique en gardant l'ordre
     seen: set[str] = set()
     out: list[str] = []
     for n in names:
@@ -147,17 +159,30 @@ def _via_gradio(image: Path, prompt: str, dest: Path, seed: int | None = None) -
         dest.write_bytes(src.read_bytes())
         return {"ok": True, "outputPath": str(dest), "mode": "gradio_i2v"}
 
+    def _try_one(api_name: str | None) -> dict[str, Any]:
+        if api_name:
+            result = client.predict(*args, api_name=api_name)
+        else:
+            result = client.predict(*args)
+        return _save_result(result)
+
     for api_name in api_names:
         try:
-            result = client.predict(*args, api_name=api_name)
-            return _save_result(result)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(_try_one, api_name)
+                return fut.result(timeout=GRADIO_TIMEOUT_SEC)
+        except FuturesTimeout:
+            last_err = TimeoutError(
+                f"Gradio timeout {GRADIO_TIMEOUT_SEC}s sur {api_name}"
+            )
+            continue
         except Exception as exc:
             last_err = exc
             continue
-    # Dernier essai sans api_name
     try:
-        result = client.predict(*args)
-        return _save_result(result)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(_try_one, None)
+            return fut.result(timeout=GRADIO_TIMEOUT_SEC)
     except Exception as exc:
         last_err = exc
     raise RuntimeError(f"Gradio I2V echoue: {last_err}")
@@ -206,14 +231,15 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
             "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
             "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
             "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
         },
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "i2v failed")[-2500:])
     if not dest.exists():
-        # parse JSON stdout
         try:
-            data = json.loads(proc.stdout.strip().splitlines()[-1])
+            lines = [ln for ln in (proc.stdout or "").strip().splitlines() if ln.strip()]
+            data = json.loads(lines[-1]) if lines else {}
             alt = Path(str(data.get("outputPath") or ""))
             if alt.exists():
                 dest.write_bytes(alt.read_bytes())
@@ -231,7 +257,7 @@ def animate_scene_i2v(
     prompt: str = "",
     seed: int | None = None,
 ) -> dict[str, Any]:
-    """Image scene → clip MP4 anime (mouvement reel)."""
+    """Image scene → clip MP4 anime (mouvement reel). Prefere CLI pour stabilite."""
     if dest.exists() and dest.stat().st_size > 5000:
         return {"ok": True, "outputPath": str(dest), "mode": "cached"}
     motion = (prompt or "").strip()
@@ -240,19 +266,29 @@ def animate_scene_i2v(
 
     health = i2v_health()
     errors: list[str] = []
-    if health.get("gradio_up"):
-        try:
-            return _via_gradio(image, motion, dest, seed=seed)
-        except Exception as exc:
-            errors.append(f"gradio: {exc}")
-    if health.get("engine") or resolve_i2v_engine():
-        try:
-            return _via_cli(image, motion, dest, seed=seed)
-        except Exception as exc:
-            errors.append(f"cli: {exc}")
+    order: list[str] = []
+    if PREFER_CLI and (health.get("engine") or resolve_i2v_engine()):
+        order = ["cli", "gradio"]
+    elif health.get("gradio_up"):
+        order = ["gradio", "cli"]
+    else:
+        order = ["cli", "gradio"]
+
+    for mode in order:
+        if mode == "cli" and (health.get("engine") or resolve_i2v_engine()):
+            try:
+                return _via_cli(image, motion, dest, seed=seed)
+            except Exception as exc:
+                errors.append(f"cli: {exc}")
+        elif mode == "gradio" and health.get("gradio_up"):
+            try:
+                return _via_gradio(image, motion, dest, seed=seed)
+            except Exception as exc:
+                errors.append(f"gradio: {exc}")
+
     detail = " | ".join(errors) if errors else "aucun moteur"
     raise RuntimeError(
         "Moteur I2V indisponible. Installe pinokio/wan-i2v (INSTALL-I2V.ps1), "
-        "relance LANCER-I2V.bat (port 7861). "
-        f"Detail: {detail}"
+        "relance LANCER-I2V.bat si besoin. "
+        f"Detail: {detail[:800]}"
     )

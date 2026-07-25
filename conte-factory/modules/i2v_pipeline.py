@@ -156,6 +156,28 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
 
     for i, scene in enumerate(scenes):
         idx = int(scene["index"])
+        still = stills_dir / f"scene_{idx:03d}.png"
+        raw = raw_dir / f"scene_{idx:03d}_i2v.mp4"
+        final = clips_dir / f"scene_{idx:03d}_part00.mp4"
+
+        # Reprise : scene deja montee → skip
+        if final.exists() and final.stat().st_size > 5000:
+            scene["ai_clip_files"] = [final.name]
+            scene["ai_clips_planned"] = 1
+            scene["still_image"] = still.name if still.exists() else scene.get("still_image")
+            scene["i2v_raw"] = raw.name if raw.exists() else scene.get("i2v_raw")
+            scene["i2v_mode"] = scene.get("i2v_mode") or "cached"
+            log_event(video_id, "info", f"I2V scene {idx}: skip (deja pret)")
+            set_progress(
+                step="video_ai",
+                video_id=video_id,
+                message=f"I2V {i + 1}/{total} deja OK (reprise)",
+                clips_done=i + 1,
+                clips_total=total,
+                detail=f"Scene {idx} ignoree (fichier existant)",
+            )
+            continue
+
         set_progress(
             step="video_ai",
             video_id=video_id,
@@ -164,7 +186,6 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             clips_total=total,
             detail="Etape 2/5 : storyboard image",
         )
-        still = stills_dir / f"scene_{idx:03d}.png"
         generate_scene_image(
             _scene_image_prompt(scene, board),
             still,
@@ -176,12 +197,11 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"I2V scene {i + 1}/{total} — animation Wan…",
+            message=f"I2V scene {i + 1}/{total} — animation…",
             clips_done=i,
             clips_total=total,
-            detail="Etape 3/5 : Image-to-Video (mouvement reel)",
+            detail="Etape 3/5 : Image-to-Video (CLI prioritaire)",
         )
-        raw = raw_dir / f"scene_{idx:03d}_i2v.mp4"
         result = animate_scene_i2v(
             still,
             raw,
@@ -190,7 +210,6 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         )
 
         audio = _scene_audio(projet, idx)
-        final = clips_dir / f"scene_{idx:03d}_part00.mp4"
         if audio and audio.exists():
             set_progress(
                 step="video_ai",
@@ -202,7 +221,6 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             )
             _fit_video_to_audio(raw, audio, final, fps=fps)
         else:
-            # Pas d'audio scene : copie le clip brut
             final.write_bytes(raw.read_bytes())
 
         scene["ai_clip_files"] = [final.name]
@@ -210,6 +228,10 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         scene["still_image"] = still.name
         scene["i2v_raw"] = raw.name
         scene["i2v_mode"] = result.get("mode")
+        # Checkpoint apres chaque scene (reprise possible si crash)
+        board_path.write_text(
+            json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         log_event(
             video_id,
             "info",
