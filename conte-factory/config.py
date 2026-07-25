@@ -62,16 +62,16 @@ PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
 WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
 
-# Wan I2V (Image-to-Video) — vraie animation RAPIDE (cible 1–2 min/scène)
+# Wan I2V (Image-to-Video) — vraie animation RAPIDE (cible <90 s/scène après warm)
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-# Plafonds RTX 3080 10 Go
-PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "81"))
-PINOKIO_I2V_STEPS = min(20, int(os.getenv("PINOKIO_I2V_STEPS", "16")))
-PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "848"))
-PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "480"))
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.5"))
+# Plafonds RTX 3080 10 Go — batch 1 load + clips courts bouclés sur l'audio
+PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "33"))
+PINOKIO_I2V_STEPS = min(10, int(os.getenv("PINOKIO_I2V_STEPS", "8")))
+PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "704"))
+PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "384"))
+PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.0"))
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")  # ltx (rapide) | wan
 CONTE_I2V_LOWVRAM = os.getenv("CONTE_I2V_LOWVRAM", "1") == "1"
 AUTO_START_I2V = os.getenv("CONTE_AUTO_START_I2V", "1") == "1"
@@ -199,10 +199,10 @@ def estimate_render_minutes(
         high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
-        # Cible 1–2 min / scène (LTX/Wan 1.3B, 16 steps, 848x480)
-        low = max(8, int(round(clips * 1.0 + 3)))
-        high = max(16, int(round(clips * 2.0 + 5)))
-        return min(low, 45), min(high, 60)
+        # Batch 1 load + 33f/8steps/704x384 → ~45–90 s/scène apres warm
+        low = max(6, int(round(clips * 0.75 + 4)))
+        high = max(12, int(round(clips * 1.5 + 6)))
+        return min(low, 40), min(high, 50)
     if provider in {"talking", "lipsync", "talk"}:
         low = max(8, int(round(clips * 0.6 + 4)))
         high = max(15, int(round(clips * 1.5 + 8)))

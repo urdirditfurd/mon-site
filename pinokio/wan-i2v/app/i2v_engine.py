@@ -1,21 +1,22 @@
 """
-I2V rapide pour RTX 3080 10 Go — cible 1–2 min / scène MAX.
+I2V rapide pour RTX 3080 10 Go — cible <90 s / scène apres 1er chargement.
 
-Backend par défaut : LTX-Video (Diffusers) — conçu pour ~10 Go VRAM.
-Fallback : Wan2.1 Fun 1.3B InP (léger, pas le 14B).
+Backend : LTX-Video (defaut) ou Wan Fun 1.3B.
+IMPORTANT : utiliser `batch` pour N scenes = 1 seul chargement modele
+(sinon chaque CLI recharge le modele = 10+ min/scene).
 
-Plafonds durs (non négociables) :
-  - steps ≤ 16
-  - résolution 848×480 (upscale FFmpeg → 1080p au montage)
-  - frames = 81 (~3.4 s @ 24 fps)
-  - CFG 5.0–6.0 (Wan) / ~3.5 (LTX)
-  - attention SDPA + lowvram / model CPU offload
+Plafonds vitesse :
+  - steps ≤ 8 (max 10)
+  - resolution 704×384 (upscale 1080p au montage)
+  - frames = 33 (~1.4 s @ 24 fps, boucle sur l'audio)
+  - lowvram + SDPA
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -35,7 +36,6 @@ MOTION_SUFFIX = (
     "continuous motion, not a still image"
 )
 
-# Backends
 BACKEND = (os.environ.get("WAN_I2V_BACKEND") or "ltx").strip().lower()
 WAN_MODEL_ID = os.environ.get(
     "WAN_I2V_MODEL",
@@ -43,20 +43,20 @@ WAN_MODEL_ID = os.environ.get(
 )
 LTX_MODEL_ID = os.environ.get("LTX_I2V_MODEL", "Lightricks/LTX-Video")
 
-# Plafonds vitesse / VRAM (RTX 3080 10 Go)
-MAX_STEPS = int(os.environ.get("PINOKIO_I2V_STEPS", "16"))
-MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "81"))
-# 848x480 ≈ 16:9 ; aligné multiple de 32 pour LTX / Wan
-DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "848"))
-DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "480"))
-GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "5.5"))
+# Plafonds ULTRA-rapides (RTX 3080 10 Go)
+MAX_STEPS = int(os.environ.get("PINOKIO_I2V_STEPS", "8"))
+MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "33"))
+DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "704"))
+DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "384"))
+GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "5.0"))
 EXPORT_FPS = int(os.environ.get("PINOKIO_I2V_FPS", "24"))
 
 RESOLUTION_PRESETS = {
-    "480p 16:9": (848, 480),
+    "480p 16:9": (704, 384),
+    "848p 16:9": (848, 480),
     "576p 16:9": (1024, 576),
-    "480p 9:16": (480, 848),
-    "480p 1:1": (480, 480),
+    "480p 9:16": (384, 704),
+    "480p 1:1": (384, 384),
 }
 
 _PIPE = None
@@ -72,9 +72,9 @@ def _log(msg: str) -> None:
         .replace("×", "x")
     )
     try:
-        print(safe, flush=True)
+        print(safe, flush=True, file=sys.stderr)
     except UnicodeEncodeError:
-        print(safe.encode("ascii", "replace").decode("ascii"), flush=True)
+        print(safe.encode("ascii", "replace").decode("ascii"), flush=True, file=sys.stderr)
 
 
 def hf_token() -> str | None:
@@ -128,22 +128,21 @@ def _tune_cuda() -> None:
 
 
 def _clamp_steps(steps: int) -> int:
-    return max(8, min(int(steps), 20, MAX_STEPS if MAX_STEPS > 0 else 16))
+    return max(4, min(int(steps), 10, MAX_STEPS if MAX_STEPS > 0 else 8))
 
 
 def _align_frames_wan(n: int) -> int:
     n = max(17, int(n))
     if n % 4 != 1:
         n = (n // 4) * 4 + 1
-    return min(n, 81)
+    return min(n, 49)
 
 
 def _align_frames_ltx(n: int) -> int:
-    # LTX : 8k+1
     n = max(9, int(n))
     if (n - 1) % 8 != 0:
         n = ((n - 1) // 8) * 8 + 1
-    return min(n, 97)
+    return min(n, 49)
 
 
 def _align_dim(value: int, multiple: int = 32) -> int:
@@ -378,7 +377,7 @@ def generate_i2v(
 
     _log(
         f"[i2v_engine] DONE {elapsed:.1f}s ({per_step:.1f}s/step) "
-        f"target=60-120s/scene"
+        f"target=<90s/scene apres warm"
     )
 
     return {
@@ -399,6 +398,62 @@ def generate_i2v(
         "seconds": round(elapsed, 1),
         "secondsPerStep": round(per_step, 2),
         "clipDurationSec": round(num_frames / max(1, fps), 2),
+    }
+
+
+def generate_i2v_batch(
+    jobs: list[dict],
+    *,
+    resolution_key: str = "480p 16:9",
+    num_frames: int | None = None,
+    fps: int | None = None,
+    steps: int | None = None,
+    cache_dir: str | None = None,
+) -> dict:
+    """Genere N clips avec UN SEUL chargement modele (critique pour la vitesse)."""
+    if not jobs:
+        return {"ok": True, "results": [], "loadedOnce": True}
+
+    device = pick_device()
+    # Force le chargement une fois
+    get_pipe(cache_dir, device)
+    results: list[dict] = []
+    t_all = time.perf_counter()
+    for i, job in enumerate(jobs):
+        image = str(job.get("image") or "")
+        prompt = str(job.get("prompt") or "")
+        output = str(job.get("output") or "")
+        seed = job.get("seed")
+        _log(f"[i2v_engine] batch {i + 1}/{len(jobs)} → {output}")
+        try:
+            results.append(
+                generate_i2v(
+                    image_path=image,
+                    prompt=prompt,
+                    output_path=output,
+                    resolution_key=resolution_key,
+                    num_frames=num_frames,
+                    fps=fps,
+                    steps=steps,
+                    seed=int(seed) if seed is not None else None,
+                    cache_dir=cache_dir,
+                )
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "ok": False,
+                    "outputPath": output,
+                    "error": str(exc)[:500],
+                    "trace": traceback.format_exc()[-800:],
+                }
+            )
+    return {
+        "ok": all(r.get("ok") for r in results),
+        "results": results,
+        "loadedOnce": True,
+        "seconds": round(time.perf_counter() - t_all, 1),
+        "count": len(results),
     }
 
 
@@ -462,10 +517,40 @@ if __name__ == "__main__":
     gen.add_argument("--fps", type=int, default=EXPORT_FPS)
     gen.add_argument("--steps", type=int, default=MAX_STEPS)
     gen.add_argument("--seed", type=int, default=None)
+    bat = sub.add_parser("batch")
+    bat.add_argument("--jobs", required=True, help="JSON file: [{image,prompt,output,seed}]")
+    bat.add_argument("--resolution", default="480p 16:9")
+    bat.add_argument("--frames", type=int, default=MAX_FRAMES)
+    bat.add_argument("--fps", type=int, default=EXPORT_FPS)
+    bat.add_argument("--steps", type=int, default=MAX_STEPS)
     args = parser.parse_args()
 
     if args.cmd == "check":
-        print(json.dumps(check_environment(), indent=2))
+        print(json.dumps(check_environment(), ensure_ascii=False))
+    elif args.cmd == "batch":
+        try:
+            jobs = json.loads(Path(args.jobs).read_text(encoding="utf-8"))
+            if not isinstance(jobs, list):
+                raise ValueError("jobs JSON must be a list")
+            print(
+                json.dumps(
+                    generate_i2v_batch(
+                        jobs,
+                        resolution_key=args.resolution,
+                        num_frames=args.frames,
+                        fps=args.fps,
+                        steps=args.steps,
+                    ),
+                    ensure_ascii=False,
+                )
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {"ok": False, "error": str(exc), "trace": traceback.format_exc()}
+                )
+            )
+            raise SystemExit(1) from exc
     else:
         try:
             print(
@@ -480,7 +565,7 @@ if __name__ == "__main__":
                         steps=args.steps,
                         seed=args.seed,
                     ),
-                    indent=2,
+                    ensure_ascii=False,
                 )
             )
         except Exception as exc:

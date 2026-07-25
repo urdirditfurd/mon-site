@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
@@ -18,19 +19,28 @@ from config import ROOT
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-PINOKIO_I2V_FRAMES = min(97, int(os.getenv("PINOKIO_I2V_FRAMES", "81")))
-PINOKIO_I2V_STEPS = min(20, int(os.getenv("PINOKIO_I2V_STEPS", "16")))
+# Plafonds vitesse RTX 3080 : 33f · 8 steps · 704×384 (upscale montage)
+PINOKIO_I2V_FRAMES = min(49, int(os.getenv("PINOKIO_I2V_FRAMES", "33")))
+PINOKIO_I2V_STEPS = min(10, int(os.getenv("PINOKIO_I2V_STEPS", "8")))
 PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "480p 16:9")
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.5"))
+PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.0"))
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")
-# CLI = plus fiable pour jobs longs (Gradio /run peut planter ou bloquer des heures)
+# CLI = plus fiable ; batch = 1 chargement modèle pour N scènes
 PREFER_CLI = os.getenv("CONTE_I2V_PREFER_CLI", "1").strip().lower() in {
     "1",
     "true",
     "yes",
     "on",
 }
-GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "900"))  # 15 min max
+USE_BATCH = os.getenv("CONTE_I2V_USE_BATCH", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "600"))
+CLI_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_CLI_TIMEOUT", "600"))
+BATCH_SCENE_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_BATCH_SCENE_TIMEOUT", "180"))
 
 MOTION_PROMPT = (
     "character natural movement, breathing, blinking eyes, gentle head tilt, "
@@ -215,24 +225,14 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
     ]
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
+    env = _cli_env()
     proc = subprocess.run(
         cmd,
         cwd=str(engine.parent),
         capture_output=True,
         text=True,
-        timeout=60 * 45,
-        env={
-            **os.environ,
-            "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),
-            "SULPHUR_CPU_OFFLOAD": os.environ.get("SULPHUR_CPU_OFFLOAD", "1"),
-            "CONTE_I2V_LOWVRAM": os.environ.get("CONTE_I2V_LOWVRAM", "1"),
-            "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", WAN_I2V_BACKEND),
-            "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
-            "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
-            "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
-            "PYTHONUNBUFFERED": "1",
-            "PYTHONIOENCODING": "utf-8",
-        },
+        timeout=CLI_TIMEOUT_SEC,
+        env=env,
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "i2v failed")[-2500:])
@@ -248,6 +248,191 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
     if not dest.exists():
         raise RuntimeError("I2V n'a pas produit de MP4")
     return {"ok": True, "outputPath": str(dest), "mode": "cli_i2v"}
+
+
+def _cli_env() -> dict[str, str]:
+    return {
+        **os.environ,
+        "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),
+        "SULPHUR_CPU_OFFLOAD": os.environ.get("SULPHUR_CPU_OFFLOAD", "1"),
+        "CONTE_I2V_LOWVRAM": os.environ.get("CONTE_I2V_LOWVRAM", "1"),
+        "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", WAN_I2V_BACKEND),
+        "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
+        "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
+        "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
+        "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "704"),
+        "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "384"),
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+
+def animate_scenes_i2v_batch(
+    jobs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Anime N scènes avec UN SEUL process CLI (= 1 chargement modèle).
+    Chaque job : image (Path), dest (Path), prompt?, seed?
+    """
+    if not jobs:
+        return []
+
+    results: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    pending_idx: list[int] = []
+
+    for i, job in enumerate(jobs):
+        dest = Path(job["dest"])
+        if dest.exists() and dest.stat().st_size > 5000:
+            results.append({"ok": True, "outputPath": str(dest), "mode": "cached"})
+            continue
+        results.append({})  # placeholder
+        pending_idx.append(i)
+        motion = str(job.get("prompt") or "").strip()
+        if MOTION_PROMPT.lower() not in motion.lower():
+            motion = f"{motion}, {MOTION_PROMPT}".strip(", ")
+        pending.append(
+            {
+                "image": str(Path(job["image"]).resolve()),
+                "prompt": motion,
+                "output": str(dest.resolve()),
+                "seed": job.get("seed"),
+            }
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if not pending:
+        return results
+
+    engine = resolve_i2v_engine()
+    if not engine:
+        # Fallback scène par scène (Gradio / CLI unitaire)
+        for j, pi in enumerate(pending_idx):
+            job = jobs[pi]
+            results[pi] = animate_scene_i2v(
+                Path(job["image"]),
+                Path(job["dest"]),
+                prompt=str(job.get("prompt") or ""),
+                seed=job.get("seed"),
+            )
+        return results
+
+    if not USE_BATCH or len(pending) == 1:
+        for j, pi in enumerate(pending_idx):
+            job = jobs[pi]
+            results[pi] = animate_scene_i2v(
+                Path(job["image"]),
+                Path(job["dest"]),
+                prompt=str(job.get("prompt") or ""),
+                seed=job.get("seed"),
+            )
+        return results
+
+    py = resolve_i2v_python(engine)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix="conte_i2v_batch_",
+        delete=False,
+        encoding="utf-8",
+    ) as fh:
+        json.dump(pending, fh, ensure_ascii=False)
+        jobs_path = Path(fh.name)
+
+    timeout = max(600, BATCH_SCENE_TIMEOUT_SEC * len(pending) + 300)
+    cmd = [
+        py,
+        str(engine),
+        "batch",
+        "--jobs",
+        str(jobs_path),
+        "--resolution",
+        PINOKIO_I2V_RESOLUTION,
+        "--frames",
+        str(PINOKIO_I2V_FRAMES),
+        "--fps",
+        "24",
+        "--steps",
+        str(PINOKIO_I2V_STEPS),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(engine.parent),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_cli_env(),
+        )
+    finally:
+        try:
+            jobs_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "batch failed")[-3000:]
+        # Fallback unitaire si batch plante
+        for pi in pending_idx:
+            if results[pi]:
+                continue
+            job = jobs[pi]
+            try:
+                results[pi] = animate_scene_i2v(
+                    Path(job["image"]),
+                    Path(job["dest"]),
+                    prompt=str(job.get("prompt") or ""),
+                    seed=job.get("seed"),
+                )
+            except Exception as exc:
+                results[pi] = {
+                    "ok": False,
+                    "error": f"batch+cli: {err[:400]} | {exc}",
+                }
+        return results
+
+    # Parser stdout JSON du batch (1 ligne compacte ; logs sur stderr)
+    batch_data: dict[str, Any] = {}
+    try:
+        lines = [ln for ln in (proc.stdout or "").strip().splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            text = ln.strip()
+            if text.startswith("{") and text.endswith("}"):
+                batch_data = json.loads(text)
+                break
+        if not batch_data and (proc.stdout or "").strip().startswith("{"):
+            batch_data = json.loads(proc.stdout.strip())
+    except Exception:
+        batch_data = {}
+
+    per_results = batch_data.get("results") if isinstance(batch_data, dict) else None
+    for j, pi in enumerate(pending_idx):
+        dest = Path(jobs[pi]["dest"])
+        if dest.exists() and dest.stat().st_size > 5000:
+            mode = "cli_i2v_batch"
+            if isinstance(per_results, list) and j < len(per_results):
+                mode = str(per_results[j].get("mode") or mode)
+            results[pi] = {"ok": True, "outputPath": str(dest), "mode": mode}
+        elif isinstance(per_results, list) and j < len(per_results):
+            r = per_results[j]
+            if r.get("ok") and Path(str(r.get("outputPath") or "")).exists():
+                src = Path(str(r["outputPath"]))
+                if src != dest:
+                    dest.write_bytes(src.read_bytes())
+                results[pi] = {
+                    "ok": True,
+                    "outputPath": str(dest),
+                    "mode": str(r.get("mode") or "cli_i2v_batch"),
+                }
+            else:
+                results[pi] = {
+                    "ok": False,
+                    "error": str(r.get("error") or "batch scene failed")[:500],
+                }
+        else:
+            results[pi] = {"ok": False, "error": "batch: sortie manquante"}
+
+    return results
 
 
 def animate_scene_i2v(

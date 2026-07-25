@@ -322,7 +322,7 @@ def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
     if ctx.get("uses_i2v"):
         st.metric("Moteur video", "I2V rapide (LTX / Wan 1.3B)")
         st.caption(
-            "16 steps · 848×480 · 81 frames · CLI prioritaire — cible 1–2 min/scène. "
+            "8 steps · 704×384 · 33 frames · CLI batch (1 load) — cible <90 s/scène. "
             "Port 7861 optionnel. Reprends un projet audio_ok depuis Suivi."
         )
         return

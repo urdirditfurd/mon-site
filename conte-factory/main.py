@@ -210,7 +210,7 @@ def run_pipeline(
                 step="start",
                 pct=2,
                 message="Demarrage I2V rapide (LTX/Wan 1.3B)…",
-                detail="16 steps · 848x480 · 81 frames — cible 1-2 min/scene",
+                detail="8 steps · 704x384 · 33 frames · batch — cible <90 s/scene",
             )
             try:
                 i2v = ensure_i2v_running(wait_seconds=min(120, I2V_START_TIMEOUT_SEC))

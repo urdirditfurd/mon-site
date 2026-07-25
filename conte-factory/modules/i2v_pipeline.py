@@ -1,6 +1,9 @@
 """Pipeline Image-to-Video — vraie animation (pas diaporama / Wav2Lip).
 
-1 TTS (deja fait) → 2 Image scene 16:9 Pixar → 3 Wan I2V → 4 Mux audio → 5 Montage
+1 TTS (deja fait) → 2 Image scene 16:9 Pixar → 3 Wan/LTX I2V (batch) → 4 Mux audio → 5 Montage
+
+Batch critique : 1 chargement modele pour toutes les scenes restantes
+(sinon chaque CLI recharge = 10+ min/scene).
 """
 
 from __future__ import annotations
@@ -12,7 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from db.database import get_video, log_event, update_video
-from modules.i2v_ai import MOTION_PROMPT, animate_scene_i2v, i2v_health
+from modules.i2v_ai import (
+    MOTION_PROMPT,
+    animate_scene_i2v,
+    animate_scenes_i2v_batch,
+    i2v_health,
+)
 from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
 from modules.youth_spec import normalize_age, youth_profile
@@ -113,7 +121,7 @@ def _scene_audio(projet: Path, idx: int) -> Path | None:
 
 
 def generate_i2v_videos(video_id: int) -> dict[str, Any]:
-    """Etapes 2–4 : image scene → Wan I2V → mux audio."""
+    """Etapes 2–4 : image scene → I2V batch → mux audio."""
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Video introuvable: {video_id}")
@@ -142,7 +150,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     log_event(
         video_id,
         "info",
-        f"Pipeline I2V : mode={health.get('mode')} url={health.get('url')}",
+        f"Pipeline I2V : mode={health.get('mode')} url={health.get('url')} batch=on",
     )
 
     set_image_output_size(1280, 720)
@@ -154,13 +162,15 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     if total == 0:
         raise RuntimeError("Aucune scene dans le storyboard")
 
+    pending: list[dict[str, Any]] = []
+
+    # --- Phase 1 : skip deja faits + generer images manquantes ---
     for i, scene in enumerate(scenes):
         idx = int(scene["index"])
         still = stills_dir / f"scene_{idx:03d}.png"
         raw = raw_dir / f"scene_{idx:03d}_i2v.mp4"
         final = clips_dir / f"scene_{idx:03d}_part00.mp4"
 
-        # Reprise : scene deja montee → skip
         if final.exists() and final.stat().st_size > 5000:
             scene["ai_clip_files"] = [final.name]
             scene["ai_clips_planned"] = 1
@@ -178,6 +188,21 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             )
             continue
 
+        # Raw I2V deja la → juste mux plus tard
+        if raw.exists() and raw.stat().st_size > 5000 and still.exists():
+            pending.append(
+                {
+                    "i": i,
+                    "idx": idx,
+                    "scene": scene,
+                    "still": still,
+                    "raw": raw,
+                    "final": final,
+                    "need_i2v": False,
+                }
+            )
+            continue
+
         set_progress(
             step="video_ai",
             video_id=video_id,
@@ -186,39 +211,102 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             clips_total=total,
             detail="Etape 2/5 : storyboard image",
         )
-        generate_scene_image(
-            _scene_image_prompt(scene, board),
-            still,
-            seed=(base_seed + idx * 17) % 1_000_000,
-            width=1280,
-            height=720,
+        if not still.exists() or still.stat().st_size < 1000:
+            generate_scene_image(
+                _scene_image_prompt(scene, board),
+                still,
+                seed=(base_seed + idx * 17) % 1_000_000,
+                width=1280,
+                height=720,
+            )
+
+        pending.append(
+            {
+                "i": i,
+                "idx": idx,
+                "scene": scene,
+                "still": still,
+                "raw": raw,
+                "final": final,
+                "need_i2v": not (raw.exists() and raw.stat().st_size > 5000),
+                "prompt": _motion_prompt(scene, board),
+                "seed": (base_seed + idx * 31) % 1_000_000,
+            }
         )
+
+    # --- Phase 2 : batch I2V (1 chargement modele) ---
+    to_animate = [p for p in pending if p.get("need_i2v")]
+    if to_animate:
+        set_progress(
+            step="video_ai",
+            video_id=video_id,
+            message=f"I2V batch {len(to_animate)} scene(s) — 1 chargement modele…",
+            clips_done=total - len(pending),
+            clips_total=total,
+            detail="Etape 3/5 : Image-to-Video batch (33f · 8 steps · 704x384)",
+        )
+        log_event(
+            video_id,
+            "info",
+            f"I2V batch start: {len(to_animate)} scenes (1 load modele)",
+        )
+        batch_jobs = [
+            {
+                "image": p["still"],
+                "dest": p["raw"],
+                "prompt": p.get("prompt") or "",
+                "seed": p.get("seed"),
+            }
+            for p in to_animate
+        ]
+        try:
+            batch_results = animate_scenes_i2v_batch(batch_jobs)
+        except Exception as exc:
+            log_event(video_id, "error", f"I2V batch echec, fallback unitaire: {exc}")
+            batch_results = []
+            for p in to_animate:
+                try:
+                    batch_results.append(
+                        animate_scene_i2v(
+                            p["still"],
+                            p["raw"],
+                            prompt=str(p.get("prompt") or ""),
+                            seed=p.get("seed"),
+                        )
+                    )
+                except Exception as exc2:
+                    batch_results.append({"ok": False, "error": str(exc2)[:500]})
+
+        for p, result in zip(to_animate, batch_results):
+            if not result.get("ok"):
+                raise RuntimeError(
+                    f"I2V scene {p['idx']} echoue: {result.get('error') or result}"
+                )
+            p["i2v_mode"] = result.get("mode") or "cli_i2v_batch"
+            p["need_i2v"] = False
+
+    # --- Phase 3 : mux audio + checkpoint ---
+    for p in pending:
+        i = int(p["i"])
+        idx = int(p["idx"])
+        scene = p["scene"]
+        still: Path = p["still"]
+        raw: Path = p["raw"]
+        final: Path = p["final"]
+
+        if not raw.exists() or raw.stat().st_size < 5000:
+            raise RuntimeError(f"I2V raw manquant pour scene {idx}: {raw}")
 
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"I2V scene {i + 1}/{total} — animation…",
+            message=f"I2V scene {i + 1}/{total} — sync audio…",
             clips_done=i,
             clips_total=total,
-            detail="Etape 3/5 : Image-to-Video (CLI prioritaire)",
+            detail="Etape 4/5 : mux voix sur clip anime",
         )
-        result = animate_scene_i2v(
-            still,
-            raw,
-            prompt=_motion_prompt(scene, board),
-            seed=(base_seed + idx * 31) % 1_000_000,
-        )
-
         audio = _scene_audio(projet, idx)
         if audio and audio.exists():
-            set_progress(
-                step="video_ai",
-                video_id=video_id,
-                message=f"I2V scene {i + 1}/{total} — sync audio…",
-                clips_done=i,
-                clips_total=total,
-                detail="Etape 4/5 : mux voix sur clip anime",
-            )
             _fit_video_to_audio(raw, audio, final, fps=fps)
         else:
             final.write_bytes(raw.read_bytes())
@@ -227,15 +315,14 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         scene["ai_clips_planned"] = 1
         scene["still_image"] = still.name
         scene["i2v_raw"] = raw.name
-        scene["i2v_mode"] = result.get("mode")
-        # Checkpoint apres chaque scene (reprise possible si crash)
+        scene["i2v_mode"] = p.get("i2v_mode") or "cli_i2v_batch"
         board_path.write_text(
             json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         log_event(
             video_id,
             "info",
-            f"I2V scene {idx}: {result.get('mode')} → {final.name}",
+            f"I2V scene {idx}: {scene['i2v_mode']} → {final.name}",
         )
         set_progress(
             step="video_ai",
@@ -243,18 +330,22 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             message=f"I2V {i + 1}/{total} OK",
             clips_done=i + 1,
             clips_total=total,
-            detail=f"Scene {idx} animee [{result.get('mode')}]",
+            detail=f"Scene {idx} animee [{scene['i2v_mode']}]",
         )
 
-    board["pipeline"] = "i2v_wan_fun_1_3b"
+    board["pipeline"] = "i2v_ltx_wan_batch"
     board["i2v_mode"] = health.get("mode")
     board_path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
     update_video(video_id, statut="images_ok")
-    log_event(video_id, "info", f"Pipeline I2V OK : {total} scenes animees (Wan Fun 1.3B).")
+    log_event(
+        video_id,
+        "info",
+        f"Pipeline I2V OK : {total} scenes (batch, 33f/8steps).",
+    )
     return {
         "ok": True,
         "provider": "i2v",
-        "model": "Wan2.1-Fun-1.3B-InP",
+        "model": "LTX/Wan-1.3B-batch",
         "clips": total,
         "dir": str(clips_dir),
     }
