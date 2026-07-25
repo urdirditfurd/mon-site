@@ -388,6 +388,8 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         os.environ["PINOKIO_I2V_WIDTH"] = str(I2V_FACE_SAFE["width"])
         os.environ["PINOKIO_I2V_HEIGHT"] = str(I2V_FACE_SAFE["height"])
         os.environ["PINOKIO_I2V_RESOLUTION"] = "848p 16:9"
+        # LTX/Wan : jamais dpmpp_2m (crash set_timesteps / custom sigmas)
+        os.environ["PINOKIO_I2V_SCHEDULER"] = "default"
         from modules.i2v_pipeline import generate_i2v_videos
 
         return generate_i2v_videos(video_id)

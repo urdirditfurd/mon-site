@@ -53,7 +53,7 @@ DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "848"))
 DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "480"))
 GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "3.5"))
 MOTION_SCALE = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"))
-SCHEDULER_NAME = (os.environ.get("PINOKIO_I2V_SCHEDULER") or "dpmpp_2m").strip().lower()
+SCHEDULER_NAME = (os.environ.get("PINOKIO_I2V_SCHEDULER") or "default").strip().lower()
 EXPORT_FPS = int(os.environ.get("PINOKIO_I2V_FPS", "24"))
 
 RESOLUTION_PRESETS = {
@@ -183,29 +183,42 @@ def _clamp_guidance(value: float) -> float:
 
 
 def _apply_scheduler(pipe, name: str) -> str:
-    """euler ou dpmpp_2m pour un denoise plus net."""
-    key = (name or "dpmpp_2m").strip().lower()
+    """
+    LTX / Wan utilisent des schedulers a sigmas custom.
+    NE PAS remplacer par DPMSolverMultistep (crash set_timesteps).
+    Defaut = garder le scheduler natif du pipeline.
+    """
+    key = (name or "default").strip().lower()
+    if key in {"", "default", "auto", "native", "none", "keep"}:
+        cls = type(pipe.scheduler).__name__
+        _log(f"[i2v_engine] scheduler=native ({cls})")
+        return f"native:{cls}"
+
+    # Snapshot pour rollback si incompatible
+    original = pipe.scheduler
     try:
         if key in {"euler", "euler_a", "euler_ancestral"}:
             from diffusers import EulerAncestralDiscreteScheduler
 
             pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
-                pipe.scheduler.config
+                original.config
             )
             return "euler_ancestral"
         if key in {"euler_discrete", "euler_d"}:
             from diffusers import EulerDiscreteScheduler
 
-            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+            pipe.scheduler = EulerDiscreteScheduler.from_config(original.config)
             return "euler"
-        # defaut qualite
-        from diffusers import DPMSolverMultistepScheduler
-
-        pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-        return "dpmpp_2m"
+        # dpmpp_2m / dpm = IGNORE pour I2V LTX/Wan (sigmas custom)
+        _log(
+            f"[i2v_engine] scheduler '{key}' ignore (incompatible LTX/Wan) "
+            f"— garde {type(original).__name__}"
+        )
+        return f"native:{type(original).__name__}"
     except Exception as exc:
+        pipe.scheduler = original
         _log(f"[i2v_engine] scheduler skip ({key}): {exc}")
-        return "default"
+        return f"native:{type(original).__name__}"
 
 
 def _align_dim(value: int, multiple: int = 32) -> int:

@@ -66,7 +66,7 @@ def ensure_i2v_running(wait_seconds: int = 300) -> dict[str, Any]:
             "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "848"),
             "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "480"),
             "PINOKIO_I2V_MOTION_SCALE": os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"),
-            "PINOKIO_I2V_SCHEDULER": os.environ.get("PINOKIO_I2V_SCHEDULER", "dpmpp_2m"),
+            "PINOKIO_I2V_SCHEDULER": os.environ.get("PINOKIO_I2V_SCHEDULER", "default"),
             "PYTHONUNBUFFERED": "1",
         },
         creationflags=creationflags,
