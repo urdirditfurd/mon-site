@@ -19,11 +19,11 @@ from config import ROOT
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-# Plafonds qualite jeunesse : 41f · 22 steps · 1024x576 · motion douce
-PINOKIO_I2V_FRAMES = min(81, int(os.getenv("PINOKIO_I2V_FRAMES", "41")))
+# Plafonds anti-deformation visage : CFG 3.5, motion 0.3, 848x480
+PINOKIO_I2V_FRAMES = min(81, int(os.getenv("PINOKIO_I2V_FRAMES", "33")))
 PINOKIO_I2V_STEPS = min(25, int(os.getenv("PINOKIO_I2V_STEPS", "22")))
-PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "576p 16:9")
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "4.5"))
+PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "848p 16:9")
+PINOKIO_I2V_GUIDANCE = min(4.0, float(os.getenv("PINOKIO_I2V_GUIDANCE", "3.5")))
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")
 # CLI = plus fiable ; batch = 1 chargement modele pour N scenes
 PREFER_CLI = os.getenv("CONTE_I2V_PREFER_CLI", "1").strip().lower() in {
@@ -42,9 +42,9 @@ GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "900"))
 CLI_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_CLI_TIMEOUT", "900"))
 BATCH_SCENE_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_BATCH_SCENE_TIMEOUT", "300"))
 MOTION_PROMPT = (
-    "gentle soft character movement, calm breathing, subtle blink, "
-    "slow smooth camera drift, sharp focus, crisp details, minimal motion blur, "
-    "continuous gentle motion, not a still image"
+    "VERY subtle motion only: soft breathing, tiny head tilt, gentle eye blink, "
+    "stable identity, same face locked, sharp facial features, no camera whip, "
+    "preserve original face exactly"
 )
 
 
@@ -260,10 +260,11 @@ def _cli_env() -> dict[str, str]:
         "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
         "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
         "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
-        "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "1024"),
-        "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "576"),
-        "PINOKIO_I2V_MOTION_SCALE": os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.65"),
+        "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "848"),
+        "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "480"),
+        "PINOKIO_I2V_MOTION_SCALE": os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"),
         "PINOKIO_I2V_SCHEDULER": os.environ.get("PINOKIO_I2V_SCHEDULER", "dpmpp_2m"),
+        "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
         "PYTHONUNBUFFERED": "1",
         "PYTHONIOENCODING": "utf-8",
     }

@@ -1,13 +1,13 @@
-# Force le mode I2V QUALITE jeunesse (22 steps, 1024x576, motion douce)
+# Force I2V FACE-SAFE + duree cible stricte
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File C:\ConteFactory\conte-factory\scripts\SWITCH-TO-I2V.ps1
-# ASCII only: Windows PowerShell 5.1 casse avec tirets unicode / UTF-8 sans BOM.
+# ASCII only (PowerShell 5.1).
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root ".env"
 
-Write-Host "Mode I2V QUALITE: LTX/Wan | 22 steps | 1024x576 | 41 frames | motion 0.65 | BATCH" -ForegroundColor Cyan
+Write-Host "Mode I2V FACE-SAFE: CFG 3.5 | motion 0.3 | 848x480 | 22 steps | BATCH" -ForegroundColor Cyan
 
 if (-not (Test-Path $envFile)) {
   Copy-Item (Join-Path $root ".env.example") $envFile
@@ -30,14 +30,14 @@ $content = Set-EnvKey $content "CONTE_AUTO_START_LIPSYNC" "0"
 $content = Set-EnvKey $content "CONTE_AUTO_START_WAN" "0"
 $content = Set-EnvKey $content "PINOKIO_I2V_URL" "http://127.0.0.1:7861"
 $content = Set-EnvKey $content "WAN_I2V_BACKEND" "ltx"
-$content = Set-EnvKey $content "PINOKIO_I2V_FRAMES" "41"
+$content = Set-EnvKey $content "PINOKIO_I2V_FRAMES" "33"
 $content = Set-EnvKey $content "PINOKIO_I2V_STEPS" "22"
-$content = Set-EnvKey $content "PINOKIO_I2V_WIDTH" "1024"
-$content = Set-EnvKey $content "PINOKIO_I2V_HEIGHT" "576"
-$content = Set-EnvKey $content "PINOKIO_I2V_GUIDANCE" "4.5"
-$content = Set-EnvKey $content "PINOKIO_I2V_MOTION_SCALE" "0.65"
+$content = Set-EnvKey $content "PINOKIO_I2V_WIDTH" "848"
+$content = Set-EnvKey $content "PINOKIO_I2V_HEIGHT" "480"
+$content = Set-EnvKey $content "PINOKIO_I2V_GUIDANCE" "3.5"
+$content = Set-EnvKey $content "PINOKIO_I2V_MOTION_SCALE" "0.3"
 $content = Set-EnvKey $content "PINOKIO_I2V_SCHEDULER" "dpmpp_2m"
-$content = Set-EnvKey $content "PINOKIO_I2V_RESOLUTION" "576p 16:9"
+$content = Set-EnvKey $content "PINOKIO_I2V_RESOLUTION" "848p 16:9"
 $content = Set-EnvKey $content "CONTE_I2V_LOWVRAM" "1"
 $content = Set-EnvKey $content "CONTE_I2V_PREFER_CLI" "1"
 $content = Set-EnvKey $content "CONTE_I2V_USE_BATCH" "1"
@@ -46,14 +46,13 @@ $content = Set-EnvKey $content "SULPHUR_CPU_OFFLOAD" "1"
 $content = Set-EnvKey $content "CONTE_TTS_VOICE" "fr-FR-VivienneMultilingualNeural"
 $content = Set-EnvKey $content "CONTE_TTS_SAMPLE_RATE" "44100"
 $content = Set-EnvKey $content "CONTE_TTS_MP3_BITRATE" "192k"
+$content = Set-EnvKey $content "CONTE_DURATION_TOLERANCE_SEC" "5"
+$content = Set-EnvKey $content "CONTE_WORDS_PER_MIN" "155"
 
 Set-Content -Path $envFile -Value $content -Encoding UTF8
-Write-Host "OK: I2V qualite (22 steps, 1024x576, motion 0.65, batch)" -ForegroundColor Green
-Write-Host "Voix: VivienneMultilingual / RemyMultilingual + audio 44.1kHz 192k" -ForegroundColor Green
+Write-Host "OK: face-safe CFG=3.5 motion=0.3 848x480 + coupe duree cible" -ForegroundColor Green
 Write-Host ""
-Write-Host "Test qualite projet 36 (regenerer prompts + audio + I2V):" -ForegroundColor Yellow
+Write-Host "Test (supprime ai_clips pour re-animer les visages):" -ForegroundColor Yellow
 Write-Host "  cd C:\ConteFactory\conte-factory"
 Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only storyboard --no-publish"
-Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only audio --no-publish"
-Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only video_ai --no-publish"
-Write-Host "Astuce: pour forcer re-animation, supprime ai_clips\i2v_raw et *_part00.mp4"
+Write-Host "Ou nouveau conte 5 min depuis Creation."

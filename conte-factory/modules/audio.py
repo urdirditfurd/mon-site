@@ -193,6 +193,130 @@ def _extra_unique_lines(scene_idx: int, hero: str, round_i: int) -> list[dict[st
     ]
 
 
+def _atempo_file(src: Path, dest: Path, speed: float) -> None:
+    """Accelere l'audio (1.05-1.1) sans changer le pitch trop agressivement."""
+    speed = max(1.01, min(1.15, float(speed)))
+    # Chainer atempo si > 2.0 jamais ici ; 1.01-1.15 = un seul filtre
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rate = TTS_SAMPLE_RATE if TTS_SAMPLE_RATE in {24000, 44100, 48000} else 44100
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-filter:a",
+        f"atempo={speed:.4f}",
+        "-ar",
+        str(rate),
+        "-ac",
+        "1",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        TTS_MP3_BITRATE,
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _trim_audio(src: Path, dest: Path, max_sec: float) -> None:
+    """Coupe dure a max_sec."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rate = TTS_SAMPLE_RATE if TTS_SAMPLE_RATE in {24000, 44100, 48000} else 44100
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-t",
+        f"{max(1.0, max_sec):.3f}",
+        "-ar",
+        str(rate),
+        "-ac",
+        "1",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        TTS_MP3_BITRATE,
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _fit_audio_to_target(
+    audio_dir: Path,
+    timings: list[dict[str, Any]],
+    full_audio: Path,
+    target_sec: float,
+    tolerance: float = 5.0,
+) -> tuple[list[dict[str, Any]], float]:
+    """
+    Si total > cible+tolerance : accelere (1.05-1.1) puis coupe dure si besoin.
+    Retourne timings mis a jour + duree finale.
+    """
+    total = sum(float(t["duration_sec"]) for t in timings)
+    if target_sec <= 0 or total <= target_sec + tolerance:
+        return timings, total
+
+    # Vitesse cible pour entrer pile dans target_sec
+    speed = min(1.10, max(1.05, total / max(1.0, target_sec)))
+    new_timings: list[dict[str, Any]] = []
+    for t in timings:
+        src = audio_dir / str(t["file"])
+        tmp = audio_dir / f"speed_{t['file']}"
+        _atempo_file(src, tmp, speed)
+        tmp.replace(src)
+        d = _ffprobe_duration(src)
+        nt = dict(t)
+        nt["duration_sec"] = round(d, 3)
+        new_timings.append(nt)
+
+    # Reconstruire narration
+    concat_list = audio_dir / "list.txt"
+    concat_list.write_text(
+        "\n".join(f"file '{t['file']}'" for t in new_timings) + "\n", encoding="utf-8"
+    )
+    full_raw = audio_dir / "narration_fit_raw.mp3"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_list),
+            "-c",
+            "copy",
+            str(full_raw),
+        ],
+        check=True,
+        cwd=str(audio_dir),
+        capture_output=True,
+    )
+    total2 = _ffprobe_duration(full_raw)
+    if total2 > target_sec + tolerance:
+        _trim_audio(full_raw, full_audio, target_sec)
+        # Repartir la coupe proportionnellement sur la derniere scene
+        overflow = total2 - target_sec
+        if new_timings:
+            last = new_timings[-1]
+            last_path = audio_dir / str(last["file"])
+            keep = max(1.0, float(last["duration_sec"]) - overflow)
+            _trim_audio(last_path, last_path, keep)
+            last["duration_sec"] = round(_ffprobe_duration(last_path), 3)
+        total2 = _ffprobe_duration(full_audio)
+    else:
+        _reencode_hq(full_raw, full_audio)
+        total2 = _ffprobe_duration(full_audio)
+    try:
+        full_raw.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return new_timings, total2
+
+
 def generate_audio(
     video_id: int,
     voice: str | None = None,
@@ -282,8 +406,12 @@ def generate_audio(
 
     timings, total = _render_all()
 
+    # Allonger SEULEMENT si trop court (ne jamais depasser la cible)
     topup_round = 0
     while target_sec > 0 and total < target_sec * 0.92 and topup_round < 4:
+        # Estimer ~8s par paire de repliques bonus — ne pas topup si on depasserait
+        if total + 8.0 > target_sec * 1.02:
+            break
         topup_round += 1
         scene = min(board["scenes"], key=lambda s: float(s.get("duration_sec") or 0))
         idx = int(scene["index"])
@@ -296,6 +424,8 @@ def generate_audio(
             f"Allonge dialogue scène {idx} (round {topup_round}) pour viser {target_sec/60:.1f} min.",
         )
         timings, total = _render_all()
+        if total > target_sec + 5:
+            break
 
     concat_list = audio_dir / "list.txt"
     concat_list.write_text(
@@ -327,15 +457,40 @@ def generate_audio(
     except OSError:
         pass
 
+    # Si trop long : atempo 1.05-1.1 puis coupe dure a cible (+/- 5s)
+    if target_sec > 0 and total > target_sec + 5:
+        log_event(
+            video_id,
+            "info",
+            f"Audio {total:.0f}s > cible {target_sec:.0f}s — acceleration/coupe…",
+        )
+        timings, total = _fit_audio_to_target(
+            audio_dir, timings, full_audio, target_sec, tolerance=5.0
+        )
+        # Sync durees scenes
+        by_idx = {int(t["index"]): t for t in timings}
+        for scene in board["scenes"]:
+            t = by_idx.get(int(scene["index"]))
+            if t:
+                scene["duration_sec"] = t["duration_sec"]
+
     if target_sec > 0 and total < target_sec * 0.85:
         log_event(
             video_id,
             "warn",
             f"Audio {total/60:.1f} min < cible {target_sec/60:.1f} min (sans boucle).",
         )
+    elif target_sec > 0:
+        delta = abs(total - target_sec)
+        log_event(
+            video_id,
+            "info",
+            f"Duree audio calée : {total:.1f}s (cible {target_sec:.0f}s, Δ={delta:.1f}s).",
+        )
 
     board["timings"] = timings
     board["total_audio_sec"] = round(total, 3)
+    board["target_audio_sec"] = round(target_sec, 3)
     board["voice_preference"] = pref
     board["tts_sample_rate"] = TTS_SAMPLE_RATE
     board["tts_bitrate"] = TTS_MP3_BITRATE

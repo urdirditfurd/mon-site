@@ -62,22 +62,24 @@ PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
 WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
 
-# Wan I2V — net + doux (enfants) : 22 steps, 1024x576, motion moderee
+# Wan I2V — anti-deformation visage : CFG 3.5, motion 0.3, 848x480
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "41"))
+PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "33"))
 PINOKIO_I2V_STEPS = min(25, int(os.getenv("PINOKIO_I2V_STEPS", "22")))
-PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "1024"))
-PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "576"))
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "4.5"))
-PINOKIO_I2V_MOTION_SCALE = float(os.getenv("PINOKIO_I2V_MOTION_SCALE", "0.65"))
+PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "848"))
+PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "480"))
+PINOKIO_I2V_GUIDANCE = min(4.0, float(os.getenv("PINOKIO_I2V_GUIDANCE", "3.5")))
+PINOKIO_I2V_MOTION_SCALE = float(os.getenv("PINOKIO_I2V_MOTION_SCALE", "0.3"))
 PINOKIO_I2V_SCHEDULER = os.getenv("PINOKIO_I2V_SCHEDULER", "dpmpp_2m")
-PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "576p 16:9")
+PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "848p 16:9")
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")  # ltx (rapide) | wan
 CONTE_I2V_LOWVRAM = os.getenv("CONTE_I2V_LOWVRAM", "1") == "1"
 AUTO_START_I2V = os.getenv("CONTE_AUTO_START_I2V", "1") == "1"
 I2V_START_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_TIMEOUT_SEC", "600"))
+# Tolerance duree finale vs cible (secondes)
+DURATION_TOLERANCE_SEC = float(os.getenv("CONTE_DURATION_TOLERANCE_SEC", "5"))
 
 # Lip-sync Pinokio (legacy Wav2Lip)
 PINOKIO_LIPSYNC_URL = os.getenv("PINOKIO_LIPSYNC_URL", "http://127.0.0.1:7870")

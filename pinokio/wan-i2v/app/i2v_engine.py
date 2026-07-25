@@ -25,16 +25,18 @@ import torch
 from PIL import Image
 
 DEFAULT_NEGATIVE = (
-    "static image, still photo, frozen frame, no motion, slideshow, ken burns only, "
-    "motion blur, heavy blur, smearing, ghosting, morphing face, flicker, "
-    "worst quality, blurry, text overlay, watermark, logo, ugly, deformed, "
-    "extra limbs, low quality, jpeg artifacts"
+    "deformed face, blurry, distortion, bad anatomy, morphing, melted face, "
+    "glitch, artifacts, morphing face, face warp, warped face, asymmetric eyes, "
+    "extra limbs, mutated hands, static image, still photo, frozen frame, "
+    "slideshow, ken burns only, motion blur, heavy blur, smearing, ghosting, "
+    "flicker, worst quality, text overlay, watermark, logo, ugly, deformed, "
+    "low quality, jpeg artifacts"
 )
 
 MOTION_SUFFIX = (
-    "gentle soft character movement, calm breathing, subtle blink, "
-    "slow smooth camera drift, sharp focus, crisp details, minimal motion blur, "
-    "continuous gentle motion, not a still image, not a whip pan"
+    "VERY subtle motion only: soft breathing, tiny head tilt, gentle eye blink, "
+    "stable identity, same face locked, sharp facial features, no camera whip, "
+    "almost still body, preserve original face exactly"
 )
 
 BACKEND = (os.environ.get("WAN_I2V_BACKEND") or "ltx").strip().lower()
@@ -44,21 +46,22 @@ WAN_MODEL_ID = os.environ.get(
 )
 LTX_MODEL_ID = os.environ.get("LTX_I2V_MODEL", "Lightricks/LTX-Video")
 
-# Qualite jeunesse : steps 20-25, 1024x576, motion douce
+# Anti-deformation visage : CFG bas, motion tres subtil, res native alignee
 MAX_STEPS = int(os.environ.get("PINOKIO_I2V_STEPS", "22"))
-MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "41"))
-DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "1024"))
-DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "576"))
-GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "4.5"))
-MOTION_SCALE = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.65"))
+MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "33"))
+DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "848"))
+DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "480"))
+GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "3.5"))
+MOTION_SCALE = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"))
 SCHEDULER_NAME = (os.environ.get("PINOKIO_I2V_SCHEDULER") or "dpmpp_2m").strip().lower()
 EXPORT_FPS = int(os.environ.get("PINOKIO_I2V_FPS", "24"))
 
 RESOLUTION_PRESETS = {
-    "480p 16:9": (704, 384),
+    "480p 16:9": (848, 480),
     "848p 16:9": (848, 480),
     "576p 16:9": (1024, 576),
     "1024p 16:9": (1024, 576),
+    "704p 16:9": (704, 384),
     "480p 9:16": (384, 704),
     "480p 1:1": (384, 384),
 }
@@ -151,18 +154,32 @@ def _align_frames_ltx(n: int) -> int:
 
 
 def _motion_prompt_scale(prompt: str, scale: float) -> str:
-    """Modere le mouvement (scale ~0.5-1.0) pour nettete enfants."""
-    s = max(0.35, min(1.0, float(scale)))
-    if s <= 0.55:
-        tag = "very gentle slow motion, almost still camera, sharp crisp frames"
-    elif s <= 0.75:
-        tag = "moderate soft motion, calm gentle movement, sharp focus, no smear"
+    """Motion tres subtil (0.2-0.4) pour garder le visage net."""
+    s = max(0.15, min(0.45, float(scale)))
+    if s <= 0.25:
+        tag = (
+            "almost still, micro breathing only, locked face identity, "
+            "no camera move, sharp crisp face"
+        )
+    elif s <= 0.35:
+        tag = (
+            "very subtle motion, soft blink and tiny head tilt, "
+            "stable face, no morphing, sharp facial details"
+        )
     else:
-        tag = "lively but controlled motion, clear details, minimal blur"
+        tag = (
+            "subtle gentle motion, calm breathing, preserve face exactly, "
+            "minimal movement, no smear"
+        )
     base = (prompt or "").strip()
-    if tag.lower() in base.lower():
+    if "locked face" in base.lower() or "preserve face" in base.lower():
         return base
     return f"{base}, {tag}".strip(", ")
+
+
+def _clamp_guidance(value: float) -> float:
+    """CFG 3.5-4.0 MAX — au-dela le visage se deforme."""
+    return max(3.0, min(4.0, float(value)))
 
 
 def _apply_scheduler(pipe, name: str) -> str:
@@ -325,7 +342,7 @@ def generate_i2v(
     image_path: str,
     prompt: str,
     output_path: str,
-    resolution_key: str = "576p 16:9",
+    resolution_key: str = "848p 16:9",
     num_frames: int | None = None,
     fps: int | None = None,
     steps: int | None = None,
@@ -335,12 +352,11 @@ def generate_i2v(
     seed: int | None = None,
     progress_callback=None,
 ) -> dict:
-    """Image + prompt → MP4 anime net (motion douce, steps 20-25)."""
+    """Image + prompt → MP4 : visage stable (CFG<=4, motion subtil)."""
     device = pick_device()
     width, height = RESOLUTION_PRESETS.get(
         resolution_key, (DEFAULT_WIDTH, DEFAULT_HEIGHT)
     )
-    # Aligner sur env si preset inconnu
     if resolution_key not in RESOLUTION_PRESETS:
         width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
     width = _align_dim(width, 32)
@@ -348,29 +364,42 @@ def generate_i2v(
 
     steps = _clamp_steps(steps if steps is not None else MAX_STEPS)
     fps = int(fps or EXPORT_FPS)
-    guidance = float(guidance if guidance is not None else GUIDANCE)
-    # CFG modere : trop haut = artefacts / flou
-    guidance = max(3.0, min(5.5, guidance))
+    guidance = _clamp_guidance(guidance if guidance is not None else GUIDANCE)
+    motion = max(0.2, min(0.4, MOTION_SCALE))
 
     num_frames = int(num_frames if num_frames is not None else MAX_FRAMES)
 
-    full_prompt = _motion_prompt_scale(prompt or "", MOTION_SCALE)
+    full_prompt = _motion_prompt_scale(prompt or "", motion)
     if MOTION_SUFFIX.lower() not in full_prompt.lower():
         full_prompt = f"{full_prompt}, {MOTION_SUFFIX}".strip(", ")
+    neg = negative_prompt or DEFAULT_NEGATIVE
+    for token in (
+        "deformed face",
+        "melted face",
+        "morphing",
+        "bad anatomy",
+        "distortion",
+    ):
+        if token not in neg.lower():
+            neg = f"{token}, {neg}"
 
     if progress_callback:
-        progress_callback(0.05, "Chargement I2V qualite (LTX / Wan 1.3B)…")
+        progress_callback(0.05, "Chargement I2V anti-deformation visage…")
 
     pipe = get_pipe(cache_dir, device)
     backend = (_PIPE_META or {}).get("backend", "wan")
     scheduler = (_PIPE_META or {}).get("scheduler", SCHEDULER_NAME)
     if backend == "ltx":
         num_frames = _align_frames_ltx(num_frames)
-        guidance = min(guidance, 4.5)
+        guidance = min(guidance, 3.5)
     else:
         num_frames = _align_frames_wan(num_frames)
 
+    # Resize EXACT a la resolution native du modele (evite warp visage)
     image = _prepare_image(image_path, width, height)
+    if image.size != (width, height):
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
+
     generator = None
     if seed is not None:
         generator = torch.Generator(device="cpu").manual_seed(int(seed))
@@ -382,20 +411,20 @@ def generate_i2v(
     if progress_callback:
         progress_callback(
             0.15,
-            f"{backend}/{scheduler} {num_frames}f x {steps} steps @ {width}x{height} "
-            f"motion={MOTION_SCALE:.2f}…",
+            f"{backend}/{scheduler} {num_frames}f x {steps}s @ {width}x{height} "
+            f"cfg={guidance:.1f} motion={motion:.2f}",
         )
 
     _log(
         f"[i2v_engine] START backend={backend} sched={scheduler} frames={num_frames} "
-        f"steps={steps} cfg={guidance} motion={MOTION_SCALE:.2f} {width}x{height} "
-        f"placement={placement}"
+        f"steps={steps} cfg={guidance} motion={motion:.2f} {width}x{height} "
+        f"placement={placement} face-safe"
     )
 
     kwargs: dict = {
         "image": image,
         "prompt": full_prompt,
-        "negative_prompt": negative_prompt or DEFAULT_NEGATIVE,
+        "negative_prompt": neg,
         "height": height,
         "width": width,
         "num_frames": num_frames,
@@ -428,13 +457,13 @@ def generate_i2v(
 
     _log(
         f"[i2v_engine] DONE {elapsed:.1f}s ({per_step:.1f}s/step) "
-        f"quality mode steps={steps} {width}x{height}"
+        f"face-safe cfg={guidance} motion={motion:.2f}"
     )
 
     return {
         "ok": True,
         "outputPath": str(out.resolve()),
-        "mode": f"{backend}_i2v_quality",
+        "mode": f"{backend}_i2v_face_safe",
         "model": model_id,
         "backend": backend,
         "scheduler": scheduler,
@@ -447,7 +476,7 @@ def generate_i2v(
         "fps": fps,
         "steps": steps,
         "guidance": guidance,
-        "motionScale": MOTION_SCALE,
+        "motionScale": motion,
         "seconds": round(elapsed, 1),
         "secondsPerStep": round(per_step, 2),
         "clipDurationSec": round(num_frames / max(1, fps), 2),
@@ -457,7 +486,7 @@ def generate_i2v(
 def generate_i2v_batch(
     jobs: list[dict],
     *,
-    resolution_key: str = "576p 16:9",
+    resolution_key: str = "848p 16:9",
     num_frames: int | None = None,
     fps: int | None = None,
     steps: int | None = None,
@@ -567,14 +596,14 @@ if __name__ == "__main__":
     gen.add_argument("--image", required=True)
     gen.add_argument("--prompt", required=True)
     gen.add_argument("--output", required=True)
-    gen.add_argument("--resolution", default="576p 16:9")
+    gen.add_argument("--resolution", default="848p 16:9")
     gen.add_argument("--frames", type=int, default=MAX_FRAMES)
     gen.add_argument("--fps", type=int, default=EXPORT_FPS)
     gen.add_argument("--steps", type=int, default=MAX_STEPS)
     gen.add_argument("--seed", type=int, default=None)
     bat = sub.add_parser("batch")
     bat.add_argument("--jobs", required=True, help="JSON file: [{image,prompt,output,seed}]")
-    bat.add_argument("--resolution", default="576p 16:9")
+    bat.add_argument("--resolution", default="848p 16:9")
     bat.add_argument("--frames", type=int, default=MAX_FRAMES)
     bat.add_argument("--fps", type=int, default=EXPORT_FPS)
     bat.add_argument("--steps", type=int, default=MAX_STEPS)

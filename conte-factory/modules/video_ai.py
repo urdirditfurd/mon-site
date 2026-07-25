@@ -360,6 +360,21 @@ def _clips_needed(duration_sec: float, provider: str, remaining_budget: int, spa
     return min(n, remaining_budget)
 
 
+# ---------------------------------------------------------------------------
+# Parametres I2V anti-deformation visage (appliques via config / i2v_engine)
+# ---------------------------------------------------------------------------
+I2V_FACE_SAFE = {
+    "guidance_scale": 3.5,  # MAX 4.0 — au-dela le visage fond
+    "motion_scale": 0.3,  # 0.2-0.4 : respiration / yeux / tete seulement
+    "width": 848,
+    "height": 480,
+    "negative_prompt": (
+        "deformed face, blurry, distortion, bad anatomy, morphing, melted face, "
+        "glitch, artifacts, morphing face, face warp, warped face"
+    ),
+}
+
+
 def generate_scene_videos(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
@@ -367,6 +382,12 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
 
     provider = VIDEO_PROVIDER.lower().strip()
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        # Force plafonds face-safe (ecrase .env trop agressif)
+        os.environ["PINOKIO_I2V_GUIDANCE"] = str(I2V_FACE_SAFE["guidance_scale"])
+        os.environ["PINOKIO_I2V_MOTION_SCALE"] = str(I2V_FACE_SAFE["motion_scale"])
+        os.environ["PINOKIO_I2V_WIDTH"] = str(I2V_FACE_SAFE["width"])
+        os.environ["PINOKIO_I2V_HEIGHT"] = str(I2V_FACE_SAFE["height"])
+        os.environ["PINOKIO_I2V_RESOLUTION"] = "848p 16:9"
         from modules.i2v_pipeline import generate_i2v_videos
 
         return generate_i2v_videos(video_id)

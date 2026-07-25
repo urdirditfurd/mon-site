@@ -42,8 +42,8 @@ def _word_count(text: str) -> int:
 
 
 def _target_words(duration_min: float) -> int:
-    # Marge +25 % : dialogues + pauses TTS → viser la durée réelle demandée
-    return max(100, int(round(duration_min * WORDS_PER_MINUTE * 1.25)))
+    # Pas de marge x1.25 : les pauses TTS allongent deja l'audio (sinon 7min pour 5min)
+    return max(100, int(round(duration_min * WORDS_PER_MINUTE * 0.95)))
 
 
 def _title_from_theme(theme: str) -> str:

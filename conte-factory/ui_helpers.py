@@ -322,7 +322,7 @@ def render_engine_status(ctx: dict, key_prefix: str = "eng") -> None:
     if ctx.get("uses_i2v"):
         st.metric("Moteur video", "I2V rapide (LTX / Wan 1.3B)")
         st.caption(
-            "22 steps · 1024×576 · motion 0.65 · CLI batch — net + doux (jeunesse). "
+            "CFG 3.5 · motion 0.3 · 848×480 · anti-déformation visage · durée calée. "
             "Prompts image EN via LLM. Reprends un projet audio_ok depuis Suivi."
         )
         return

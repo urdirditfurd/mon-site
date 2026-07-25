@@ -10,7 +10,16 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from config import EXPORTS_DIR, MUSIC_DIR, MUSIC_VOLUME, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH
+from config import (
+    DURATION_TOLERANCE_SEC,
+    EXPORTS_DIR,
+    MUSIC_DIR,
+    MUSIC_VOLUME,
+    TARGET_DURATION_MIN,
+    VIDEO_FPS,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
+)
 from db.database import get_video, log_event, update_video, video_title
 import config as cfg
 
@@ -470,7 +479,16 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         srt_path = projet / "subtitles.srt"
         _write_srt(board, srt_path)
 
+    # Coupe dure a la duree cible (ex: 300s pour 5 min) — +/- tolerance
+    target_cap = float(
+        board.get("target_audio_sec")
+        or (float(board.get("duration_min") or TARGET_DURATION_MIN) * 60.0)
+    )
+    target_cap = max(30.0, target_cap)
+
     cmd += [
+        "-t",
+        f"{target_cap:.3f}",
         "-c:v",
         "libx264",
         "-preset",
@@ -489,6 +507,31 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     subprocess.run(cmd, check=True, capture_output=True)
 
     total = _ffprobe_duration(final_path)
+    # Filet de securite si -shortest a laisse un depassement
+    if total > target_cap + max(1.0, DURATION_TOLERANCE_SEC):
+        trimmed = final_path.with_suffix(".trim.mp4")
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(final_path),
+                "-t",
+                f"{target_cap:.3f}",
+                "-c",
+                "copy",
+                str(trimmed),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        trimmed.replace(final_path)
+        total = _ffprobe_duration(final_path)
+        log_event(
+            video_id,
+            "info",
+            f"Montage coupe a {target_cap:.0f}s (etait trop long).",
+        )
     meta = {
         "titre": titre,
         "description": (

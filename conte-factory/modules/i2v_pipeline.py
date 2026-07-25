@@ -74,17 +74,15 @@ def _scene_image_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
 
 
 def _motion_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
-    """Motion I2V : base visuelle EN + mouvement doux/net (pas la narration FR)."""
+    """Motion I2V subtil : respiration / yeux / tete — visage verrouille."""
     visual = str(scene.get("visual_prompt") or "").strip()
     theme = str(
         board.get("hero_description") or board.get("theme") or board.get("hero") or "character"
     )
-    age = normalize_age(str(board.get("age_group") or "1-10"))
-    profile = youth_profile(age)
-    motion = str(profile.get("motion_prompt") or "")
     head = visual if visual else f"Cute Pixar 3D animated shot of {theme}"
     return (
-        f"{head}. Soft gentle acting, speaking naturally. {motion}. {MOTION_PROMPT}"
+        f"{head}. {MOTION_PROMPT}. "
+        "locked face identity, no morphing, sharp facial features"
     )
 
 
@@ -286,7 +284,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             message=f"I2V batch {len(to_animate)} scene(s) — 1 chargement modele…",
             clips_done=total - len(pending),
             clips_total=total,
-            detail="Etape 3/5 : Image-to-Video batch (22 steps · 1024x576 · motion douce)",
+            detail="Etape 3/5 : I2V face-safe (CFG 3.5 · motion 0.3 · 848x480)",
         )
         log_event(
             video_id,
