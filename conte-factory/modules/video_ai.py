@@ -27,6 +27,8 @@ from config import (
     FAL_CONCURRENCY,
     FAL_KEY,
     FAL_MODEL,
+    PINOKIO_I2V_HEIGHT,
+    PINOKIO_I2V_WIDTH,
     PINOKIO_WAN_ENGINE,
     PINOKIO_WAN_FRAMES,
     PINOKIO_WAN_PYTHON,
@@ -40,8 +42,11 @@ from config import (
     wan_clip_budget,
 )
 from db.database import get_video, log_event, update_video
-from modules.image_ai import generate_scene_image
+from modules.creative_options import format_size
+from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
+from modules.storyboard import enrich_board_visual_prompts, visual_prompt_for_scene
+from modules.youth_spec import normalize_age, youth_profile
 
 FAL_QUEUE = "https://queue.fal.run"
 
@@ -387,22 +392,26 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
     clips_dir = projet / "ai_clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    from modules.creative_options import format_size
-    from modules.image_ai import set_image_output_size
-    from modules.storyboard import _visual_prompt
-
-    aw, ah = format_size(str(board.get("aspect") or "16:9"))
-    img_w = min(1280, aw)
-    img_h = int(round(img_w * ah / aw))
+    img_w = int(PINOKIO_I2V_WIDTH or 1024)
+    img_h = int(PINOKIO_I2V_HEIGHT or 576)
+    if str(board.get("aspect") or "16:9") != "16:9":
+        aw, ah = format_size(str(board.get("aspect") or "16:9"))
+        img_w = min(1024, aw)
+        img_h = int(round(img_w * ah / aw))
     set_image_output_size(img_w, img_h)
+
+    n_enriched = enrich_board_visual_prompts(board, force=False)
+    if n_enriched:
+        board_path.write_text(
+            json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        log_event(video_id, "info", f"Prompts visuels EN enrichis : {n_enriched}.")
 
     theme_key = str(board.get("theme") or board.get("hero") or "conte")
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
     duration_min = float(board.get("duration_min") or TARGET_DURATION_MIN)
     budget = wan_clip_budget(duration_min) if provider in {"pinokio", "fal"} else 10_000
     remaining = budget
-
-    from modules.youth_spec import normalize_age, youth_profile
 
     age = normalize_age(str(board.get("age_group") or "1-10"))
     yprofile = youth_profile(age)
@@ -412,12 +421,12 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         or WAN_CLIP_SPAN_SEC
     )
 
-    # Story dict minimal pour regenerer prompts par partie
     story_ctx = {
         "hero": board.get("hero"),
         "theme": board.get("theme"),
+        "hero_description": board.get("hero_description") or board.get("theme"),
         "friend": board.get("friend"),
-        "place": "enchanted sky",
+        "place": board.get("place") or "enchanted sky",
         "visual_style": board.get("visual_style"),
         "age_group": age,
     }
@@ -437,16 +446,20 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
         ]
         scene_files: list[str] = []
         for part in range(n):
+            # Preferer visual_prompt EN deja enrichi ; sinon regenerer via LLM/fallback
+            base_vp = str(scene.get("visual_prompt") or "").strip()
+            if part == 0 and base_vp:
+                part_prompt = base_vp
+            else:
+                part_prompt = visual_prompt_for_scene(dialogue, idx - 1, story_ctx, part=part)
             if provider == "images":
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.png"
-                part_prompt = _visual_prompt(dialogue, idx - 1, story_ctx, part=part)
                 seed = (base_seed + idx * 17 + part) % 1_000_000
             else:
                 out = clips_dir / f"scene_{idx:03d}_part{part:02d}.mp4"
-                part_prompt = _visual_prompt(dialogue, idx - 1, story_ctx, part=part)
                 part_prompt += (
-                    f", shot {part + 1}/{n}, continuous motion, speaking character animation, "
-                    f"cinematic children's movie frame"
+                    ", shot continuity, gentle soft motion, sharp focus, "
+                    "minimal motion blur, cinematic children's movie frame"
                 )
                 seed = (base_seed + idx * 31 + part * 7) % 1_000_000
             jobs.append((idx, part, part_prompt, out, seed))

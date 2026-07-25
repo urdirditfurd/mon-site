@@ -1,16 +1,17 @@
 """Étape 3 — Dialogues multi-voix (personnages) + durée réelle cible.
 
 Pas de narrateur VO unique : chaque réplique = voix du personnage.
-Si l'audio est trop court vs la durée demandée, on ajoute des répliques
-UNIQUE (jamais de boucle audio).
+Edge-TTS jeunesse haute qualité + pauses naturelles + export 44.1 kHz.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,10 @@ from config import TARGET_DURATION_MIN, TTS_PITCH, TTS_RATE, TTS_VOICE
 from db.database import get_video, log_event, update_video
 from modules.creative_options import voices_for_preference
 from modules.youth_spec import normalize_age, youth_profile
+
+# Export audio haute qualite (pas de compression agressive)
+TTS_SAMPLE_RATE = int(os.getenv("CONTE_TTS_SAMPLE_RATE", "44100"))
+TTS_MP3_BITRATE = os.getenv("CONTE_TTS_MP3_BITRATE", "192k")
 
 
 def _ffprobe_duration(path: Path) -> float:
@@ -35,12 +40,40 @@ def _ffprobe_duration(path: Path) -> float:
     return float(out)
 
 
-def _soften_text(text: str) -> str:
+def _prosody_text(text: str) -> str:
+    """Insere virgules / points / pauses pour une diction conteuse naturelle."""
     t = " ".join((text or "").split())
     if not t:
         return "..."
+    # Normaliser espaces avant ponctuation
+    t = re.sub(r"\s+([,;:!?…])", r"\1", t)
+    # Apres .!? — pause explicite Edge-TTS ("...")
     t = re.sub(r"([.!?…])\s+", r"\1 ... ", t)
+    # Apres virgule — micro-pause legere (pas trop dense)
+    t = re.sub(r",\s*", ", ", t)
+    if t.count(",") >= 1 and "..." not in t:
+        # Une seule micro-pause apres la 1ere virgule
+        t = t.replace(", ", ", ... ", 1)
+    # Eviter doubles pauses
+    t = re.sub(r"(\.\.\.\s*){2,}", "... ", t)
+    # Si phrase longue sans ponctuation, couper aux conjonctions
+    if "," not in t and "." not in t and len(t) > 90:
+        t = re.sub(
+            r"\b(et|mais|puis|alors|quand|parce que|car)\b",
+            r", ... \1",
+            t,
+            count=2,
+            flags=re.IGNORECASE,
+        )
+    # Garantir ponctuation finale
+    if t[-1] not in ".!?…":
+        t = t + "."
     return t.strip()
+
+
+# Compat anciens appels
+def _soften_text(text: str) -> str:
+    return _prosody_text(text)
 
 
 def _normalize_tts_rate(rate: str | None) -> str:
@@ -67,23 +100,57 @@ def _normalize_tts_pitch(pitch: str | None) -> str:
     return f"{sign}{num}Hz"
 
 
+def _reencode_hq(src: Path, dest: Path) -> None:
+    """Re-encode en 44.1 kHz (ou 24 kHz) MP3 192k — lisible et net."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rate = TTS_SAMPLE_RATE if TTS_SAMPLE_RATE in {24000, 44100, 48000} else 44100
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-ar",
+        str(rate),
+        "-ac",
+        "1",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        TTS_MP3_BITRATE,
+        "-q:a",
+        "2",
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
 async def _synthesize(text: str, out_path: Path, voice: str, rate: str, pitch: str) -> None:
     import edge_tts
 
-    communicate = edge_tts.Communicate(
-        text=_soften_text(text),
-        voice=voice,
-        rate=_normalize_tts_rate(rate),
-        pitch=_normalize_tts_pitch(pitch),
-    )
-    await communicate.save(str(out_path))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        communicate = edge_tts.Communicate(
+            text=_prosody_text(text),
+            voice=voice,
+            rate=_normalize_tts_rate(rate),
+            pitch=_normalize_tts_pitch(pitch),
+        )
+        await communicate.save(str(tmp_path))
+        _reencode_hq(tmp_path, out_path)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _voice_preference_from_voice(voice: str | None) -> str:
     v = (voice or "").lower()
-    if "henri" in v or "homme" in v:
+    if "remy" in v or "henri" in v or "homme" in v:
         return "homme"
-    if "denise" in v or "femme" in v or "eloise" in v:
+    if "vivienne" in v or "denise" in v or "femme" in v or "eloise" in v:
         return "femme"
     return "auto"
 
@@ -112,7 +179,7 @@ def _extra_unique_lines(scene_idx: int, hero: str, round_i: int) -> list[dict[st
         {
             "speaker": "heros",
             "text": (
-                f"Encore un instant… Moi, {hero}, je te confie un secret de la scène {scene_idx} "
+                f"Encore un instant. Moi, {hero}, je te confie un secret de la scène {scene_idx} "
                 f"numéro {round_i} : le ciel change encore un peu pour moi."
             ),
         },
@@ -144,7 +211,6 @@ def generate_audio(
     audio_dir = projet / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
-    # voice arg = préférence UI (femme/homme) OU nom Edge-TTS legacy
     pref = _voice_preference_from_voice(voice)
     if voice in {"femme", "homme", "auto"}:
         pref = voice
@@ -159,7 +225,6 @@ def generate_audio(
 
     def _render_all() -> tuple[list[dict[str, Any]], float]:
         timings: list[dict[str, Any]] = []
-        lines_concat: list[str] = []
         for scene in board["scenes"]:
             idx = int(scene["index"])
             dialogue = _dialogue_for_scene(scene)
@@ -174,16 +239,16 @@ def generate_audio(
                 d = _ffprobe_duration(part_path)
                 scene_dur += d
                 part_files.append(part_path.name)
-                lines_concat.append(f"file '{part_path.name}'")
                 line["voice"] = vox
                 line["duration_sec"] = round(d, 3)
 
-            # Concat lignes → scene_XXX.mp3
             scene_path = audio_dir / f"scene_{idx:03d}.mp3"
             list_tmp = audio_dir / f"scene_{idx:03d}_list.txt"
             list_tmp.write_text(
                 "\n".join(f"file '{p}'" for p in part_files) + "\n", encoding="utf-8"
             )
+            # Re-concat + re-encode HQ (pas -c copy qui conserve des mp3 heterogenes)
+            concat_tmp = audio_dir / f"scene_{idx:03d}_concat.mp3"
             subprocess.run(
                 [
                     "ffmpeg",
@@ -196,12 +261,17 @@ def generate_audio(
                     str(list_tmp),
                     "-c",
                     "copy",
-                    str(scene_path),
+                    str(concat_tmp),
                 ],
                 check=True,
                 cwd=str(audio_dir),
                 capture_output=True,
             )
+            _reencode_hq(concat_tmp, scene_path)
+            try:
+                concat_tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
             scene["audio_file"] = scene_path.name
             scene["duration_sec"] = round(scene_dur, 3)
             scene["narration"] = " ".join(d["text"] for d in dialogue)
@@ -212,11 +282,9 @@ def generate_audio(
 
     timings, total = _render_all()
 
-    # Allonger avec répliques UNIQUE si trop court (pas de boucle)
     topup_round = 0
     while target_sec > 0 and total < target_sec * 0.92 and topup_round < 4:
         topup_round += 1
-        # Ajouter 2 répliques à la scène la plus courte relative
         scene = min(board["scenes"], key=lambda s: float(s.get("duration_sec") or 0))
         idx = int(scene["index"])
         extra = _extra_unique_lines(idx, hero_name, topup_round)
@@ -233,6 +301,7 @@ def generate_audio(
     concat_list.write_text(
         "\n".join(f"file '{t['file']}'" for t in timings) + "\n", encoding="utf-8"
     )
+    full_raw = audio_dir / "narration_concat.mp3"
     full_audio = audio_dir / "narration.mp3"
     subprocess.run(
         [
@@ -246,12 +315,17 @@ def generate_audio(
             str(concat_list),
             "-c",
             "copy",
-            str(full_audio),
+            str(full_raw),
         ],
         check=True,
         cwd=str(audio_dir),
         capture_output=True,
     )
+    _reencode_hq(full_raw, full_audio)
+    try:
+        full_raw.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     if target_sec > 0 and total < target_sec * 0.85:
         log_event(
@@ -263,12 +337,18 @@ def generate_audio(
     board["timings"] = timings
     board["total_audio_sec"] = round(total, 3)
     board["voice_preference"] = pref
+    board["tts_sample_rate"] = TTS_SAMPLE_RATE
+    board["tts_bitrate"] = TTS_MP3_BITRATE
     board_path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
 
     update_video(video_id, statut="audio_ok", duree_sec=total)
     log_event(
         video_id,
         "info",
-        f"Dialogues prêts : {total/60:.1f} min (héros/ami, {rate}, {pitch}).",
+        (
+            f"Dialogues HQ : {total/60:.1f} min "
+            f"(voix={voice_map.get('heros')}/{voice_map.get('ami')}, "
+            f"{rate}, {pitch}, {TTS_SAMPLE_RATE}Hz {TTS_MP3_BITRATE})."
+        ),
     )
     return {"ok": True, "total_sec": total, "audio": str(full_audio), "scenes": len(timings)}

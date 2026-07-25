@@ -26,14 +26,15 @@ from PIL import Image
 
 DEFAULT_NEGATIVE = (
     "static image, still photo, frozen frame, no motion, slideshow, ken burns only, "
+    "motion blur, heavy blur, smearing, ghosting, morphing face, flicker, "
     "worst quality, blurry, text overlay, watermark, logo, ugly, deformed, "
-    "extra limbs, low quality, jpeg artifacts, morphing face, flicker"
+    "extra limbs, low quality, jpeg artifacts"
 )
 
 MOTION_SUFFIX = (
-    "character natural movement, breathing, blinking eyes, gentle head tilt, "
-    "cinematic camera pan, lively background, smooth 24fps animation, "
-    "continuous motion, not a still image"
+    "gentle soft character movement, calm breathing, subtle blink, "
+    "slow smooth camera drift, sharp focus, crisp details, minimal motion blur, "
+    "continuous gentle motion, not a still image, not a whip pan"
 )
 
 BACKEND = (os.environ.get("WAN_I2V_BACKEND") or "ltx").strip().lower()
@@ -43,18 +44,21 @@ WAN_MODEL_ID = os.environ.get(
 )
 LTX_MODEL_ID = os.environ.get("LTX_I2V_MODEL", "Lightricks/LTX-Video")
 
-# Plafonds ULTRA-rapides (RTX 3080 10 Go)
-MAX_STEPS = int(os.environ.get("PINOKIO_I2V_STEPS", "8"))
-MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "33"))
-DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "704"))
-DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "384"))
-GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "5.0"))
+# Qualite jeunesse : steps 20-25, 1024x576, motion douce
+MAX_STEPS = int(os.environ.get("PINOKIO_I2V_STEPS", "22"))
+MAX_FRAMES = int(os.environ.get("PINOKIO_I2V_FRAMES", "41"))
+DEFAULT_WIDTH = int(os.environ.get("PINOKIO_I2V_WIDTH", "1024"))
+DEFAULT_HEIGHT = int(os.environ.get("PINOKIO_I2V_HEIGHT", "576"))
+GUIDANCE = float(os.environ.get("PINOKIO_I2V_GUIDANCE", "4.5"))
+MOTION_SCALE = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.65"))
+SCHEDULER_NAME = (os.environ.get("PINOKIO_I2V_SCHEDULER") or "dpmpp_2m").strip().lower()
 EXPORT_FPS = int(os.environ.get("PINOKIO_I2V_FPS", "24"))
 
 RESOLUTION_PRESETS = {
     "480p 16:9": (704, 384),
     "848p 16:9": (848, 480),
     "576p 16:9": (1024, 576),
+    "1024p 16:9": (1024, 576),
     "480p 9:16": (384, 704),
     "480p 1:1": (384, 384),
 }
@@ -128,21 +132,63 @@ def _tune_cuda() -> None:
 
 
 def _clamp_steps(steps: int) -> int:
-    return max(4, min(int(steps), 10, MAX_STEPS if MAX_STEPS > 0 else 8))
+    # Qualite : 20-25 (jamais sous 12 apres warm)
+    return max(12, min(int(steps), 25))
 
 
 def _align_frames_wan(n: int) -> int:
     n = max(17, int(n))
     if n % 4 != 1:
         n = (n // 4) * 4 + 1
-    return min(n, 49)
+    return min(n, 81)
 
 
 def _align_frames_ltx(n: int) -> int:
     n = max(9, int(n))
     if (n - 1) % 8 != 0:
         n = ((n - 1) // 8) * 8 + 1
-    return min(n, 49)
+    return min(n, 81)
+
+
+def _motion_prompt_scale(prompt: str, scale: float) -> str:
+    """Modere le mouvement (scale ~0.5-1.0) pour nettete enfants."""
+    s = max(0.35, min(1.0, float(scale)))
+    if s <= 0.55:
+        tag = "very gentle slow motion, almost still camera, sharp crisp frames"
+    elif s <= 0.75:
+        tag = "moderate soft motion, calm gentle movement, sharp focus, no smear"
+    else:
+        tag = "lively but controlled motion, clear details, minimal blur"
+    base = (prompt or "").strip()
+    if tag.lower() in base.lower():
+        return base
+    return f"{base}, {tag}".strip(", ")
+
+
+def _apply_scheduler(pipe, name: str) -> str:
+    """euler ou dpmpp_2m pour un denoise plus net."""
+    key = (name or "dpmpp_2m").strip().lower()
+    try:
+        if key in {"euler", "euler_a", "euler_ancestral"}:
+            from diffusers import EulerAncestralDiscreteScheduler
+
+            pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
+                pipe.scheduler.config
+            )
+            return "euler_ancestral"
+        if key in {"euler_discrete", "euler_d"}:
+            from diffusers import EulerDiscreteScheduler
+
+            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+            return "euler"
+        # defaut qualite
+        from diffusers import DPMSolverMultistepScheduler
+
+        pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+        return "dpmpp_2m"
+    except Exception as exc:
+        _log(f"[i2v_engine] scheduler skip ({key}): {exc}")
+        return "default"
 
 
 def _align_dim(value: int, multiple: int = 32) -> int:
@@ -261,6 +307,7 @@ def get_pipe(cache_dir: str | None, device: str, backend: str | None = None):
         used_backend = "wan"
 
     placement = _place_pipe(pipe, device, total_b)
+    sched = _apply_scheduler(pipe, SCHEDULER_NAME)
     _PIPE = pipe
     _PIPE_META = {
         "device": device,
@@ -268,6 +315,7 @@ def get_pipe(cache_dir: str | None, device: str, backend: str | None = None):
         "placement": placement,
         "model": model_id,
         "backend": used_backend,
+        "scheduler": sched,
     }
     return _PIPE
 
@@ -277,7 +325,7 @@ def generate_i2v(
     image_path: str,
     prompt: str,
     output_path: str,
-    resolution_key: str = "480p 16:9",
+    resolution_key: str = "576p 16:9",
     num_frames: int | None = None,
     fps: int | None = None,
     steps: int | None = None,
@@ -287,37 +335,38 @@ def generate_i2v(
     seed: int | None = None,
     progress_callback=None,
 ) -> dict:
-    """Image + prompt → MP4 animé en ≤ ~2 min / scène (params plafonnés)."""
+    """Image + prompt → MP4 anime net (motion douce, steps 20-25)."""
     device = pick_device()
     width, height = RESOLUTION_PRESETS.get(
         resolution_key, (DEFAULT_WIDTH, DEFAULT_HEIGHT)
     )
+    # Aligner sur env si preset inconnu
+    if resolution_key not in RESOLUTION_PRESETS:
+        width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
     width = _align_dim(width, 32)
     height = _align_dim(height, 32)
 
     steps = _clamp_steps(steps if steps is not None else MAX_STEPS)
     fps = int(fps or EXPORT_FPS)
     guidance = float(guidance if guidance is not None else GUIDANCE)
-    # Durcir CFG dans la fenêtre demandée
-    guidance = max(3.0, min(6.0, guidance))
+    # CFG modere : trop haut = artefacts / flou
+    guidance = max(3.0, min(5.5, guidance))
 
     num_frames = int(num_frames if num_frames is not None else MAX_FRAMES)
 
-    full_prompt = (prompt or "").strip()
+    full_prompt = _motion_prompt_scale(prompt or "", MOTION_SCALE)
     if MOTION_SUFFIX.lower() not in full_prompt.lower():
         full_prompt = f"{full_prompt}, {MOTION_SUFFIX}".strip(", ")
 
     if progress_callback:
-        progress_callback(0.05, "Chargement I2V rapide (LTX / Wan 1.3B)…")
+        progress_callback(0.05, "Chargement I2V qualite (LTX / Wan 1.3B)…")
 
     pipe = get_pipe(cache_dir, device)
     backend = (_PIPE_META or {}).get("backend", "wan")
+    scheduler = (_PIPE_META or {}).get("scheduler", SCHEDULER_NAME)
     if backend == "ltx":
         num_frames = _align_frames_ltx(num_frames)
-        # LTX : CFG plus bas (doc ~3–3.5) mais on reste ≤6
-        guidance = min(guidance, 5.0)
-        if guidance > 4.0:
-            guidance = 3.5
+        guidance = min(guidance, 4.5)
     else:
         num_frames = _align_frames_wan(num_frames)
 
@@ -333,12 +382,14 @@ def generate_i2v(
     if progress_callback:
         progress_callback(
             0.15,
-            f"{backend} {num_frames}f × {steps} steps @ {width}x{height} (cible <2 min)…",
+            f"{backend}/{scheduler} {num_frames}f x {steps} steps @ {width}x{height} "
+            f"motion={MOTION_SCALE:.2f}…",
         )
 
     _log(
-        f"[i2v_engine] START backend={backend} frames={num_frames} steps={steps} "
-        f"cfg={guidance} {width}x{height} placement={placement}"
+        f"[i2v_engine] START backend={backend} sched={scheduler} frames={num_frames} "
+        f"steps={steps} cfg={guidance} motion={MOTION_SCALE:.2f} {width}x{height} "
+        f"placement={placement}"
     )
 
     kwargs: dict = {
@@ -377,15 +428,16 @@ def generate_i2v(
 
     _log(
         f"[i2v_engine] DONE {elapsed:.1f}s ({per_step:.1f}s/step) "
-        f"target=<90s/scene apres warm"
+        f"quality mode steps={steps} {width}x{height}"
     )
 
     return {
         "ok": True,
         "outputPath": str(out.resolve()),
-        "mode": f"{backend}_i2v_fast",
+        "mode": f"{backend}_i2v_quality",
         "model": model_id,
         "backend": backend,
+        "scheduler": scheduler,
         "device": device,
         "dtype": dtype_label,
         "placement": placement,
@@ -395,6 +447,7 @@ def generate_i2v(
         "fps": fps,
         "steps": steps,
         "guidance": guidance,
+        "motionScale": MOTION_SCALE,
         "seconds": round(elapsed, 1),
         "secondsPerStep": round(per_step, 2),
         "clipDurationSec": round(num_frames / max(1, fps), 2),
@@ -404,7 +457,7 @@ def generate_i2v(
 def generate_i2v_batch(
     jobs: list[dict],
     *,
-    resolution_key: str = "480p 16:9",
+    resolution_key: str = "576p 16:9",
     num_frames: int | None = None,
     fps: int | None = None,
     steps: int | None = None,
@@ -476,6 +529,8 @@ def check_environment() -> dict:
         "maxFrames": MAX_FRAMES,
         "resolution": f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}",
         "guidance": GUIDANCE,
+        "motionScale": MOTION_SCALE,
+        "scheduler": SCHEDULER_NAME,
         "torch": torch.__version__,
         "hfToken": bool(hf_token()),
     }
@@ -512,14 +567,14 @@ if __name__ == "__main__":
     gen.add_argument("--image", required=True)
     gen.add_argument("--prompt", required=True)
     gen.add_argument("--output", required=True)
-    gen.add_argument("--resolution", default="480p 16:9")
+    gen.add_argument("--resolution", default="576p 16:9")
     gen.add_argument("--frames", type=int, default=MAX_FRAMES)
     gen.add_argument("--fps", type=int, default=EXPORT_FPS)
     gen.add_argument("--steps", type=int, default=MAX_STEPS)
     gen.add_argument("--seed", type=int, default=None)
     bat = sub.add_parser("batch")
     bat.add_argument("--jobs", required=True, help="JSON file: [{image,prompt,output,seed}]")
-    bat.add_argument("--resolution", default="480p 16:9")
+    bat.add_argument("--resolution", default="576p 16:9")
     bat.add_argument("--frames", type=int, default=MAX_FRAMES)
     bat.add_argument("--fps", type=int, default=EXPORT_FPS)
     bat.add_argument("--steps", type=int, default=MAX_STEPS)

@@ -1,4 +1,4 @@
-# Force le mode I2V ULTRA-RAPIDE (cible <90 s / scene apres warm, RTX 3080 10 Go)
+# Force le mode I2V QUALITE jeunesse (22 steps, 1024x576, motion douce)
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File C:\ConteFactory\conte-factory\scripts\SWITCH-TO-I2V.ps1
 # ASCII only: Windows PowerShell 5.1 casse avec tirets unicode / UTF-8 sans BOM.
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root ".env"
 
-Write-Host "Mode I2V ULTRA: LTX/Wan 1.3B | 8 steps | 704x384 | 33 frames | BATCH" -ForegroundColor Cyan
+Write-Host "Mode I2V QUALITE: LTX/Wan | 22 steps | 1024x576 | 41 frames | motion 0.65 | BATCH" -ForegroundColor Cyan
 
 if (-not (Test-Path $envFile)) {
   Copy-Item (Join-Path $root ".env.example") $envFile
@@ -30,30 +30,30 @@ $content = Set-EnvKey $content "CONTE_AUTO_START_LIPSYNC" "0"
 $content = Set-EnvKey $content "CONTE_AUTO_START_WAN" "0"
 $content = Set-EnvKey $content "PINOKIO_I2V_URL" "http://127.0.0.1:7861"
 $content = Set-EnvKey $content "WAN_I2V_BACKEND" "ltx"
-$content = Set-EnvKey $content "PINOKIO_I2V_FRAMES" "33"
-$content = Set-EnvKey $content "PINOKIO_I2V_STEPS" "8"
-$content = Set-EnvKey $content "PINOKIO_I2V_WIDTH" "704"
-$content = Set-EnvKey $content "PINOKIO_I2V_HEIGHT" "384"
-$content = Set-EnvKey $content "PINOKIO_I2V_GUIDANCE" "5.0"
-$content = Set-EnvKey $content "PINOKIO_I2V_RESOLUTION" "480p 16:9"
+$content = Set-EnvKey $content "PINOKIO_I2V_FRAMES" "41"
+$content = Set-EnvKey $content "PINOKIO_I2V_STEPS" "22"
+$content = Set-EnvKey $content "PINOKIO_I2V_WIDTH" "1024"
+$content = Set-EnvKey $content "PINOKIO_I2V_HEIGHT" "576"
+$content = Set-EnvKey $content "PINOKIO_I2V_GUIDANCE" "4.5"
+$content = Set-EnvKey $content "PINOKIO_I2V_MOTION_SCALE" "0.65"
+$content = Set-EnvKey $content "PINOKIO_I2V_SCHEDULER" "dpmpp_2m"
+$content = Set-EnvKey $content "PINOKIO_I2V_RESOLUTION" "576p 16:9"
 $content = Set-EnvKey $content "CONTE_I2V_LOWVRAM" "1"
 $content = Set-EnvKey $content "CONTE_I2V_PREFER_CLI" "1"
 $content = Set-EnvKey $content "CONTE_I2V_USE_BATCH" "1"
 $content = Set-EnvKey $content "WAN_DTYPE" "float16"
 $content = Set-EnvKey $content "SULPHUR_CPU_OFFLOAD" "1"
+$content = Set-EnvKey $content "CONTE_TTS_VOICE" "fr-FR-VivienneMultilingualNeural"
+$content = Set-EnvKey $content "CONTE_TTS_SAMPLE_RATE" "44100"
+$content = Set-EnvKey $content "CONTE_TTS_MP3_BITRATE" "192k"
 
 Set-Content -Path $envFile -Value $content -Encoding UTF8
-Write-Host "OK: I2V ultra (ltx, 8 steps, 704x384, 33f, batch 1-load)" -ForegroundColor Green
-Write-Host "Si LTX trop lent: WAN_I2V_BACKEND=wan" -ForegroundColor DarkYellow
+Write-Host "OK: I2V qualite (22 steps, 1024x576, motion 0.65, batch)" -ForegroundColor Green
+Write-Host "Voix: VivienneMultilingual / RemyMultilingual + audio 44.1kHz 192k" -ForegroundColor Green
 Write-Host ""
-Write-Host "IMPORTANT: si un job I2V tourne encore (lent / anciens params):" -ForegroundColor Yellow
-Write-Host "  1. Arrete-le (Ctrl+C ou Gestionnaire des taches)"
-Write-Host "  2. git pull + ce script SWITCH-TO-I2V"
-Write-Host "  3. Suivi -> Continuer I2V projet 36 (scenes deja OK sautees)"
-Write-Host ""
-Write-Host "Cible: 45-90 s / scene apres 1er chargement (batch)" -ForegroundColor DarkYellow
-Write-Host ""
-Write-Host "Pas besoin de LANCER-I2V.bat: le CLI batch charge le modele tout seul." -ForegroundColor DarkCyan
-Write-Host "Reprise projet 36:" -ForegroundColor Yellow
+Write-Host "Test qualite projet 36 (regenerer prompts + audio + I2V):" -ForegroundColor Yellow
 Write-Host "  cd C:\ConteFactory\conte-factory"
+Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only storyboard --no-publish"
+Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only audio --no-publish"
 Write-Host "  .\.venv\Scripts\python.exe main.py --resume 36 --only video_ai --no-publish"
+Write-Host "Astuce: pour forcer re-animation, supprime ai_clips\i2v_raw et *_part00.mp4"

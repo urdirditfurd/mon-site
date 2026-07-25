@@ -14,6 +14,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
+from config import PINOKIO_I2V_HEIGHT, PINOKIO_I2V_WIDTH
 from db.database import get_video, log_event, update_video
 from modules.i2v_ai import (
     MOTION_PROMPT,
@@ -23,12 +26,13 @@ from modules.i2v_ai import (
 )
 from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
+from modules.storyboard import enrich_board_visual_prompts
 from modules.youth_spec import normalize_age, youth_profile
 
 PIXAR_SCENE_PREFIX = (
     "cute 3D Pixar style children's film still, vibrant pastel colors, "
     "bright soft lighting, highly detailed, cinematic 16:9 composition, "
-    "clear character in environment, friendly expression"
+    "clear character in environment, friendly expression, sharp focus"
 )
 
 
@@ -50,9 +54,15 @@ def _ffprobe_duration(path: Path) -> float:
 
 
 def _scene_image_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
+    """Utilise le visual_prompt EN du storyboard (LLM) — pas le script FR."""
     base = str(scene.get("visual_prompt") or "").strip()
-    theme = str(board.get("hero_description") or board.get("theme") or board.get("hero") or "")
     style = str(board.get("visual_style") or "")
+    # Si deja un prompt EN riche, ne pas re-injecter le theme FR
+    if base and len(base) > 60:
+        if style and style.lower() not in base.lower():
+            return f"{PIXAR_SCENE_PREFIX}. {style}. {base}"
+        return f"{PIXAR_SCENE_PREFIX}. {base}"
+    theme = str(board.get("hero_description") or board.get("theme") or board.get("hero") or "")
     age = normalize_age(str(board.get("age_group") or "1-10"))
     profile = youth_profile(age)
     color = str(profile.get("color_prompt") or "")
@@ -64,14 +74,17 @@ def _scene_image_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
 
 
 def _motion_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
-    theme = str(board.get("hero_description") or board.get("theme") or board.get("hero") or "character")
-    narr = str(scene.get("narration") or "")[:160]
+    """Motion I2V : base visuelle EN + mouvement doux/net (pas la narration FR)."""
+    visual = str(scene.get("visual_prompt") or "").strip()
+    theme = str(
+        board.get("hero_description") or board.get("theme") or board.get("hero") or "character"
+    )
     age = normalize_age(str(board.get("age_group") or "1-10"))
     profile = youth_profile(age)
     motion = str(profile.get("motion_prompt") or "")
+    head = visual if visual else f"Cute Pixar 3D animated shot of {theme}"
     return (
-        f"Cute Pixar 3D animated shot of {theme}, speaking and acting naturally. "
-        f"Scene vibe: {narr}. {motion}. {MOTION_PROMPT}"
+        f"{head}. Soft gentle acting, speaking naturally. {motion}. {MOTION_PROMPT}"
     )
 
 
@@ -153,7 +166,23 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         f"Pipeline I2V : mode={health.get('mode')} url={health.get('url')} batch=on",
     )
 
-    set_image_output_size(1280, 720)
+    # Aligner image source = resolution I2V (evite deformation / flou)
+    img_w = int(PINOKIO_I2V_WIDTH or 1024)
+    img_h = int(PINOKIO_I2V_HEIGHT or 576)
+    set_image_output_size(img_w, img_h)
+
+    # Regenerer prompts EN si storyboard ancien (script FR brut)
+    n_enriched = enrich_board_visual_prompts(board, force=False)
+    if n_enriched:
+        board_path.write_text(
+            json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        log_event(
+            video_id,
+            "info",
+            f"Prompts visuels EN enrichis (LLM/fallback) : {n_enriched} scene(s).",
+        )
+
     theme_key = str(board.get("theme") or board.get("hero") or "conte")
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
 
@@ -188,8 +217,16 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             )
             continue
 
-        # Raw I2V deja la → juste mux plus tard
-        if raw.exists() and raw.stat().st_size > 5000 and still.exists():
+        # Raw I2V deja la + still bonne res → juste mux plus tard
+        still_ok = False
+        if still.exists() and still.stat().st_size > 1000:
+            try:
+                with Image.open(still) as im:
+                    still_ok = im.size == (img_w, img_h)
+            except Exception:
+                still_ok = False
+
+        if raw.exists() and raw.stat().st_size > 5000 and still_ok:
             pending.append(
                 {
                     "i": i,
@@ -211,14 +248,20 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             clips_total=total,
             detail="Etape 2/5 : storyboard image",
         )
-        if not still.exists() or still.stat().st_size < 1000:
+        if not still_ok:
             generate_scene_image(
                 _scene_image_prompt(scene, board),
                 still,
                 seed=(base_seed + idx * 17) % 1_000_000,
-                width=1280,
-                height=720,
+                width=img_w,
+                height=img_h,
             )
+            # Nouvelle image → invalider raw ancien (res/flou)
+            if raw.exists():
+                try:
+                    raw.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         pending.append(
             {
@@ -243,7 +286,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             message=f"I2V batch {len(to_animate)} scene(s) — 1 chargement modele…",
             clips_done=total - len(pending),
             clips_total=total,
-            detail="Etape 3/5 : Image-to-Video batch (33f · 8 steps · 704x384)",
+            detail="Etape 3/5 : Image-to-Video batch (22 steps · 1024x576 · motion douce)",
         )
         log_event(
             video_id,

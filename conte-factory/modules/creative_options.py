@@ -40,22 +40,22 @@ MUSIC_OPTIONS: dict[str, str] = {
     "fichier": "Fichier libre de droit dans assets/music/",
 }
 
-# Voix Edge-TTS pour dialogues personnages (pas un narrateur unique)
+# Voix Edge-TTS jeunesse / conteuse haute qualite (Multilingual Neural)
 CHARACTER_VOICES: dict[str, dict[str, str]] = {
     "femme": {
-        "heros": "fr-FR-DeniseNeural",
-        "ami": "fr-FR-HenriNeural",
-        "choeur": "fr-FR-DeniseNeural",
+        "heros": "fr-FR-VivienneMultilingualNeural",
+        "ami": "fr-FR-RemyMultilingualNeural",
+        "choeur": "fr-FR-VivienneMultilingualNeural",
     },
     "homme": {
-        "heros": "fr-FR-HenriNeural",
-        "ami": "fr-FR-DeniseNeural",
-        "choeur": "fr-FR-HenriNeural",
+        "heros": "fr-FR-RemyMultilingualNeural",
+        "ami": "fr-FR-VivienneMultilingualNeural",
+        "choeur": "fr-FR-RemyMultilingualNeural",
     },
     "auto": {
-        "heros": "fr-FR-DeniseNeural",
-        "ami": "fr-FR-HenriNeural",
-        "choeur": "fr-FR-DeniseNeural",
+        "heros": "fr-FR-VivienneMultilingualNeural",
+        "ami": "fr-FR-RemyMultilingualNeural",
+        "choeur": "fr-FR-VivienneMultilingualNeural",
     },
 }
 

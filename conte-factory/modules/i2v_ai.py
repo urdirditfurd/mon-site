@@ -19,13 +19,13 @@ from config import ROOT
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-# Plafonds vitesse RTX 3080 : 33f · 8 steps · 704×384 (upscale montage)
-PINOKIO_I2V_FRAMES = min(49, int(os.getenv("PINOKIO_I2V_FRAMES", "33")))
-PINOKIO_I2V_STEPS = min(10, int(os.getenv("PINOKIO_I2V_STEPS", "8")))
-PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "480p 16:9")
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.0"))
+# Plafonds qualite jeunesse : 41f · 22 steps · 1024x576 · motion douce
+PINOKIO_I2V_FRAMES = min(81, int(os.getenv("PINOKIO_I2V_FRAMES", "41")))
+PINOKIO_I2V_STEPS = min(25, int(os.getenv("PINOKIO_I2V_STEPS", "22")))
+PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "576p 16:9")
+PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "4.5"))
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")
-# CLI = plus fiable ; batch = 1 chargement modèle pour N scènes
+# CLI = plus fiable ; batch = 1 chargement modele pour N scenes
 PREFER_CLI = os.getenv("CONTE_I2V_PREFER_CLI", "1").strip().lower() in {
     "1",
     "true",
@@ -38,13 +38,13 @@ USE_BATCH = os.getenv("CONTE_I2V_USE_BATCH", "1").strip().lower() in {
     "yes",
     "on",
 }
-GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "600"))
-CLI_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_CLI_TIMEOUT", "600"))
-BATCH_SCENE_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_BATCH_SCENE_TIMEOUT", "180"))
-
+GRADIO_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_GRADIO_TIMEOUT_SEC", "900"))
+CLI_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_CLI_TIMEOUT", "900"))
+BATCH_SCENE_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_BATCH_SCENE_TIMEOUT", "300"))
 MOTION_PROMPT = (
-    "character natural movement, breathing, blinking eyes, gentle head tilt, "
-    "cinematic camera pan, lively background, smooth 24fps animation"
+    "gentle soft character movement, calm breathing, subtle blink, "
+    "slow smooth camera drift, sharp focus, crisp details, minimal motion blur, "
+    "continuous gentle motion, not a still image"
 )
 
 
@@ -260,8 +260,10 @@ def _cli_env() -> dict[str, str]:
         "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
         "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
         "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
-        "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "704"),
-        "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "384"),
+        "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "1024"),
+        "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "576"),
+        "PINOKIO_I2V_MOTION_SCALE": os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.65"),
+        "PINOKIO_I2V_SCHEDULER": os.environ.get("PINOKIO_I2V_SCHEDULER", "dpmpp_2m"),
         "PYTHONUNBUFFERED": "1",
         "PYTHONIOENCODING": "utf-8",
     }

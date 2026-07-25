@@ -24,10 +24,10 @@ TARGET_DURATION_MIN = float(os.getenv("CONTE_TARGET_DURATION_MIN", "30"))
 # Durée narration cible par scène storyboard (secondes)
 SCENE_TARGET_SEC = float(os.getenv("CONTE_SCENE_TARGET_SEC", "180"))
 
-# Voix Edge-TTS — plus douce / moins mécanique
-TTS_VOICE = os.getenv("CONTE_TTS_VOICE", "fr-FR-DeniseNeural")
-TTS_RATE = os.getenv("CONTE_TTS_RATE", "-18%")
-TTS_PITCH = os.getenv("CONTE_TTS_PITCH", "-2Hz")
+# Voix Edge-TTS — conteuse jeunesse haute qualite
+TTS_VOICE = os.getenv("CONTE_TTS_VOICE", "fr-FR-VivienneMultilingualNeural")
+TTS_RATE = os.getenv("CONTE_TTS_RATE", "-12%")
+TTS_PITCH = os.getenv("CONTE_TTS_PITCH", "+0Hz")
 
 # Style visuel fixe pour cohérence entre clips IA
 VISUAL_STYLE = os.getenv(
@@ -62,16 +62,18 @@ PINOKIO_WAN_FRAMES = int(os.getenv("PINOKIO_WAN_FRAMES", "13"))
 PINOKIO_WAN_STEPS = int(os.getenv("PINOKIO_WAN_STEPS", "10"))
 WAN_CLIP_SPAN_SEC = float(os.getenv("CONTE_WAN_CLIP_SPAN_SEC", "22"))
 
-# Wan I2V (Image-to-Video) — vraie animation RAPIDE (cible <90 s/scène après warm)
+# Wan I2V — net + doux (enfants) : 22 steps, 1024x576, motion moderee
 PINOKIO_I2V_URL = os.getenv("PINOKIO_I2V_URL", "http://127.0.0.1:7861")
 PINOKIO_I2V_ENGINE = os.getenv("PINOKIO_I2V_ENGINE", "")
 PINOKIO_I2V_PYTHON = os.getenv("PINOKIO_I2V_PYTHON", "")
-# Plafonds RTX 3080 10 Go — batch 1 load + clips courts bouclés sur l'audio
-PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "33"))
-PINOKIO_I2V_STEPS = min(10, int(os.getenv("PINOKIO_I2V_STEPS", "8")))
-PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "704"))
-PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "384"))
-PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "5.0"))
+PINOKIO_I2V_FRAMES = int(os.getenv("PINOKIO_I2V_FRAMES", "41"))
+PINOKIO_I2V_STEPS = min(25, int(os.getenv("PINOKIO_I2V_STEPS", "22")))
+PINOKIO_I2V_WIDTH = int(os.getenv("PINOKIO_I2V_WIDTH", "1024"))
+PINOKIO_I2V_HEIGHT = int(os.getenv("PINOKIO_I2V_HEIGHT", "576"))
+PINOKIO_I2V_GUIDANCE = float(os.getenv("PINOKIO_I2V_GUIDANCE", "4.5"))
+PINOKIO_I2V_MOTION_SCALE = float(os.getenv("PINOKIO_I2V_MOTION_SCALE", "0.65"))
+PINOKIO_I2V_SCHEDULER = os.getenv("PINOKIO_I2V_SCHEDULER", "dpmpp_2m")
+PINOKIO_I2V_RESOLUTION = os.getenv("PINOKIO_I2V_RESOLUTION", "576p 16:9")
 WAN_I2V_BACKEND = os.getenv("WAN_I2V_BACKEND", "ltx")  # ltx (rapide) | wan
 CONTE_I2V_LOWVRAM = os.getenv("CONTE_I2V_LOWVRAM", "1") == "1"
 AUTO_START_I2V = os.getenv("CONTE_AUTO_START_I2V", "1") == "1"
@@ -199,10 +201,10 @@ def estimate_render_minutes(
         high = max(6, int(round(clips * 0.9 + 4)))
         return low, high
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
-        # Batch 1 load + 33f/8steps/704x384 → ~45–90 s/scène apres warm
-        low = max(6, int(round(clips * 0.75 + 4)))
-        high = max(12, int(round(clips * 1.5 + 6)))
-        return min(low, 40), min(high, 50)
+        # Qualite : ~2-4 min/scene apres warm (22 steps @ 1024x576)
+        low = max(12, int(round(clips * 2.0 + 6)))
+        high = max(20, int(round(clips * 4.0 + 10)))
+        return min(low, 70), min(high, 90)
     if provider in {"talking", "lipsync", "talk"}:
         low = max(8, int(round(clips * 0.6 + 4)))
         high = max(15, int(round(clips * 1.5 + 8)))
