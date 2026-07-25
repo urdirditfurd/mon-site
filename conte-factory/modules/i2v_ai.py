@@ -251,20 +251,23 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
 
 
 def _cli_env() -> dict[str, str]:
+    # Toujours relire os.environ (video_ai force face-safe juste avant)
+    guidance = min(4.0, float(os.environ.get("PINOKIO_I2V_GUIDANCE", str(PINOKIO_I2V_GUIDANCE))))
+    motion = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"))
+    motion = max(0.2, min(0.4, motion))
     return {
         **os.environ,
         "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),
         "SULPHUR_CPU_OFFLOAD": os.environ.get("SULPHUR_CPU_OFFLOAD", "1"),
         "CONTE_I2V_LOWVRAM": os.environ.get("CONTE_I2V_LOWVRAM", "1"),
         "WAN_I2V_BACKEND": os.environ.get("WAN_I2V_BACKEND", WAN_I2V_BACKEND),
-        "PINOKIO_I2V_FRAMES": str(PINOKIO_I2V_FRAMES),
-        "PINOKIO_I2V_STEPS": str(PINOKIO_I2V_STEPS),
-        "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
+        "PINOKIO_I2V_FRAMES": os.environ.get("PINOKIO_I2V_FRAMES", str(PINOKIO_I2V_FRAMES)),
+        "PINOKIO_I2V_STEPS": os.environ.get("PINOKIO_I2V_STEPS", str(PINOKIO_I2V_STEPS)),
+        "PINOKIO_I2V_GUIDANCE": str(guidance),
         "PINOKIO_I2V_WIDTH": os.environ.get("PINOKIO_I2V_WIDTH", "848"),
         "PINOKIO_I2V_HEIGHT": os.environ.get("PINOKIO_I2V_HEIGHT", "480"),
-        "PINOKIO_I2V_MOTION_SCALE": os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"),
+        "PINOKIO_I2V_MOTION_SCALE": str(motion),
         "PINOKIO_I2V_SCHEDULER": os.environ.get("PINOKIO_I2V_SCHEDULER", "dpmpp_2m"),
-        "PINOKIO_I2V_GUIDANCE": str(PINOKIO_I2V_GUIDANCE),
         "PYTHONUNBUFFERED": "1",
         "PYTHONIOENCODING": "utf-8",
     }
