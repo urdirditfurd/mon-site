@@ -428,6 +428,104 @@ def generate_story(
     return _builtin_story(theme, age_group, duration_min, style_key)
 
 
+def write_story_to_project(
+    video_id: int,
+    story: dict[str, Any],
+    *,
+    age_group: str,
+    duration_min: float,
+    style_key: str = "aquarelle",
+    aspect: str = "16:9",
+    music: str = "berceuse",
+) -> Path:
+    """Ecrit story.json + script.txt dans le dossier projet (idempotent)."""
+    from modules.youth_spec import normalize_age
+
+    age_group = normalize_age(age_group)
+    minutes = float(duration_min)
+    target_scenes = int(
+        story.get("target_scenes") or scene_count_for_duration(minutes, age_group)
+    )
+    script = str(story["script"]).strip()
+    titre = str(story.get("titre") or story.get("theme") or f"Video {video_id}").strip()
+    hash_script = fingerprint(script)
+    projet = project_dir(video_id)
+    payload = {
+        "id": video_id,
+        "titre": titre,
+        "theme": story.get("theme"),
+        "morale": story.get("morale"),
+        "hero": story.get("hero"),
+        "hero_description": story.get("hero_description") or story.get("theme"),
+        "friend": story.get("friend"),
+        "place": story.get("place"),
+        "script": script,
+        "dialogue_scenes": story.get("dialogue_scenes") or [],
+        "format": story.get("format") or "dialogue",
+        "hash_script": hash_script,
+        "age_group": age_group,
+        "duration_min": minutes,
+        "target_scenes": target_scenes,
+        "style_key": style_key,
+        "visual_style": story.get("visual_style") or style_prompt(style_key),
+        "aspect": aspect,
+        "music": music,
+        "word_count": story.get("word_count") or _word_count(script),
+    }
+    (projet / "story.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (projet / "script.txt").write_text(script, encoding="utf-8")
+    update_video(
+        video_id,
+        chemin_projet=str(projet),
+        statut="script_ok",
+        titre=titre,
+        theme=str(story.get("theme") or titre),
+        hash_script=hash_script,
+    )
+    return projet
+
+
+def ensure_story_files(
+    video_id: int,
+    *,
+    age_group: str = "1-10",
+    duration_min: float | None = None,
+    style_key: str = "aquarelle",
+    aspect: str = "16:9",
+    music: str = "berceuse",
+) -> Path:
+    """Restaure story.json si manquant (projet DB sans fichiers sur disque)."""
+    video = get_video(video_id)
+    if not video:
+        raise ValueError(f"Video {video_id} introuvable")
+    chemin = str(video.get("chemin_projet") or "").strip()
+    projet = Path(chemin) if chemin else project_dir(video_id)
+    if (projet / "story.json").exists():
+        return projet
+
+    theme = str(video.get("theme") or video.get("titre") or "conte magique")
+    minutes = float(duration_min if duration_min is not None else TARGET_DURATION_MIN)
+    from modules.youth_spec import normalize_age
+
+    age_group = normalize_age(age_group)
+    story = generate_story(
+        theme, age_group=age_group, duration_min=minutes, style_key=style_key
+    )
+    write_story_to_project(
+        video_id,
+        story,
+        age_group=age_group,
+        duration_min=minutes,
+        style_key=style_key,
+        aspect=aspect,
+        music=music,
+    )
+    log_event(video_id, "info", "story.json restaure (projet incomplet sur disque).")
+    return project_dir(video_id)
+
+
 def source_new_video(
     theme: str | None = None,
     age_group: str = "1-10",
@@ -453,7 +551,27 @@ def source_new_video(
 
     existing = find_by_hash(hash_script)
     if existing:
-        log_event(existing["id"], "warn", "Histoire déjà connue (même empreinte).")
+        existing_id = int(existing["id"])
+        projet_existing = project_dir(existing_id)
+        if not (projet_existing / "story.json").exists():
+            write_story_to_project(
+                existing_id,
+                story,
+                age_group=age_group,
+                duration_min=minutes,
+                style_key=style_key,
+                aspect=aspect,
+                music=music,
+            )
+            log_event(existing_id, "info", "Projet incomplet repare (story.json ecrit).")
+            return {
+                "ok": True,
+                "video_id": existing_id,
+                "repaired": True,
+                "projet": str(projet_existing),
+                "story": story,
+            }
+        log_event(existing_id, "warn", "Histoire déjà connue (même empreinte).")
         return {"ok": False, "reason": "doublon_hash", "video": existing}
 
     if similar_title_exists(titre):
@@ -469,30 +587,16 @@ def source_new_video(
     projet = project_dir(video_id)
     update_video(video_id, chemin_projet=str(projet), statut="script_ok")
 
-    payload = {
-        "id": video_id,
-        "titre": titre,
-        "theme": story.get("theme"),
-        "morale": story.get("morale"),
-        "hero": story.get("hero"),
-        "hero_description": story.get("hero_description") or story.get("theme"),
-        "friend": story.get("friend"),
-        "place": story.get("place"),
-        "script": script,
-        "dialogue_scenes": story.get("dialogue_scenes") or [],
-        "format": story.get("format") or "dialogue",
-        "hash_script": hash_script,
-        "age_group": age_group,
-        "duration_min": minutes,
-        "target_scenes": target_scenes,
-        "style_key": style_key,
-        "visual_style": story.get("visual_style") or style_prompt(style_key),
-        "aspect": aspect,
-        "music": music,
-        "word_count": story.get("word_count") or _word_count(script),
-    }
-    (projet / "story.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    (projet / "script.txt").write_text(script, encoding="utf-8")
+    write_story_to_project(
+        video_id,
+        story,
+        age_group=age_group,
+        duration_min=minutes,
+        style_key=style_key,
+        aspect=aspect,
+        music=music,
+    )
+    payload = json.loads((projet / "story.json").read_text(encoding="utf-8"))
     log_event(
         video_id,
         "info",

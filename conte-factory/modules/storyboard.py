@@ -19,7 +19,8 @@ from config import (
     scene_count_for_duration,
     scene_sec_for_audience,
 )
-from db.database import get_video, log_event, update_video, video_title
+from db.database import get_video, log_event, project_dir, update_video, video_title
+from modules.sourcing import ensure_story_files
 from modules.clip_prompts import build_clip_plans_for_board
 from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
 
@@ -354,8 +355,11 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    projet = Path(video["chemin_projet"])
+    projet = Path(video["chemin_projet"]) if video.get("chemin_projet") else project_dir(video_id)
+    ensure_story_files(video_id)
     story_path = projet / "story.json"
+    if not story_path.exists():
+        story_path = project_dir(video_id) / "story.json"
     if not story_path.exists():
         raise FileNotFoundError("story.json manquant — relancez l'étape sourcing.")
 

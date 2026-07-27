@@ -240,6 +240,7 @@ def update_video(video_id: int, **fields: Any) -> None:
         "notes",
         "nombre_scenes",
         "script_complet",
+        "hash_script",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
