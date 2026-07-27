@@ -45,11 +45,33 @@ if (-not (Test-Path (Join-Path $Root ".git"))) {
     robocopy (Join-Path $tmp "pinokio\wan-i2v") (Join-Path $Root "pinokio\wan-i2v") /E /XD env /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
   }
 } else {
+  Write-Host "=== 2) Reparer refs Git corrompus ===" -ForegroundColor Cyan
+  $broken = @(
+    ".git\refs\heads\cursor",
+    ".git\refs\remotes\origin\cursor"
+  )
+  foreach ($rel in $broken) {
+    $full = Join-Path $Root $rel
+    if (Test-Path $full) {
+      Remove-Item -Recurse -Force $full
+      Write-Host "Supprime refs: $rel"
+    }
+  }
+  $packed = Join-Path $Root ".git\packed-refs"
+  if (Test-Path $packed) {
+    $lines = Get-Content $packed | Where-Object { $_ -notmatch "cursor/conte-factory-pipeline-0391" }
+    Set-Content -Path $packed -Value $lines -Encoding Ascii
+  }
   try {
     git remote remove origin 2>$null
   } catch {}
   git remote add origin $Repo 2>$null
+  git reset --hard 2>$null
+  git clean -fd
   git fetch origin $Branch --depth 50
+  if ($LASTEXITCODE -ne 0) {
+    throw "git fetch a echoue - verifie internet / GitHub"
+  }
   git checkout -B $Branch FETCH_HEAD
   git reset --hard FETCH_HEAD
   git clean -fd
@@ -123,5 +145,5 @@ if (Test-Path $clear) {
 }
 
 Write-Host "=== 5) Relance pipeline #36 ===" -ForegroundColor Cyan
-& $py main.py --resume 36 --only storyboard --no-publish
+& $py main.py --resume 36 --only storyboard,video_ai --no-publish
 Write-Host "Termine." -ForegroundColor Green
