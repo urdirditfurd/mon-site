@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,15 @@ def set_progress(
         "running": step not in {"done", "error"},
     }
     _write(PROGRESS_FILE, data)
+    if os.getenv("CONTE_CLI_PROGRESS", "1").strip().lower() in {"1", "true", "yes", "on"}:
+        detail_part = f" — {detail}" if detail else ""
+        clips_part = ""
+        if clips_done is not None and clips_total:
+            clips_part = f" ({clips_done}/{clips_total})"
+        print(
+            f"[{data['pct']:.0f}%] {data['label']}: {data['message']}{clips_part}{detail_part}",
+            flush=True,
+        )
     return data
 
 
