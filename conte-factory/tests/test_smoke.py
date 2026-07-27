@@ -41,6 +41,21 @@ class TestBasics(unittest.TestCase):
         # Ne doit pas planter sur base vide
         self.assertFalse(similar_title_exists("titre-inexistant-xyz-999"))
 
+    def test_project_path_create(self) -> None:
+        p = project_path(9876, create=True)
+        self.assertTrue(p.is_dir())
+        story = p / "story.json"
+        story.write_text("{}", encoding="utf-8")
+        self.assertTrue(story.is_file())
+        story.unlink(missing_ok=True)
+        p.rmdir()
+
+    def test_sourcing_module_imports(self) -> None:
+        from modules.sourcing import ensure_story_files, write_story_to_project
+
+        self.assertTrue(callable(ensure_story_files))
+        self.assertTrue(callable(write_story_to_project))
+
 
 if __name__ == "__main__":
     unittest.main()
