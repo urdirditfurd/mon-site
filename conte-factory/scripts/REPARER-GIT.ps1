@@ -74,7 +74,7 @@ $prev = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 & git reset --hard 2>&1 | Out-Null
 $ErrorActionPreference = $prev
-Invoke-Git clean -fd | Out-Null
+Invoke-Git clean -fd -e conte-factory/.venv -e conte-factory/data -e conte-factory/.env -e pinokio | Out-Null
 Invoke-Git fetch origin $Branch --depth 50 | Out-Null
 Invoke-Git checkout -B $Branch FETCH_HEAD | Out-Null
 Invoke-Git reset --hard FETCH_HEAD | Out-Null

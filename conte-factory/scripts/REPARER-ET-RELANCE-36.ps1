@@ -41,6 +41,48 @@ function Ensure-GitOrigin {
     }
 }
 
+function Ensure-PythonVenv {
+    param([string]$CfRoot)
+    $py = Join-Path $CfRoot ".venv\Scripts\python.exe"
+    if (Test-Path $py) {
+        Write-Host "venv OK: $py"
+        return $py
+    }
+
+    Write-Host "Creation venv conte-factory (5-10 min)..." -ForegroundColor Yellow
+    Push-Location $CfRoot
+    try {
+        $launcher = $null
+        if (Get-Command py -ErrorAction SilentlyContinue) {
+            $launcher = @("py", "-3")
+        } elseif (Get-Command python -ErrorAction SilentlyContinue) {
+            $launcher = @("python")
+        } elseif (Get-Command python3 -ErrorAction SilentlyContinue) {
+            $launcher = @("python3")
+        } else {
+            throw "Python introuvable. Installe Python 3.10+ depuis python.org puis relance."
+        }
+
+        if (Test-Path ".venv") {
+            Remove-Item -Recurse -Force ".venv"
+        }
+        & @launcher -m venv .venv
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $py)) {
+            throw "Echec creation .venv avec $($launcher -join ' ')"
+        }
+
+        & $py -m pip install -U pip
+        & $py -m pip install -r requirements.txt
+        if ($LASTEXITCODE -ne 0) {
+            throw "pip install requirements.txt a echoue"
+        }
+        Write-Host "venv cree." -ForegroundColor Green
+        return $py
+    } finally {
+        Pop-Location
+    }
+}
+
 function Remove-BrokenGitRefs {
     param([string]$Base)
     $broken = @(
@@ -107,11 +149,11 @@ if (-not (Test-Path (Join-Path $Root ".git"))) {
     $ErrorActionPreference = "Continue"
     & git reset --hard 2>&1 | Out-Null
     $ErrorActionPreference = $prev
-    Invoke-Git clean -fd | Out-Null
     Invoke-Git fetch origin $Branch --depth 50 | Out-Null
     Invoke-Git checkout -B $Branch FETCH_HEAD | Out-Null
     Invoke-Git reset --hard FETCH_HEAD | Out-Null
-    Invoke-Git clean -fd | Out-Null
+    # Ne pas supprimer .venv / data / .env (ignores par git)
+    Invoke-Git clean -fd -e conte-factory/.venv -e conte-factory/data -e conte-factory/.env -e pinokio | Out-Null
 }
 
 Write-Host "Git OK." -ForegroundColor Green
@@ -168,8 +210,7 @@ Write-Host ".env OK" -ForegroundColor Green
 
 Write-Host "=== 4) Supprimer ai_clips #36 ===" -ForegroundColor Cyan
 Set-Location (Join-Path $Root "conte-factory")
-$py = Join-Path (Get-Location) ".venv\Scripts\python.exe"
-if (-not (Test-Path $py)) { throw ".venv manquant: $py" }
+$py = Ensure-PythonVenv -CfRoot (Get-Location)
 $clear = Join-Path (Get-Location) "scripts\clear_ai_clips.py"
 if (Test-Path $clear) {
     & $py $clear 36
