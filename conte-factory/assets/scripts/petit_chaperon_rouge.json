@@ -19,8 +19,8 @@
       "id": 1,
       "lieu": "maison au bord de la forêt",
       "action": "Chaperon Rouge takes the wicker basket from her mother and puts on her red hood",
-      "narration": "Maman m'a préparé un panier pour grand-mère. Je mets ma capuche rouge.",
-      "duree_secondes": 4,
+      "narration": "Bonjour. Aujourd'hui, maman m'a préparé un panier pour grand-mère : du pain encore chaud, un peu de beurre, et des fleurs. Je noue bien ma belle capuche rouge sous mon menton. Maman me dit d'aller tout droit sur le sentier, sans m'arrêter trop longtemps. Je souris, je prends le panier à deux mains, et je suis prête à partir.",
+      "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "joie douce",
       "action_type": "regarde"
@@ -29,8 +29,8 @@
       "id": 2,
       "lieu": "chemin de forêt ensoleillé",
       "action": "Chaperon Rouge walks along the forest path holding her basket, looking at the trees",
-      "narration": "Je marche sur le sentier. Les arbres murmurent tout bas.",
-      "duree_secondes": 4,
+      "narration": "Je marche sur le sentier ensoleillé. Les arbres murmurent tout bas, comme s'ils me souhaitaient une bonne route. Je tiens mon panier bien droit contre moi. Un oiseau bleu passe au-dessus de ma tête et chante. Je regarde le chemin devant moi : il est clair, et je sais que grand-mère m'attend. Un pas après l'autre, tout doucement.",
+      "duree_secondes": 5,
       "camera": "slow pan left to right",
       "emotion": "curiosité joyeuse",
       "action_type": "marche"
@@ -39,8 +39,8 @@
       "id": 3,
       "lieu": "clairière fleurie",
       "action": "Chaperon Rouge bends once to pick a flower then stands and smiles",
-      "narration": "Oh ! Des fleurs pour grand-mère. J'en cueille une toute douce.",
-      "duree_secondes": 4,
+      "narration": "Oh ! Une clairière pleine de fleurs douces. Grand-mère aime tant les fleurs… J'en cueille une seule, bien délicatement, pour ne pas abîmer la prairie. Je la glisse près du pain dans mon panier. Comme ça sent bon ! Je me redresse, je souris, et je me dis que je ne resterai pas trop longtemps. Le chemin m'appelle encore.",
+      "duree_secondes": 5,
       "camera": "slow zoom in",
       "emotion": "émerveillement",
       "action_type": "cueille"
@@ -49,8 +49,8 @@
       "id": 4,
       "lieu": "clairière près des grands chênes",
       "action": "A grey wolf steps out from behind a tree and looks gently at Chaperon Rouge",
-      "narration": "Qui es-tu, grand animal ? Tu as l'air de connaître la forêt.",
-      "duree_secondes": 4,
+      "narration": "Qui es-tu, grand animal gris ? Tu sors tout doucement de derrière le chêne. Tu as l'air de connaître la forêt mieux que moi. Je tiens mon panier un peu plus près. Ton regard est calme, mais maman m'a dit d'être prudente avec les inconnus. Je reste polie, et je t'écoute sans trop m'approcher.",
+      "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "tension douce",
       "action_type": "apparait"
@@ -59,8 +59,8 @@
       "id": 5,
       "lieu": "sentier de forêt",
       "action": "The wolf points toward a side path while Chaperon Rouge listens with her basket",
-      "narration": "Le loup me parle d'un chemin plus joli… J'écoute, un peu hésitante.",
-      "duree_secondes": 4,
+      "narration": "Le loup me parle d'un chemin plus joli, plein de fleurs et d'ombres douces. Il pointe du museau vers un sentier sur le côté. J'écoute, un peu hésitante. Une partie de moi a envie d'y aller… Une autre se souvient des conseils de maman : rester sur le grand chemin. Je hoche la tête, sans encore choisir.",
+      "duree_secondes": 5,
       "camera": "slow pan right to left",
       "emotion": "doute prudent",
       "action_type": "ecoute"
@@ -69,8 +69,8 @@
       "id": 6,
       "lieu": "chemin détourné dans la forêt",
       "action": "Chaperon Rouge walks the longer flower path, looking around carefully",
-      "narration": "Je prends le chemin des fleurs. Comme c'est long…",
-      "duree_secondes": 4,
+      "narration": "Je prends le chemin des fleurs. Comme c'est long… Les branches font des ombres qui bougent. Je marche plus lentement, je regarde à gauche, à droite, et je serre mon panier. Les fleurs sont jolies, mais le temps passe. Grand-mère m'attend. J'espère que je n'ai pas choisi le mauvais détour. Je continue, courageusement.",
+      "duree_secondes": 5,
       "camera": "slow pan left to right",
       "emotion": "aventure",
       "action_type": "marche"
@@ -79,18 +79,18 @@
       "id": 7,
       "lieu": "devant la petite maison de grand-mère",
       "action": "Chaperon Rouge knocks once on the cottage door holding her basket",
-      "narration": "Me voici chez grand-mère. Toc toc…",
-      "duree_secondes": 4,
+      "narration": "Me voici enfin devant la petite maison de grand-mère. Le toit est rouge, la porte est en bois. Je pose une main près de mon panier, et je frappe une seule fois : toc toc. J'attends. Mon cœur bat un peu plus vite. « Grand-mère, c'est moi, Chaperon Rouge ! J'apporte du pain et des fleurs. »",
+      "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "impatience douce",
-      "action_type": "regarde"
+      "action_type": "frappe"
     },
     {
       "id": 8,
       "lieu": "chambre de grand-mère",
       "action": "Chaperon Rouge peeks into the room where someone in a nightcap lies in bed",
-      "narration": "Grand-mère ? Comme tu as de grandes oreilles…",
-      "duree_secondes": 4,
+      "narration": "J'entre doucement dans la chambre. Quelqu'un est allongé dans le lit, coiffé d'un bonnet de nuit. « Grand-mère ? Comme tu as de grandes oreilles… » Je m'approche un peu, curieuse et inquiète. La voix qui me répond est étrange. Les draps bougent. Je plisse les yeux pour mieux voir, le panier encore contre moi.",
+      "duree_secondes": 5,
       "camera": "slow zoom in",
       "emotion": "surprise inquiète",
       "action_type": "regarde"
@@ -99,18 +99,18 @@
       "id": 9,
       "lieu": "chambre de grand-mère",
       "action": "Chaperon Rouge steps back as the wolf sits up in the bed, eyes wide",
-      "narration": "Ce n'est pas grand-mère ! C'est le loup !",
-      "duree_secondes": 4,
+      "narration": "Ce n'est pas grand-mère ! C'est le loup ! Il se redresse dans le lit, les yeux grands ouverts. Je recule d'un pas, le panier serré. J'ai peur, mais je reste maîtresse de moi. Je ne crie pas trop fort. Je cherche la porte du regard. Il faut que j'aille chercher de l'aide, tout de suite, dehors.",
+      "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "peur maîtrisée",
-      "action_type": "regarde"
+      "action_type": "recule"
     },
     {
       "id": 10,
       "lieu": "devant la maison de grand-mère",
       "action": "A kind woodcutter arrives as Chaperon Rouge runs a few steps outside then stops safely",
-      "narration": "Le bûcheron arrive ! Je suis en sécurité.",
-      "duree_secondes": 4,
+      "narration": "Je cours dehors, quelques pas rapides, puis je m'arrête. Le bûcheron arrive ! Il a entendu mon appel. Son visage est bon et rassurant. « Je suis en sécurité maintenant », me dis-je. Ensemble, nous allons aider grand-mère. Le loup ne gagnera pas aujourd'hui. Mon cœur se calme un peu.",
+      "duree_secondes": 5,
       "camera": "zoom out smoothly",
       "emotion": "soulagement",
       "action_type": "court"
@@ -119,11 +119,11 @@
       "id": 11,
       "lieu": "jardin devant la maison de grand-mère",
       "action": "Chaperon Rouge hugs grandmother and holds the flower basket, smiling softly",
-      "narration": "Grand-mère est sauvée. Je resterai prudente, et je t'apporterai encore des fleurs.",
-      "duree_secondes": 4,
+      "narration": "Grand-mère est sauvée. Je la serre tout doucement dans mes bras, et je lui tends mon panier de fleurs. Elle sourit. Moi aussi. Je resterai prudente la prochaine fois, et j'écouterai mieux les conseils de ceux qui m'aiment. Je t'apporterai encore des fleurs, grand-mère — mais en restant sur le bon chemin.",
+      "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "tendresse",
-      "action_type": "regarde"
+      "action_type": "etreinte"
     }
   ]
 }

@@ -258,8 +258,8 @@ def run_pipeline(
     duration_min: float | None = None,
     voice: str | None = None,
     subtitles: bool = False,
-    age_group: str = "1-10",
-    style_key: str = "aquarelle",
+    age_group: str | None = None,
+    style_key: str | None = None,
     aspect: str = "16:9",
     music: str = "berceuse",
     script_path: str | None = None,
@@ -343,7 +343,7 @@ def run_pipeline(
 
     if duration_min is not None:
         cfg.TARGET_DURATION_MIN = max(1.0, min(60.0, float(duration_min)))
-        cfg.SCENE_TARGET_SEC = scene_sec_for_audience(age_group)
+        cfg.SCENE_TARGET_SEC = scene_sec_for_audience(age_group or "1-10")
     elif short or micro:
         if micro:
             cfg.TARGET_DURATION_MIN = 1.2
@@ -383,18 +383,28 @@ def run_pipeline(
     if script_path:
         from modules.sourcing import source_from_script
 
+        # Ne pas ecraser age/duree/style du JSON par les defauts CLI :
+        # seuls --age / --duration / --style explicites surchargent le script.
         sourced = source_from_script(
             script_path,
             age_group=age_group,
-            duration_min=cfg.TARGET_DURATION_MIN if duration_min is None else duration_min,
+            duration_min=duration_min,
             style_key=style_key,
         )
+        if sourced.get("ok") and isinstance(sourced.get("story"), dict):
+            story_meta = sourced["story"]
+            cfg.TARGET_DURATION_MIN = max(
+                1.0, min(60.0, float(story_meta.get("duration_min") or cfg.TARGET_DURATION_MIN))
+            )
+            cfg.SCENE_TARGET_SEC = scene_sec_for_audience(
+                str(story_meta.get("age_group") or "1-10")
+            )
     else:
         sourced = source_new_video(
             theme,
-            age_group=age_group,
-            duration_min=cfg.TARGET_DURATION_MIN,
-            style_key=style_key,
+            age_group=age_group or "1-10",
+            duration_min=cfg.TARGET_DURATION_MIN if duration_min is None else duration_min,
+            style_key=style_key or "aquarelle",
             aspect=aspect,
             music=music,
         )
@@ -485,15 +495,16 @@ def main() -> int:
     parser.add_argument(
         "--age",
         type=str,
-        default="1-10",
+        default=None,
         choices=["1-3", "4-6", "7-10", "1-10", "7-9", "1-9"],
-        help="Public cible enfants (rythme des scenes)",
+        help="Public cible enfants (rythme des scenes). Avec --script, omettre pour garder le JSON.",
     )
     parser.add_argument(
         "--style",
         type=str,
-        default="aquarelle",
+        default=None,
         choices=["aquarelle", "anime_doux", "3d_mignon", "conte_classique", "papier_decoupe"],
+        help="Style visuel. Avec --script, omettre pour garder le JSON.",
     )
     parser.add_argument(
         "--aspect",

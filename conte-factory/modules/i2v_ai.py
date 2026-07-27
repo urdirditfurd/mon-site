@@ -264,6 +264,8 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
         cwd=str(engine.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=CLI_TIMEOUT_SEC,
         env=env,
     )

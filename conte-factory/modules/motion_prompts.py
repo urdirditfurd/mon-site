@@ -37,6 +37,22 @@ MOTION_TEMPLATES: dict[str, str] = {
         "character listens attentively, small nod once, then relaxes, "
         "static camera, stable environment"
     ),
+    "frappe": (
+        "character knocks once on the door with one hand then lowers the hand and waits, "
+        "stable door and background, no morphing"
+    ),
+    "recule": (
+        "character takes one careful step back in surprise then freezes watching, "
+        "stable room, no teleport"
+    ),
+    "etreinte": (
+        "character gently hugs once then holds still smiling softly, "
+        "calm motion, consistent faces, no morphing"
+    ),
+    "pointe": (
+        "character points once toward a side path then lowers the arm, "
+        "small gesture only, stable forest background"
+    ),
 }
 
 
@@ -48,20 +64,31 @@ def resolve_motion_template(action_type: str | None, action_text: str = "") -> s
     for name, tmpl in MOTION_TEMPLATES.items():
         if name in blob:
             return tmpl
-    # Heuristique FR/EN
+    # Heuristique FR/EN depuis le texte d'action / narration
+    if re.search(r"\b(knock|frappe|toc)\b", blob):
+        return MOTION_TEMPLATES["frappe"]
+    if re.search(r"\b(hug|embrace|etreinte|étreinte|serre)\b", blob):
+        return MOTION_TEMPLATES["etreinte"]
+    if re.search(r"\b(step back|recule|steps back)\b", blob):
+        return MOTION_TEMPLATES["recule"]
+    if re.search(r"\b(point|pointe)\b", blob):
+        return MOTION_TEMPLATES["pointe"]
     if re.search(r"\b(walk|marche|cueill)\b", blob):
         return MOTION_TEMPLATES["marche"]
     if re.search(r"\b(run|court|fuit)\b", blob):
         return MOTION_TEMPLATES["court"]
     if re.search(r"\b(danc|danse)\b", blob):
         return MOTION_TEMPLATES["danse"]
+    if re.search(r"\b(appear|apparait|apparaît|steps out)\b", blob):
+        return MOTION_TEMPLATES["apparait"]
+    if re.search(r"\b(listen|ecoute|écoute)\b", blob):
+        return MOTION_TEMPLATES["ecoute"]
     return MOTION_TEMPLATES["regarde"]
 
 
 def build_fluid_prompt(action_type: str | None, scene_context: str, action_text: str = "") -> str:
     motion = resolve_motion_template(action_type, action_text)
-    ctx = (scene_context or "").strip()
-    return (
-        f"{ctx}. {motion}. "
-        f"no sudden cuts, no morphing, consistent lighting, stable anatomy"
-    )
+    ctx = (scene_context or "").strip().strip(" .,;")
+    suffix = "no sudden cuts, no morphing, consistent lighting, stable anatomy"
+    parts = [p for p in (ctx, motion, suffix) if p]
+    return ". ".join(parts)

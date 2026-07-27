@@ -86,6 +86,47 @@ class TestBasics(unittest.TestCase):
         self.assertIn("same character identity", prompt)
         self.assertIn("walking", resolve_motion_template("marche").lower())
 
+    def test_fluid_prompt_no_leading_dot(self) -> None:
+        from modules.clip_prompts import build_clip_plan, finish_action
+        from modules.motion_prompts import build_fluid_prompt
+
+        prompt = build_fluid_prompt("regarde", "", "looks around")
+        self.assertFalse(prompt.startswith("."))
+        self.assertFalse(prompt.startswith(" ."))
+        self.assertTrue(prompt.lower().startswith("character"))
+        finished = finish_action(prompt)
+        self.assertFalse(finished.startswith("."))
+
+        scene = {
+            "index": 1,
+            "script_action": "Chaperon Rouge knocks once on the cottage door",
+            "action_type": "frappe",
+            "script_camera": "static camera shot",
+            "target_duration_sec": 4,
+            "narration": "Toc toc",
+            "visual_prompt": "watercolor cottage door scene with girl in red hood",
+        }
+        board = {
+            "age_group": "7-10",
+            "style_key": "aquarelle",
+            "hero": "Chaperon Rouge",
+            "hero_description": "girl with bright red hooded cape",
+        }
+        plan = build_clip_plan(scene, board, 0, 1, scene_index=0)
+        self.assertFalse(str(plan["action"]).startswith("."))
+        self.assertIn("knock", str(plan["action"]).lower())
+
+    def test_script_payload_keeps_age_and_duration(self) -> None:
+        from modules.script_parser import load_script_file, script_to_story_payload
+
+        sample = ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json"
+        if not sample.exists():
+            self.skipTest("template script absent")
+        story = script_to_story_payload(load_script_file(sample))
+        self.assertEqual(story["age_group"], "7-10")
+        self.assertEqual(float(story["duration_min"]), 5.0)
+        self.assertGreaterEqual(int(story["word_count"]), 400)
+
 
 
 if __name__ == "__main__":

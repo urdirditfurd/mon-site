@@ -95,11 +95,12 @@ def finish_action(action: str) -> str:
     Transforme une action en sequence avec debut et fin.
     Ex: "a boy dancing" -> "a boy starts dancing, then stops and looks at the sky"
     """
-    text = " ".join((action or "").split()).strip()
+    text = " ".join((action or "").split()).strip().lstrip(". ,;")
     if not text:
         return "character takes a calm breath, then looks gently at the camera and holds still"
     if _MULTI_SCENE_FORBIDDEN.search(text):
         text = _MULTI_SCENE_FORBIDDEN.sub("", text).strip(" ,.")
+        text = text.lstrip(". ,;")
     for pattern, replacement in _INFINITE_PATTERNS:
         if pattern.search(text):
             # Garder le sujet si present
@@ -198,7 +199,10 @@ def build_clip_plan(
     narration = str(scene.get("script_action") or scene.get("narration") or "")
     action_type = str(scene.get("action_type") or "")
     if scene.get("script_action"):
-        action = finish_action(build_fluid_prompt(action_type, "", narration))
+        # Motion template + heuristiques sur l'action EN du script (pas de contexte vide → ". foo")
+        action = finish_action(
+            build_fluid_prompt(action_type, "", str(scene.get("script_action") or narration))
+        )
     else:
         action = _action_from_narration(narration, clip_i, n_clips)
         action = finish_action(
