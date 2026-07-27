@@ -56,6 +56,19 @@ class TestBasics(unittest.TestCase):
         self.assertTrue(callable(ensure_story_files))
         self.assertTrue(callable(write_story_to_project))
 
+    def test_main_cli_help(self) -> None:
+        import subprocess
+
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "main.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(0, r.returncode, msg=r.stderr[:500])
+        self.assertIn("--resume", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
