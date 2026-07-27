@@ -519,6 +519,8 @@ def main() -> int:
         publish = None
 
     try:
+        if resume_id:
+            print(f"=== Pipeline projet #{resume_id} ===", flush=True)
         result = run_pipeline(
             theme=args.theme,
             only=args.only,
