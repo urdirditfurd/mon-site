@@ -388,6 +388,38 @@ def run_pipeline(
         music=music,
     )
     if not sourced.get("ok"):
+        if sourced.get("reason") == "doublon_hash" and sourced.get("video"):
+            video_id = int(sourced["video"]["id"])
+            log_event(
+                video_id,
+                "info",
+                "Histoire deja presente — reprise du projet existant.",
+            )
+            set_progress(
+                step="sourcing",
+                video_id=video_id,
+                message=f"Reprise projet #{video_id} (meme histoire)",
+                pct=8,
+            )
+            if only_single == "sourcing":
+                return {
+                    "ok": True,
+                    "resumed": True,
+                    "video_id": video_id,
+                    "video": sourced["video"],
+                }
+            return {
+                "ok": True,
+                "resumed": True,
+                "video_id": video_id,
+                **_run_from(
+                    video_id,
+                    "storyboard",
+                    do_publish,
+                    voice=voice,
+                    subtitles=subtitles,
+                ),
+            }
         set_progress(
             step="error",
             message="Impossible de creer l'histoire",
