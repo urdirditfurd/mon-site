@@ -55,6 +55,10 @@ def clip_span_sec(age_group: str | None = "1-10") -> float:
     return max(3.0, min(5.0, span))
 
 
+# Plafond pratique RTX 3080 : 3 clips courts / scene narrative
+MAX_CLIPS_PER_SCENE = 3
+
+
 def ensure_camera(camera: str | None, clip_index: int = 0) -> str:
     """Camera obligatoire : defaut static, sinon mouvement simple autorise."""
     raw = (camera or "").strip().lower()
@@ -208,7 +212,7 @@ def build_clip_plans_for_scene(
         or board.get("youth_profile", {}).get("scene_target_sec")
         or 28.0
     )
-    n_clips = max(1, min(12, int(round(audio_sec / span))))
+    n_clips = max(1, min(MAX_CLIPS_PER_SCENE, int(round(audio_sec / span))))
     return [
         build_clip_plan(scene, board, i, n_clips, scene_index=scene_index)
         for i in range(n_clips)

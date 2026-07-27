@@ -1,5 +1,4 @@
-# Install Wan I2V 1.3B (Image-to-Video) — RTX 3080 10 Go
-# Reutilise le venv de wan-snapdragon-arm si present.
+# Installe/repare torch + deps I2V (RTX 3080 / CUDA 12.1)
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File C:\ConteFactory\pinokio\wan-i2v\INSTALL-I2V.ps1
 
@@ -9,34 +8,54 @@ $app = Join-Path $root "app"
 $wanT2vEnv = Join-Path $root "..\wan-snapdragon-arm\app\env"
 $localEnv = Join-Path $app "env"
 
-Write-Host "=== Install Wan I2V (vraie animation) ===" -ForegroundColor Cyan
+Write-Host "=== Install / repair Wan I2V (torch) ===" -ForegroundColor Cyan
 
 New-Item -ItemType Directory -Force -Path $app | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $root "outputs") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $root "models") | Out-Null
 
-$py = $null
-if (Test-Path (Join-Path $wanT2vEnv "Scripts\python.exe")) {
-  $py = Join-Path $wanT2vEnv "Scripts\python.exe"
-  Write-Host "Reutilise venv Wan T2V: $py" -ForegroundColor Green
-} elseif (Test-Path (Join-Path $localEnv "Scripts\python.exe")) {
-  $py = Join-Path $localEnv "Scripts\python.exe"
-} else {
-  Write-Host "Creation venv local..." -ForegroundColor Yellow
-  py -3.11 -m venv $localEnv
-  if (-not (Test-Path (Join-Path $localEnv "Scripts\python.exe"))) {
-    python -m venv $localEnv
-  }
-  $py = Join-Path $localEnv "Scripts\python.exe"
-  & $py -m pip install -U pip wheel
-  & $py -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-  & $py -m pip install "diffusers>=0.33.0" transformers accelerate sentencepiece protobuf pillow imageio imageio-ffmpeg opencv-python-headless gradio
+function Ensure-Venv([string]$EnvPath) {
+    $py = Join-Path $EnvPath "Scripts\python.exe"
+    if (-not (Test-Path $py)) {
+        Write-Host "Creation venv: $EnvPath" -ForegroundColor Yellow
+        New-Item -ItemType Directory -Force -Path $EnvPath | Out-Null
+        if (Get-Command py -ErrorAction SilentlyContinue) {
+            py -3.11 -m venv $EnvPath
+            if (-not (Test-Path $py)) { py -3 -m venv $EnvPath }
+        } else {
+            python -m venv $EnvPath
+        }
+    }
+    if (-not (Test-Path $py)) {
+        throw "Impossible de creer le venv: $EnvPath"
+    }
+    return $py
 }
 
-Write-Host "Verifie pipelines I2V (LTX + Wan)..." -ForegroundColor Cyan
-& $py -c "from diffusers import LTXImageToVideoPipeline, WanImageToVideoPipeline; print('LTX OK'); print('Wan I2V OK')"
+$py = $null
+if (Test-Path (Join-Path $wanT2vEnv "Scripts\python.exe")) {
+    $py = Join-Path $wanT2vEnv "Scripts\python.exe"
+    Write-Host "Venv Wan T2V: $py" -ForegroundColor Green
+} else {
+    $py = Ensure-Venv $localEnv
+    Write-Host "Venv I2V local: $py" -ForegroundColor Green
+}
+
+Write-Host "=== Installation torch CUDA 12.1 (peut prendre 10-20 min) ===" -ForegroundColor Yellow
+& $py -m pip install -U pip wheel
+& $py -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+& $py -m pip install "diffusers>=0.33.0" transformers accelerate sentencepiece protobuf pillow imageio imageio-ffmpeg opencv-python-headless gradio
+
+Write-Host "=== Verification torch ===" -ForegroundColor Cyan
+& $py -c "import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available())"
+if ($LASTEXITCODE -ne 0) {
+    throw "torch toujours indisponible apres install"
+}
+
+Write-Host "=== Verification pipelines I2V ===" -ForegroundColor Cyan
+& $py -c "from diffusers import LTXImageToVideoPipeline; print('LTX OK')"
 
 Write-Host ""
-Write-Host "Params rapides: WAN_I2V_BACKEND=ltx, 16 steps, 848x480, 81 frames" -ForegroundColor Yellow
-Write-Host "Lance: .\LANCER-I2V.bat  (http://127.0.0.1:7861)" -ForegroundColor Green
-Write-Host "Puis: .\conte-factory\scripts\SWITCH-TO-I2V.ps1" -ForegroundColor Green
+Write-Host "OK. Relance ensuite le pipeline ConteFactory:" -ForegroundColor Green
+Write-Host '  cd C:\ConteFactory\conte-factory' -ForegroundColor White
+Write-Host '  .\.venv\Scripts\python.exe main.py --resume 1 --only video_ai --no-publish' -ForegroundColor White

@@ -68,11 +68,10 @@ def resolve_i2v_python(engine: Path | None = None) -> str:
     if PINOKIO_I2V_PYTHON and Path(PINOKIO_I2V_PYTHON).exists():
         return PINOKIO_I2V_PYTHON
     engine = engine or resolve_i2v_engine()
+    candidates: list[Path] = []
     if engine:
-        local = engine.parent / "env" / "Scripts" / "python.exe"
-        if local.exists():
-            return str(local)
-        t2v = (
+        candidates.append(engine.parent / "env" / "Scripts" / "python.exe")
+        candidates.append(
             engine.parent.parent.parent
             / "wan-snapdragon-arm"
             / "app"
@@ -80,12 +79,32 @@ def resolve_i2v_python(engine: Path | None = None) -> str:
             / "Scripts"
             / "python.exe"
         )
-        if t2v.exists():
-            return str(t2v)
-        alt = Path(r"C:\ConteFactory\pinokio\wan-snapdragon-arm\app\env\Scripts\python.exe")
-        if alt.exists():
-            return str(alt)
+    candidates.append(
+        Path(r"C:\ConteFactory\pinokio\wan-i2v\app\env\Scripts\python.exe")
+    )
+    candidates.append(
+        Path(r"C:\ConteFactory\pinokio\wan-snapdragon-arm\app\env\Scripts\python.exe")
+    )
+    for py in candidates:
+        if py.exists() and _python_has_torch(str(py)):
+            return str(py)
+    for py in candidates:
+        if py.exists():
+            return str(py)
     return sys.executable
+
+
+def _python_has_torch(py: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [py, "-c", "import torch; print(torch.__version__)"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return proc.returncode == 0 and bool((proc.stdout or "").strip())
+    except Exception:
+        return False
 
 
 def i2v_health() -> dict[str, Any]:
@@ -93,9 +112,12 @@ def i2v_health() -> dict[str, Any]:
         "url": PINOKIO_I2V_URL,
         "gradio_up": False,
         "engine": None,
+        "python": None,
+        "torch_ok": False,
         "ready": False,
         "mode": "missing",
         "prefer_cli": PREFER_CLI,
+        "hint": None,
     }
     try:
         resp = requests.get(PINOKIO_I2V_URL.rstrip("/") + "/", timeout=2)
@@ -105,9 +127,20 @@ def i2v_health() -> dict[str, Any]:
     engine = resolve_i2v_engine()
     if engine:
         info["engine"] = str(engine)
-    if engine:
-        info["ready"] = True
-        info["mode"] = "cli" if PREFER_CLI or not info["gradio_up"] else "gradio"
+        py = resolve_i2v_python(engine)
+        info["python"] = py
+        info["torch_ok"] = _python_has_torch(py)
+        if info["torch_ok"]:
+            info["ready"] = True
+            info["mode"] = "cli" if PREFER_CLI or not info["gradio_up"] else "gradio"
+        else:
+            info["ready"] = False
+            info["mode"] = "torch_missing"
+            info["hint"] = (
+                "torch manquant dans le venv I2V. Lance: "
+                "powershell -ExecutionPolicy Bypass -File "
+                r"C:\ConteFactory\pinokio\wan-i2v\INSTALL-I2V.ps1"
+            )
     elif info["gradio_up"]:
         info["ready"] = True
         info["mode"] = "gradio"

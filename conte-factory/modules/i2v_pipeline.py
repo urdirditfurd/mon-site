@@ -43,12 +43,11 @@ def _clip_paths(
     scene_idx: int,
     clip_idx: int,
 ) -> dict[str, Path]:
-    stem = _clip_stem(scene_idx, clip_idx)
-    part_no = clip_idx
+    # 1 image de reference par scene narrative (pas par micro-clip)
     return {
-        "still": stills_dir / f"{stem}.png",
-        "raw": raw_dir / f"{stem}.mp4",
-        "part": clips_dir / f"scene_{scene_idx:03d}_part{part_no:02d}.mp4",
+        "still": stills_dir / f"scene_{scene_idx:03d}.png",
+        "raw": raw_dir / f"scene_{scene_idx:03d}_clip_{clip_idx:02d}.mp4",
+        "part": clips_dir / f"scene_{scene_idx:03d}_part{clip_idx:02d}.mp4",
     }
 
 
@@ -103,10 +102,12 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
 
     health = i2v_health()
     if not health.get("ready"):
+        hint = health.get("hint") or (
+            "powershell -ExecutionPolicy Bypass -File "
+            r"C:\ConteFactory\pinokio\wan-i2v\INSTALL-I2V.ps1"
+        )
         raise RuntimeError(
-            "Moteur Wan I2V indisponible. "
-            "powershell -ExecutionPolicy Bypass -File pinokio\\wan-i2v\\INSTALL-I2V.ps1 "
-            "puis LANCER-I2V.bat (http://127.0.0.1:7861)."
+            f"Moteur Wan I2V indisponible (mode={health.get('mode')}). {hint}"
         )
     log_event(
         video_id,
@@ -179,39 +180,48 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             }
         )
 
-    # --- Phase 1 : images de reference (init_frame) par clip ---
-    for i, p in enumerate(pending):
+    # --- Phase 1 : 1 image de reference (init_frame) PAR SCENE narrative ---
+    scenes_needing_still: dict[int, dict[str, Any]] = {}
+    for p in pending:
         if not p.get("need_still"):
             continue
+        scene_idx = int(p["job"]["scene_index"])
+        if scene_idx not in scenes_needing_still:
+            scenes_needing_still[scene_idx] = p
+
+    for i, (scene_idx, p) in enumerate(scenes_needing_still.items()):
         job = p["job"]
-        scene_idx = int(job["scene_index"])
-        clip_idx = int(job["clip_index"])
         paths = p["paths"]
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"Image ref clip {i + 1}/{len(pending)} (scene {scene_idx})…",
+            message=f"Image ref scene {scene_idx} ({i + 1}/{len(scenes_needing_still)})…",
             clips_done=done_count,
             clips_total=total_clips,
-            detail=f"init_frame clip {clip_idx}",
+            detail="init_frame scene (reuse clips)",
         )
         generate_scene_image(
             str(p.get("image_prompt") or ""),
             paths["still"],
-            seed=int(p.get("seed") or base_seed),
+            seed=(base_seed + scene_idx * 17) % 1_000_000,
             width=img_w,
             height=img_h,
         )
-        clip_plan = job["clip_plan"]
-        clip_plan["init_frame"] = paths["still"].name
-        clip_plan["reference_image"] = paths["still"].name
-        if paths["raw"].exists():
-            try:
-                paths["raw"].unlink(missing_ok=True)
-            except OSError:
-                pass
-        p["need_still"] = False
-        p["need_i2v"] = True
+        for q in pending:
+            if int(q["job"]["scene_index"]) != scene_idx:
+                continue
+            q["need_still"] = False
+            q["need_i2v"] = True
+            q["paths"]["still"] = paths["still"]
+            clip_plan = q["job"]["clip_plan"]
+            clip_plan["init_frame"] = paths["still"].name
+            clip_plan["reference_image"] = paths["still"].name
+            raw = q["paths"]["raw"]
+            if raw.exists():
+                try:
+                    raw.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     # --- Phase 2 : batch I2V (1 chargement modele) ---
     to_animate = [p for p in pending if p.get("need_i2v")]
