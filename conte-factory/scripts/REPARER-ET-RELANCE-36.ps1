@@ -236,5 +236,5 @@ if (Test-Path $clear) {
 }
 
 Write-Host "=== 5) Relance pipeline #36 ===" -ForegroundColor Cyan
-& $py main.py --resume 36 --only storyboard,video_ai --no-publish
+& $py main.py --resume 36 --only "storyboard,video_ai" --no-publish
 Write-Host "Termine." -ForegroundColor Green

@@ -28,7 +28,7 @@ from config import (
     ensure_dirs,
     estimate_ai_clips,
 )
-from db.database import get_video, init_db, is_paused, log_event, set_paused, update_video
+from db.database import ensure_video_registered, get_video, init_db, is_paused, log_event, set_paused, update_video
 from modules.audio import generate_audio
 from modules.montage import assemble_video
 from modules.progress import set_progress
@@ -42,6 +42,97 @@ from modules.lipsync_service import ensure_lipsync_running
 STEPS = ("sourcing", "storyboard", "audio", "video_ai", "montage", "publish")
 
 
+def _parse_only_steps(only: str | None) -> list[str] | None:
+    if not only:
+        return None
+    parts = [p.strip() for p in only.split(",") if p.strip()]
+    for part in parts:
+        if part not in STEPS:
+            raise ValueError(f"--only invalide: {part!r}. Autorise: {STEPS}")
+    return parts
+
+
+def _run_selected_steps(
+    video_id: int,
+    step_names: list[str],
+    publish: bool,
+    *,
+    voice: str | None = None,
+    subtitles: bool = False,
+) -> dict:
+    video = ensure_video_registered(video_id) or get_video(video_id)
+    if not video:
+        raise ValueError(f"Video {video_id} introuvable (ni DB ni disque)")
+
+    result: dict = {"video_id": video_id, "steps": {}}
+    for step in step_names:
+        if step == "storyboard":
+            set_progress(step="storyboard", video_id=video_id, message="Decoupage des scenes…")
+            result["steps"]["storyboard"] = build_storyboard(video_id)
+        elif step == "audio":
+            set_progress(step="audio", video_id=video_id, message="Generation des dialogues…")
+            result["steps"]["audio"] = generate_audio(video_id, voice=voice)
+        elif step == "video_ai":
+            from config import wan_clip_budget
+
+            try:
+                update_video(video_id, statut="audio_ok", erreur=None)
+            except Exception:
+                pass
+            n_clips = max(1, estimate_ai_clips())
+            try:
+                projet = Path(video["chemin_projet"])
+                board_path = projet / "storyboard.json"
+                if board_path.exists():
+                    board = json.loads(board_path.read_text(encoding="utf-8"))
+                    planned = sum(
+                        int(s.get("ai_clips_planned") or 0) for s in (board.get("scenes") or [])
+                    )
+                    if planned > 0:
+                        n_clips = planned
+                    else:
+                        n_clips = max(
+                            1,
+                            wan_clip_budget(float(board.get("duration_min") or TARGET_DURATION_MIN)),
+                        )
+            except Exception:
+                pass
+            set_progress(
+                step="video_ai",
+                video_id=video_id,
+                message="Generation clips animes (Image-to-Video)…",
+                clips_done=0,
+                clips_total=n_clips,
+            )
+            result["steps"]["video_ai"] = generate_scene_videos(video_id)
+        elif step == "montage":
+            set_progress(step="montage", video_id=video_id, message="Assemblage du film…")
+            result["steps"]["montage"] = assemble_video(video_id, with_subtitles=subtitles)
+        elif step == "publish":
+            set_progress(step="publish", video_id=video_id, message="Publication YouTube…")
+            result["steps"]["publish"] = publish_youtube(video_id, force=True)
+        elif step == "sourcing":
+            raise ValueError("Utilisez --only sourcing sans --resume pour une nouvelle video")
+        else:
+            raise ValueError(f"Etape inconnue: {step}")
+
+    if publish and "publish" not in step_names:
+        set_progress(step="publish", video_id=video_id, message="Publication YouTube…")
+        result["steps"]["publish"] = publish_youtube(video_id, force=True)
+    elif "publish" not in step_names and "montage" in step_names:
+        from modules.publish import prepare_publish_package
+
+        result["steps"]["publish"] = prepare_publish_package(video_id)
+
+    set_progress(
+        step="done",
+        video_id=video_id,
+        message="Video prete",
+        detail="Etapes selectionnees terminees",
+    )
+    return result
+
+
 def _run_from(
     video_id: int,
     start_step: str,
@@ -50,9 +141,9 @@ def _run_from(
     voice: str | None = None,
     subtitles: bool = False,
 ) -> dict:
-    video = get_video(video_id)
+    video = ensure_video_registered(video_id) or get_video(video_id)
     if not video:
-        raise ValueError(f"Vidéo {video_id} introuvable")
+        raise ValueError(f"Vidéo {video_id} introuvable (ni DB ni disque)")
 
     start_idx = STEPS.index(start_step)
     result: dict = {"video_id": video_id, "steps": {}}
@@ -254,11 +345,21 @@ def run_pipeline(
             cfg.TARGET_DURATION_MIN = 3
             cfg.SCENE_TARGET_SEC = 45
 
-    if only and only not in STEPS:
-        raise ValueError(f"--only doit être parmi {STEPS}")
+    only_steps = _parse_only_steps(only)
 
     if resume_id:
-        start = only or "storyboard"
+        if only_steps and len(only_steps) > 1:
+            return {
+                "ok": True,
+                **_run_selected_steps(
+                    resume_id,
+                    only_steps,
+                    do_publish,
+                    voice=voice,
+                    subtitles=subtitles,
+                ),
+            }
+        start = only_steps[0] if only_steps else "storyboard"
         return {
             "ok": True,
             **_run_from(
@@ -266,8 +367,10 @@ def run_pipeline(
             ),
         }
 
-    if only and only != "sourcing":
+    if only_steps and only_steps != ["sourcing"]:
         raise ValueError("Pour une étape seule hors sourcing, utilisez --resume ID")
+
+    only_single = only_steps[0] if only_steps else None
 
     set_progress(step="sourcing", message="Ecriture de l'histoire…")
     sourced = source_new_video(
@@ -288,7 +391,7 @@ def run_pipeline(
 
     video_id = int(sourced["video_id"])
     set_progress(step="sourcing", video_id=video_id, message="Histoire prete", pct=8)
-    if only == "sourcing":
+    if only_single == "sourcing":
         return sourced
 
     return {

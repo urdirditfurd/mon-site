@@ -256,6 +256,60 @@ def get_video(video_id: int) -> dict[str, Any] | None:
     return normalize_video(dict(row) if row else None)
 
 
+def ensure_video_registered(video_id: int) -> dict[str, Any] | None:
+    """Retrouve une video en DB ou la re-enregistre depuis data/videos/video_XXXX."""
+    init_db()
+    existing = get_video(video_id)
+    if existing:
+        return existing
+
+    projet = project_dir(video_id)
+    story_path = projet / "story.json"
+    board_path = projet / "storyboard.json"
+    if not story_path.exists() and not board_path.exists():
+        return None
+
+    titre = f"Video #{video_id}"
+    theme = ""
+    statut = "nouveau"
+    for path in (story_path, board_path):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            titre = str(data.get("titre") or titre)
+            theme = str(data.get("theme") or theme)
+            statut = "storyboard_ok" if path == board_path else "script_ok"
+        except Exception:
+            pass
+
+    if (projet / "audio" / "narration.mp3").exists():
+        statut = "audio_ok"
+    if (projet / "ai_clips").exists():
+        statut = "images_ok"
+
+    hash_script = fingerprint(f"disk-recover-{video_id}-{projet}")
+    chemin = str(projet.resolve())
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO videos(
+                id, titre, titre_original, theme, hash_script, statut,
+                chemin_projet, date_creation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (video_id, titre, titre, theme, hash_script, statut, chemin, _now()),
+        )
+        row = conn.execute("SELECT MAX(id) FROM videos").fetchone()
+        max_id = int(row[0] or video_id)
+        conn.execute(
+            "INSERT OR REPLACE INTO sqlite_sequence(name, seq) VALUES('videos', ?)",
+            (max(max_id, video_id),),
+        )
+    log_event(video_id, "info", "Projet recupere depuis le disque")
+    return get_video(video_id)
+
+
 def list_videos(limit: int = 50) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
