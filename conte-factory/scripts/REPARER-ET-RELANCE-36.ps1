@@ -9,19 +9,29 @@ $Branch = "cursor/conte-factory-pipeline-0391"
 
 function Invoke-Git {
     param(
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]]$Args
+        [Parameter(Mandatory = $true)]
+        [string[]]$GitCommand
     )
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $out = & git @Args 2>&1
+    $out = & git @GitCommand 2>&1
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prev
     if ($code -ne 0) {
         $msg = ($out | Out-String).Trim()
-        throw "git $($Args -join ' ') a echoue (code $code). $msg"
+        throw "git $($GitCommand -join ' ') a echoue (code $code). $msg"
     }
     return $out
+}
+
+function Invoke-GitCleanSafe {
+    Invoke-Git @(
+        "clean", "-fd",
+        "-e", "conte-factory/.venv",
+        "-e", "conte-factory/data",
+        "-e", "conte-factory/.env",
+        "-e", "pinokio"
+    ) | Out-Null
 }
 
 function Ensure-GitOrigin {
@@ -35,9 +45,9 @@ function Ensure-GitOrigin {
         throw "git remote a echoue (code $code)"
     }
     if ($remotes -contains "origin") {
-        Invoke-Git remote set-url origin $Url | Out-Null
+        Invoke-Git @("remote", "set-url", "origin", $Url) | Out-Null
     } else {
-        Invoke-Git remote add origin $Url | Out-Null
+        Invoke-Git @("remote", "add", "origin", $Url) | Out-Null
     }
 }
 
@@ -87,7 +97,11 @@ function Remove-BrokenGitRefs {
     param([string]$Base)
     $broken = @(
         ".git\refs\heads\cursor",
-        ".git\refs\remotes\origin\cursor"
+        ".git\refs\remotes\origin\cursor",
+        ".git\ORIG_HEAD",
+        ".git\MERGE_HEAD",
+        ".git\CHERRY_PICK_HEAD",
+        ".git\REBASE_HEAD"
     )
     foreach ($rel in $broken) {
         $full = Join-Path $Base $rel
@@ -110,7 +124,7 @@ Write-Host "=== 1) Aller dans C:\ConteFactory ===" -ForegroundColor Cyan
 if (-not (Test-Path $Root)) {
     Write-Host "Dossier absent - clone complet..." -ForegroundColor Yellow
     New-Item -ItemType Directory -Path (Split-Path $Root) -Force | Out-Null
-    Invoke-Git clone --branch $Branch --single-branch $Repo $Root | Out-Null
+    Invoke-Git @("clone", "--branch", $Branch, "--single-branch", $Repo, $Root) | Out-Null
 }
 Set-Location $Root
 
@@ -119,7 +133,7 @@ if (-not (Test-Path (Join-Path $Root ".git"))) {
     Write-Host "Pas de .git - re-clone dans un dossier temp puis copie..." -ForegroundColor Yellow
     $tmp = Join-Path $env:TEMP "contefactory-repair"
     if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
-    Invoke-Git clone --branch $Branch --single-branch $Repo $tmp | Out-Null
+    Invoke-Git @("clone", "--branch", $Branch, "--single-branch", $Repo, $tmp) | Out-Null
     $keep = @("conte-factory\data", "conte-factory\.venv", "conte-factory\.env", "pinokio")
     foreach ($rel in $keep) {
         $src = Join-Path $Root $rel
@@ -149,11 +163,10 @@ if (-not (Test-Path (Join-Path $Root ".git"))) {
     $ErrorActionPreference = "Continue"
     & git reset --hard 2>&1 | Out-Null
     $ErrorActionPreference = $prev
-    Invoke-Git fetch origin $Branch --depth 50 | Out-Null
-    Invoke-Git checkout -B $Branch FETCH_HEAD | Out-Null
-    Invoke-Git reset --hard FETCH_HEAD | Out-Null
-    # Ne pas supprimer .venv / data / .env (ignores par git)
-    Invoke-Git clean -fd -e conte-factory/.venv -e conte-factory/data -e conte-factory/.env -e pinokio | Out-Null
+    Invoke-Git @("fetch", "origin", $Branch, "--depth", "50") | Out-Null
+    Invoke-Git @("checkout", "-B", $Branch, "FETCH_HEAD") | Out-Null
+    Invoke-Git @("reset", "--hard", "FETCH_HEAD") | Out-Null
+    Invoke-GitCleanSafe
 }
 
 Write-Host "Git OK." -ForegroundColor Green
