@@ -1,9 +1,9 @@
-"""Pipeline Image-to-Video — vraie animation (pas diaporama / Wav2Lip).
+"""Pipeline Image-to-Video — clips courts anti-boucle (3-5 s par plan).
 
-1 TTS (deja fait) → 2 Image scene 16:9 Pixar → 3 Wan/LTX I2V (batch) → 4 Mux audio → 5 Montage
+Workflow :
+  Input → decoupage clip_plans → image ref par clip → I2V batch → trim loops → export montage
 
-Batch critique : 1 chargement modele pour toutes les scenes restantes
-(sinon chaque CLI recharge = 10+ min/scene).
+Jamais de video longue en un seul prompt : 1 action + 1 camera par clip.
 """
 
 from __future__ import annotations
@@ -18,121 +18,72 @@ from PIL import Image
 
 from config import PINOKIO_I2V_HEIGHT, PINOKIO_I2V_WIDTH
 from db.database import get_video, log_event, update_video
-from modules.i2v_ai import (
-    MOTION_PROMPT,
-    animate_scene_i2v,
-    animate_scenes_i2v_batch,
-    i2v_health,
+from modules.clip_postprocess import trim_loop_tail
+from modules.clip_prompts import (
+    build_clip_plans_for_board,
+    enhance_image_prompt,
+    enhance_motion_prompt,
+    flatten_clip_jobs,
 )
+from modules.i2v_ai import animate_scene_i2v, animate_scenes_i2v_batch, i2v_health
 from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
 from modules.storyboard import enrich_board_visual_prompts
 from modules.youth_spec import normalize_age, youth_profile
 
-PIXAR_SCENE_PREFIX = (
-    "cute 3D Pixar style children's film still, vibrant pastel colors, "
-    "bright soft lighting, highly detailed, cinematic 16:9 composition, "
-    "clear character in environment, friendly expression, sharp focus"
-)
+
+def _clip_stem(scene_idx: int, clip_idx: int) -> str:
+    return f"scene_{scene_idx:03d}_clip_{clip_idx:02d}"
 
 
-def _ffprobe_duration(path: Path) -> float:
-    out = subprocess.check_output(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        text=True,
-    ).strip()
-    return float(out)
+def _clip_paths(
+    clips_dir: Path,
+    stills_dir: Path,
+    raw_dir: Path,
+    scene_idx: int,
+    clip_idx: int,
+) -> dict[str, Path]:
+    stem = _clip_stem(scene_idx, clip_idx)
+    part_no = clip_idx
+    return {
+        "still": stills_dir / f"{stem}.png",
+        "raw": raw_dir / f"{stem}.mp4",
+        "part": clips_dir / f"scene_{scene_idx:03d}_part{part_no:02d}.mp4",
+    }
 
 
-def _scene_image_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
-    """Utilise le visual_prompt EN du storyboard (LLM) — pas le script FR."""
-    base = str(scene.get("visual_prompt") or "").strip()
-    style = str(board.get("visual_style") or "")
-    # Si deja un prompt EN riche, ne pas re-injecter le theme FR
-    if base and len(base) > 60:
-        if style and style.lower() not in base.lower():
-            return f"{PIXAR_SCENE_PREFIX}. {style}. {base}"
-        return f"{PIXAR_SCENE_PREFIX}. {base}"
-    theme = str(board.get("hero_description") or board.get("theme") or board.get("hero") or "")
-    age = normalize_age(str(board.get("age_group") or "1-10"))
-    profile = youth_profile(age)
-    color = str(profile.get("color_prompt") or "")
-    return (
-        f"{PIXAR_SCENE_PREFIX}. {style}. {base}. "
-        f"Main subject: {theme}. {color}. "
-        f"no text, no watermark, no logo, not a close-up portrait only"
-    )
+def _still_ok(still: Path, img_w: int, img_h: int) -> bool:
+    if not still.exists() or still.stat().st_size < 1000:
+        return False
+    try:
+        with Image.open(still) as im:
+            return im.size == (img_w, img_h)
+    except Exception:
+        return False
 
 
-def _motion_prompt(scene: dict[str, Any], board: dict[str, Any]) -> str:
-    """Motion I2V subtil : respiration / yeux / tete — visage verrouille."""
-    visual = str(scene.get("visual_prompt") or "").strip()
-    theme = str(
-        board.get("hero_description") or board.get("theme") or board.get("hero") or "character"
-    )
-    head = visual if visual else f"Cute Pixar 3D animated shot of {theme}"
-    return (
-        f"{head}. {MOTION_PROMPT}. "
-        "locked face identity, no morphing, sharp facial features"
-    )
+def _part_ok(part: Path) -> bool:
+    return part.exists() and part.stat().st_size > 5000
 
 
-def _fit_video_to_audio(video: Path, audio: Path, out: Path, fps: int = 24) -> None:
-    """Boucle le clip I2V anime jusqu'a la duree audio (mouvement reel, pas image fixe)."""
-    dur = max(1.0, _ffprobe_duration(audio))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-stream_loop",
-        "-1",
-        "-i",
-        str(video),
-        "-i",
-        str(audio),
-        "-t",
-        f"{dur:.3f}",
-        "-vf",
-        f"scale=1920:1080:force_original_aspect_ratio=decrease,"
-        f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,fps={fps},format=yuv420p",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        "-r",
-        str(fps),
-        str(out),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-
-
-def _scene_audio(projet: Path, idx: int) -> Path | None:
-    audio_dir = projet / "audio"
-    scene = audio_dir / f"scene_{idx:03d}.mp3"
-    if scene.exists():
-        return scene
-    parts = sorted(audio_dir.glob(f"scene_{idx:03d}_line*.mp3"))
-    return parts[0] if parts else None
+def _sync_scene_clip_files(
+    scene: dict[str, Any],
+    clips_dir: Path,
+    plans: list[dict[str, Any]],
+    scene_idx: int,
+) -> list[str]:
+    names: list[str] = []
+    for ci in range(len(plans)):
+        part = clips_dir / f"scene_{scene_idx:03d}_part{ci:02d}.mp4"
+        if _part_ok(part):
+            names.append(part.name)
+    scene["ai_clip_files"] = names
+    scene["ai_clips_planned"] = len(plans)
+    return names
 
 
 def generate_i2v_videos(video_id: int) -> dict[str, Any]:
-    """Etapes 2–4 : image scene → I2V batch → mux audio."""
+    """Etapes : clip_plans → image ref → I2V batch → trim anti-loop → export."""
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Video introuvable: {video_id}")
@@ -148,8 +99,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     age = normalize_age(str(board.get("age_group") or "1-10"))
-    profile = youth_profile(age)
-    fps = int(profile.get("fps") or 24)
+    youth_profile(age)
 
     health = i2v_health()
     if not health.get("ready"):
@@ -161,119 +111,107 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     log_event(
         video_id,
         "info",
-        f"Pipeline I2V : mode={health.get('mode')} url={health.get('url')} batch=on",
+        f"Pipeline I2V clips courts : mode={health.get('mode')} url={health.get('url')}",
     )
 
-    # Aligner image source = resolution I2V (evite deformation / flou)
-    img_w = int(PINOKIO_I2V_WIDTH or 1024)
-    img_h = int(PINOKIO_I2V_HEIGHT or 576)
+    img_w = int(PINOKIO_I2V_WIDTH or 848)
+    img_h = int(PINOKIO_I2V_HEIGHT or 480)
     set_image_output_size(img_w, img_h)
 
-    # Regenerer prompts EN si storyboard ancien (script FR brut)
     n_enriched = enrich_board_visual_prompts(board, force=False)
     if n_enriched:
-        board_path.write_text(
-            json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
         log_event(
             video_id,
             "info",
-            f"Prompts visuels EN enrichis (LLM/fallback) : {n_enriched} scene(s).",
+            f"Prompts visuels EN enrichis : {n_enriched} scene(s).",
         )
+
+    total_clips = build_clip_plans_for_board(board)
+    jobs = flatten_clip_jobs(board)
+    if not jobs:
+        raise RuntimeError("Aucun clip planifie dans le storyboard")
 
     theme_key = str(board.get("theme") or board.get("hero") or "conte")
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
 
-    scenes = board.get("scenes") or []
-    total = len(scenes)
-    if total == 0:
-        raise RuntimeError("Aucune scene dans le storyboard")
-
     pending: list[dict[str, Any]] = []
+    done_count = 0
 
-    # --- Phase 1 : skip deja faits + generer images manquantes ---
-    for i, scene in enumerate(scenes):
-        idx = int(scene["index"])
-        still = stills_dir / f"scene_{idx:03d}.png"
-        raw = raw_dir / f"scene_{idx:03d}_i2v.mp4"
-        final = clips_dir / f"scene_{idx:03d}_part00.mp4"
+    for job in jobs:
+        scene_idx = int(job["scene_index"])
+        clip_idx = int(job["clip_index"]) - 1
+        clip_plan = job["clip_plan"]
+        scene = job["scene"]
+        paths = _clip_paths(clips_dir, stills_dir, raw_dir, scene_idx, clip_idx)
 
-        if final.exists() and final.stat().st_size > 5000:
-            scene["ai_clip_files"] = [final.name]
-            scene["ai_clips_planned"] = 1
-            scene["still_image"] = still.name if still.exists() else scene.get("still_image")
-            scene["i2v_raw"] = raw.name if raw.exists() else scene.get("i2v_raw")
-            scene["i2v_mode"] = scene.get("i2v_mode") or "cached"
-            log_event(video_id, "info", f"I2V scene {idx}: skip (deja pret)")
-            set_progress(
-                step="video_ai",
-                video_id=video_id,
-                message=f"I2V {i + 1}/{total} deja OK (reprise)",
-                clips_done=i + 1,
-                clips_total=total,
-                detail=f"Scene {idx} ignoree (fichier existant)",
-            )
+        if _part_ok(paths["part"]):
+            done_count += 1
+            clip_plan["init_frame"] = paths["still"].name if paths["still"].exists() else None
+            clip_plan["output_file"] = paths["part"].name
             continue
 
-        # Raw I2V deja la + still bonne res → juste mux plus tard
-        still_ok = False
-        if still.exists() and still.stat().st_size > 1000:
-            try:
-                with Image.open(still) as im:
-                    still_ok = im.size == (img_w, img_h)
-            except Exception:
-                still_ok = False
+        still_ok = _still_ok(paths["still"], img_w, img_h)
+        raw_ok = paths["raw"].exists() and paths["raw"].stat().st_size > 5000
 
-        if raw.exists() and raw.stat().st_size > 5000 and still_ok:
+        if raw_ok and still_ok:
             pending.append(
                 {
-                    "i": i,
-                    "idx": idx,
-                    "scene": scene,
-                    "still": still,
-                    "raw": raw,
-                    "final": final,
+                    "job": job,
+                    "paths": paths,
+                    "need_still": False,
                     "need_i2v": False,
+                    "need_trim": True,
                 }
             )
             continue
 
+        need_i2v = not raw_ok or not still_ok
+        pending.append(
+            {
+                "job": job,
+                "paths": paths,
+                "need_still": not still_ok,
+                "need_i2v": need_i2v,
+                "need_trim": True,
+                "prompt": enhance_motion_prompt(clip_plan),
+                "image_prompt": enhance_image_prompt(clip_plan, board),
+                "seed": (base_seed + scene_idx * 31 + clip_idx * 7) % 1_000_000,
+            }
+        )
+
+    # --- Phase 1 : images de reference (init_frame) par clip ---
+    for i, p in enumerate(pending):
+        if not p.get("need_still"):
+            continue
+        job = p["job"]
+        scene_idx = int(job["scene_index"])
+        clip_idx = int(job["clip_index"])
+        paths = p["paths"]
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"I2V scene {i + 1}/{total} — image Pixar…",
-            clips_done=i,
-            clips_total=total,
-            detail="Etape 2/5 : storyboard image",
+            message=f"Image ref clip {i + 1}/{len(pending)} (scene {scene_idx})…",
+            clips_done=done_count,
+            clips_total=total_clips,
+            detail=f"init_frame clip {clip_idx}",
         )
-        if not still_ok:
-            generate_scene_image(
-                _scene_image_prompt(scene, board),
-                still,
-                seed=(base_seed + idx * 17) % 1_000_000,
-                width=img_w,
-                height=img_h,
-            )
-            # Nouvelle image → invalider raw ancien (res/flou)
-            if raw.exists():
-                try:
-                    raw.unlink(missing_ok=True)
-                except OSError:
-                    pass
-
-        pending.append(
-            {
-                "i": i,
-                "idx": idx,
-                "scene": scene,
-                "still": still,
-                "raw": raw,
-                "final": final,
-                "need_i2v": not (raw.exists() and raw.stat().st_size > 5000),
-                "prompt": _motion_prompt(scene, board),
-                "seed": (base_seed + idx * 31) % 1_000_000,
-            }
+        generate_scene_image(
+            str(p.get("image_prompt") or ""),
+            paths["still"],
+            seed=int(p.get("seed") or base_seed),
+            width=img_w,
+            height=img_h,
         )
+        clip_plan = job["clip_plan"]
+        clip_plan["init_frame"] = paths["still"].name
+        clip_plan["reference_image"] = paths["still"].name
+        if paths["raw"].exists():
+            try:
+                paths["raw"].unlink(missing_ok=True)
+            except OSError:
+                pass
+        p["need_still"] = False
+        p["need_i2v"] = True
 
     # --- Phase 2 : batch I2V (1 chargement modele) ---
     to_animate = [p for p in pending if p.get("need_i2v")]
@@ -281,21 +219,17 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"I2V batch {len(to_animate)} scene(s) — 1 chargement modele…",
-            clips_done=total - len(pending),
-            clips_total=total,
-            detail="Etape 3/5 : I2V face-safe (CFG 3.5 · motion 0.3 · 848x480)",
+            message=f"I2V batch {len(to_animate)} clip(s) courts…",
+            clips_done=done_count,
+            clips_total=total_clips,
+            detail="clips 3-5 s · anti-loop · CFG 3.5",
         )
-        log_event(
-            video_id,
-            "info",
-            f"I2V batch start: {len(to_animate)} scenes (1 load modele)",
-        )
+        log_event(video_id, "info", f"I2V batch: {len(to_animate)} clips (1 load modele)")
         batch_jobs = [
             {
-                "image": p["still"],
-                "dest": p["raw"],
-                "prompt": p.get("prompt") or "",
+                "image": p["paths"]["still"],
+                "dest": p["paths"]["raw"],
+                "prompt": str(p.get("prompt") or ""),
                 "seed": p.get("seed"),
             }
             for p in to_animate
@@ -309,8 +243,8 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
                 try:
                     batch_results.append(
                         animate_scene_i2v(
-                            p["still"],
-                            p["raw"],
+                            p["paths"]["still"],
+                            p["paths"]["raw"],
                             prompt=str(p.get("prompt") or ""),
                             seed=p.get("seed"),
                         )
@@ -320,73 +254,79 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
 
         for p, result in zip(to_animate, batch_results):
             if not result.get("ok"):
+                job = p["job"]
                 raise RuntimeError(
-                    f"I2V scene {p['idx']} echoue: {result.get('error') or result}"
+                    f"I2V scene {job['scene_index']} clip {job['clip_index']} echoue: "
+                    f"{result.get('error') or result}"
                 )
             p["i2v_mode"] = result.get("mode") or "cli_i2v_batch"
             p["need_i2v"] = False
 
-    # --- Phase 3 : mux audio + checkpoint ---
-    for p in pending:
-        i = int(p["i"])
-        idx = int(p["idx"])
-        scene = p["scene"]
-        still: Path = p["still"]
-        raw: Path = p["raw"]
-        final: Path = p["final"]
+    # --- Phase 3 : trim anti-loop + checkpoint ---
+    for i, p in enumerate(pending):
+        job = p["job"]
+        scene_idx = int(job["scene_index"])
+        clip_idx = int(job["clip_index"])
+        clip_plan = job["clip_plan"]
+        scene = job["scene"]
+        paths = p["paths"]
 
-        if not raw.exists() or raw.stat().st_size < 5000:
-            raise RuntimeError(f"I2V raw manquant pour scene {idx}: {raw}")
+        if not paths["raw"].exists() or paths["raw"].stat().st_size < 5000:
+            raise RuntimeError(f"I2V raw manquant: {paths['raw']}")
 
         set_progress(
             step="video_ai",
             video_id=video_id,
-            message=f"I2V scene {i + 1}/{total} — sync audio…",
-            clips_done=i,
-            clips_total=total,
-            detail="Etape 4/5 : mux voix sur clip anime",
+            message=f"Nettoyage loop clip {done_count + 1}/{total_clips}…",
+            clips_done=done_count,
+            clips_total=total_clips,
+            detail=f"scene {scene_idx} clip {clip_idx}",
         )
-        audio = _scene_audio(projet, idx)
-        if audio and audio.exists():
-            _fit_video_to_audio(raw, audio, final, fps=fps)
-        else:
-            final.write_bytes(raw.read_bytes())
+        trim_loop_tail(paths["raw"], paths["part"])
+        clip_plan["output_file"] = paths["part"].name
+        clip_plan["i2v_raw"] = paths["raw"].name
+        scene["i2v_mode"] = p.get("i2v_mode") or "cli_i2v_clip_batch"
+        done_count += 1
 
-        scene["ai_clip_files"] = [final.name]
-        scene["ai_clips_planned"] = 1
-        scene["still_image"] = still.name
-        scene["i2v_raw"] = raw.name
-        scene["i2v_mode"] = p.get("i2v_mode") or "cli_i2v_batch"
+        plans = scene.get("clip_plans") or []
+        _sync_scene_clip_files(scene, clips_dir, plans, scene_idx)
         board_path.write_text(
             json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         log_event(
             video_id,
             "info",
-            f"I2V scene {idx}: {scene['i2v_mode']} → {final.name}",
-        )
-        set_progress(
-            step="video_ai",
-            video_id=video_id,
-            message=f"I2V {i + 1}/{total} OK",
-            clips_done=i + 1,
-            clips_total=total,
-            detail=f"Scene {idx} animee [{scene['i2v_mode']}]",
+            f"I2V clip scene {scene_idx}/{clip_idx}: {paths['part'].name}",
         )
 
-    board["pipeline"] = "i2v_ltx_wan_batch"
+    # Sync final pour scenes deja en cache
+    for scene in board.get("scenes") or []:
+        scene_idx = int(scene.get("index") or 0)
+        plans = scene.get("clip_plans") or []
+        if plans:
+            _sync_scene_clip_files(scene, clips_dir, plans, scene_idx)
+
+    board["pipeline"] = "i2v_clip_plans_anti_loop"
     board["i2v_mode"] = health.get("mode")
     board_path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
     update_video(video_id, statut="images_ok")
     log_event(
         video_id,
         "info",
-        f"Pipeline I2V OK : {total} scenes (batch, 33f/8steps).",
+        f"Pipeline I2V OK : {total_clips} clips courts (3-5 s, trim anti-loop).",
+    )
+    set_progress(
+        step="video_ai",
+        video_id=video_id,
+        message=f"I2V termine — {total_clips} clips",
+        clips_done=total_clips,
+        clips_total=total_clips,
+        detail="pret pour montage",
     )
     return {
         "ok": True,
         "provider": "i2v",
-        "model": "LTX/Wan-1.3B-batch",
-        "clips": total,
+        "model": "LTX/Wan-clip-batch",
+        "clips": total_clips,
         "dir": str(clips_dir),
     }

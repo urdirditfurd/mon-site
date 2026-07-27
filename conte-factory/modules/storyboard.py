@@ -20,6 +20,7 @@ from config import (
     scene_sec_for_audience,
 )
 from db.database import get_video, log_event, update_video, video_title
+from modules.clip_prompts import build_clip_plans_for_board
 from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
 
 
@@ -421,6 +422,7 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "scene_count": len(scenes),
         "scenes": scenes,
     }
+    total_clips = build_clip_plans_for_board(board)
     out = projet / "storyboard.json"
     out.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
     update_video(video_id, statut="storyboard_ok")
@@ -429,8 +431,8 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "info",
         (
             f"Storyboard jeunesse {age_group} : {len(scenes)} scènes, "
-            f"prompts visuels EN (LLM/fallback), {profile['fps']} fps, "
-            f"plans {profile['shot_sec_min']}-{profile['shot_sec_max']}s."
+            f"{total_clips} clips courts (3-5 s), prompts anti-boucle, "
+            f"{profile['fps']} fps, plans {profile['shot_sec_min']}-{profile['shot_sec_max']}s."
         ),
     )
     return board

@@ -147,8 +147,8 @@ with st.form("create_form", clear_on_submit=False):
     yp = youth_profile(age_group)
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
         mode_txt = (
-            f"**Pipeline I2V face-safe** : LTX/Wan · CFG 3.5 · motion 0.3 · "
-            f"848×480 · scheduler natif (~{scenes} scènes)"
+            f"**Pipeline I2V anti-boucle** : clips 3-5 s · camera fixe/pan/zoom · "
+            f"trim loops · LTX/Wan CFG 3.5 (~{scenes} scènes découpées)"
         )
     elif provider in {"talking", "lipsync", "talk"}:
         mode_txt = (
