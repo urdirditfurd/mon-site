@@ -400,6 +400,8 @@ def animate_scenes_i2v_batch(
             cwd=str(engine.parent),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=_cli_env(),
         )
