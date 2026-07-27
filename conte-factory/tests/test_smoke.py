@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from config import ensure_dirs
-from db.database import fingerprint, init_db, similar_title_exists
+from db.database import fingerprint, init_db, project_path, similar_title_exists
 from modules.audio import _normalize_tts_pitch, _normalize_tts_rate
 from modules.sourcing import _hero_short_name
 

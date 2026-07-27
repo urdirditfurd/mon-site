@@ -14,6 +14,7 @@ from config import (
     OLLAMA_URL,
     STORY_MODE,
     TARGET_DURATION_MIN,
+    ensure_dirs,
     scene_count_for_duration,
 )
 from db.database import (
@@ -436,6 +437,7 @@ def source_new_video(
     music: str = "berceuse",
 ) -> dict[str, Any]:
     """Crée un nouveau projet si l'histoire n'existe pas déjà."""
+    ensure_dirs()
     age_group = (age_group or "1-10").strip().lower()
     from modules.youth_spec import normalize_age
 

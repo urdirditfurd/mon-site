@@ -257,10 +257,15 @@ def get_video(video_id: int) -> dict[str, Any] | None:
 
 
 def project_path(video_id: int, *, create: bool = False) -> Path:
-    """Chemin projet sans creer le dossier (sauf si create=True)."""
-    from config import VIDEOS_DIR
+    """Chemin projet ; cree le dossier si create=True."""
+    from config import VIDEOS_DIR, ensure_dirs
 
-    return VIDEOS_DIR / f"video_{video_id:04d}"
+    if create:
+        ensure_dirs()
+    path = VIDEOS_DIR / f"video_{video_id:04d}"
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def project_has_artifacts(projet: Path) -> bool:
