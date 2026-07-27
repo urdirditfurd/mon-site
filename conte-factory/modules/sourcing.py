@@ -21,6 +21,7 @@ from db.database import (
     create_video,
     find_by_hash,
     fingerprint,
+    get_video,
     log_event,
     project_dir,
     similar_title_exists,
