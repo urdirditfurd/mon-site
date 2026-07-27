@@ -7,6 +7,40 @@ $Root = "C:\ConteFactory"
 $Repo = "https://github.com/urdirditfurd/mon-site.git"
 $Branch = "cursor/conte-factory-pipeline-0391"
 
+function Invoke-Git {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $out = & git @Args 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) {
+        $msg = ($out | Out-String).Trim()
+        throw "git $($Args -join ' ') a echoue (code $code). $msg"
+    }
+    return $out
+}
+
+function Ensure-GitOrigin {
+    param([string]$Url)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $remotes = @(& git remote 2>&1)
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) {
+        throw "git remote a echoue (code $code)"
+    }
+    if ($remotes -contains "origin") {
+        Invoke-Git remote set-url origin $Url | Out-Null
+    } else {
+        Invoke-Git remote add origin $Url | Out-Null
+    }
+}
+
 if (-not (Test-Path $Root)) {
     throw "Dossier introuvable: $Root"
 }
@@ -15,9 +49,7 @@ Set-Location $Root
 Write-Host "=== Suppression refs Git corrompus ===" -ForegroundColor Cyan
 $broken = @(
     ".git\refs\heads\cursor",
-    ".git\refs\remotes\origin\cursor",
-    ".git\refs\heads\$Branch",
-    ".git\refs\remotes\origin\$Branch"
+    ".git\refs\remotes\origin\cursor"
 )
 foreach ($rel in $broken) {
     $full = Join-Path $Root $rel
@@ -37,15 +69,13 @@ if (Test-Path $packed) {
 }
 
 Write-Host "=== Reset local + fetch ===" -ForegroundColor Cyan
-git remote remove origin 2>$null
-git remote add origin $Repo
-git reset --hard 2>$null
-git clean -fd
-git fetch origin $Branch --depth 50
-if ($LASTEXITCODE -ne 0) {
-    throw "git fetch a echoue"
-}
-
-git checkout -B $Branch FETCH_HEAD
-git reset --hard FETCH_HEAD
+Ensure-GitOrigin -Url $Repo
+$prev = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& git reset --hard 2>&1 | Out-Null
+$ErrorActionPreference = $prev
+Invoke-Git clean -fd | Out-Null
+Invoke-Git fetch origin $Branch --depth 50 | Out-Null
+Invoke-Git checkout -B $Branch FETCH_HEAD | Out-Null
+Invoke-Git reset --hard FETCH_HEAD | Out-Null
 Write-Host "Git OK sur $Branch" -ForegroundColor Green
