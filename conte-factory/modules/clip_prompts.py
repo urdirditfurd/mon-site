@@ -8,7 +8,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from modules.character_lock import apply_character_lock
+from modules.motion_prompts import build_fluid_prompt, resolve_motion_template
+from modules.style_lock import apply_style_lock, normalize_style_key
 from modules.youth_spec import normalize_age, youth_profile
+
 
 # Suffixe obligatoire sur tous les prompts motion I2V
 ANTI_LOOP_SUFFIX = (
@@ -155,19 +159,24 @@ def _description_for_clip(
     board: dict[str, Any],
     clip_i: int,
 ) -> str:
-    base = str(scene.get("visual_prompt") or "").strip()
-    style = str(board.get("visual_style") or "")
+    base = str(scene.get("visual_prompt") or scene.get("script_action") or "").strip()
+    style_key = normalize_style_key(str(board.get("style_key") or "aquarelle"))
     hero = str(board.get("hero_description") or board.get("theme") or board.get("hero") or "")
-    place = str(board.get("place") or "enchanted storybook setting")
+    place = str(
+        scene.get("lieu")
+        or board.get("place")
+        or "enchanted storybook setting"
+    )
     if base and len(base) > 40:
         desc = base
     else:
         desc = (
-            f"Cute Pixar 3D children's scene, {style}. "
-            f"Character: {hero}. Setting: {place}. Single environment only."
+            f"Children's storybook scene. Character: {hero}. "
+            f"Setting: {place}. Single environment only."
         )
-    # Un seul decor par clip — pas d'enchainement
     desc = _MULTI_SCENE_FORBIDDEN.sub("", desc).strip(" ,.")
+    desc = apply_style_lock(desc, style_key)
+    desc = apply_character_lock(desc, board)
     return desc
 
 
@@ -181,16 +190,28 @@ def build_clip_plan(
 ) -> dict[str, Any]:
     """Structure {description, action, camera, duration} pour un clip."""
     age = normalize_age(str(board.get("age_group") or "1-10"))
-    dur = clip_span_sec(age)
-    narration = str(scene.get("narration") or "")
-    action = _action_from_narration(narration, clip_i, n_clips)
-    camera = ensure_camera(None, clip_i + scene_index)
+    # Prefer duree script structuree (3-5s) si presente
+    if scene.get("target_duration_sec") and float(scene["target_duration_sec"]) <= 5.5:
+        dur = max(3.0, min(5.0, float(scene["target_duration_sec"])))
+    else:
+        dur = clip_span_sec(age)
+    narration = str(scene.get("script_action") or scene.get("narration") or "")
+    action_type = str(scene.get("action_type") or "")
+    if scene.get("script_action"):
+        action = finish_action(build_fluid_prompt(action_type, "", narration))
+    else:
+        action = _action_from_narration(narration, clip_i, n_clips)
+        action = finish_action(
+            resolve_motion_template(action_type, action) if action_type else action
+        )
+    camera = ensure_camera(str(scene.get("script_camera") or ""), clip_i + scene_index)
     description = _description_for_clip(scene, board, clip_i)
     return {
         "clip_index": clip_i + 1,
         "scene_index": int(scene.get("index") or scene_index + 1),
         "description": description,
         "action": action,
+        "action_type": action_type or "regarde",
         "camera": camera,
         "duration": dur,
         "needs_reference_image": True,
@@ -212,7 +233,14 @@ def build_clip_plans_for_scene(
         or board.get("youth_profile", {}).get("scene_target_sec")
         or 28.0
     )
-    n_clips = max(1, min(MAX_CLIPS_PER_SCENE, int(round(audio_sec / span))))
+    # Script structure : 1 clip = 1 scene (duree deja 3-5 s)
+    if board.get("structured_script") or (
+        scene.get("target_duration_sec") and float(scene["target_duration_sec"]) <= 5.5
+        and scene.get("script_action")
+    ):
+        n_clips = 1
+    else:
+        n_clips = max(1, min(MAX_CLIPS_PER_SCENE, int(round(audio_sec / span))))
     return [
         build_clip_plan(scene, board, i, n_clips, scene_index=scene_index)
         for i in range(n_clips)
@@ -236,14 +264,20 @@ def enhance_motion_prompt(
     clip: dict[str, Any],
     *,
     visual_base: str = "",
+    board: dict[str, Any] | None = None,
 ) -> str:
-    """Prompt I2V final : description + action finie + camera + anti-loop."""
+    """Prompt I2V final : style lock + character lock + action + camera + anti-loop."""
+    board = board or {}
+    style_key = normalize_style_key(str(board.get("style_key") or "aquarelle"))
     desc = str(clip.get("description") or visual_base or "").strip()
     action = finish_action(str(clip.get("action") or ""))
     camera = ensure_camera(str(clip.get("camera") or ""), int(clip.get("clip_index") or 0))
+    motion = resolve_motion_template(str(clip.get("action_type") or ""), action)
     parts = [
-        desc,
+        apply_style_lock(desc, style_key),
+        apply_character_lock("", board) if board else "",
         f"Action: {action}",
+        f"Motion: {motion}",
         f"Camera: {camera}",
         ANTI_LOOP_SUFFIX,
         "locked face identity, sharp facial features, preserve original face",
@@ -252,21 +286,22 @@ def enhance_motion_prompt(
 
 
 def enhance_image_prompt(clip: dict[str, Any], board: dict[str, Any]) -> str:
-    """Prompt image de reference (init_frame) pour un clip."""
+    """Prompt image de reference (init_frame) pour un clip — style lock, pas de Pixar force."""
+    style_key = normalize_style_key(str(board.get("style_key") or "aquarelle"))
     desc = str(clip.get("description") or "").strip()
-    style = str(board.get("visual_style") or "")
     action = finish_action(str(clip.get("action") or ""))
     camera = ensure_camera(str(clip.get("camera") or ""), 0)
     prefix = (
-        "cute 3D Pixar children's film still, single environment, "
+        "children's storybook film still, single environment, "
         "one clear subject, sharp focus, soft lighting"
     )
-    return (
-        f"{prefix}. {style}. {desc}. "
+    raw = (
+        f"{prefix}. {desc}. "
         f"Frozen moment before action: {action}. {camera}. "
         f"{ANTI_LOOP_SUFFIX}. "
         f"no text, no watermark, stable anatomy"
     )
+    return apply_character_lock(apply_style_lock(raw, style_key), board)
 
 
 def flatten_clip_jobs(board: dict[str, Any]) -> list[dict[str, Any]]:

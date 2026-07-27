@@ -262,6 +262,7 @@ def run_pipeline(
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",
+    script_path: str | None = None,
 ) -> dict:
     ensure_dirs()
     init_db()
@@ -379,14 +380,24 @@ def run_pipeline(
     only_single = only_steps[0] if only_steps else None
 
     set_progress(step="sourcing", message="Ecriture de l'histoire…")
-    sourced = source_new_video(
-        theme,
-        age_group=age_group,
-        duration_min=cfg.TARGET_DURATION_MIN,
-        style_key=style_key,
-        aspect=aspect,
-        music=music,
-    )
+    if script_path:
+        from modules.sourcing import source_from_script
+
+        sourced = source_from_script(
+            script_path,
+            age_group=age_group,
+            duration_min=cfg.TARGET_DURATION_MIN if duration_min is None else duration_min,
+            style_key=style_key,
+        )
+    else:
+        sourced = source_new_video(
+            theme,
+            age_group=age_group,
+            duration_min=cfg.TARGET_DURATION_MIN,
+            style_key=style_key,
+            aspect=aspect,
+            music=music,
+        )
     if not sourced.get("ok"):
         if sourced.get("reason") == "doublon_hash" and sourced.get("video"):
             video_id = int(sourced["video"]["id"])
@@ -456,6 +467,12 @@ def print_estimate() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Conte Factory — pipeline vidéo IA longue")
     parser.add_argument("--theme", type=str, default=None)
+    parser.add_argument(
+        "--script",
+        type=str,
+        default=None,
+        help="Chemin vers un script JSON structure (scenes, heros, style)",
+    )
     parser.add_argument("--only", type=str, default=None)
     parser.add_argument("--resume", type=int, default=None)
     parser.add_argument("--publish", action="store_true")
@@ -535,6 +552,7 @@ def main() -> int:
             style_key=args.style,
             aspect=args.aspect,
             music=args.music,
+            script_path=args.script,
         )
     except Exception as exc:
         traceback.print_exc()

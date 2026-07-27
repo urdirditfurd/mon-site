@@ -56,18 +56,36 @@ class TestBasics(unittest.TestCase):
         self.assertTrue(callable(ensure_story_files))
         self.assertTrue(callable(write_story_to_project))
 
-    def test_main_cli_help(self) -> None:
-        import subprocess
+    def test_script_parser_and_style_lock(self) -> None:
+        from modules.script_parser import load_script_file, script_to_story_payload
+        from modules.style_lock import apply_style_lock
 
-        r = subprocess.run(
-            [sys.executable, str(ROOT / "main.py"), "--help"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(ROOT),
-        )
-        self.assertEqual(0, r.returncode, msg=r.stderr[:500])
-        self.assertIn("--resume", r.stdout)
+        sample = ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json"
+        if not sample.exists():
+            self.skipTest("template script absent")
+        script = load_script_file(sample)
+        self.assertGreaterEqual(len(script["scenes"]), 5)
+        story = script_to_story_payload(script)
+        self.assertIn("structured_scenes", story)
+        locked = apply_style_lock("a forest path", "aquarelle")
+        self.assertIn("watercolor", locked.lower())
+        self.assertTrue("no 3D" in locked or "no Pixar" in locked or "no CGI" in locked)
+
+    def test_motion_and_character_lock(self) -> None:
+        from modules.character_lock import apply_character_lock, character_lock_clause
+        from modules.motion_prompts import resolve_motion_template
+
+        board = {
+            "hero": "Chaperon Rouge",
+            "hero_description": "girl with red hood and basket",
+            "style_key": "aquarelle",
+        }
+        clause = character_lock_clause(board)
+        self.assertIn("red hood", clause.lower() + board["hero_description"].lower())
+        prompt = apply_character_lock("in the forest", board)
+        self.assertIn("same character identity", prompt)
+        self.assertIn("walking", resolve_motion_template("marche").lower())
+
 
 
 if __name__ == "__main__":

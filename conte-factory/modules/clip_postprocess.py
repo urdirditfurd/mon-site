@@ -1,15 +1,18 @@
-"""Post-traitement des clips I2V : coupe des boucles en fin de clip."""
+"""Post-traitement des clips I2V : coupe des boucles (detection + trim)."""
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
+from modules.loop_detection import detect_loop
+
 logger = logging.getLogger(__name__)
 
-# Conserver 50–70 % du clip (couper 30–50 % de la fin où les loops apparaissent)
 DEFAULT_KEEP_RATIO = 0.65
 MIN_KEEP_SECONDS = 1.5
+LOOP_THRESHOLD = float(os.getenv("CONTE_LOOP_THRESHOLD", "0.85"))
 
 
 def _probe_duration(path: Path) -> float:
@@ -41,16 +44,22 @@ def trim_loop_tail(
     *,
     keep_ratio: float = DEFAULT_KEEP_RATIO,
     min_keep_seconds: float = MIN_KEEP_SECONDS,
+    threshold: float | None = None,
 ) -> Path:
-    """
-    Coupe la fin du clip (30–50 %) pour supprimer les répétitions visuelles.
-    Priorise la première partie du clip, généralement la plus propre.
-    """
+    """Detecte une boucle (similarite frames) puis coupe la fin."""
     input_path = Path(input_path)
     if output_path is None:
         output_path = input_path.with_name(f"{input_path.stem}_trim{input_path.suffix}")
     else:
         output_path = Path(output_path)
+
+    thr = float(threshold if threshold is not None else LOOP_THRESHOLD)
+    is_loop, cut_ratio = detect_loop(input_path, threshold=thr)
+    if is_loop and cut_ratio > 0:
+        keep_ratio = float(cut_ratio)
+        logger.info("Loop detectee sur %s → keep_ratio=%.2f", input_path.name, keep_ratio)
+    else:
+        keep_ratio = max(keep_ratio, 0.70)
 
     keep_ratio = max(0.5, min(0.7, float(keep_ratio)))
     duration = _probe_duration(input_path)
@@ -97,7 +106,6 @@ def trim_all_clips(
     keep_ratio: float = DEFAULT_KEEP_RATIO,
     in_place: bool = True,
 ) -> list[Path]:
-    """Applique le nettoyage anti-loop à tous les clips générés."""
     cleaned: list[Path] = []
     for path in clip_paths:
         if not path.exists():
@@ -108,6 +116,5 @@ def trim_all_clips(
             tmp.replace(path)
             cleaned.append(path)
         else:
-            out = trim_loop_tail(path, keep_ratio=keep_ratio)
-            cleaned.append(out)
+            cleaned.append(trim_loop_tail(path, keep_ratio=keep_ratio))
     return cleaned

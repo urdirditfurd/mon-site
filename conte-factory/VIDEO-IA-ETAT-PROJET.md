@@ -124,13 +124,25 @@ data/database.db
 ### Fait ✅
 
 - Pipeline I2V face-safe + anti-boucle opérationnel
+- **P1 Script structuré** : `--script` JSON (`script_parser.py`, template Petit Chaperon)
+- **P2 Style lock** : `style_lock.py` (anti mélange aquarelle/Pixar)
+- **P3 Character lock** : `character_lock.py` + `hero_ref.png` par projet
+- **P4 Loop detection** : similarité de frames + trim (`loop_detection.py`)
+- **P5 Motion templates** : `motion_prompts.py` (marche/regarde/court…)
 - Découpage `clip_plans` + trim loops
 - TTS jeunesse HQ (Edge Vivienne / Remy)
 - Durée cible calée (audio + montage `-t`)
 - UI Creation / Dashboard Streamlit
-- Scripts Windows : `SWITCH-TO-I2V`, `INSTALL-I2V`, `verify_pipeline`, réparation Git
-- Reprise projet (`--resume`, `ensure_story_files`, doublon_hash → reprise)
+- Scripts Windows : `SWITCH-TO-I2V`, `INSTALL-I2V`, `verify_pipeline`
+- Reprise projet (`--resume`, `ensure_story_files`)
 - Vérification pré-lancement (`scripts/verify_pipeline.py`)
+
+### Nouveau test recommandé (script fidèle au conte)
+
+```powershell
+cd C:\ConteFactory\conte-factory
+.\.venv\Scripts\python.exe main.py --script assets\scripts\petit_chaperon_rouge.json --no-publish
+```
 
 ### Partiel / fragile ⚠️
 

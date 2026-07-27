@@ -605,3 +605,116 @@ def source_new_video(
         f"Script thème-centré : {target_scenes} scènes, ~{payload['word_count']} mots, {minutes} min cibles.",
     )
     return {"ok": True, "video_id": video_id, "projet": str(projet), "story": payload}
+
+
+def source_from_script(
+    script_path: str | Path,
+    *,
+    age_group: str | None = None,
+    duration_min: float | None = None,
+    style_key: str | None = None,
+) -> dict[str, Any]:
+    """Cree un projet depuis un script JSON structure (P1)."""
+    from modules.script_parser import load_script_file, script_to_story_payload
+
+    ensure_dirs()
+    script = load_script_file(script_path)
+    if age_group:
+        from modules.youth_spec import normalize_age
+
+        script["age_group"] = normalize_age(age_group)
+    if duration_min is not None:
+        script["duration_min"] = float(duration_min)
+    if style_key:
+        script["style_key"] = style_key
+        script["style_visuel"] = style_prompt(style_key)
+
+    story = script_to_story_payload(script)
+    script_text = str(story["script"]).strip()
+    titre = str(story["titre"]).strip()
+    hash_script = fingerprint(script_text + "|structured|" + titre)
+
+    existing = find_by_hash(hash_script)
+    if existing:
+        existing_id = int(existing["id"])
+        projet_existing = project_dir(existing_id)
+        if not (projet_existing / "story.json").exists():
+            write_story_to_project(
+                existing_id,
+                story,
+                age_group=str(story["age_group"]),
+                duration_min=float(story["duration_min"]),
+                style_key=str(story["style_key"]),
+                aspect=str(story.get("aspect") or "16:9"),
+                music=str(story.get("music") or "berceuse"),
+            )
+            return {
+                "ok": True,
+                "video_id": existing_id,
+                "repaired": True,
+                "projet": str(projet_existing),
+                "story": story,
+            }
+        log_event(existing_id, "warn", "Script structure deja connu — reprise.")
+        return {"ok": False, "reason": "doublon_hash", "video": existing}
+
+    if similar_title_exists(titre):
+        titre = f"{titre} ({random.randint(2, 99)})"
+        story["titre"] = titre
+
+    video_id = create_video(
+        titre=titre,
+        titre_original=titre,
+        theme=str(story.get("theme") or titre),
+        hash_script=hash_script,
+        chemin_projet="",
+    )
+    projet = project_dir(video_id)
+    # Copier reference personnage si chemin relatif fourni
+    hint = story.get("character_ref_hint")
+    if hint:
+        src = Path(str(hint))
+        if not src.is_absolute():
+            src = Path(script_path).resolve().parent / src
+        if src.exists():
+            dest_dir = projet / "characters"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / "hero_ref.png"
+            dest.write_bytes(src.read_bytes())
+            story["character_ref_hint"] = str(dest)
+
+    write_story_to_project(
+        video_id,
+        story,
+        age_group=str(story["age_group"]),
+        duration_min=float(story["duration_min"]),
+        style_key=str(story["style_key"]),
+        aspect=str(story.get("aspect") or "16:9"),
+        music=str(story.get("music") or "berceuse"),
+    )
+    # Re-ecrire story enrichie (structured_scenes)
+    payload = json.loads((projet / "story.json").read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "structured_scenes": story.get("structured_scenes"),
+            "character_ref_hint": story.get("character_ref_hint"),
+            "source": "structured_script",
+            "dialogue_scenes": story.get("dialogue_scenes"),
+        }
+    )
+    (projet / "story.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    # Sauver une copie du script source
+    try:
+        (projet / "script_source.json").write_text(
+            Path(script_path).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    except Exception:
+        pass
+    log_event(
+        video_id,
+        "info",
+        f"Script structure importe : {len(story.get('structured_scenes') or [])} scenes.",
+    )
+    return {"ok": True, "video_id": video_id, "projet": str(projet), "story": payload}

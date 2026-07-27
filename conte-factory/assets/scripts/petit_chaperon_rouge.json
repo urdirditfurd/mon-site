@@ -1,0 +1,129 @@
+{
+  "titre": "Le Petit Chaperon Rouge",
+  "theme": "le petit chaperon rouge",
+  "style_key": "aquarelle",
+  "style_visuel": "aquarelle douce, couleurs pastel, style livre d'enfants, illustration 2D, pas de 3D",
+  "age_group": "7-10",
+  "duration_min": 5,
+  "music": "berceuse",
+  "aspect": "16:9",
+  "friend": "un oiseau bleu amical",
+  "place": "forêt enchantée",
+  "morale": "écouter les conseils de ceux qui nous aiment",
+  "personnage_principal": {
+    "nom": "Chaperon Rouge",
+    "description": "young girl with bright red hooded cape, blue dress, brown braided hair, wicker basket with bread and flowers, soft watercolor children's book character, same design every scene"
+  },
+  "scenes": [
+    {
+      "id": 1,
+      "lieu": "maison au bord de la forêt",
+      "action": "Chaperon Rouge takes the wicker basket from her mother and puts on her red hood",
+      "narration": "Maman m'a préparé un panier pour grand-mère. Je mets ma capuche rouge.",
+      "duree_secondes": 4,
+      "camera": "static camera shot",
+      "emotion": "joie douce",
+      "action_type": "regarde"
+    },
+    {
+      "id": 2,
+      "lieu": "chemin de forêt ensoleillé",
+      "action": "Chaperon Rouge walks along the forest path holding her basket, looking at the trees",
+      "narration": "Je marche sur le sentier. Les arbres murmurent tout bas.",
+      "duree_secondes": 4,
+      "camera": "slow pan left to right",
+      "emotion": "curiosité joyeuse",
+      "action_type": "marche"
+    },
+    {
+      "id": 3,
+      "lieu": "clairière fleurie",
+      "action": "Chaperon Rouge bends once to pick a flower then stands and smiles",
+      "narration": "Oh ! Des fleurs pour grand-mère. J'en cueille une toute douce.",
+      "duree_secondes": 4,
+      "camera": "slow zoom in",
+      "emotion": "émerveillement",
+      "action_type": "cueille"
+    },
+    {
+      "id": 4,
+      "lieu": "clairière près des grands chênes",
+      "action": "A grey wolf steps out from behind a tree and looks gently at Chaperon Rouge",
+      "narration": "Qui es-tu, grand animal ? Tu as l'air de connaître la forêt.",
+      "duree_secondes": 4,
+      "camera": "static camera shot",
+      "emotion": "tension douce",
+      "action_type": "apparait"
+    },
+    {
+      "id": 5,
+      "lieu": "sentier de forêt",
+      "action": "The wolf points toward a side path while Chaperon Rouge listens with her basket",
+      "narration": "Le loup me parle d'un chemin plus joli… J'écoute, un peu hésitante.",
+      "duree_secondes": 4,
+      "camera": "slow pan right to left",
+      "emotion": "doute prudent",
+      "action_type": "ecoute"
+    },
+    {
+      "id": 6,
+      "lieu": "chemin détourné dans la forêt",
+      "action": "Chaperon Rouge walks the longer flower path, looking around carefully",
+      "narration": "Je prends le chemin des fleurs. Comme c'est long…",
+      "duree_secondes": 4,
+      "camera": "slow pan left to right",
+      "emotion": "aventure",
+      "action_type": "marche"
+    },
+    {
+      "id": 7,
+      "lieu": "devant la petite maison de grand-mère",
+      "action": "Chaperon Rouge knocks once on the cottage door holding her basket",
+      "narration": "Me voici chez grand-mère. Toc toc…",
+      "duree_secondes": 4,
+      "camera": "static camera shot",
+      "emotion": "impatience douce",
+      "action_type": "regarde"
+    },
+    {
+      "id": 8,
+      "lieu": "chambre de grand-mère",
+      "action": "Chaperon Rouge peeks into the room where someone in a nightcap lies in bed",
+      "narration": "Grand-mère ? Comme tu as de grandes oreilles…",
+      "duree_secondes": 4,
+      "camera": "slow zoom in",
+      "emotion": "surprise inquiète",
+      "action_type": "regarde"
+    },
+    {
+      "id": 9,
+      "lieu": "chambre de grand-mère",
+      "action": "Chaperon Rouge steps back as the wolf sits up in the bed, eyes wide",
+      "narration": "Ce n'est pas grand-mère ! C'est le loup !",
+      "duree_secondes": 4,
+      "camera": "static camera shot",
+      "emotion": "peur maîtrisée",
+      "action_type": "regarde"
+    },
+    {
+      "id": 10,
+      "lieu": "devant la maison de grand-mère",
+      "action": "A kind woodcutter arrives as Chaperon Rouge runs a few steps outside then stops safely",
+      "narration": "Le bûcheron arrive ! Je suis en sécurité.",
+      "duree_secondes": 4,
+      "camera": "zoom out smoothly",
+      "emotion": "soulagement",
+      "action_type": "court"
+    },
+    {
+      "id": 11,
+      "lieu": "jardin devant la maison de grand-mère",
+      "action": "Chaperon Rouge hugs grandmother and holds the flower basket, smiling softly",
+      "narration": "Grand-mère est sauvée. Je resterai prudente, et je t'apporterai encore des fleurs.",
+      "duree_secondes": 4,
+      "camera": "static camera shot",
+      "emotion": "tendresse",
+      "action_type": "regarde"
+    }
+  ]
+}

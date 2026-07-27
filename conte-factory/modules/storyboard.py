@@ -20,8 +20,9 @@ from config import (
     scene_sec_for_audience,
 )
 from db.database import get_video, log_event, project_dir, update_video, video_title
-from modules.sourcing import ensure_story_files
 from modules.clip_prompts import build_clip_plans_for_board
+from modules.script_parser import apply_structured_scenes_to_board
+from modules.sourcing import ensure_story_files
 from modules.youth_spec import normalize_age, youth_profile, youth_visual_suffix
 
 
@@ -179,14 +180,15 @@ def _fallback_visual_prompt_en(
     ]
     motion = motions[(index + part) % len(motions)]
     return (
-        f"Cute Pixar-style 3D children's film still, {style}. "
+        f"Children's storybook film still, {style}. "
         f"Main character: {theme} (consistent design named {hero}). "
         f"Companion: {friend}. Setting: {place}. "
         f"Action: {action}. Key props: {prop_txt}. "
         f"Camera motion feel: {motion}. "
         f"{youth_visual_suffix(profile)} "
-        f"sharp focus, crisp details, soft warm lighting, 8k detailed, "
+        f"sharp focus, crisp details, soft warm lighting, "
         f"wide readable framing, coherent character design, "
+        f"same character identity throughout, "
         f"no text, no watermark, no logo, no motion blur, no neon"
     )
 
@@ -209,8 +211,10 @@ def _llm_visual_prompt_en(
     )
     system = (
         "You convert children's story dialogue into ONE English IMAGE prompt for a "
-        "Pixar-like 3D still. Never copy French dialogue verbatim. Describe who, where, "
-        "action, emotion, lighting, camera. Output ONLY the English prompt string."
+        "children's storybook illustration (respect the given visual style; "
+        "if watercolor, do NOT describe 3D/Pixar). Never copy French dialogue verbatim. "
+        "Describe who, where, action, emotion, lighting, camera. "
+        "Keep the same character design. Output ONLY the English prompt string."
     )
     user = (
         f"Age group: {age}. Style: {style}.\n"
@@ -379,6 +383,12 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     )
 
     dialogue_scenes = _dialogue_from_story(story, target_n)
+    # Script structure : 1 scene board = 1 scene script
+    structured = story.get("structured_scenes") or []
+    if structured:
+        target_n = len(structured)
+        dialogue_scenes = _dialogue_from_story(story, target_n)
+
     scenes = []
     for i, dialogue in enumerate(dialogue_scenes):
         narration = " ".join(f"{d['text']}" for d in dialogue)
@@ -420,12 +430,14 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
         "place": story.get("place"),
         "style_key": story.get("style_key"),
         "visual_style": story.get("visual_style"),
+        "character_ref_hint": story.get("character_ref_hint"),
         "aspect": story.get("aspect") or profile.get("aspect") or "16:9",
         "music": story.get("music") or "berceuse",
         "format": "dialogue",
         "scene_count": len(scenes),
         "scenes": scenes,
     }
+    apply_structured_scenes_to_board(board, story)
     total_clips = build_clip_plans_for_board(board)
     out = projet / "storyboard.json"
     out.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")

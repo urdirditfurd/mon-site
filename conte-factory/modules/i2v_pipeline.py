@@ -18,6 +18,7 @@ from PIL import Image
 
 from config import PINOKIO_I2V_HEIGHT, PINOKIO_I2V_WIDTH
 from db.database import get_video, log_event, update_video
+from modules.character_lock import ensure_hero_reference
 from modules.clip_postprocess import trim_loop_tail
 from modules.clip_prompts import (
     build_clip_plans_for_board,
@@ -132,6 +133,11 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     if not jobs:
         raise RuntimeError("Aucun clip planifie dans le storyboard")
 
+    # P3 — image de reference heros (lock personnage)
+    hero_ref = ensure_hero_reference(projet, board, width=img_w, height=img_h)
+    board["character_ref_path"] = str(hero_ref)
+    log_event(video_id, "info", f"Character lock: {hero_ref.name}")
+
     theme_key = str(board.get("theme") or board.get("hero") or "conte")
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
 
@@ -174,7 +180,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
                 "need_still": not still_ok,
                 "need_i2v": need_i2v,
                 "need_trim": True,
-                "prompt": enhance_motion_prompt(clip_plan),
+                "prompt": enhance_motion_prompt(clip_plan, board=board),
                 "image_prompt": enhance_image_prompt(clip_plan, board),
                 "seed": (base_seed + scene_idx * 31 + clip_idx * 7) % 1_000_000,
             }

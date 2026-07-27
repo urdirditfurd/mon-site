@@ -80,6 +80,8 @@ AUTO_START_I2V = os.getenv("CONTE_AUTO_START_I2V", "1") == "1"
 I2V_START_TIMEOUT_SEC = int(os.getenv("CONTE_I2V_TIMEOUT_SEC", "600"))
 # Tolerance duree finale vs cible (secondes)
 DURATION_TOLERANCE_SEC = float(os.getenv("CONTE_DURATION_TOLERANCE_SEC", "5"))
+# Seuil similarite frames pour detection de boucle (0.7–0.95)
+LOOP_THRESHOLD = float(os.getenv("CONTE_LOOP_THRESHOLD", "0.85"))
 
 # Lip-sync Pinokio (legacy Wav2Lip)
 PINOKIO_LIPSYNC_URL = os.getenv("PINOKIO_LIPSYNC_URL", "http://127.0.0.1:7870")

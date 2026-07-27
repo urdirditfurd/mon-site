@@ -8,7 +8,8 @@ import os
 VISUAL_STYLES: dict[str, str] = {
     "aquarelle": (
         "children's storybook watercolor illustration, soft washes, warm pastel palette, "
-        "gentle lighting, hand-painted look, no text, no watermark"
+        "gentle lighting, hand-painted 2D look, flat illustration, "
+        "no 3D rendering, no Pixar, no CGI, no photorealistic, no text, no watermark"
     ),
     "anime_doux": (
         "soft anime illustration for children, clean lines, pastel colors, cozy lighting, "
