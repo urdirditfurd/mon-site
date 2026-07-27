@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from db.database import get_video, init_db, project_dir
+from db.database import get_video, init_db, project_has_artifacts, project_path
 
 
 def main() -> int:
@@ -27,8 +27,11 @@ def main() -> int:
     if video:
         p = Path(str(video["chemin_projet"]))
     else:
-        p = project_dir(vid)
-        print(f"WARN: video {vid} absente en DB, essai {p}")
+        p = project_path(vid)
+        if not project_has_artifacts(p):
+            print(f"WARN: video {vid} absente en DB et dossier vide: {p}")
+        else:
+            print(f"WARN: video {vid} absente en DB, essai {p}")
 
     print(f"PROJET={p}")
     clips = p / "ai_clips"

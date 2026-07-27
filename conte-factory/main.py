@@ -62,7 +62,10 @@ def _run_selected_steps(
 ) -> dict:
     video = ensure_video_registered(video_id) or get_video(video_id)
     if not video:
-        raise ValueError(f"Video {video_id} introuvable (ni DB ni disque)")
+        raise ValueError(
+            f"Video {video_id} introuvable. Lancez: "
+            f"python scripts/diagnostic_projet.py --scan-all"
+        )
 
     result: dict = {"video_id": video_id, "steps": {}}
     for step in step_names:
@@ -143,7 +146,10 @@ def _run_from(
 ) -> dict:
     video = ensure_video_registered(video_id) or get_video(video_id)
     if not video:
-        raise ValueError(f"Vidéo {video_id} introuvable (ni DB ni disque)")
+        raise ValueError(
+            f"Video {video_id} introuvable. Lancez: "
+            f"python scripts/diagnostic_projet.py --scan-all"
+        )
 
     start_idx = STEPS.index(start_step)
     result: dict = {"video_id": video_id, "steps": {}}

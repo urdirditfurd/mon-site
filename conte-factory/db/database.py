@@ -256,6 +256,61 @@ def get_video(video_id: int) -> dict[str, Any] | None:
     return normalize_video(dict(row) if row else None)
 
 
+def project_path(video_id: int, *, create: bool = False) -> Path:
+    """Chemin projet sans creer le dossier (sauf si create=True)."""
+    from config import VIDEOS_DIR
+
+    return VIDEOS_DIR / f"video_{video_id:04d}"
+
+
+def project_has_artifacts(projet: Path) -> bool:
+    """True si le dossier contient de vrais fichiers de pipeline (pas un dossier vide)."""
+    if not projet.is_dir():
+        return False
+    if (projet / "story.json").is_file():
+        return True
+    if (projet / "storyboard.json").is_file():
+        return True
+    audio = projet / "audio"
+    if audio.is_dir() and any(audio.glob("*.mp3")):
+        return True
+    clips = projet / "ai_clips"
+    if clips.is_dir():
+        for child in clips.rglob("*"):
+            if child.is_file() and child.stat().st_size > 100:
+                return True
+    return False
+
+
+def list_disk_projects() -> list[dict[str, Any]]:
+    """Liste les projets reels sur disque (dossiers video_XXXX avec contenu)."""
+    from config import VIDEOS_DIR
+
+    found: list[dict[str, Any]] = []
+    if not VIDEOS_DIR.is_dir():
+        return found
+    for entry in sorted(VIDEOS_DIR.glob("video_*")):
+        if not entry.is_dir():
+            continue
+        suffix = entry.name.replace("video_", "")
+        if not suffix.isdigit():
+            continue
+        vid = int(suffix)
+        if project_has_artifacts(entry):
+            found.append(
+                {
+                    "video_id": vid,
+                    "path": str(entry.resolve()),
+                    "has_story": (entry / "story.json").is_file(),
+                    "has_board": (entry / "storyboard.json").is_file(),
+                    "has_audio": any((entry / "audio").glob("*.mp3"))
+                    if (entry / "audio").is_dir()
+                    else False,
+                }
+            )
+    return found
+
+
 def ensure_video_registered(video_id: int) -> dict[str, Any] | None:
     """Retrouve une video en DB ou la re-enregistre depuis data/videos/video_XXXX."""
     init_db()
@@ -263,15 +318,15 @@ def ensure_video_registered(video_id: int) -> dict[str, Any] | None:
     if existing:
         return existing
 
-    projet = project_dir(video_id)
-    story_path = projet / "story.json"
-    board_path = projet / "storyboard.json"
-    if not story_path.exists() and not board_path.exists():
+    projet = project_path(video_id)
+    if not project_has_artifacts(projet):
         return None
 
     titre = f"Video #{video_id}"
     theme = ""
     statut = "nouveau"
+    story_path = projet / "story.json"
+    board_path = projet / "storyboard.json"
     for path in (story_path, board_path):
         if not path.exists():
             continue
@@ -506,8 +561,4 @@ def similar_title_exists(titre: str) -> bool:
 
 
 def project_dir(video_id: int) -> Path:
-    from config import VIDEOS_DIR
-
-    path = VIDEOS_DIR / f"video_{video_id:04d}"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return project_path(video_id, create=True)
