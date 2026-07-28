@@ -286,10 +286,11 @@ def _via_cli(image: Path, prompt: str, dest: Path, seed: int | None = None) -> d
 
 
 def _cli_env() -> dict[str, str]:
-    # Toujours relire os.environ (video_ai force face-safe juste avant)
-    guidance = min(4.0, float(os.environ.get("PINOKIO_I2V_GUIDANCE", str(PINOKIO_I2V_GUIDANCE))))
+    # Relire os.environ (video_ai applique face-safe ou Pixar juste avant)
+    guidance = min(4.5, float(os.environ.get("PINOKIO_I2V_GUIDANCE", str(PINOKIO_I2V_GUIDANCE))))
     motion = float(os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3"))
-    motion = max(0.2, min(0.4, motion))
+    # Face-safe ~0.3 ; Pixar 3D ~0.55 — plafond 0.7 pour eviter morphing
+    motion = max(0.2, min(0.7, motion))
     return {
         **os.environ,
         "WAN_DTYPE": os.environ.get("WAN_DTYPE", "float16"),

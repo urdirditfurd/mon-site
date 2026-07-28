@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,22 @@ from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
 from modules.storyboard import enrich_board_visual_prompts
 from modules.youth_spec import normalize_age, youth_profile
+
+
+def _i2v_runtime_size() -> tuple[int, int]:
+    """Largeur/hauteur actives (env forcee par video_ai selon style)."""
+    w = int(os.environ.get("PINOKIO_I2V_WIDTH", str(PINOKIO_I2V_WIDTH or 848)))
+    h = int(os.environ.get("PINOKIO_I2V_HEIGHT", str(PINOKIO_I2V_HEIGHT or 480)))
+    return max(256, w), max(256, h)
+
+
+def _i2v_runtime_detail() -> str:
+    cfg = os.environ.get("PINOKIO_I2V_GUIDANCE", "3.5")
+    motion = os.environ.get("PINOKIO_I2V_MOTION_SCALE", "0.3")
+    w, h = _i2v_runtime_size()
+    frames = os.environ.get("PINOKIO_I2V_FRAMES", "33")
+    steps = os.environ.get("PINOKIO_I2V_STEPS", "22")
+    return f"CFG {cfg} · motion {motion} · {w}x{h} · {frames}f/{steps}steps"
 
 
 def _clip_stem(scene_idx: int, clip_idx: int) -> str:
@@ -116,9 +133,9 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
         f"Pipeline I2V clips courts : mode={health.get('mode')} url={health.get('url')}",
     )
 
-    img_w = int(PINOKIO_I2V_WIDTH or 848)
-    img_h = int(PINOKIO_I2V_HEIGHT or 480)
+    img_w, img_h = _i2v_runtime_size()
     set_image_output_size(img_w, img_h)
+    log_event(video_id, "info", f"I2V params: {_i2v_runtime_detail()}")
 
     n_enriched = enrich_board_visual_prompts(board, force=False)
     if n_enriched:
@@ -238,7 +255,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
             message=f"I2V batch {len(to_animate)} clip(s) courts…",
             clips_done=done_count,
             clips_total=total_clips,
-            detail="clips 3-5 s · anti-loop · CFG 3.5",
+            detail=_i2v_runtime_detail(),
         )
         log_event(video_id, "info", f"I2V batch: {len(to_animate)} clips (1 load modele)")
         batch_jobs = [

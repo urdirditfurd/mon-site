@@ -95,7 +95,7 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
         "duration_min": float(data.get("duration_min") or max(1.0, len(cleaned_scenes) * 0.5)),
         "music": str(data.get("music") or "berceuse"),
         "aspect": str(data.get("aspect") or "16:9"),
-        "friend": str(data.get("friend") or "a gentle forest companion"),
+        "friend": str(data.get("friend") or "").strip(),
         "place": str(data.get("place") or cleaned_scenes[0]["lieu"]),
         "morale": str(data.get("morale") or "le courage et la prudence"),
         "scenes": cleaned_scenes,

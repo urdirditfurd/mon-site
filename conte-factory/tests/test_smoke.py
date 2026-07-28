@@ -165,6 +165,20 @@ class TestBasics(unittest.TestCase):
         for scene in board["scenes"]:
             self.assertEqual(scene["ai_clips_planned"], 1)
 
+    def test_i2v_pixar_motion_not_clamped_to_face_safe(self) -> None:
+        import os
+
+        from modules.i2v_ai import _cli_env
+        from modules.video_ai import I2V_PIXAR_PARAMS, _apply_i2v_env
+
+        _apply_i2v_env(I2V_PIXAR_PARAMS)
+        env = _cli_env()
+        self.assertEqual(env["PINOKIO_I2V_WIDTH"], "1024")
+        self.assertEqual(env["PINOKIO_I2V_HEIGHT"], "576")
+        self.assertAlmostEqual(float(env["PINOKIO_I2V_MOTION_SCALE"]), 0.55, places=2)
+        self.assertAlmostEqual(float(env["PINOKIO_I2V_GUIDANCE"]), 4.0, places=1)
+        self.assertEqual(env["PINOKIO_I2V_FRAMES"], "81")
+
     def test_resolve_project_dir_repairs_empty_chemin(self) -> None:
         import os
         import tempfile
