@@ -13,7 +13,9 @@ STYLE_PRESETS: dict[str, str] = {
         "soft anime 2D illustration, Studio Ghibli inspired, clean lines, pastel colors"
     ),
     "3d_mignon": (
-        "cute 3D children's animation render, soft clay materials, Pixar-like friendliness"
+        "3D Pixar animation style, Disney quality rendering, cute character design, "
+        "vibrant colors, soft cinematic lighting, subsurface scattering, "
+        "detailed textures, volumetric lighting, expressive eyes"
     ),
     "conte_classique": (
         "classic European fairy-tale book plate, detailed ink and soft watercolor wash"
@@ -29,7 +31,10 @@ STYLE_NEGATIVES: dict[str, str] = {
         "no Unreal Engine, no octane render"
     ),
     "anime_doux": "no photorealistic, no 3D CGI, no live action",
-    "3d_mignon": "no flat 2D watercolor, no sketchy lineart only",
+    "3d_mignon": (
+        "no flat 2D watercolor, no sketchy lineart only, no photorealistic live action, "
+        "no deformed face, no blurry, no loop, no repetition, no static frozen pose"
+    ),
     "conte_classique": "no modern 3D CGI, no photorealistic",
     "papier_decoupe": "no photorealistic, no smooth 3D CGI",
 }

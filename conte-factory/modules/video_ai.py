@@ -361,18 +361,53 @@ def _clips_needed(duration_sec: float, provider: str, remaining_budget: int, spa
 
 
 # ---------------------------------------------------------------------------
-# Parametres I2V anti-deformation visage (appliques via config / i2v_engine)
+# Parametres I2V (face-safe vs Pixar 3D)
 # ---------------------------------------------------------------------------
 I2V_FACE_SAFE = {
-    "guidance_scale": 3.5,  # MAX 4.0 — au-dela le visage fond
-    "motion_scale": 0.3,  # 0.2-0.4 : respiration / yeux / tete seulement
+    "guidance_scale": 3.5,
+    "motion_scale": 0.3,
     "width": 848,
     "height": 480,
+    "frames": 33,
+    "steps": 22,
     "negative_prompt": (
         "deformed face, blurry, distortion, bad anatomy, morphing, melted face, "
         "glitch, artifacts, morphing face, face warp, warped face"
     ),
 }
+
+I2V_PIXAR_PARAMS = {
+    "guidance_scale": 4.0,
+    "motion_scale": 0.55,
+    "width": 1024,
+    "height": 576,
+    "frames": 81,
+    "steps": 25,
+    "negative_prompt": (
+        "deformed face, blurry, loop, repetition, static frozen pose, "
+        "flat 2D watercolor, bad anatomy, morphing, melted face, glitch, artifacts"
+    ),
+}
+
+
+def _apply_i2v_env(params: dict[str, Any]) -> None:
+    os.environ["PINOKIO_I2V_GUIDANCE"] = str(params["guidance_scale"])
+    os.environ["PINOKIO_I2V_MOTION_SCALE"] = str(params["motion_scale"])
+    os.environ["PINOKIO_I2V_WIDTH"] = str(params["width"])
+    os.environ["PINOKIO_I2V_HEIGHT"] = str(params["height"])
+    os.environ["PINOKIO_I2V_FRAMES"] = str(params.get("frames", 33))
+    os.environ["PINOKIO_I2V_STEPS"] = str(params.get("steps", 22))
+    os.environ["PINOKIO_I2V_RESOLUTION"] = f"{params['width']}p 16:9"
+    os.environ["PINOKIO_I2V_SCHEDULER"] = "default"
+    os.environ["CONTE_I2V_NEGATIVE_PROMPT"] = str(params.get("negative_prompt") or "")
+
+
+def _i2v_params_for_board(board: dict[str, Any]) -> dict[str, Any]:
+    from modules.style_lock import normalize_style_key
+
+    if normalize_style_key(str(board.get("style_key") or "")) == "3d_mignon":
+        return dict(I2V_PIXAR_PARAMS)
+    return dict(I2V_FACE_SAFE)
 
 
 def generate_scene_videos(video_id: int) -> dict[str, Any]:
@@ -382,15 +417,15 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
 
     provider = VIDEO_PROVIDER.lower().strip()
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
-        # Force plafonds face-safe (ecrase .env trop agressif)
-        os.environ["PINOKIO_I2V_GUIDANCE"] = str(I2V_FACE_SAFE["guidance_scale"])
-        os.environ["PINOKIO_I2V_MOTION_SCALE"] = str(I2V_FACE_SAFE["motion_scale"])
-        os.environ["PINOKIO_I2V_WIDTH"] = str(I2V_FACE_SAFE["width"])
-        os.environ["PINOKIO_I2V_HEIGHT"] = str(I2V_FACE_SAFE["height"])
-        os.environ["PINOKIO_I2V_RESOLUTION"] = "848p 16:9"
-        # LTX/Wan : jamais dpmpp_2m (crash set_timesteps / custom sigmas)
-        os.environ["PINOKIO_I2V_SCHEDULER"] = "default"
         from modules.i2v_pipeline import generate_i2v_videos
+
+        projet = resolve_project_dir(video_id, video)
+        board_path = projet / "storyboard.json"
+        if board_path.exists():
+            board = json.loads(board_path.read_text(encoding="utf-8"))
+            _apply_i2v_env(_i2v_params_for_board(board))
+        else:
+            _apply_i2v_env(I2V_FACE_SAFE)
 
         return generate_i2v_videos(video_id)
 

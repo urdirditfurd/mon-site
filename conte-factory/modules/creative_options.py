@@ -16,8 +16,10 @@ VISUAL_STYLES: dict[str, str] = {
         "Studio Ghibli inspired mood, no text, no watermark"
     ),
     "3d_mignon": (
-        "cute 3D rendered children's character art, soft clay-like materials, warm light, "
-        "Pixar-like friendliness, no text, no watermark"
+        "3D Pixar animation style, Disney quality rendering, cute character design, "
+        "vibrant colors, soft cinematic lighting, subsurface scattering skin, "
+        "detailed textures, volumetric lighting, expressive facial features, "
+        "professional animation studio quality, depth of field, no text, no watermark"
     ),
     "conte_classique": (
         "classic European fairy-tale book plate, detailed ink and soft color, vintage charm, "

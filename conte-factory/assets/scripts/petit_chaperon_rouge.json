@@ -1,129 +1,152 @@
 {
   "titre": "Le Petit Chaperon Rouge",
   "theme": "le petit chaperon rouge",
-  "style_key": "aquarelle",
-  "style_visuel": "aquarelle douce, couleurs pastel, style livre d'enfants, illustration 2D, pas de 3D",
+  "style_key": "3d_mignon",
+  "style_visuel": "3D Pixar animation style, Disney quality rendering, cute character design, vibrant colors, soft cinematic lighting, subsurface scattering, volumetric lighting, depth of field, no text, no watermark",
   "age_group": "7-10",
   "duration_min": 5,
   "music": "berceuse",
   "aspect": "16:9",
-  "friend": "un oiseau bleu amical",
+  "friend": "",
   "place": "forêt enchantée",
   "morale": "écouter les conseils de ceux qui nous aiment",
   "personnage_principal": {
     "nom": "Chaperon Rouge",
-    "description": "young girl with bright red hooded cape, blue dress, brown braided hair, wicker basket with bread and flowers, soft watercolor children's book character, same design every scene"
+    "description": "7-year-old girl, bright red hooded cloak, blue dress, brown braided pigtails, rosy cheeks, big expressive Pixar eyes, wicker basket with bread and flowers, identical design every scene",
+    "reference_image": "assets/characters/red_hood_ref.png"
   },
   "scenes": [
     {
       "id": 1,
-      "lieu": "maison au bord de la forêt",
-      "action": "Chaperon Rouge takes the wicker basket from her mother and puts on her red hood",
+      "lieu": "cottage doorway at the edge of an enchanted forest",
+      "action": "Little Red Riding Hood takes the wicker basket from her mother and ties her red hood under her chin",
+      "visual_prompt": "3D Pixar animation film still. Cottage doorway at forest edge, golden morning light. Little Red Riding Hood, 7-year-old girl with bright red hood and blue dress, receives wicker basket from mother, ties hood strings, warm smile, cinematic depth of field, enchanted forest in background.",
       "narration": "Bonjour. Aujourd'hui, maman m'a préparé un panier pour grand-mère : du pain encore chaud, un peu de beurre, et des fleurs. Je noue bien ma belle capuche rouge sous mon menton. Maman me dit d'aller tout droit sur le sentier, sans m'arrêter trop longtemps. Je souris, je prends le panier à deux mains, et je suis prête à partir.",
       "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "joie douce",
-      "action_type": "regarde"
+      "action_type": "regarde",
+      "characters": ["Little Red Riding Hood", "Mother"]
     },
     {
       "id": 2,
-      "lieu": "chemin de forêt ensoleillé",
-      "action": "Chaperon Rouge walks along the forest path holding her basket, looking at the trees",
-      "narration": "Je marche sur le sentier ensoleillé. Les arbres murmurent tout bas, comme s'ils me souhaitaient une bonne route. Je tiens mon panier bien droit contre moi. Un oiseau bleu passe au-dessus de ma tête et chante. Je regarde le chemin devant moi : il est clair, et je sais que grand-mère m'attend. Un pas après l'autre, tout doucement.",
+      "lieu": "sunlit forest path with tall trees",
+      "action": "Little Red Riding Hood walks along the forest path holding her basket, looking at the trees",
+      "visual_prompt": "3D Pixar animation. Sunlit enchanted forest path, dappled light through tall trees. Little Red Riding Hood walks forward holding basket, gentle tracking shot feel, magical floating particles, warm golden hour lighting, cinematic composition.",
+      "narration": "Je marche sur le sentier ensoleillé. Les arbres murmurent tout bas, comme s'ils me souhaitaient une bonne route. Je tiens mon panier bien droit contre moi. Je regarde le chemin devant moi : il est clair, et je sais que grand-mère m'attend. Un pas après l'autre, tout doucement.",
       "duree_secondes": 5,
       "camera": "slow pan left to right",
       "emotion": "curiosité joyeuse",
-      "action_type": "marche"
+      "action_type": "marche",
+      "characters": ["Little Red Riding Hood"]
     },
     {
       "id": 3,
-      "lieu": "clairière fleurie",
-      "action": "Chaperon Rouge bends once to pick a flower then stands and smiles",
-      "narration": "Oh ! Une clairière pleine de fleurs douces. Grand-mère aime tant les fleurs… J'en cueille une seule, bien délicatement, pour ne pas abîmer la prairie. Je la glisse près du pain dans mon panier. Comme ça sent bon ! Je me redresse, je souris, et je me dis que je ne resterai pas trop longtemps. Le chemin m'appelle encore.",
+      "lieu": "flower meadow clearing",
+      "action": "Little Red Riding Hood bends once to pick a flower then stands and smiles",
+      "visual_prompt": "3D Pixar animation. Colorful wildflower meadow in enchanted forest. Little Red Riding Hood bends to pick one delicate flower, basket at her side, soft smile, vibrant pastel flowers, cinematic slow zoom composition, no other characters.",
+      "narration": "Oh ! Une clairière pleine de fleurs douces. Grand-mère aime tant les fleurs… J'en cueille une seule, bien délicatement, pour ne pas abîmer la prairie. Je la glisse près du pain dans mon panier. Comme ça sent bon ! Je me redresse, je souris, et je me dis que je ne resterai pas trop longtemps.",
       "duree_secondes": 5,
       "camera": "slow zoom in",
       "emotion": "émerveillement",
-      "action_type": "cueille"
+      "action_type": "cueille",
+      "characters": ["Little Red Riding Hood"]
     },
     {
       "id": 4,
-      "lieu": "clairière près des grands chênes",
-      "action": "A grey wolf steps out from behind a tree and looks gently at Chaperon Rouge",
+      "lieu": "oak trees clearing",
+      "action": "A grey wolf steps out from behind a tree and looks gently at Little Red Riding Hood",
+      "visual_prompt": "3D Pixar animation. Forest clearing near large oak trees. A grey anthropomorphic wolf steps from behind a tree trunk, calm cunning expression, Little Red Riding Hood holds basket and watches cautiously, tension without horror, cinematic static shot, volumetric forest light.",
       "narration": "Qui es-tu, grand animal gris ? Tu sors tout doucement de derrière le chêne. Tu as l'air de connaître la forêt mieux que moi. Je tiens mon panier un peu plus près. Ton regard est calme, mais maman m'a dit d'être prudente avec les inconnus. Je reste polie, et je t'écoute sans trop m'approcher.",
       "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "tension douce",
-      "action_type": "apparait"
+      "action_type": "apparait",
+      "characters": ["Little Red Riding Hood", "Grey Wolf"]
     },
     {
       "id": 5,
-      "lieu": "sentier de forêt",
-      "action": "The wolf points toward a side path while Chaperon Rouge listens with her basket",
+      "lieu": "forest path fork",
+      "action": "The wolf points toward a side path while Little Red Riding Hood listens with her basket",
+      "visual_prompt": "3D Pixar animation. Forest path fork. Grey wolf points muzzle toward a flower side path, Little Red Riding Hood listens hesitantly with basket, slow pan camera feel, soft shadows, fairy-tale mood, clear two-character composition.",
       "narration": "Le loup me parle d'un chemin plus joli, plein de fleurs et d'ombres douces. Il pointe du museau vers un sentier sur le côté. J'écoute, un peu hésitante. Une partie de moi a envie d'y aller… Une autre se souvient des conseils de maman : rester sur le grand chemin. Je hoche la tête, sans encore choisir.",
       "duree_secondes": 5,
       "camera": "slow pan right to left",
       "emotion": "doute prudent",
-      "action_type": "ecoute"
+      "action_type": "ecoute",
+      "characters": ["Little Red Riding Hood", "Grey Wolf"]
     },
     {
       "id": 6,
-      "lieu": "chemin détourné dans la forêt",
-      "action": "Chaperon Rouge walks the longer flower path, looking around carefully",
-      "narration": "Je prends le chemin des fleurs. Comme c'est long… Les branches font des ombres qui bougent. Je marche plus lentement, je regarde à gauche, à droite, et je serre mon panier. Les fleurs sont jolies, mais le temps passe. Grand-mère m'attend. J'espère que je n'ai pas choisi le mauvais détour. Je continue, courageusement.",
+      "lieu": "longer flower path in the forest",
+      "action": "Little Red Riding Hood walks the longer flower path, looking around carefully",
+      "visual_prompt": "3D Pixar animation. Long winding flower path through enchanted forest, moving shadows from branches. Little Red Riding Hood walks slowly, glancing left and right, clutching basket, adventurous mood, gentle camera follow, depth of field.",
+      "narration": "Je prends le chemin des fleurs. Comme c'est long… Les branches font des ombres qui bougent. Je marche plus lentement, je regarde à gauche, à droite, et je serre mon panier. Les fleurs sont jolies, mais le temps passe. Grand-mère m'attend. Je continue, courageusement.",
       "duree_secondes": 5,
       "camera": "slow pan left to right",
       "emotion": "aventure",
-      "action_type": "marche"
+      "action_type": "marche",
+      "characters": ["Little Red Riding Hood"]
     },
     {
       "id": 7,
-      "lieu": "devant la petite maison de grand-mère",
-      "action": "Chaperon Rouge knocks once on the cottage door holding her basket",
+      "lieu": "grandmother's cottage front door",
+      "action": "Little Red Riding Hood knocks once on the cottage door holding her basket",
+      "visual_prompt": "3D Pixar animation. Charming grandmother cottage with red roof and wooden door. Little Red Riding Hood knocks once on the door, basket in hand, impatient gentle expression, warm afternoon light, static cinematic framing.",
       "narration": "Me voici enfin devant la petite maison de grand-mère. Le toit est rouge, la porte est en bois. Je pose une main près de mon panier, et je frappe une seule fois : toc toc. J'attends. Mon cœur bat un peu plus vite. « Grand-mère, c'est moi, Chaperon Rouge ! J'apporte du pain et des fleurs. »",
       "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "impatience douce",
-      "action_type": "frappe"
+      "action_type": "frappe",
+      "characters": ["Little Red Riding Hood"]
     },
     {
       "id": 8,
-      "lieu": "chambre de grand-mère",
-      "action": "Chaperon Rouge peeks into the room where someone in a nightcap lies in bed",
-      "narration": "J'entre doucement dans la chambre. Quelqu'un est allongé dans le lit, coiffé d'un bonnet de nuit. « Grand-mère ? Comme tu as de grandes oreilles… » Je m'approche un peu, curieuse et inquiète. La voix qui me répond est étrange. Les draps bougent. Je plisse les yeux pour mieux voir, le panier encore contre moi.",
+      "lieu": "grandmother's bedroom",
+      "action": "Little Red Riding Hood peeks into the room where someone in a nightcap lies in bed",
+      "visual_prompt": "3D Pixar animation. Cozy grandmother bedroom. Figure in nightcap lies in bed. Little Red Riding Hood peeks in doorway with basket, curious worried expression, slow zoom toward bed, warm indoor lighting, fairy-tale mystery mood.",
+      "narration": "J'entre doucement dans la chambre. Quelqu'un est allongé dans le lit, coiffé d'un bonnet de nuit. « Grand-mère ? Comme tu as de grandes oreilles… » Je m'approche un peu, curieuse et inquiète. La voix qui me répond est étrange. Les draps bougent.",
       "duree_secondes": 5,
       "camera": "slow zoom in",
       "emotion": "surprise inquiète",
-      "action_type": "regarde"
+      "action_type": "regarde",
+      "characters": ["Little Red Riding Hood", "Figure in bed"]
     },
     {
       "id": 9,
-      "lieu": "chambre de grand-mère",
-      "action": "Chaperon Rouge steps back as the wolf sits up in the bed, eyes wide",
-      "narration": "Ce n'est pas grand-mère ! C'est le loup ! Il se redresse dans le lit, les yeux grands ouverts. Je recule d'un pas, le panier serré. J'ai peur, mais je reste maîtresse de moi. Je ne crie pas trop fort. Je cherche la porte du regard. Il faut que j'aille chercher de l'aide, tout de suite, dehors.",
+      "lieu": "grandmother's bedroom",
+      "action": "Little Red Riding Hood steps back as the wolf sits up in the bed, eyes wide",
+      "visual_prompt": "3D Pixar animation. Grandmother bedroom. Grey wolf sits up in bed revealing disguise, nightcap askew, wide eyes. Little Red Riding Hood steps back in controlled fear, basket tight, dramatic but child-safe, static camera shot.",
+      "narration": "Ce n'est pas grand-mère ! C'est le loup ! Il se redresse dans le lit, les yeux grands ouverts. Je recule d'un pas, le panier serré. J'ai peur, mais je reste maîtresse de moi. Je cherche la porte du regard. Il faut que j'aille chercher de l'aide, tout de suite, dehors.",
       "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "peur maîtrisée",
-      "action_type": "recule"
+      "action_type": "recule",
+      "characters": ["Little Red Riding Hood", "Grey Wolf"]
     },
     {
       "id": 10,
-      "lieu": "devant la maison de grand-mère",
-      "action": "A kind woodcutter arrives as Chaperon Rouge runs a few steps outside then stops safely",
-      "narration": "Je cours dehors, quelques pas rapides, puis je m'arrête. Le bûcheron arrive ! Il a entendu mon appel. Son visage est bon et rassurant. « Je suis en sécurité maintenant », me dis-je. Ensemble, nous allons aider grand-mère. Le loup ne gagnera pas aujourd'hui. Mon cœur se calme un peu.",
+      "lieu": "outside grandmother's cottage",
+      "action": "A kind woodcutter arrives as Little Red Riding Hood runs a few steps outside then stops safely",
+      "visual_prompt": "3D Pixar animation. Outside grandmother cottage. Little Red Riding Hood runs a few steps then stops. Kind woodcutter arrives with reassuring smile, axe at belt, relief mood, smooth zoom out, sunny forest background.",
+      "narration": "Je cours dehors, quelques pas rapides, puis je m'arrête. Le bûcheron arrive ! Il a entendu mon appel. Son visage est bon et rassurant. « Je suis en sécurité maintenant », me dis-je. Ensemble, nous allons aider grand-mère. Le loup ne gagnera pas aujourd'hui.",
       "duree_secondes": 5,
       "camera": "zoom out smoothly",
       "emotion": "soulagement",
-      "action_type": "court"
+      "action_type": "court",
+      "characters": ["Little Red Riding Hood", "Woodcutter"]
     },
     {
       "id": 11,
-      "lieu": "jardin devant la maison de grand-mère",
-      "action": "Chaperon Rouge hugs grandmother and holds the flower basket, smiling softly",
+      "lieu": "garden in front of grandmother's cottage",
+      "action": "Little Red Riding Hood hugs grandmother and holds the flower basket, smiling softly",
+      "visual_prompt": "3D Pixar animation. Cottage garden in warm light. Little Red Riding Hood gently hugs grandmother, offers flower basket, tender happy ending, grandmother smiles, static heartwarming composition, vibrant Pixar colors.",
       "narration": "Grand-mère est sauvée. Je la serre tout doucement dans mes bras, et je lui tends mon panier de fleurs. Elle sourit. Moi aussi. Je resterai prudente la prochaine fois, et j'écouterai mieux les conseils de ceux qui m'aiment. Je t'apporterai encore des fleurs, grand-mère — mais en restant sur le bon chemin.",
       "duree_secondes": 5,
       "camera": "static camera shot",
       "emotion": "tendresse",
-      "action_type": "etreinte"
+      "action_type": "etreinte",
+      "characters": ["Little Red Riding Hood", "Grandmother"]
     }
   ]
 }

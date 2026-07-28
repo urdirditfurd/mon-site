@@ -70,6 +70,9 @@ class TestBasics(unittest.TestCase):
         locked = apply_style_lock("a forest path", "aquarelle")
         self.assertIn("watercolor", locked.lower())
         self.assertTrue("no 3D" in locked or "no Pixar" in locked or "no CGI" in locked)
+        pixar = apply_style_lock("forest path", "3d_mignon")
+        self.assertIn("pixar", pixar.lower())
+        self.assertNotIn("no pixar", pixar.lower())
 
     def test_motion_and_character_lock(self) -> None:
         from modules.character_lock import apply_character_lock, character_lock_clause
@@ -125,7 +128,42 @@ class TestBasics(unittest.TestCase):
         story = script_to_story_payload(load_script_file(sample))
         self.assertEqual(story["age_group"], "7-10")
         self.assertEqual(float(story["duration_min"]), 5.0)
+        self.assertEqual(story["style_key"], "3d_mignon")
         self.assertGreaterEqual(int(story["word_count"]), 400)
+        self.assertEqual(len(story["structured_scenes"]), 11)
+
+    def test_structured_script_one_clip_per_scene(self) -> None:
+        from modules.clip_prompts import build_clip_plans_for_board
+        from modules.script_parser import load_script_file, script_to_story_payload
+
+        sample = ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json"
+        if not sample.exists():
+            self.skipTest("template script absent")
+        story = script_to_story_payload(load_script_file(sample))
+        board = {
+            "age_group": story["age_group"],
+            "style_key": story["style_key"],
+            "hero": story["hero"],
+            "hero_description": story["hero_description"],
+            "visual_style": story["visual_style"],
+            "structured_script": True,
+            "scenes": [
+                {
+                    "index": i + 1,
+                    "script_action": sc["action"],
+                    "action_type": sc["action_type"],
+                    "script_camera": sc["camera"],
+                    "target_duration_sec": sc["duree_secondes"],
+                    "narration": sc["narration"],
+                    "visual_prompt": sc.get("visual_prompt") or sc["action"],
+                }
+                for i, sc in enumerate(story["structured_scenes"])
+            ],
+        }
+        total = build_clip_plans_for_board(board)
+        self.assertEqual(total, 11)
+        for scene in board["scenes"]:
+            self.assertEqual(scene["ai_clips_planned"], 1)
 
     def test_resolve_project_dir_repairs_empty_chemin(self) -> None:
         import os

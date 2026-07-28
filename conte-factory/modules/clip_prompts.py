@@ -290,15 +290,21 @@ def enhance_motion_prompt(
 
 
 def enhance_image_prompt(clip: dict[str, Any], board: dict[str, Any]) -> str:
-    """Prompt image de reference (init_frame) pour un clip — style lock, pas de Pixar force."""
+    """Prompt image de reference (init_frame) pour un clip."""
     style_key = normalize_style_key(str(board.get("style_key") or "aquarelle"))
     desc = str(clip.get("description") or "").strip()
     action = finish_action(str(clip.get("action") or ""))
     camera = ensure_camera(str(clip.get("camera") or ""), 0)
-    prefix = (
-        "children's storybook film still, single environment, "
-        "one clear subject, sharp focus, soft lighting"
-    )
+    if style_key == "3d_mignon":
+        prefix = (
+            "3D Pixar animation film still, single environment, one clear subject, "
+            "cinematic composition, sharp focus, octane render quality"
+        )
+    else:
+        prefix = (
+            "children's storybook film still, single environment, "
+            "one clear subject, sharp focus, soft lighting"
+        )
     raw = (
         f"{prefix}. {desc}. "
         f"Frozen moment before action: {action}. {camera}. "

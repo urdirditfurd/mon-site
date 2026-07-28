@@ -474,6 +474,9 @@ def write_story_to_project(
         "aspect": aspect,
         "music": music,
         "word_count": story.get("word_count") or _word_count(script),
+        "structured_scenes": story.get("structured_scenes") or [],
+        "character_ref_hint": story.get("character_ref_hint"),
+        "source": story.get("source") or "theme",
     }
     (projet / "story.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -613,6 +616,7 @@ def source_from_script(
     age_group: str | None = None,
     duration_min: float | None = None,
     style_key: str | None = None,
+    force_new: bool = False,
 ) -> dict[str, Any]:
     """Cree un projet depuis un script JSON structure (P1)."""
     from modules.script_parser import load_script_file, script_to_story_payload
@@ -635,7 +639,7 @@ def source_from_script(
     hash_script = fingerprint(script_text + "|structured|" + titre)
 
     existing = find_by_hash(hash_script)
-    if existing:
+    if existing and not force_new:
         existing_id = int(existing["id"])
         projet_existing = resolve_project_dir(existing_id, existing)
         if not (projet_existing / "story.json").exists():
@@ -655,7 +659,17 @@ def source_from_script(
                 "projet": str(projet_existing),
                 "story": story,
             }
-        log_event(existing_id, "warn", "Script structure deja connu — reprise.")
+        # Resynchroniser story.json avec le template (style Pixar, scenes structurees)
+        write_story_to_project(
+            existing_id,
+            story,
+            age_group=str(story["age_group"]),
+            duration_min=float(story["duration_min"]),
+            style_key=str(story["style_key"]),
+            aspect=str(story.get("aspect") or "16:9"),
+            music=str(story.get("music") or "berceuse"),
+        )
+        log_event(existing_id, "info", "Script structure resynchronise — reprise.")
         return {"ok": False, "reason": "doublon_hash", "video": existing}
 
     if similar_title_exists(titre):

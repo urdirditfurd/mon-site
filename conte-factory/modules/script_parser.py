@@ -69,6 +69,8 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
                 "action_type": str(sc.get("action_type") or _infer_action_type(action)),
                 "narration": str(sc.get("narration") or action),
                 "dialogue": sc.get("dialogue"),
+                "visual_prompt": str(sc.get("visual_prompt") or sc.get("visual_prompt_en") or "").strip(),
+                "characters": sc.get("characters") or [],
             }
         )
     if not cleaned_scenes:
@@ -105,6 +107,24 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
 def _infer_action_type(action: str) -> str:
     low = action.lower()
     mapping = (
+        ("knock", "frappe"),
+        ("frappe", "frappe"),
+        ("hug", "etreinte"),
+        ("embrace", "etreinte"),
+        ("step back", "recule"),
+        ("steps back", "recule"),
+        ("recule", "recule"),
+        ("point", "pointe"),
+        ("pointe", "pointe"),
+        ("listen", "ecoute"),
+        ("ecoute", "ecoute"),
+        ("pick", "cueille"),
+        ("cueill", "cueille"),
+        ("bend", "cueille"),
+        ("appear", "apparait"),
+        ("apparait", "apparait"),
+        ("steps out", "apparait"),
+        ("wolf", "apparait"),
         ("marche", "marche"),
         ("walk", "marche"),
         ("court", "court"),
@@ -113,15 +133,39 @@ def _infer_action_type(action: str) -> str:
         ("dance", "danse"),
         ("regarde", "regarde"),
         ("look", "regarde"),
-        ("cueill", "marche"),
-        ("parle", "regarde"),
-        ("apparait", "regarde"),
-        ("fuit", "court"),
+        ("peek", "regarde"),
     )
     for fr, key in mapping:
         if fr in low:
             return key
     return "regarde"
+
+
+def build_scene_visual_prompt(
+    sc: dict[str, Any],
+    *,
+    hero: str,
+    style: str,
+    place: str = "",
+) -> str:
+    """Prompt visuel EN fidele au script (sans LLM ni compagnon invente)."""
+    custom = str(sc.get("visual_prompt") or "").strip()
+    if custom:
+        return custom
+    lieu = str(sc.get("lieu") or place or "enchanted fairy-tale setting")
+    action = str(sc.get("action") or "")
+    emotion = str(sc.get("emotion") or "gentle")
+    camera = str(sc.get("camera") or "static camera shot")
+    chars = sc.get("characters") or []
+    cast = ", ".join(str(c) for c in chars) if chars else ""
+    cast_clause = f" Characters in scene: {cast}." if cast else ""
+    return (
+        f"{style}. Single environment: {lieu}. "
+        f"Main character: {hero}.{cast_clause} "
+        f"Action: {action}. Emotion: {emotion}. Camera: {camera}. "
+        f"Cinematic composition, clear readable characters, faithful to the fairy tale, "
+        f"no text, no watermark."
+    )
 
 
 def script_to_story_payload(script: dict[str, Any]) -> dict[str, Any]:
@@ -195,15 +239,13 @@ def apply_structured_scenes_to_board(board: dict[str, Any], story: dict[str, Any
         scene["emotion"] = sc.get("emotion")
         scene["action_type"] = sc.get("action_type")
         scene["target_duration_sec"] = float(sc.get("duree_secondes") or 4)
-        # Prompt visuel EN oriente scene (pas le script FR seul)
         hero = str(board.get("hero_description") or board.get("hero") or "")
         style = str(board.get("visual_style") or "")
-        scene["visual_prompt"] = (
-            f"{style}. Single environment: {sc.get('lieu')}. "
-            f"Main character: {hero}. Action: {sc.get('action')}. "
-            f"Emotion: {sc.get('emotion')}. Camera feel: {sc.get('camera')}. "
-            f"Faithful fairy-tale storybook scene, clear readable characters, "
-            f"no text, no watermark."
+        scene["visual_prompt"] = build_scene_visual_prompt(
+            sc,
+            hero=hero,
+            style=style,
+            place=str(board.get("place") or ""),
         )
         scene["visual_prompt_source"] = "structured_script"
     board["structured_script"] = True

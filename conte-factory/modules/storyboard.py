@@ -344,6 +344,8 @@ def enrich_board_visual_prompts(board: dict[str, Any], *, force: bool = False) -
     }
     updated = 0
     for i, scene in enumerate(board.get("scenes") or []):
+        if str(scene.get("visual_prompt_source") or "") == "structured_script":
+            continue
         dialogue = scene.get("dialogue") or [
             {"speaker": "heros", "text": scene.get("narration") or ""}
         ]
@@ -392,16 +394,25 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     scenes = []
     for i, dialogue in enumerate(dialogue_scenes):
         narration = " ".join(f"{d['text']}" for d in dialogue)
+        scene_dur = scene_sec
+        if structured and i < len(structured):
+            scene_dur = float(structured[i].get("duree_secondes") or scene_sec)
+        if structured:
+            visual_prompt = ""
+            visual_source = "structured_script"
+        else:
+            visual_prompt = _visual_prompt(
+                dialogue, i, {**story, "age_group": age_group}
+            )
+            visual_source = "llm_or_fallback_en"
         scenes.append(
             {
                 "index": i + 1,
                 "narration": narration,
                 "dialogue": dialogue,
-                "visual_prompt": _visual_prompt(
-                    dialogue, i, {**story, "age_group": age_group}
-                ),
-                "visual_prompt_source": "llm_or_fallback_en",
-                "target_duration_sec": scene_sec,
+                "visual_prompt": visual_prompt,
+                "visual_prompt_source": visual_source,
+                "target_duration_sec": scene_dur,
                 "shot_sec_min": profile["shot_sec_min"],
                 "shot_sec_max": profile["shot_sec_max"],
             }

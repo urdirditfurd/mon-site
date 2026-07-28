@@ -272,6 +272,7 @@ def run_pipeline(
     aspect: str = "16:9",
     music: str = "berceuse",
     script_path: str | None = None,
+    force_new: bool = False,
 ) -> dict:
     ensure_dirs()
     init_db()
@@ -399,6 +400,7 @@ def run_pipeline(
             age_group=age_group,
             duration_min=duration_min,
             style_key=style_key,
+            force_new=force_new,
         )
         if sourced.get("ok") and isinstance(sourced.get("story"), dict):
             story_meta = sourced["story"]
@@ -493,6 +495,11 @@ def main() -> int:
         default=None,
         help="Chemin vers un script JSON structure (scenes, heros, style)",
     )
+    parser.add_argument(
+        "--force-new",
+        action="store_true",
+        help="Avec --script : ignore le doublon et cree un nouveau projet",
+    )
     parser.add_argument("--only", type=str, default=None)
     parser.add_argument("--resume", type=int, default=None)
     parser.add_argument("--publish", action="store_true")
@@ -574,6 +581,7 @@ def main() -> int:
             aspect=args.aspect,
             music=args.music,
             script_path=args.script,
+            force_new=args.force_new,
         )
     except Exception as exc:
         traceback.print_exc()
