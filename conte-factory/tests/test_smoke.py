@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from config import ensure_dirs
 from db.database import fingerprint, init_db, project_path, similar_title_exists
-from modules.audio import _normalize_tts_pitch, _normalize_tts_rate
+from modules.audio import _normalize_tts_pitch, _normalize_tts_rate, _strip_parasitic_text
 from modules.sourcing import _hero_short_name
 
 
@@ -249,6 +249,29 @@ class TestBasics(unittest.TestCase):
             video2 = get_video(vid)
             self.assertTrue(str(video2.get("chemin_projet") or "").strip())
 
+
+
+    def test_strip_parasitic_text(self) -> None:
+        self.assertEqual(
+            _strip_parasitic_text("Bonjour les enfants! Il était une fois."),
+            "Il était une fois.",
+        )
+        self.assertEqual(
+            _strip_parasitic_text("Scène 1, numéro 2: Le loup arriva."),
+            "Le loup arriva.",
+        )
+        self.assertEqual(
+            _strip_parasitic_text("Il était une fois un roi."),
+            "Il était une fois un roi.",
+        )
+        # All-parasitic input returns original
+        orig = "Bonjour!"
+        self.assertTrue(len(_strip_parasitic_text(orig)) > 0)
+
+    def test_music_volume_minus_16db(self) -> None:
+        from config import MUSIC_VOLUME
+        target_linear = 10 ** (-16.0 / 20.0)
+        self.assertAlmostEqual(MUSIC_VOLUME, target_linear, places=2)
 
 
 if __name__ == "__main__":

@@ -245,6 +245,35 @@ def _via_cli(image: Path, audio: Path, dest: Path, prompt: str) -> Path:
     return dest
 
 
+def _postprocess_lipsync(clip: Path) -> None:
+    """Feathering doux sur la zone bouche + sharpen léger sur le visage.
+
+    Applique un unsharp mask global modéré (luma) pour compenser le flou
+    Wav2Lip, puis un léger smooth sur les bords pour atténuer l'effet
+    «carte découpée» autour des lèvres.
+    """
+    tmp = clip.with_suffix(".pp.mp4")
+    vf = (
+        "unsharp=5:5:0.8:5:5:0.0,"
+        "smartblur=lr=1.0:ls=-0.5:lt=-3.0:cr=0.5:cs=-0.5:ct=-3.0"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-i", str(clip),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-c:a", "copy",
+        str(tmp),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        tmp.replace(clip)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def animate_talking_clip(
     image: Path,
     audio: Path,
@@ -270,6 +299,7 @@ def animate_talking_clip(
         resp = requests.get(PINOKIO_LIPSYNC_URL, timeout=2)
         if resp.status_code < 500:
             _via_gradio(image, audio, dest, prompt)
+            _postprocess_lipsync(dest)
             return {"ok": True, "path": str(dest), "mode": "gradio"}
     except Exception as exc:
         errors.append(f"gradio: {exc}")
@@ -278,6 +308,7 @@ def animate_talking_clip(
     try:
         if resolve_lipsync_engine():
             _via_cli(image, audio, dest, prompt)
+            _postprocess_lipsync(dest)
             return {"ok": True, "path": str(dest), "mode": "cli"}
     except Exception as exc:
         errors.append(f"cli: {exc}")

@@ -40,9 +40,42 @@ def _ffprobe_duration(path: Path) -> float:
     return float(out)
 
 
+_PARASITIC_PATTERNS = [
+    re.compile(r"(?i)^bonjour\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^salut\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^coucou\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^(aujourd['''\s]?hui?|ce soir),?\s*(nous allons|on va|je vais)\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^bienvenue\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^chers?\s+(enfants?|amis?|petits?)\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^(hello|hi|hey)\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^(voici|c[''']est)\s+(l[''']histoire|le conte|une histoire)\b[^.!?]*[.!?…]?\s*"),
+    re.compile(r"(?i)^je (te|vous) (confie|raconte|lis)\b[^.!?]*[.!?…]?\s*"),
+]
+_METADATA_PATTERNS = [
+    re.compile(r"(?i),?\s*\bsc[eèé]ne\s+\d+\b,?\s*"),
+    re.compile(r"(?i),?\s*\bnum[eéè]ro\s+\d+\b,?\s*"),
+    re.compile(r"(?i),?\s*\bacte\s+\d+\b,?\s*"),
+    re.compile(r"(?i),?\s*\bpartie\s+\d+\b,?\s*"),
+]
+
+
+def _strip_parasitic_text(text: str) -> str:
+    """Supprime formules d'introduction, salutations et métadonnées scène."""
+    t = text.strip()
+    for pat in _PARASITIC_PATTERNS:
+        t = pat.sub("", t).strip()
+    for pat in _METADATA_PATTERNS:
+        t = pat.sub(" ", t).strip()
+    t = re.sub(r"^[,;:\s]+", "", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    if t and t[0].islower():
+        t = t[0].upper() + t[1:]
+    return t if t else text.strip()
+
+
 def _prosody_text(text: str) -> str:
     """Insere virgules / points / pauses pour une diction conteuse naturelle."""
-    t = " ".join((text or "").split())
+    t = _strip_parasitic_text(" ".join((text or "").split()))
     if not t:
         return "..."
     # Normaliser espaces avant ponctuation
@@ -173,23 +206,27 @@ def _dialogue_for_scene(scene: dict[str, Any]) -> list[dict[str, str]]:
     return [{"speaker": "heros", "text": text}]
 
 
+_EXTRA_HERO_LINES = [
+    "Le vent soufflait doucement entre les arbres.",
+    "Les étoiles commençaient à briller dans le ciel.",
+    "Un parfum de fleurs sauvages flottait dans l'air.",
+    "Le sentier serpentait à travers la forêt enchantée.",
+]
+_EXTRA_FRIEND_LINES = [
+    "Continuons notre chemin, l'aventure n'est pas finie.",
+    "Regarde, là-bas, quelque chose scintille.",
+    "Chaque pas nous rapproche de la fin de l'histoire.",
+    "La nuit tombe doucement sur la forêt.",
+]
+
+
 def _extra_unique_lines(scene_idx: int, hero: str, round_i: int) -> list[dict[str, str]]:
-    """Répliques bonus pour allonger jusqu'à la durée — contenu nouveau."""
+    """Répliques bonus narratives (sans métadonnées ni salutations)."""
+    hi = (scene_idx + round_i) % len(_EXTRA_HERO_LINES)
+    fi = (scene_idx + round_i) % len(_EXTRA_FRIEND_LINES)
     return [
-        {
-            "speaker": "heros",
-            "text": (
-                f"Encore un instant. Moi, {hero}, je te confie un secret de la scène {scene_idx} "
-                f"numéro {round_i} : le ciel change encore un peu pour moi."
-            ),
-        },
-        {
-            "speaker": "ami",
-            "text": (
-                f"Je t'écoute, {hero}. Ce n'est pas une reprise : c'est la suite, "
-                f"tout doucement, pour atteindre la fin du conte."
-            ),
-        },
+        {"speaker": "heros", "text": _EXTRA_HERO_LINES[hi]},
+        {"speaker": "ami", "text": _EXTRA_FRIEND_LINES[fi]},
     ]
 
 

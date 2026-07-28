@@ -236,8 +236,11 @@ def _fit_clip_to_duration(src: Path, duration: float, out: Path, motion: str = "
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+XFADE_DURATION = 0.5
+
+
 def _concat_parts_xfade(parts: list[Path], out: Path) -> None:
-    """Enchaîne plusieurs clips Wan avec fondus courts (= vraie vidéo continue)."""
+    """Enchaîne clips avec crossfade 0.5s entre scènes distinctes."""
     if len(parts) == 1:
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(parts[0]), "-c", "copy", str(out)],
@@ -246,16 +249,48 @@ def _concat_parts_xfade(parts: list[Path], out: Path) -> None:
         )
         return
     if len(parts) == 2:
-        # xfade simple
         try:
-            d0 = max(0.3, _ffprobe_duration(parts[0]) - 0.25)
+            d0 = max(0.5, _ffprobe_duration(parts[0]) - XFADE_DURATION)
             filter_complex = (
-                f"[0:v][1:v]xfade=transition=fade:duration=0.25:offset={d0:.3f},format=yuv420p"
+                f"[0:v][1:v]xfade=transition=fade:duration={XFADE_DURATION}:offset={d0:.3f},"
+                f"format=yuv420p"
             )
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(parts[0]), "-i", str(parts[1]),
                 "-filter_complex", filter_complex,
+                "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                str(out),
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            return
+        except Exception:
+            pass
+    # 3+ clips: chain xfade
+    if len(parts) >= 3:
+        try:
+            durations = [_ffprobe_duration(p) for p in parts]
+            inputs = []
+            for p in parts:
+                inputs += ["-i", str(p)]
+            fc_parts = []
+            offset = max(0.5, durations[0] - XFADE_DURATION)
+            fc_parts.append(
+                f"[0:v][1:v]xfade=transition=fade:duration={XFADE_DURATION}:offset={offset:.3f}[v1]"
+            )
+            for i in range(2, len(parts)):
+                prev_label = f"v{i-1}"
+                merged_dur = offset + XFADE_DURATION + (durations[i-1] - XFADE_DURATION)
+                offset = max(0.5, merged_dur - XFADE_DURATION)
+                out_label = f"v{i}" if i < len(parts) - 1 else "vout"
+                fc_parts.append(
+                    f"[{prev_label}][{i}:v]xfade=transition=fade:duration={XFADE_DURATION}:offset={offset:.3f}[{out_label}]"
+                )
+            fc = ";".join(fc_parts)
+            cmd = [
+                "ffmpeg", "-y", *inputs,
+                "-filter_complex", f"{fc},format=yuv420p",
+                "-map", "[vout]",
                 "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                 str(out),
             ]
@@ -428,29 +463,14 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
             _fit_clip_to_duration(raw, dur, fitted, motion=motion)
         scene_clips.append(fitted)
 
-    list_file = fitted_dir / "concat.txt"
-    list_file.write_text(
-        "\n".join(f"file '{p.name}'" for p in scene_clips) + "\n", encoding="utf-8"
-    )
     silent_video = fitted_dir / "video_silent.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_file),
-            "-c",
-            "copy",
-            str(silent_video),
-        ],
-        check=True,
-        cwd=str(fitted_dir),
-        capture_output=True,
-    )
+    if len(scene_clips) > 1:
+        _concat_parts_xfade(scene_clips, silent_video)
+    else:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(scene_clips[0]), "-c", "copy", str(silent_video)],
+            check=True, capture_output=True,
+        )
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in titre)[:60]
@@ -459,12 +479,13 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     music = _find_music(str(board.get("music") or "berceuse"))
     inputs = ["-i", str(silent_video), "-i", str(narration)]
     filter_complex = None
+    # -16 dB sous la voix ≈ 0.158 linéaire
+    music_linear = min(music_vol, 10 ** (-16.0 / 20.0))
     if music:
         inputs += ["-stream_loop", "-1", "-i", str(music)]
-        # Spec : musique a -12 dB sous les voix ; voix restent prioritaires
         filter_complex = (
             f"[1:a]volume=1.0[vox];"
-            f"[2:a]volume={music_vol:.4f}[bg];"
+            f"[2:a]afade=t=in:st=0:d=2.0,volume={music_linear:.4f}[bg];"
             f"[vox][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
 
@@ -556,7 +577,7 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
         "info",
         (
             f"Montage jeunesse {age} : {final_path.name} ({total/60:.1f} min) "
-            f"{w}x{h}@{use_fps}fps musique={music_vol:.2f} (-14dB)."
+            f"{w}x{h}@{use_fps}fps musique={music_linear:.3f} (-16dB)."
         ),
     )
     return {"ok": True, "video": str(final_path), "duree_sec": total, "meta": meta}

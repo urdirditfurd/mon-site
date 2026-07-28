@@ -664,6 +664,7 @@ def source_from_script(
         existing_id = int(existing["id"])
         projet_existing = resolve_project_dir(existing_id, existing)
         if not (projet_existing / "story.json").exists():
+            story["hash_script"] = str(existing.get("hash_script") or hash_script)
             write_story_to_project(
                 existing_id,
                 story,

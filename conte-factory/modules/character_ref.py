@@ -20,13 +20,13 @@ def _portrait_prompt(role: str, description: str, style_key: str, age_group: str
     base_style = style_prompt(style_key)
     who = description.strip() or "a friendly magical creature"
     role_label = "main hero" if role == "heros" else "cute friend companion"
-    # Style UI (aquarelle…) + visage lisible pour lip-sync (pas forcer Pixar)
     return (
-        f"{base_style}, front view character portrait, clear facial features, "
-        f"friendly expression, clean soft background, highly detailed children's character. "
+        f"{base_style}, medium close-up front view character portrait, "
+        f"face centered in frame occupying 40% of image, sharp facial features, "
+        f"high detail 1080p quality, friendly expression, clean soft background. "
         f"Subject ({role_label}): {who}. "
-        f"Medium close-up, face clearly visible and large enough for lip-sync, "
-        f"looking at camera, mouth slightly closed, eyes open, "
+        f"Face clearly visible, looking at camera, mouth slightly closed, eyes open, "
+        f"well-lit face, no profile view, no wide shot, no side angle, "
         f"{youth_visual_suffix(profile)} "
         f"no text, no watermark, no logo, no extra characters"
     )
@@ -50,8 +50,8 @@ def ensure_character_refs(projet: Path, board: dict[str, Any]) -> dict[str, Path
     theme_key = str(board.get("theme") or hero)
     base_seed = int(hashlib.md5(theme_key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
 
-    # Portrait 16:9 mais visage centré / assez grand
-    set_image_output_size(1280, 720)
+    # Portrait 16:9 1080p — visage centré, net, pour Wav2Lip
+    set_image_output_size(1920, 1080)
 
     paths: dict[str, Path] = {
         "heros": refs_dir / "heros_portrait.png",
@@ -63,15 +63,15 @@ def ensure_character_refs(projet: Path, board: dict[str, Any]) -> dict[str, Path
         _portrait_prompt("heros", hero, style_key, age),
         paths["heros"],
         seed=base_seed,
-        width=1280,
-        height=720,
+        width=1920,
+        height=1080,
     )
     generate_scene_image(
         _portrait_prompt("ami", friend, style_key, age),
         paths["ami"],
         seed=(base_seed + 77) % 1_000_000,
-        width=1280,
-        height=720,
+        width=1920,
+        height=1080,
     )
 
     meta = {

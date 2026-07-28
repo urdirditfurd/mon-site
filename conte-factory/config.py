@@ -97,8 +97,8 @@ VIDEO_WIDTH = int(os.getenv("CONTE_VIDEO_WIDTH", "1920"))
 VIDEO_HEIGHT = int(os.getenv("CONTE_VIDEO_HEIGHT", "1080"))
 # Spec jeunesse : 24–30 FPS (jamais 60). Défaut cinéma doux 24.
 VIDEO_FPS = int(os.getenv("CONTE_VIDEO_FPS", "24"))
-# Musique à -14 dB sous les voix ≈ 0.20
-MUSIC_VOLUME = float(os.getenv("CONTE_MUSIC_VOLUME", "0.20"))
+# Musique à -16 dB sous la voix narrative ≈ 0.158
+MUSIC_VOLUME = float(os.getenv("CONTE_MUSIC_VOLUME", "0.158"))
 # Export 4K pour 4–10 ans (upscale — tradeoff poids fichier)
 EXPORT_4K = os.getenv("CONTE_EXPORT_4K", "0") == "1"
 
