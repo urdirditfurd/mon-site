@@ -487,6 +487,48 @@ def print_estimate() -> None:
 
 
 def main() -> int:
+    exit_code = 1
+    try:
+        exit_code = _main_inner()
+        return exit_code
+    except Exception as exc:
+        traceback.print_exc()
+        try:
+            set_progress(
+                step="error",
+                message="Erreur pendant la generation",
+                error=str(exc)[:500],
+            )
+        except Exception:
+            pass
+        exit_code = 1
+        return exit_code
+    finally:
+        try:
+            from config import DATA_DIR
+
+            (DATA_DIR / "job.exit").write_text(str(exit_code), encoding="utf-8")
+        except Exception:
+            pass
+        # Garantit un statut UI si crash brutal sans set_progress(error/done)
+        try:
+            from modules.progress import get_progress
+
+            prog = get_progress()
+            if prog.get("step") not in {"done", "error", "idle"}:
+                set_progress(
+                    step="error" if exit_code else "done",
+                    message="Generation interrompue" if exit_code else "Video prete",
+                    error=("Processus termine (code %s) — voir data/job.log" % exit_code)
+                    if exit_code
+                    else None,
+                    video_id=prog.get("video_id"),
+                )
+        except Exception:
+            pass
+
+
+def _main_inner() -> int:
     parser = argparse.ArgumentParser(description="Conte Factory — pipeline vidéo IA longue")
     parser.add_argument("--theme", type=str, default=None)
     parser.add_argument(

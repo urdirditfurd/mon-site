@@ -60,7 +60,7 @@ def clip_span_sec(age_group: str | None = "1-10") -> float:
 
 
 # Plafond pratique RTX 3080 : 3 clips courts / scene narrative
-MAX_CLIPS_PER_SCENE = 3
+MAX_CLIPS_PER_SCENE = 1  # I2V local : 1 clip/scene (montage pad sur l'audio) — evite OOM/crash 33 clips
 
 
 def ensure_camera(camera: str | None, clip_index: int = 0) -> str:

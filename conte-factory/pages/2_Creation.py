@@ -51,12 +51,21 @@ job = status.get("job") or {}
 running = bool(job.get("running") and status.get("alive"))
 
 # --- Formulaire ---
+SCRIPT_PCR = str((ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json").resolve())
+
 with st.form("create_form", clear_on_submit=False):
-    theme = st.text_input(
-        "Theme ou prompt",
+    use_script = st.checkbox(
+        "Utiliser le script structure Petit Chaperon Rouge (Pixar 3D, 11 scenes)",
+        value=False,
+        help="Recommande : prompts scene-par-scene, 11 clips, style 3d_mignon. "
+        "Sinon le theme libre produit une histoire auto (plus fragile).",
+    )
+    theme = st.text_area(
+        "Theme ou prompt (ignore si script structure coche)",
         value=st.session_state.get("last_theme", ""),
         placeholder="ex: un dragon violet fonce qui vole et chante dans les nuages",
-        help="Decris EXACTEMENT le heros / l'action. L'histoire parlera de ca.",
+        height=120,
+        help="Decris le heros / l'action. Pour un conte complet, prefere le script JSON.",
     )
     duration = st.slider(
         "Duree de la video (minutes)", min_value=1, max_value=60, value=5
@@ -66,18 +75,18 @@ with st.form("create_form", clear_on_submit=False):
         style_label = st.selectbox(
             "Style visuel",
             options=[
+                "3D mignon (Pixar)",
                 "Aquarelle conte",
                 "Anime doux",
-                "3D mignon",
                 "Conte classique",
                 "Papier decoupe",
             ],
             index=0,
         )
         style_map = {
+            "3D mignon (Pixar)": "3d_mignon",
             "Aquarelle conte": "aquarelle",
             "Anime doux": "anime_doux",
-            "3D mignon": "3d_mignon",
             "Conte classique": "conte_classique",
             "Papier decoupe": "papier_decoupe",
         }
@@ -140,15 +149,29 @@ with st.form("create_form", clear_on_submit=False):
 
     subtitles = st.checkbox("Sous-titres", value=False)
     publish = st.checkbox("Publier sur YouTube a la fin", value=False)
+    force_new = st.checkbox(
+        "Forcer un nouveau projet (meme si histoire deja generee)",
+        value=use_script,
+        help="Utile avec le script Petit Chaperon pour ne pas reprendre un vieux projet.",
+    )
 
     scenes = estimate_ai_clips(float(duration), age_group=age_group)
+    # I2V : 1 clip / scene narrative (plafond anti-crash)
+    if use_script:
+        scenes = 11
+    else:
+        scenes = min(int(scenes), 15)
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     provider = VIDEO_PROVIDER.lower().strip()
     yp = youth_profile(age_group)
     if provider in {"i2v", "wan_i2v", "image2video", "img2vid"}:
+        if style_key == "3d_mignon":
+            i2v_params = "CFG 4.0 · motion 0.55 · 1024×576 · 81f/25steps"
+        else:
+            i2v_params = "CFG 3.5 · motion 0.3 · 848×480 (face-safe)"
         mode_txt = (
-            f"**Pipeline I2V anti-boucle** : clips 3-5 s · camera fixe/pan/zoom · "
-            f"trim loops · LTX/Wan CFG 3.5 (~{scenes} scènes découpées)"
+            f"**Pipeline I2V** : 1 clip/scène · anti-boucle · {i2v_params} "
+            f"(~{scenes} clips)"
         )
     elif provider in {"talking", "lipsync", "talk"}:
         mode_txt = (
@@ -177,22 +200,28 @@ Vraie animation : personnage qui bouge, camera, decor vivant (Wan I2V) — pas u
     )
 
 if submitted:
-    if not theme.strip():
-        st.error("Indique un theme.")
+    if use_script and not Path(SCRIPT_PCR).is_file():
+        st.error(f"Script introuvable : {SCRIPT_PCR}")
+    elif (not use_script) and not theme.strip():
+        st.error("Indique un theme, ou coche le script Petit Chaperon.")
     elif ctx["uses_wan"] and not ctx["wan_ok"]:
         st.error("Moteur video pas encore pret — attends puis reessaie.")
     else:
         st.session_state["last_theme"] = theme.strip()
+        # Script structure impose son style JSON sauf override UI explicite
+        effective_style = style_key
         payload = {
-            "theme": theme.strip(),
+            "theme": theme.strip() or "le petit chaperon rouge",
             "duration_min": float(duration),
             "voice": voice,
             "subtitles": subtitles,
             "publish": publish,
             "age_group": age_group,
-            "style_key": style_key,
+            "style_key": effective_style,
             "aspect": aspect_key,
             "music": music,
+            "script_path": SCRIPT_PCR if use_script else None,
+            "force_new": bool(force_new and use_script),
         }
         params = inspect.signature(start_generation_job).parameters
         has_var_kw = any(

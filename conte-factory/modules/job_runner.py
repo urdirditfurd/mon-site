@@ -28,7 +28,7 @@ def resolve_voice(choice: str) -> str:
 
 
 # API Creation — si l'UI voit une erreur style_key, c'est un vieux job_runner en cache.
-JOB_RUNNER_API = 2
+JOB_RUNNER_API = 3
 
 
 def start_generation_job(
@@ -42,6 +42,8 @@ def start_generation_job(
     style_key: str = "aquarelle",
     aspect: str = "16:9",
     music: str = "berceuse",
+    script_path: str | None = None,
+    force_new: bool = False,
     **_extra: Any,
 ) -> dict[str, Any]:
     """Demarre main.py en sous-processus avec les options UI.
@@ -53,6 +55,7 @@ def start_generation_job(
     style_key = str(style_key or "aquarelle").strip() or "aquarelle"
     aspect = str(aspect or "16:9").strip() or "16:9"
     music = str(music or "berceuse").strip() or "berceuse"
+    script_path = (str(script_path).strip() if script_path else "") or None
 
     existing = get_job()
     if existing and existing.get("running"):
@@ -65,8 +68,6 @@ def start_generation_job(
     cmd = [
         py,
         str(ROOT / "main.py"),
-        "--theme",
-        theme.strip() or "conte magique",
         "--duration",
         str(float(duration_min)),
         "--voice",
@@ -80,6 +81,12 @@ def start_generation_job(
         "--music",
         music,
     ]
+    if script_path:
+        cmd.extend(["--script", script_path])
+        if force_new:
+            cmd.append("--force-new")
+    else:
+        cmd.extend(["--theme", theme.strip() or "conte magique"])
     if subtitles:
         cmd.append("--subtitles")
     if publish:
@@ -91,8 +98,8 @@ def start_generation_job(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_f = log_path.open("a", encoding="utf-8")
     log_f.write(
-        f"\n=== JOB {theme} {duration_min}min age={age_group} "
-        f"style={style_key} aspect={aspect} music={music} ===\n"
+        f"\n=== JOB theme={theme!r} script={script_path!r} {duration_min}min "
+        f"age={age_group} style={style_key} aspect={aspect} music={music} ===\n"
     )
     log_f.flush()
 
@@ -118,6 +125,7 @@ def start_generation_job(
         "running": True,
         "pid": proc.pid,
         "theme": theme,
+        "script_path": script_path,
         "duration_min": duration_min,
         "voice": voice,
         "subtitles": subtitles,
@@ -127,7 +135,13 @@ def start_generation_job(
         "aspect": aspect,
         "music": music,
         "log": str(log_path),
+        "exit_code_file": str(ROOT / "data" / "job.exit"),
     }
+    # Nettoyer ancien code sortie
+    try:
+        Path(job["exit_code_file"]).unlink(missing_ok=True)
+    except Exception:
+        pass
     set_job(job)
     return job
 
@@ -211,14 +225,30 @@ def refresh_job_status() -> dict[str, Any]:
     if job.get("running") and not alive:
         # Process fini
         if progress.get("step") not in {"done", "error"}:
-            log_hint = _job_log_tail(job.get("log"), max_chars=800)
+            log_hint = _job_log_tail(job.get("log"), max_chars=1200)
+            exit_code = _read_exit_code(job.get("exit_code_file"))
             err = "Processus termine sans statut final"
+            if exit_code is not None:
+                err = f"{err} (code={exit_code})"
+            # Indices utiles pour reprise
+            vid = progress.get("video_id")
+            if vid:
+                err += (
+                    f"\nProjet #{vid} — pour reprendre : "
+                    f"python main.py --resume {vid} --only video_ai,montage --no-publish"
+                )
             if log_hint:
-                err = f"{err}\n\n{log_hint}"
+                # Extraire derniere ligne Traceback / Error
+                for marker in ("Error", "Exception", "Traceback", "MemoryError", "CUDA"):
+                    if marker in log_hint:
+                        err = f"{err}\n\n{log_hint}"
+                        break
+                else:
+                    err = f"{err}\n\n{log_hint[-600:]}"
             set_progress(
                 step="error",
                 message="La generation s'est arretee",
-                error=err[:500],
+                error=err[:900],
                 video_id=progress.get("video_id"),
             )
             progress = get_progress()
@@ -227,6 +257,18 @@ def refresh_job_status() -> dict[str, Any]:
     elif job and not alive:
         job["running"] = False
     return {"job": job, "progress": progress, "alive": alive}
+
+
+def _read_exit_code(path: str | None) -> int | None:
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        return int(p.read_text(encoding="utf-8").strip().split()[0])
+    except Exception:
+        return None
 
 
 def _job_log_tail(log_path: str | None, max_chars: int = 800) -> str:
