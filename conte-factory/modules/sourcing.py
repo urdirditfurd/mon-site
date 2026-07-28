@@ -451,7 +451,14 @@ def write_story_to_project(
     )
     script = str(story["script"]).strip()
     titre = str(story.get("titre") or story.get("theme") or f"Video {video_id}").strip()
-    hash_script = fingerprint(script)
+    # Preferer le hash deja attribue (create_video / force-new) — ne pas ecraser
+    # avec fingerprint(script) seul, sinon UNIQUE constraint avec un autre projet.
+    existing = get_video(video_id)
+    hash_script = str(
+        story.get("hash_script")
+        or (existing or {}).get("hash_script")
+        or fingerprint(script)
+    ).strip()
     projet = project_dir(video_id)
     payload = {
         "id": video_id,
@@ -482,14 +489,16 @@ def write_story_to_project(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (projet / "script.txt").write_text(script, encoding="utf-8")
-    update_video(
-        video_id,
-        chemin_projet=str(projet),
-        statut="script_ok",
-        titre=titre,
-        theme=str(story.get("theme") or titre),
-        hash_script=hash_script,
-    )
+    update_kwargs: dict[str, Any] = {
+        "chemin_projet": str(projet),
+        "statut": "script_ok",
+        "titre": titre,
+        "theme": str(story.get("theme") or titre),
+    }
+    # N'ecrire hash_script que s'il change vraiment (evite collision UNIQUE)
+    if not existing or str(existing.get("hash_script") or "") != hash_script:
+        update_kwargs["hash_script"] = hash_script
+    update_video(video_id, **update_kwargs)
     return projet
 
 
@@ -639,7 +648,19 @@ def source_from_script(
     hash_script = fingerprint(script_text + "|structured|" + titre)
 
     existing = find_by_hash(hash_script)
-    if existing and not force_new:
+    if force_new:
+        # Hash unique pour un nouveau projet (meme script)
+        import time
+        import uuid
+
+        hash_script = fingerprint(
+            script_text
+            + "|structured|"
+            + titre
+            + f"|force-{uuid.uuid4().hex[:10]}-{time.time_ns()}"
+        )
+        existing = None
+    if existing:
         existing_id = int(existing["id"])
         projet_existing = resolve_project_dir(existing_id, existing)
         if not (projet_existing / "story.json").exists():
@@ -660,6 +681,7 @@ def source_from_script(
                 "story": story,
             }
         # Resynchroniser story.json avec le template (style Pixar, scenes structurees)
+        story["hash_script"] = str(existing.get("hash_script") or hash_script)
         write_story_to_project(
             existing_id,
             story,
@@ -676,6 +698,7 @@ def source_from_script(
         titre = f"{titre} ({random.randint(2, 99)})"
         story["titre"] = titre
 
+    story["hash_script"] = hash_script
     video_id = create_video(
         titre=titre,
         titre_original=titre,

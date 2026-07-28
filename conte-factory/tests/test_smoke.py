@@ -165,7 +165,43 @@ class TestBasics(unittest.TestCase):
         for scene in board["scenes"]:
             self.assertEqual(scene["ai_clips_planned"], 1)
 
-    def test_i2v_pixar_motion_not_clamped_to_face_safe(self) -> None:
+    def test_force_new_unique_hash(self) -> None:
+        import os
+        import tempfile
+
+        import importlib
+        import config as cfg
+        from db.database import find_by_hash, get_video, init_db
+        from modules.sourcing import source_from_script
+
+        sample = ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json"
+        if not sample.exists():
+            self.skipTest("template script absent")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CONTE_DATA_DIR"] = tmp
+            importlib.reload(cfg)
+            import db.database as db_mod
+
+            importlib.reload(db_mod)
+            import modules.sourcing as sourcing_mod
+
+            importlib.reload(sourcing_mod)
+            init_db()
+            a = sourcing_mod.source_from_script(sample, force_new=True)
+            b = sourcing_mod.source_from_script(sample, force_new=True)
+            self.assertTrue(a.get("ok"))
+            self.assertTrue(b.get("ok"))
+            self.assertNotEqual(a["video_id"], b["video_id"])
+            va = get_video(a["video_id"])
+            vb = get_video(b["video_id"])
+            self.assertIsNotNone(va)
+            self.assertIsNotNone(vb)
+            self.assertNotEqual(va["hash_script"], vb["hash_script"])
+            self.assertIsNone(find_by_hash("missing-hash-xyz"))
+
+
+
         import os
 
         from modules.i2v_ai import _cli_env
