@@ -127,6 +127,40 @@ class TestBasics(unittest.TestCase):
         self.assertEqual(float(story["duration_min"]), 5.0)
         self.assertGreaterEqual(int(story["word_count"]), 400)
 
+    def test_resolve_project_dir_repairs_empty_chemin(self) -> None:
+        import os
+        import tempfile
+
+        import importlib
+        import config as cfg
+        from db.database import (
+            create_video,
+            fingerprint,
+            get_video,
+            init_db,
+            resolve_project_dir,
+            update_video,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CONTE_DATA_DIR"] = tmp
+            importlib.reload(cfg)
+            import db.database as db_mod
+
+            importlib.reload(db_mod)
+            init_db()
+            h = fingerprint("resolve-project-dir-test")
+            vid = create_video("Test chemin", "Test chemin", "theme", h, "")
+            projet = db_mod.project_dir(vid)
+            (projet / "story.json").write_text('{"titre":"Test"}', encoding="utf-8")
+            update_video(vid, chemin_projet="")
+            video = get_video(vid)
+            self.assertEqual(str(video.get("chemin_projet") or "").strip(), "")
+            resolved = resolve_project_dir(vid, video)
+            self.assertTrue((resolved / "story.json").is_file())
+            video2 = get_video(vid)
+            self.assertTrue(str(video2.get("chemin_projet") or "").strip())
+
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from config import AUTO_PUBLISH, YOUTUBE_PRIVACY
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, resolve_project_dir, update_video
 
 
 def prepare_publish_package(video_id: int) -> dict[str, Any]:
@@ -15,7 +15,7 @@ def prepare_publish_package(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     meta_path = projet / "publish.json"
     if not meta_path.exists():
         raise FileNotFoundError("publish.json manquant — terminez le montage.")
@@ -48,7 +48,7 @@ def publish_youtube(video_id: int, force: bool = False) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     meta = json.loads((projet / "publish.json").read_text(encoding="utf-8"))
     video_file = Path(meta["video"])
     if not video_file.exists():

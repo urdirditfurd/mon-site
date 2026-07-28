@@ -41,7 +41,7 @@ from config import (
     WAN_CLIP_SPAN_SEC,
     wan_clip_budget,
 )
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, resolve_project_dir, update_video
 from modules.creative_options import format_size
 from modules.image_ai import generate_scene_image, set_image_output_size
 from modules.progress import set_progress
@@ -409,7 +409,7 @@ def generate_scene_videos(video_id: int) -> dict[str, Any]:
             "Utilisez i2v (recommande), talking, pinokio, images ou fal."
         )
 
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     board_path = projet / "storyboard.json"
     board = json.loads(board_path.read_text(encoding="utf-8"))
     clips_dir = projet / "ai_clips"

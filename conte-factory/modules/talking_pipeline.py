@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, resolve_project_dir, update_video
 from modules.character_ref import ensure_character_refs
 from modules.lipsync_ai import animate_talking_clip, lipsync_health
 from modules.progress import set_progress
@@ -57,7 +57,7 @@ def generate_talking_videos(video_id: int) -> dict[str, Any]:
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
 
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     board_path = projet / "storyboard.json"
     board = json.loads(board_path.read_text(encoding="utf-8"))
     audio_dir = projet / "audio"

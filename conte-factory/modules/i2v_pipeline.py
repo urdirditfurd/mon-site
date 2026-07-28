@@ -17,7 +17,7 @@ from typing import Any
 from PIL import Image
 
 from config import PINOKIO_I2V_HEIGHT, PINOKIO_I2V_WIDTH
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, resolve_project_dir, update_video
 from modules.character_lock import ensure_hero_reference
 from modules.clip_postprocess import trim_loop_tail
 from modules.clip_prompts import (
@@ -88,7 +88,7 @@ def generate_i2v_videos(video_id: int) -> dict[str, Any]:
     if not video:
         raise ValueError(f"Video introuvable: {video_id}")
 
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     board_path = projet / "storyboard.json"
     board = json.loads(board_path.read_text(encoding="utf-8"))
     clips_dir = projet / "ai_clips"

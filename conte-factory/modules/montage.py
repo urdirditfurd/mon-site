@@ -20,7 +20,7 @@ from config import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
-from db.database import get_video, log_event, update_video, video_title
+from db.database import get_video, log_event, resolve_project_dir, update_video, video_title
 import config as cfg
 
 
@@ -310,7 +310,7 @@ def assemble_video(video_id: int, with_subtitles: bool = False) -> dict[str, Any
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
     titre = video_title(video)
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     board = json.loads((projet / "storyboard.json").read_text(encoding="utf-8"))
 
     age = normalize_age(str(board.get("age_group") or "1-10"))

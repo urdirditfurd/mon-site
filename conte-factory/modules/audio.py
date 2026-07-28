@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from config import TARGET_DURATION_MIN, TTS_PITCH, TTS_RATE, TTS_VOICE
-from db.database import get_video, log_event, update_video
+from db.database import get_video, log_event, project_dir, resolve_project_dir, update_video
 from modules.creative_options import voices_for_preference
 from modules.youth_spec import normalize_age, youth_profile
 
@@ -326,7 +326,7 @@ def generate_audio(
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    projet = Path(video["chemin_projet"])
+    projet = resolve_project_dir(video_id, video)
     board_path = projet / "storyboard.json"
     if not board_path.exists():
         raise FileNotFoundError("storyboard.json manquant.")

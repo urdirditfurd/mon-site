@@ -25,6 +25,7 @@ from db.database import (
     get_video,
     log_event,
     project_dir,
+    resolve_project_dir,
     similar_title_exists,
     update_video,
 )
@@ -502,8 +503,7 @@ def ensure_story_files(
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Video {video_id} introuvable")
-    chemin = str(video.get("chemin_projet") or "").strip()
-    projet = Path(chemin) if chemin else project_dir(video_id)
+    projet = resolve_project_dir(video_id, video)
     if (projet / "story.json").exists():
         return projet
 
@@ -554,7 +554,7 @@ def source_new_video(
     existing = find_by_hash(hash_script)
     if existing:
         existing_id = int(existing["id"])
-        projet_existing = project_dir(existing_id)
+        projet_existing = resolve_project_dir(existing_id, existing)
         if not (projet_existing / "story.json").exists():
             write_story_to_project(
                 existing_id,
@@ -637,7 +637,7 @@ def source_from_script(
     existing = find_by_hash(hash_script)
     if existing:
         existing_id = int(existing["id"])
-        projet_existing = project_dir(existing_id)
+        projet_existing = resolve_project_dir(existing_id, existing)
         if not (projet_existing / "story.json").exists():
             write_story_to_project(
                 existing_id,

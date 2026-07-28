@@ -420,7 +420,7 @@ def video_process_detail(video_id: int) -> dict[str, Any]:
     if not video:
         return {"ok": False, "error": "introuvable"}
 
-    projet = Path(video.get("chemin_projet") or "")
+    projet = resolve_project_dir(video_id, video)
     detail: dict[str, Any] = {
         "ok": True,
         "video": video,
@@ -568,3 +568,21 @@ def similar_title_exists(titre: str) -> bool:
 
 def project_dir(video_id: int) -> Path:
     return project_path(video_id, create=True)
+
+
+def resolve_project_dir(video_id: int, video: dict[str, Any] | None = None) -> Path:
+    """Dossier projet canonique ; repare chemin_projet DB si vide ou invalide."""
+    video = video or get_video(video_id)
+    canonical = project_dir(video_id).resolve()
+    chemin = str((video or {}).get("chemin_projet") or "").strip()
+
+    for candidate in ([Path(chemin)] if chemin else []) + [canonical]:
+        if candidate.is_dir() and project_has_artifacts(candidate):
+            resolved = candidate.resolve()
+            if video and chemin != str(resolved):
+                update_video(video_id, chemin_projet=str(resolved))
+            return resolved
+
+    if video and chemin != str(canonical):
+        update_video(video_id, chemin_projet=str(canonical))
+    return canonical

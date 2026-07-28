@@ -28,7 +28,16 @@ from config import (
     ensure_dirs,
     estimate_ai_clips,
 )
-from db.database import ensure_video_registered, get_video, init_db, is_paused, log_event, set_paused, update_video
+from db.database import (
+    ensure_video_registered,
+    get_video,
+    init_db,
+    is_paused,
+    log_event,
+    resolve_project_dir,
+    set_paused,
+    update_video,
+)
 from modules.audio import generate_audio
 from modules.montage import assemble_video
 from modules.progress import set_progress
@@ -84,7 +93,7 @@ def _run_selected_steps(
                 pass
             n_clips = max(1, estimate_ai_clips())
             try:
-                projet = Path(video["chemin_projet"])
+                projet = resolve_project_dir(video_id, video)
                 board_path = projet / "storyboard.json"
                 if board_path.exists():
                     board = json.loads(board_path.read_text(encoding="utf-8"))
@@ -178,7 +187,7 @@ def _run_from(
                 pass
             n_clips = max(1, estimate_ai_clips())
             try:
-                projet = Path(video["chemin_projet"])
+                projet = resolve_project_dir(video_id, video)
                 board_path = projet / "storyboard.json"
                 if board_path.exists():
                     board = json.loads(board_path.read_text(encoding="utf-8"))
@@ -411,6 +420,7 @@ def run_pipeline(
     if not sourced.get("ok"):
         if sourced.get("reason") == "doublon_hash" and sourced.get("video"):
             video_id = int(sourced["video"]["id"])
+            resolve_project_dir(video_id, sourced["video"])
             log_event(
                 video_id,
                 "info",

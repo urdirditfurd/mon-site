@@ -19,7 +19,7 @@ from config import (
     scene_count_for_duration,
     scene_sec_for_audience,
 )
-from db.database import get_video, log_event, project_dir, update_video, video_title
+from db.database import get_video, log_event, project_dir, resolve_project_dir, update_video, video_title
 from modules.clip_prompts import build_clip_plans_for_board
 from modules.script_parser import apply_structured_scenes_to_board
 from modules.sourcing import ensure_story_files
@@ -359,7 +359,7 @@ def build_storyboard(video_id: int) -> dict[str, Any]:
     video = get_video(video_id)
     if not video:
         raise ValueError(f"Vidéo introuvable: {video_id}")
-    projet = Path(video["chemin_projet"]) if video.get("chemin_projet") else project_dir(video_id)
+    projet = resolve_project_dir(video_id, video)
     ensure_story_files(video_id)
     story_path = projet / "story.json"
     if not story_path.exists():
