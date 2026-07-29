@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EBX — AI Dropshipping Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwindcss.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9' },
+            surface: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .code-editor { font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; }
+    .skeleton { background: linear-gradient(90deg, #e4e4e7 25%, #f4f4f5 50%, #e4e4e7 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+    .phone-frame { border-radius: 2rem; box-shadow: 0 0 0 8px #27272a, 0 0 0 10px #3f3f46; }
+  </style>
+</head>
+<body class="bg-surface-50 text-zinc-800 min-h-screen flex">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-white border-r border-zinc-200 flex flex-col shrink-0 sticky top-0 h-screen">
+    <div class="p-5 border-b border-zinc-100">
+      <h1 class="text-2xl font-bold text-brand-600 tracking-tight">⚡ EBX</h1>
+      <p class="text-xs text-zinc-400 mt-0.5">Dropshipping Automation</p>
+    </div>
+    <nav class="flex-1 p-3 space-y-1" id="sidebar-nav">
+      <a href="#" data-page="dashboard" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+        Dashboard
+      </a>
+      <a href="#" data-page="ai-optimizer" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-50 text-brand-700">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z"/></svg>
+        AI Optimizer
+      </a>
+      <a href="#" data-page="auto-listing" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>
+        Auto-Listing
+      </a>
+      <a href="#" data-page="auto-order" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"/></svg>
+        Auto-Order
+      </a>
+      <a href="#" data-page="settings" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        Paramètres
+      </a>
+    </nav>
+    <div class="p-4 border-t border-zinc-100">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 text-sm font-bold">E</div>
+        <div>
+          <p class="text-sm font-medium">EBX User</p>
+          <p class="text-xs text-zinc-400">Plan Pro</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-auto">
+    <!-- Header -->
+    <header class="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-zinc-200 px-8 py-4 flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold">AI Description Generator</h2>
+        <p class="text-sm text-zinc-400">Générez des descriptions eBay optimisées par l'IA</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium">● API connectée</span>
+      </div>
+    </header>
+
+    <div class="p-8 space-y-6">
+      <!-- Input Section -->
+      <section class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-zinc-600 mb-1.5">Nom du produit</label>
+            <input id="product-name" type="text" value="Vélo Spinning UMAY CBE20" placeholder="Ex: Vélo Spinning UMAY CBE20"
+              class="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-surface-50 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-zinc-600 mb-1.5">Mots-clés bruts</label>
+            <input id="keywords" type="text" value="fitness, cardio, home gym, silencieux, LCD, résistance magnétique" placeholder="fitness, cardio, home gym..."
+              class="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-surface-50 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition" />
+          </div>
+        </div>
+        <button id="generate-btn" onclick="handleGenerate()"
+          class="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-brand-200 transition active:scale-[0.97]">
+          <span id="btn-icon">✨</span>
+          <span id="btn-text">Générer avec l'IA EBX</span>
+        </button>
+      </section>
+
+      <!-- Two-column: Code Editor + Preview -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Code Editor -->
+        <section class="bg-zinc-900 rounded-2xl overflow-hidden flex flex-col min-h-[500px]">
+          <div class="flex items-center gap-2 px-4 py-3 bg-zinc-800 border-b border-zinc-700">
+            <span class="w-3 h-3 rounded-full bg-red-400"></span>
+            <span class="w-3 h-3 rounded-full bg-yellow-400"></span>
+            <span class="w-3 h-3 rounded-full bg-green-400"></span>
+            <span class="ml-3 text-xs text-zinc-400 font-medium">description.html</span>
+          </div>
+          <div id="code-skeleton" class="p-4 space-y-2 hidden">
+            <div class="skeleton h-4 rounded w-3/4"></div>
+            <div class="skeleton h-4 rounded w-full"></div>
+            <div class="skeleton h-4 rounded w-5/6"></div>
+            <div class="skeleton h-4 rounded w-2/3"></div>
+            <div class="skeleton h-4 rounded w-full"></div>
+            <div class="skeleton h-4 rounded w-4/5"></div>
+          </div>
+          <pre id="code-output" class="code-editor flex-1 p-4 text-green-400 overflow-auto whitespace-pre-wrap"><span class="text-zinc-500">// Cliquez sur "Générer" pour voir le code HTML ici...</span></pre>
+        </section>
+
+        <!-- eBay Preview -->
+        <section class="flex flex-col items-center">
+          <p class="text-sm font-medium text-zinc-500 mb-3">📱 eBay Preview</p>
+          <div class="phone-frame bg-white w-[340px] h-[620px] overflow-hidden flex flex-col">
+            <!-- Fake eBay top bar -->
+            <div class="bg-white px-4 py-3 border-b border-zinc-100 flex items-center justify-between shrink-0">
+              <span class="text-xs font-bold text-blue-600 tracking-wide">eBay</span>
+              <span class="text-[10px] text-zinc-400">Mobile Preview</span>
+            </div>
+            <div id="preview-skeleton" class="p-4 space-y-3 hidden">
+              <div class="skeleton h-40 rounded-lg w-full"></div>
+              <div class="skeleton h-5 rounded w-2/3"></div>
+              <div class="skeleton h-4 rounded w-full"></div>
+              <div class="skeleton h-4 rounded w-5/6"></div>
+            </div>
+            <div id="preview-output" class="flex-1 overflow-auto">
+              <div class="flex items-center justify-center h-full text-zinc-300 text-sm">Aperçu en temps réel</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const MOCK_AI_RESPONSE = {
+      title: "Vélo Spinning UMAY CBE20 — Entraînement Cardio Silencieux à Domicile",
+      html: `<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 100%; color: #1a1a2e;">
+  <!-- Hero -->
+  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 28px 20px; text-align: center; color: white; margin-bottom: 20px;">
+    <h1 style="font-size: 20px; margin: 0 0 8px;">🚴 Vélo Spinning UMAY CBE20</h1>
+    <p style="font-size: 13px; opacity: 0.9; margin: 0;">Entraînement Cardio Silencieux &amp; Résistance Magnétique</p>
+  </div>
+
+  <!-- Highlights -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+    <div style="background: #f0f0ff; border-radius: 12px; padding: 14px; text-align: center;">
+      <div style="font-size: 22px;">🔇</div>
+      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Ultra Silencieux</p>
+    </div>
+    <div style="background: #f0fff4; border-radius: 12px; padding: 14px; text-align: center;">
+      <div style="font-size: 22px;">📊</div>
+      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Écran LCD</p>
+    </div>
+    <div style="background: #fff7ed; border-radius: 12px; padding: 14px; text-align: center;">
+      <div style="font-size: 22px;">🧲</div>
+      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Résistance Magnétique</p>
+    </div>
+    <div style="background: #fef2f2; border-radius: 12px; padding: 14px; text-align: center;">
+      <div style="font-size: 22px;">🏠</div>
+      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Home Gym</p>
+    </div>
+  </div>
+
+  <!-- Description -->
+  <div style="background: #fafafe; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+    <h2 style="font-size: 15px; margin: 0 0 10px; color: #2d2d5e;">📝 Description</h2>
+    <p style="font-size: 13px; line-height: 1.7; color: #555; margin: 0;">
+      Transformez votre espace en salle de sport avec le <strong>UMAY CBE20</strong>. Ce vélo de spinning combine une <strong>résistance magnétique progressive</strong> pour des séances intenses et silencieuses. Son <strong>écran LCD</strong> affiche vos données en temps réel : vitesse, distance, calories et fréquence cardiaque. Idéal pour le cardio à domicile, il s'adapte à tous les niveaux grâce à ses multiples niveaux de résistance.
+    </p>
+  </div>
+
+  <!-- Specs -->
+  <div style="border-radius: 12px; border: 1px solid #e8e8f0; overflow: hidden; margin-bottom: 20px;">
+    <div style="background: #f5f3ff; padding: 10px 16px; font-size: 13px; font-weight: 600; color: #5b21b6;">⚙️ Caractéristiques</div>
+    <div style="padding: 12px 16px; font-size: 12px; color: #555; line-height: 2;">
+      ✅ Résistance magnétique réglable<br>
+      ✅ Écran LCD multifonction<br>
+      ✅ Fonctionnement ultra silencieux (&lt;30dB)<br>
+      ✅ Selle et guidon ajustables<br>
+      ✅ Roulettes de transport intégrées<br>
+      ✅ Capacité max : 120 kg
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 16px; text-align: center; color: white;">
+    <p style="font-size: 14px; font-weight: 700; margin: 0 0 4px;">🔥 Stock limité — Commandez maintenant !</p>
+    <p style="font-size: 11px; opacity: 0.85; margin: 0;">Livraison rapide • Satisfaction garantie • Retour 30 jours</p>
+  </div>
+</div>`
+    };
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function handleGenerate() {
+      const btn = document.getElementById('generate-btn');
+      const btnIcon = document.getElementById('btn-icon');
+      const btnText = document.getElementById('btn-text');
+      const codeSkeleton = document.getElementById('code-skeleton');
+      const codeOutput = document.getElementById('code-output');
+      const previewSkeleton = document.getElementById('preview-skeleton');
+      const previewOutput = document.getElementById('preview-output');
+
+      btn.disabled = true;
+      btn.classList.add('opacity-70', 'cursor-not-allowed');
+      btnIcon.innerHTML = '<svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+      btnText.textContent = 'Génération en cours...';
+
+      codeSkeleton.classList.remove('hidden');
+      codeOutput.classList.add('hidden');
+      previewSkeleton.classList.remove('hidden');
+      previewOutput.innerHTML = '';
+
+      setTimeout(() => {
+        const html = MOCK_AI_RESPONSE.html;
+
+        codeSkeleton.classList.add('hidden');
+        codeOutput.classList.remove('hidden');
+        codeOutput.innerHTML = escapeHtml(html);
+        previewSkeleton.classList.add('hidden');
+        previewOutput.innerHTML = html;
+
+        btn.disabled = false;
+        btn.classList.remove('opacity-70', 'cursor-not-allowed');
+        btnIcon.innerHTML = '✨';
+        btnText.textContent = 'Générer avec l\'IA EBX';
+      }, 2200);
+    }
+
+    document.querySelectorAll('.nav-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelectorAll('.nav-link').forEach(l => {
+          l.className = 'nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition';
+        });
+        link.className = 'nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-50 text-brand-700';
+      });
+    });
+  </script>
+</body>
+</html>
