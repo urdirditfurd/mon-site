@@ -71,14 +71,13 @@
 
   <!-- Main Content -->
   <main class="flex-1 overflow-auto">
-    <!-- Header -->
     <header class="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-zinc-200 px-8 py-4 flex items-center justify-between">
       <div>
         <h2 class="text-lg font-semibold">AI Description Generator</h2>
         <p class="text-sm text-zinc-400">Générez des descriptions eBay optimisées par l'IA</p>
       </div>
       <div class="flex items-center gap-3">
-        <span class="text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium">● API connectée</span>
+        <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
       </div>
     </header>
 
@@ -129,7 +128,6 @@
         <section class="flex flex-col items-center">
           <p class="text-sm font-medium text-zinc-500 mb-3">📱 eBay Preview</p>
           <div class="phone-frame bg-white w-[340px] h-[620px] overflow-hidden flex flex-col">
-            <!-- Fake eBay top bar -->
             <div class="bg-white px-4 py-3 border-b border-zinc-100 flex items-center justify-between shrink-0">
               <span class="text-xs font-bold text-blue-600 tracking-wide">eBay</span>
               <span class="text-[10px] text-zinc-400">Mobile Preview</span>
@@ -146,105 +144,164 @@
           </div>
         </section>
       </div>
+
+      <!-- Historique -->
+      <section class="bg-white rounded-2xl border border-zinc-200 p-6">
+        <h3 class="text-base font-semibold mb-4">📋 Historique des générations</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-zinc-100 text-left text-zinc-400">
+                <th class="pb-3 font-medium">Date</th>
+                <th class="pb-3 font-medium">Titre SEO</th>
+                <th class="pb-3 font-medium">Prix</th>
+                <th class="pb-3 font-medium text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              <tr><td colspan="4" class="py-8 text-center text-zinc-300">Aucun listing généré pour le moment.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>
 
+  <!-- Modal pour "Voir" un listing -->
+  <div id="listing-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 id="modal-title" class="text-lg font-semibold">Listing</h3>
+        <button onclick="closeModal()" class="text-zinc-400 hover:text-zinc-600 text-xl">&times;</button>
+      </div>
+      <div id="modal-content" class="border border-zinc-200 rounded-xl p-4"></div>
+    </div>
+  </div>
+
   <script>
-    const MOCK_AI_RESPONSE = {
-      title: "Vélo Spinning UMAY CBE20 — Entraînement Cardio Silencieux à Domicile",
-      html: `<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 100%; color: #1a1a2e;">
-  <!-- Hero -->
-  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 28px 20px; text-align: center; color: white; margin-bottom: 20px;">
-    <h1 style="font-size: 20px; margin: 0 0 8px;">🚴 Vélo Spinning UMAY CBE20</h1>
-    <p style="font-size: 13px; opacity: 0.9; margin: 0;">Entraînement Cardio Silencieux &amp; Résistance Magnétique</p>
-  </div>
+    const API_BASE = window.location.origin;
 
-  <!-- Highlights -->
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-    <div style="background: #f0f0ff; border-radius: 12px; padding: 14px; text-align: center;">
-      <div style="font-size: 22px;">🔇</div>
-      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Ultra Silencieux</p>
-    </div>
-    <div style="background: #f0fff4; border-radius: 12px; padding: 14px; text-align: center;">
-      <div style="font-size: 22px;">📊</div>
-      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Écran LCD</p>
-    </div>
-    <div style="background: #fff7ed; border-radius: 12px; padding: 14px; text-align: center;">
-      <div style="font-size: 22px;">🧲</div>
-      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Résistance Magnétique</p>
-    </div>
-    <div style="background: #fef2f2; border-radius: 12px; padding: 14px; text-align: center;">
-      <div style="font-size: 22px;">🏠</div>
-      <p style="font-size: 11px; font-weight: 600; color: #4a4a6a; margin: 4px 0 0;">Home Gym</p>
-    </div>
-  </div>
-
-  <!-- Description -->
-  <div style="background: #fafafe; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-    <h2 style="font-size: 15px; margin: 0 0 10px; color: #2d2d5e;">📝 Description</h2>
-    <p style="font-size: 13px; line-height: 1.7; color: #555; margin: 0;">
-      Transformez votre espace en salle de sport avec le <strong>UMAY CBE20</strong>. Ce vélo de spinning combine une <strong>résistance magnétique progressive</strong> pour des séances intenses et silencieuses. Son <strong>écran LCD</strong> affiche vos données en temps réel : vitesse, distance, calories et fréquence cardiaque. Idéal pour le cardio à domicile, il s'adapte à tous les niveaux grâce à ses multiples niveaux de résistance.
-    </p>
-  </div>
-
-  <!-- Specs -->
-  <div style="border-radius: 12px; border: 1px solid #e8e8f0; overflow: hidden; margin-bottom: 20px;">
-    <div style="background: #f5f3ff; padding: 10px 16px; font-size: 13px; font-weight: 600; color: #5b21b6;">⚙️ Caractéristiques</div>
-    <div style="padding: 12px 16px; font-size: 12px; color: #555; line-height: 2;">
-      ✅ Résistance magnétique réglable<br>
-      ✅ Écran LCD multifonction<br>
-      ✅ Fonctionnement ultra silencieux (&lt;30dB)<br>
-      ✅ Selle et guidon ajustables<br>
-      ✅ Roulettes de transport intégrées<br>
-      ✅ Capacité max : 120 kg
-    </div>
-  </div>
-
-  <!-- CTA -->
-  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 16px; text-align: center; color: white;">
-    <p style="font-size: 14px; font-weight: 700; margin: 0 0 4px;">🔥 Stock limité — Commandez maintenant !</p>
-    <p style="font-size: 11px; opacity: 0.85; margin: 0;">Livraison rapide • Satisfaction garantie • Retour 30 jours</p>
-  </div>
-</div>`
-    };
+    // Health check on load
+    async function checkHealth() {
+      const el = document.getElementById('api-status');
+      try {
+        const res = await fetch(API_BASE + '/api/health');
+        if (res.ok) {
+          el.className = 'text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium';
+          el.textContent = '● API connectée';
+        } else { throw new Error(); }
+      } catch (_) {
+        el.className = 'text-xs bg-red-50 text-red-500 px-2.5 py-1 rounded-full font-medium';
+        el.textContent = '● API hors ligne';
+      }
+    }
 
     function escapeHtml(str) {
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    function handleGenerate() {
+    function setLoading(loading) {
       const btn = document.getElementById('generate-btn');
       const btnIcon = document.getElementById('btn-icon');
       const btnText = document.getElementById('btn-text');
       const codeSkeleton = document.getElementById('code-skeleton');
       const codeOutput = document.getElementById('code-output');
       const previewSkeleton = document.getElementById('preview-skeleton');
-      const previewOutput = document.getElementById('preview-output');
 
-      btn.disabled = true;
-      btn.classList.add('opacity-70', 'cursor-not-allowed');
-      btnIcon.innerHTML = '<svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
-      btnText.textContent = 'Génération en cours...';
-
-      codeSkeleton.classList.remove('hidden');
-      codeOutput.classList.add('hidden');
-      previewSkeleton.classList.remove('hidden');
-      previewOutput.innerHTML = '';
-
-      setTimeout(() => {
-        const html = MOCK_AI_RESPONSE.html;
-
-        codeSkeleton.classList.add('hidden');
-        codeOutput.classList.remove('hidden');
-        codeOutput.innerHTML = escapeHtml(html);
-        previewSkeleton.classList.add('hidden');
-        previewOutput.innerHTML = html;
-
+      if (loading) {
+        btn.disabled = true;
+        btn.classList.add('opacity-70', 'cursor-not-allowed');
+        btnIcon.innerHTML = '<svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+        btnText.textContent = 'Génération en cours...';
+        codeSkeleton.classList.remove('hidden');
+        codeOutput.classList.add('hidden');
+        previewSkeleton.classList.remove('hidden');
+      } else {
         btn.disabled = false;
         btn.classList.remove('opacity-70', 'cursor-not-allowed');
         btnIcon.innerHTML = '✨';
-        btnText.textContent = 'Générer avec l\'IA EBX';
-      }, 2200);
+        btnText.textContent = "Générer avec l'IA EBX";
+        codeSkeleton.classList.add('hidden');
+        codeOutput.classList.remove('hidden');
+        previewSkeleton.classList.add('hidden');
+      }
+    }
+
+    async function handleGenerate() {
+      const productName = document.getElementById('product-name').value.trim();
+      const rawKeywords = document.getElementById('keywords').value.trim();
+
+      if (!productName) { alert('Veuillez saisir un nom de produit.'); return; }
+
+      setLoading(true);
+
+      try {
+        const res = await fetch(API_BASE + '/api/generate-listing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productName, rawKeywords })
+        });
+
+        const json = await res.json();
+
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || 'Erreur serveur');
+        }
+
+        const html = json.data.html_description || '';
+        document.getElementById('code-output').innerHTML = escapeHtml(html);
+        document.getElementById('preview-output').innerHTML = html;
+
+        loadHistory();
+      } catch (err) {
+        alert('Erreur : ' + err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function loadHistory() {
+      const tbody = document.getElementById('history-body');
+      try {
+        const res = await fetch(API_BASE + '/api/listings');
+        const json = await res.json();
+
+        if (!json.success || !json.data.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-zinc-300">Aucun listing généré pour le moment.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = json.data.map(item => `
+          <tr class="border-b border-zinc-50 hover:bg-surface-50 transition">
+            <td class="py-3 text-zinc-400 text-xs">${new Date(item.created_at).toLocaleString('fr-FR')}</td>
+            <td class="py-3 font-medium text-zinc-700">${escapeHtml(item.seo_title || '—')}</td>
+            <td class="py-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + ' €' : '—'}</td>
+            <td class="py-3 text-right"><button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition">Voir</button></td>
+          </tr>
+        `).join('');
+      } catch (_) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-red-400">Erreur de chargement.</td></tr>';
+      }
+    }
+
+    async function viewListing(id) {
+      try {
+        const res = await fetch(API_BASE + '/api/listings/' + id);
+        const json = await res.json();
+        if (!json.success) throw new Error();
+
+        document.getElementById('modal-title').textContent = json.data.seo_title || 'Listing #' + id;
+        document.getElementById('modal-content').innerHTML = json.data.html_description || '<p>Pas de contenu.</p>';
+        document.getElementById('listing-modal').classList.remove('hidden');
+        document.getElementById('listing-modal').classList.add('flex');
+      } catch (_) {
+        alert('Impossible de charger ce listing.');
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('listing-modal').classList.add('hidden');
+      document.getElementById('listing-modal').classList.remove('flex');
     }
 
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -256,6 +313,10 @@
         link.className = 'nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-50 text-brand-700';
       });
     });
+
+    // Init
+    checkHealth();
+    loadHistory();
   </script>
 </body>
 </html>

@@ -1,25 +1,38 @@
-/**
- * EBX Server — Point d'entrée API
- *
- * Démarrage :
- *   1. npm install
- *   2. Lancer LM Studio avec un modèle chargé (serveur local sur le port 1234)
- *   3. node server.js
- *   4. Le frontend appelle POST http://localhost:3000/api/generate-listing
- */
-
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const Database = require("better-sqlite3");
 const { generateListing } = require("./ai-brain");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// SQLite init
+const db = new Database(path.join(__dirname, "ebx.db"));
+db.pragma("journal_mode = WAL");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seo_title TEXT,
+    html_description TEXT,
+    suggested_price REAL,
+    keywords TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+const insertListing = db.prepare(
+  "INSERT INTO listings (seo_title, html_description, suggested_price, keywords) VALUES (?, ?, ?, ?)"
+);
+const getRecentListings = db.prepare(
+  "SELECT id, seo_title, suggested_price, keywords, created_at FROM listings ORDER BY created_at DESC LIMIT 10"
+);
+const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Endpoint principal : génération de listing eBay via LLM local
+// Génération + sauvegarde
 app.post("/api/generate-listing", async (req, res) => {
   const { productName, rawKeywords } = req.body;
 
@@ -29,11 +42,18 @@ app.post("/api/generate-listing", async (req, res) => {
 
   try {
     const listing = await generateListing(productName, rawKeywords || "");
-    return res.json({ success: true, data: listing });
+
+    const result = insertListing.run(
+      listing.seo_title || "",
+      listing.html_description || "",
+      listing.suggested_price || 0,
+      rawKeywords || ""
+    );
+
+    return res.json({ success: true, data: { ...listing, id: result.lastInsertRowid } });
   } catch (err) {
     console.error("[EBX] Erreur LLM :", err.message);
 
-    // Distinguer les erreurs réseau (LLM non lancé) des autres
     if (err.code === "ECONNREFUSED") {
       return res.status(503).json({
         success: false,
@@ -41,10 +61,29 @@ app.post("/api/generate-listing", async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      error: "Erreur lors de la génération. Réessaie.",
-    });
+    return res.status(500).json({ success: false, error: "Erreur lors de la génération. Réessaie." });
+  }
+});
+
+// Historique des 10 derniers listings
+app.get("/api/listings", (_req, res) => {
+  try {
+    const listings = getRecentListings.all();
+    return res.json({ success: true, data: listings });
+  } catch (err) {
+    console.error("[EBX] Erreur DB :", err.message);
+    return res.status(500).json({ success: false, error: "Erreur base de données." });
+  }
+});
+
+// Détail d'un listing
+app.get("/api/listings/:id", (req, res) => {
+  try {
+    const listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    return res.json({ success: true, data: listing });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Erreur base de données." });
   }
 });
 
