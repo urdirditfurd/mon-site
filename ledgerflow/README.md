@@ -21,11 +21,69 @@ Application comptable modulaire inspirée de Pennylane / QuickBooks / Xero, adap
 
 ## Démarrage
 
+### Prérequis
+- Node.js **20 LTS** (64-bit) — [nodejs.org](https://nodejs.org)
+- **Docker Desktop** (recommandé pour PostgreSQL) — [docker.com](https://www.docker.com/products/docker-desktop/)
+  - *ou* PostgreSQL 16 installé localement
+
+### Windows (PowerShell) — important
+
+**Ne clone pas dans `C:\Windows\System32`.** Ouvre PowerShell *normal* (pas admin) et place le projet dans ton dossier utilisateur :
+
+```powershell
+cd $HOME\Documents
+git clone https://github.com/urdirditfurd/mon-site.git
+cd mon-site
+git checkout cursor/ledgerflow-fec-export-ce56
+cd ledgerflow
+
+# 1) Base de données
+docker compose up -d
+
+# 2) Config
+Copy-Item .env.example .env
+
+# 3) Dépendances + moteur Prisma Windows (propre)
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+npm install
+npx prisma generate
+npx prisma migrate dev --name init
+npm run db:seed
+npm run dev
+```
+
+Ouvre [http://localhost:3000](http://localhost:3000).
+
+#### Si tu vois `query_engine-windows.dll.node is not a valid Win32 application`
+C’est un moteur Prisma téléchargé pour la **mauvaise architecture** (souvent Node ARM vs x64, ou `node_modules` corrompu). Corrige ainsi :
+
+```powershell
+# Vérifie Node : doit afficher x64 ou arm64 (un seul)
+node -p "process.arch"
+
+Remove-Item -Recurse -Force node_modules, .prisma -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force node_modules\.prisma -ErrorAction SilentlyContinue
+npm cache clean --force
+npm install
+npx prisma generate
+```
+
+Si Node est en **32-bit**, réinstalle la version **64-bit** depuis nodejs.org.
+
+#### Si tu vois `P1001: Can't reach database server`
+PostgreSQL n’écoute pas sur `localhost:5432`. Lance Docker Desktop, puis :
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+### Linux / Mac
+
 ```bash
 cd ledgerflow
 cp .env.example .env
-# Exemple local :
-# DATABASE_URL="postgresql://ledgerflow:ledgerflow@localhost:5432/ledgerflow?schema=public"
+docker compose up -d
 npm install
 npx prisma migrate dev
 npm run db:seed

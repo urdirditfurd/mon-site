@@ -2,7 +2,9 @@
 // https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // native = machine actuelle ; windows = PC Windows x64
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {
