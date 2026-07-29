@@ -12,6 +12,8 @@ export type InvoiceStatus =
   | "REJECTED";
 
 export type ExpenseStatus =
+  | "DRAFT"
+  | "PENDING"
   | "PENDING_OCR"
   | "EXTRACTED"
   | "PENDING_MANAGER"

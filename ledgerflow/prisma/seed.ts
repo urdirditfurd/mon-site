@@ -308,30 +308,7 @@ async function main() {
     },
   });
 
-  // Note de frais approuvée (débit à matcher)
-  await prisma.expense.upsert({
-    where: { id: "exp_seed_sncf" },
-    update: {
-      status: "APPROVED",
-      merchantName: "SNCF",
-      amountTtc: 89,
-      expenseDate: new Date("2026-07-18"),
-    },
-    create: {
-      id: "exp_seed_sncf",
-      companyId: company.id,
-      status: "APPROVED",
-      category: "TRANSPORT",
-      merchantName: "SNCF",
-      description: "Aller-retour Lille-Paris",
-      expenseDate: new Date("2026-07-18"),
-      amountTtc: 89,
-      amountHt: 80.91,
-      vatAmount: 8.09,
-      vatRate: 10,
-      employeeId: "emp_camille",
-    },
-  });
+  // Notes de frais seedées après le PCG (voir plus bas)
 
   const bankAccount = await prisma.bankAccount.upsert({
     where: { id: "ba_bnp_courant" },
@@ -655,9 +632,91 @@ async function main() {
     data: { balance: 42870.14 },
   });
 
+  const acc625 = await prisma.account.findFirst({
+    where: { companyId: company.id, number: "625000" },
+  });
+
+  const expenseSeeds = [
+    {
+      id: "exp_seed_bistro",
+      merchantName: "Restaurant Le Bistro",
+      status: "APPROVED" as const,
+      category: "RESTAURANT" as const,
+      expenseDate: new Date("2026-07-18"),
+      amountTtc: 120,
+      amountHt: 100,
+      vatAmount: 20,
+      vatEstimated: false,
+      description: "Déjeuner client",
+      note: "Seed dashboard TVA",
+    },
+    {
+      id: "exp_seed_uber",
+      merchantName: "Uber",
+      status: "PENDING" as const,
+      category: "TRANSPORT" as const,
+      expenseDate: new Date("2026-07-22"),
+      amountTtc: 15.5,
+      amountHt: 12.92,
+      vatAmount: 2.58,
+      vatEstimated: true,
+      description: "Trajet gare",
+      note: null as string | null,
+    },
+    {
+      id: "exp_seed_sncf",
+      merchantName: "SNCF",
+      status: "APPROVED" as const,
+      category: "TRANSPORT" as const,
+      expenseDate: new Date("2026-07-18"),
+      amountTtc: 89,
+      amountHt: 80.91,
+      vatAmount: 8.09,
+      vatEstimated: false,
+      description: "Aller-retour Lille-Paris",
+      note: null as string | null,
+    },
+  ];
+
+  for (const exp of expenseSeeds) {
+    await prisma.expense.upsert({
+      where: { id: exp.id },
+      update: {
+        status: exp.status,
+        merchantName: exp.merchantName,
+        amountTtc: exp.amountTtc,
+        amountHt: exp.amountHt,
+        vatAmount: exp.vatAmount,
+        vatEstimated: exp.vatEstimated,
+        expenseDate: exp.expenseDate,
+        accountId: acc625?.id,
+        category: exp.category,
+        note: exp.note,
+      },
+      create: {
+        id: exp.id,
+        companyId: company.id,
+        employeeId: "emp_demo",
+        status: exp.status,
+        category: exp.category,
+        merchantName: exp.merchantName,
+        description: exp.description,
+        expenseDate: exp.expenseDate,
+        amountTtc: exp.amountTtc,
+        amountHt: exp.amountHt,
+        vatAmount: exp.vatAmount,
+        vatEstimated: exp.vatEstimated,
+        vatRate: 20,
+        accountId: acc625?.id,
+        note: exp.note,
+        approvedAt: exp.status === "APPROVED" ? new Date("2026-07-19") : null,
+      },
+    });
+  }
+
   console.log("Seed OK — company", company.name);
   console.log(
-    `  ${openInvoices.length} factures ouvertes, ${paidInvoices.length} payées, ${txns.length}+ historique txns, ${pcgAccounts.length} comptes PCG`,
+    `  ${openInvoices.length} factures ouvertes, ${paidInvoices.length} payées, ${txns.length}+ historique txns, ${pcgAccounts.length} comptes PCG, ${expenseSeeds.length} notes de frais`,
   );
 }
 

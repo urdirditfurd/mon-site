@@ -18,6 +18,8 @@ const expenseStatusMeta: Record<
   ExpenseStatus,
   { label: string; variant: NonNullable<BadgeProps["variant"]> }
 > = {
+  DRAFT: { label: "Brouillon", variant: "muted" },
+  PENDING: { label: "En attente", variant: "warning" },
   PENDING_OCR: { label: "OCR en cours", variant: "muted" },
   EXTRACTED: { label: "Extrait", variant: "info" },
   PENDING_MANAGER: { label: "Manager", variant: "warning" },

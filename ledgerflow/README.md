@@ -5,7 +5,7 @@ Application comptable modulaire inspirée de Pennylane / QuickBooks / Xero, adap
 ## Les 6 piliers
 
 1. **Facturation intelligente** — Devis → Facture → Relance auto ✅
-2. **Notes de frais** — Photo → OCR → Validation
+2. **Notes de frais** — Photo → OCR → Validation ✅
 3. **Trésorerie & Banque** — Import CSV + lettrage heuristique ✅
 4. **Journal comptable** — PCG, règles, export FEC ✅ (cerveau catégorisation)
 5. **Tableau de bord** — KPIs temps réel + TVA ✅
@@ -33,6 +33,18 @@ npm run dev
 ```
 
 Ouvre [http://localhost:3000/facturation](http://localhost:3000/facturation).
+
+## Pilier 2 — Notes de frais & OCR
+
+- Capture `/notes-de-frais/nouvelle` (photo / upload)
+- OCR mock `src/lib/ocr-engine.ts` (~1,5 s) + suggestion PCG (Pilier 4)
+- Review éditable (react-hook-form + zod)
+- Liste + approbation / refus
+- Notes `APPROVED` → TVA déductible du dashboard
+
+```bash
+# Astuce mock : nommez le fichier sncf.jpg / uber.png / bistro.jpg
+```
 
 ## Pilier 5 — Tableau de bord & TVA
 

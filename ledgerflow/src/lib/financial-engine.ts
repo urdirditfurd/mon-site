@@ -279,6 +279,32 @@ export async function getVatSummary(
       deductibleIsEstimated = true;
     }
   }
+
+  // Notes de frais APPROVED / REIMBURSED (Pilier 2)
+  const approvedExpenses = await prisma.expense.findMany({
+    where: {
+      companyId,
+      status: { in: ["APPROVED", "REIMBURSED"] },
+      expenseDate: { gte: start, lte: end },
+      amountTtc: { not: null },
+    },
+    include: { account: true },
+  });
+
+  for (const expense of approvedExpenses) {
+    const accountNumber = expense.account?.number ?? "";
+    if (accountNumber && !isVatDeductibleChargeAccount(accountNumber)) {
+      continue;
+    }
+    if (expense.vatAmount != null) {
+      deductible += toNumber(expense.vatAmount);
+      if (expense.vatEstimated) deductibleIsEstimated = true;
+    } else if (expense.amountTtc != null) {
+      deductible += estimateVatFromTtc(toNumber(expense.amountTtc));
+      deductibleIsEstimated = true;
+    }
+  }
+
   deductible = round2(deductible);
 
   return {
@@ -346,7 +372,7 @@ export async function getNetResultSummary(
     paid.reduce((s, inv) => s + toNumber(inv.subtotalHt), 0),
   );
 
-  // Dépenses : transactions catégorisées en charges (montant HT estimé)
+  // Dépenses : transactions catégorisées + notes de frais approuvées
   const expensesTxns = await prisma.bankTransaction.findMany({
     where: {
       bankAccount: { companyId },
@@ -363,7 +389,27 @@ export async function getNetResultSummary(
     const type = txn.categorizedAccount?.type;
     if (type !== "EXPENSE") continue;
     const ttc = Math.abs(toNumber(txn.amount));
-    const vat = txn.vatAmount != null ? toNumber(txn.vatAmount) : estimateVatFromTtc(ttc);
+    const vat =
+      txn.vatAmount != null
+        ? toNumber(txn.vatAmount)
+        : estimateVatFromTtc(ttc);
+    expenses += round2(ttc - vat);
+  }
+
+  const approvedExpenses = await prisma.expense.findMany({
+    where: {
+      companyId,
+      status: { in: ["APPROVED", "REIMBURSED"] },
+      expenseDate: { gte: start, lte: end },
+      amountTtc: { not: null },
+    },
+  });
+  for (const expense of approvedExpenses) {
+    const ttc = toNumber(expense.amountTtc);
+    const vat =
+      expense.vatAmount != null
+        ? toNumber(expense.vatAmount)
+        : estimateVatFromTtc(ttc);
     expenses += round2(ttc - vat);
   }
   expenses = round2(expenses);

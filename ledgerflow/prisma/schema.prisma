@@ -29,6 +29,8 @@ enum InvoiceStatus {
 }
 
 enum ExpenseStatus {
+  DRAFT
+  PENDING
   PENDING_OCR
   EXTRACTED
   PENDING_MANAGER
@@ -294,6 +296,8 @@ model Expense {
   ocrRawText      String?
   ocrConfidence   Float?
   ocrData         Json?
+  vatEstimated    Boolean         @default(false)
+  note            String?
   accountId       String?
   managerId       String?
   managerNote     String?
