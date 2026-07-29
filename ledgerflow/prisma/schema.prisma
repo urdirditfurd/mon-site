@@ -55,6 +55,12 @@ enum BankProvider {
   GOCARDLESS
 }
 
+enum BankMatchStatus {
+  UNMATCHED
+  MATCHED
+  IGNORED
+}
+
 enum EntrySource {
   MANUAL
   INVOICE
@@ -286,6 +292,7 @@ model Expense {
   party   Party?             @relation(fields: [partyId], references: [id])
   account Account?           @relation(fields: [accountId], references: [id])
   entries AccountingEntry[]
+  bankMatches BankTransaction[] @relation("ExpenseBankMatch")
 
   @@index([companyId, status])
   @@index([companyId, category])
@@ -317,26 +324,29 @@ model BankAccount {
 }
 
 model BankTransaction {
-  id              String    @id @default(cuid())
-  bankAccountId   String
-  externalId      String?
-  bookingDate     DateTime
-  valueDate       DateTime?
-  label           String
-  amount          Decimal   @db.Decimal(14, 2)
-  currency        String    @default("EUR")
-  isMatched       Boolean   @default(false)
-  matchedAt       DateTime?
+  id               String          @id @default(cuid())
+  bankAccountId    String
+  externalId       String?
+  bookingDate      DateTime
+  valueDate        DateTime?
+  label            String
+  amount           Decimal         @db.Decimal(14, 2)
+  currency         String          @default("EUR")
+  status           BankMatchStatus @default(UNMATCHED)
+  isMatched        Boolean         @default(false)
+  matchedAt        DateTime?
   matchedInvoiceId String?
-  matchedEntryId  String?
+  matchedExpenseId String?
+  matchedEntryId   String?
   suggestedAccountId String?
-  duplicateOfId   String?
-  rawPayload      Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  duplicateOfId    String?
+  rawPayload       Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   bankAccount      BankAccount      @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
   matchedInvoice   Invoice?         @relation("InvoiceBankMatch", fields: [matchedInvoiceId], references: [id])
+  matchedExpense   Expense?         @relation("ExpenseBankMatch", fields: [matchedExpenseId], references: [id])
   matchedEntry     AccountingEntry? @relation("TxnMatchedEntry", fields: [matchedEntryId], references: [id])
   suggestedAccount Account?         @relation(fields: [suggestedAccountId], references: [id])
   duplicateOf      BankTransaction? @relation("TxnDuplicates", fields: [duplicateOfId], references: [id])
@@ -344,6 +354,7 @@ model BankTransaction {
 
   @@index([bankAccountId, bookingDate])
   @@index([bankAccountId, isMatched])
+  @@index([bankAccountId, status])
   @@index([label])
   @@unique([bankAccountId, externalId])
 }

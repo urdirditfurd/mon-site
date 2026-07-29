@@ -1,5 +1,12 @@
 import { AppShell } from "@/components/layout/AppShell";
-import { Badge } from "@/components/ui/badge";
+import { BankImport } from "@/modules/banking/BankImport";
+import { ReconciliationView } from "@/modules/banking/ReconciliationView";
+import { prisma } from "@/lib/prisma";
+import { DEMO_COMPANY_ID, ensureDemoCompany } from "@/lib/company";
+import type {
+  MatchableExpense,
+  MatchableInvoice,
+} from "@/lib/reconciliation-engine";
 import {
   Card,
   CardContent,
@@ -7,99 +14,163 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { mockBankTransactions } from "@/lib/mock-data";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
-export default function TresoreriePage() {
+export const dynamic = "force-dynamic";
+
+function toNumber(value: { toNumber?: () => number } | number | string): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value);
+  if (value && typeof value.toNumber === "function") return value.toNumber();
+  return Number(value);
+}
+
+async function loadBankingData() {
+  await ensureDemoCompany();
+
+  let accounts = await prisma.bankAccount.findMany({
+    where: { companyId: DEMO_COMPANY_ID, isActive: true },
+    orderBy: { name: "asc" },
+  });
+
+  if (accounts.length === 0) {
+    const created = await prisma.bankAccount.create({
+      data: {
+        id: "ba_bnp_courant",
+        companyId: DEMO_COMPANY_ID,
+        name: "Compte courant BNP",
+        iban: "FR7610096000501234567890185",
+        currency: "EUR",
+        provider: "CSV",
+        balance: 42870.14,
+      },
+    });
+    accounts = [created];
+  }
+
+  const transactions = await prisma.bankTransaction.findMany({
+    where: { bankAccount: { companyId: DEMO_COMPANY_ID } },
+    include: {
+      matchedInvoice: { include: { party: true } },
+    },
+    orderBy: { bookingDate: "desc" },
+  });
+
+  const openInvoicesRaw = await prisma.invoice.findMany({
+    where: {
+      companyId: DEMO_COMPANY_ID,
+      type: { in: ["INVOICE", "CREDIT_NOTE"] },
+      status: { in: ["SENT", "OVERDUE", "ACCEPTED", "DRAFT"] },
+    },
+    include: { party: true },
+    orderBy: { issueDate: "desc" },
+  });
+
+  const openExpensesRaw = await prisma.expense.findMany({
+    where: {
+      companyId: DEMO_COMPANY_ID,
+      status: {
+        in: [
+          "APPROVED",
+          "PENDING_ACCOUNTANT",
+          "PENDING_MANAGER",
+          "EXTRACTED",
+        ],
+      },
+      amountTtc: { not: null },
+    },
+  });
+
+  const openInvoices: MatchableInvoice[] = openInvoicesRaw.map((inv) => ({
+    id: inv.id,
+    number: inv.number,
+    partyName: inv.party.name,
+    issueDate: inv.issueDate.toISOString(),
+    dueDate: inv.dueDate?.toISOString() ?? null,
+    totalTtc: toNumber(inv.totalTtc),
+    status: inv.status,
+    type: inv.type,
+  }));
+
+  const openExpenses: MatchableExpense[] = openExpensesRaw.map((exp) => ({
+    id: exp.id,
+    merchantName: exp.merchantName,
+    description: exp.description,
+    expenseDate: exp.expenseDate?.toISOString() ?? null,
+    amountTtc: exp.amountTtc != null ? toNumber(exp.amountTtc) : null,
+    status: exp.status,
+  }));
+
+  return {
+    accounts: accounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      iban: a.iban,
+    })),
+    transactions: transactions.map((txn) => ({
+      id: txn.id,
+      bookingDate: txn.bookingDate.toISOString(),
+      label: txn.label,
+      amount: toNumber(txn.amount),
+      status: txn.status as "UNMATCHED" | "MATCHED" | "IGNORED",
+      matchedInvoiceNumber: txn.matchedInvoice?.number ?? null,
+      matchedPartyName: txn.matchedInvoice?.party.name ?? null,
+    })),
+    openInvoices,
+    openExpenses,
+    unmatchedCount: transactions.filter((t) => t.status === "UNMATCHED").length,
+  };
+}
+
+export default async function TresoreriePage() {
+  const data = await loadBankingData();
+
   return (
     <AppShell
       title="Trésorerie & Banque"
-      subtitle="Import → Lettrage automatique → Rapprochement"
+      subtitle="Import CSV → suggestions heuristiques → lettrage 1 clic"
     >
       <div className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Stratégie d&apos;intégration</CardTitle>
-            <CardDescription>
-              Phase 1 : CSV · Phase 2 : Bridge / Budget Insight / GoCardless
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 md:grid-cols-4">
-              {[
-                { name: "CSV manuel", cost: "Gratuit", tag: "MVP" },
-                { name: "Bridge.io", cost: "~5€/banque", tag: "Prod" },
-                { name: "Budget Insight", cost: "Sur devis", tag: "Prod" },
-                { name: "GoCardless", cost: "Freemium", tag: "MVP+" },
-              ].map((opt) => (
-                <div
-                  key={opt.name}
-                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3"
-                >
-                  <p className="text-sm font-semibold text-slate-900">{opt.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">{opt.cost}</p>
-                  <Badge variant="navy" className="mt-2">
-                    {opt.tag}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card>
+            <CardContent className="pt-5">
+              <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+                À lettrer
+              </p>
+              <p className="mt-2 font-display text-2xl text-[#0B1F33]">
+                {data.unmatchedCount}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-5">
+              <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+                Factures ouvertes
+              </p>
+              <p className="mt-2 font-display text-2xl text-[#0B1F33]">
+                {data.openInvoices.length}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Phase CSV</CardTitle>
+              <CardDescription>
+                Bridge / Budget Insight viendront ensuite
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Badge variant="navy">MVP import manuel</Badge>
+            </CardContent>
+          </Card>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Transactions récentes</CardTitle>
-            <CardDescription>
-              Règles de lettrage (ex. URSSAF → 431) prêtes côté schéma
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto rounded-lg ring-1 ring-slate-200">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] tracking-wide text-slate-500 uppercase">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Date</th>
-                    <th className="px-4 py-3 font-medium">Libellé</th>
-                    <th className="px-4 py-3 font-medium">Compte suggéré</th>
-                    <th className="px-4 py-3 font-medium">Lettrage</th>
-                    <th className="px-4 py-3 text-right font-medium">Montant</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {mockBankTransactions.map((txn) => (
-                    <tr key={txn.id}>
-                      <td className="px-4 py-3 text-slate-600">
-                        {formatDate(txn.bookingDate)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-900">{txn.label}</p>
-                        <p className="text-xs text-slate-500">
-                          {txn.bankAccountName}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                        {txn.suggestedAccount ?? "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={txn.isMatched ? "success" : "warning"}>
-                          {txn.isMatched ? "Lettré" : "À traiter"}
-                        </Badge>
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-right font-medium tabular-nums ${
-                          txn.amount < 0 ? "text-rose-600" : "text-emerald-700"
-                        }`}
-                      >
-                        {formatCurrency(txn.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        <BankImport accounts={data.accounts} />
+        <ReconciliationView
+          transactions={data.transactions}
+          openInvoices={data.openInvoices}
+          openExpenses={data.openExpenses}
+        />
       </div>
     </AppShell>
   );

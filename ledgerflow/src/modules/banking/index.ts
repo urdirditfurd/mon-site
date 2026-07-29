@@ -1,5 +1,5 @@
 /**
- * Placeholders module — banking / lettrage.
- * UI actuelle : src/app/tresorerie/page.tsx
+ * Module banking — import CSV + lettrage heuristique.
  */
-export {};
+export { BankImport } from "./BankImport";
+export { ReconciliationView } from "./ReconciliationView";

@@ -11,7 +11,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "test:reconciliation": "npx tsx scripts/test-reconciliation.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
@@ -23,11 +24,14 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "fuse.js": "^7.5.0",
     "lucide-react": "^1.27.0",
     "next": "14.2.35",
+    "papaparse": "^5.5.4",
     "prisma": "5.22.0",
     "react": "^18",
     "react-dom": "^18",
+    "react-dropzone": "^19.1.1",
     "react-hook-form": "^7.83.0",
     "recharts": "^3.10.1",
     "sonner": "^2.0.7",
@@ -36,6 +40,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",

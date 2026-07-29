@@ -36,8 +36,8 @@ async function main() {
   const parties = [
     {
       id: "party_dupont",
-      name: "Maison Dupont",
-      email: "compta@maisondupont.fr",
+      name: "DUPONT SARL",
+      email: "compta@dupont-sarl.fr",
       type: "CUSTOMER" as const,
       siret: "51234567800019",
       address: "8 avenue Foch",
@@ -65,6 +65,16 @@ async function main() {
       zipCode: "69006",
     },
     {
+      id: "party_urssaf",
+      name: "URSSAF",
+      email: null as string | null,
+      type: "SUPPLIER" as const,
+      siret: "18003503100017",
+      address: "Urssaf Nord",
+      city: "Lille",
+      zipCode: "59000",
+    },
+    {
       id: "party_lefevre",
       name: "Cabinet Lefèvre",
       email: "contact@cabinet-lefevre.fr",
@@ -89,78 +99,246 @@ async function main() {
         zipCode: party.zipCode,
       },
       create: {
-        ...party,
+        id: party.id,
+        name: party.name,
+        email: party.email,
+        type: party.type,
+        siret: party.siret,
+        address: party.address,
+        city: party.city,
+        zipCode: party.zipCode,
         companyId: company.id,
         country: "FR",
       },
     });
   }
 
-  const existingCount = await prisma.invoice.count({
-    where: { companyId: company.id },
-  });
+  // Factures ouvertes pour le lettrage
+  const openInvoices = [
+    {
+      id: "inv_seed_dupont_open",
+      partyId: "party_dupont",
+      number: "F-2026-0101",
+      status: "SENT" as const,
+      issueDate: new Date("2026-07-10"),
+      dueDate: new Date("2026-07-25"),
+      subtotalHt: 2500,
+      vatAmount: 500,
+      totalTtc: 3000,
+      notes: "Accompagnement produit — juillet",
+      line: "Forfait conseil",
+    },
+    {
+      id: "inv_seed_lumiere_open",
+      partyId: "party_lumiere",
+      number: "F-2026-0102",
+      status: "OVERDUE" as const,
+      issueDate: new Date("2026-06-20"),
+      dueDate: new Date("2026-07-05"),
+      subtotalHt: 1800,
+      vatAmount: 360,
+      totalTtc: 2160,
+      notes: "Retouche identité visuelle",
+      line: "Design graphique",
+    },
+    {
+      id: "inv_seed_technova_open",
+      partyId: "party_technova",
+      number: "F-2026-0103",
+      status: "SENT" as const,
+      issueDate: new Date("2026-07-15"),
+      dueDate: new Date("2026-07-30"),
+      subtotalHt: 4200,
+      vatAmount: 840,
+      totalTtc: 5040,
+      notes: "Sprint delivery",
+      line: "Développement logiciel",
+    },
+  ];
 
-  if (existingCount === 0) {
-    const invoice = await prisma.invoice.create({
-      data: {
+  for (const inv of openInvoices) {
+    await prisma.invoice.upsert({
+      where: { id: inv.id },
+      update: {
+        status: inv.status,
+        partyId: inv.partyId,
+        number: inv.number,
+        issueDate: inv.issueDate,
+        dueDate: inv.dueDate,
+        subtotalHt: inv.subtotalHt,
+        vatAmount: inv.vatAmount,
+        totalTtc: inv.totalTtc,
+        notes: inv.notes,
+      },
+      create: {
+        id: inv.id,
         companyId: company.id,
-        partyId: "party_dupont",
+        partyId: inv.partyId,
         type: "INVOICE",
-        status: "SENT",
-        number: "F-2026-0001",
-        issueDate: new Date("2026-06-02"),
-        dueDate: new Date("2026-07-02"),
-        subtotalHt: 4200,
-        vatAmount: 840,
-        totalTtc: 5040,
+        status: inv.status,
+        number: inv.number,
+        issueDate: inv.issueDate,
+        dueDate: inv.dueDate,
+        subtotalHt: inv.subtotalHt,
+        vatAmount: inv.vatAmount,
+        totalTtc: inv.totalTtc,
         vatRate: 20,
-        notes: "Prestation de design produit — juin 2026",
+        notes: inv.notes,
         lines: {
           create: [
             {
-              description: "Design UX — forfait mensuel",
+              description: inv.line,
               quantity: 1,
-              unitPriceHt: 3200,
+              unitPriceHt: inv.subtotalHt,
               vatRate: 20,
-              amountHt: 3200,
+              amountHt: inv.subtotalHt,
               sortOrder: 0,
-            },
-            {
-              description: "Atelier découverte (journée)",
-              quantity: 2,
-              unitPriceHt: 500,
-              vatRate: 20,
-              amountHt: 1000,
-              sortOrder: 1,
             },
           ],
         },
       },
     });
+  }
 
-    await prisma.invoiceSequence.upsert({
-      where: {
-        companyId_type_year_prefix: {
-          companyId: company.id,
-          type: "INVOICE",
-          year: 2026,
-          prefix: "F",
-        },
-      },
-      update: { nextNumber: 2 },
-      create: {
+  await prisma.invoiceSequence.upsert({
+    where: {
+      companyId_type_year_prefix: {
         companyId: company.id,
         type: "INVOICE",
         year: 2026,
         prefix: "F",
-        nextNumber: 2,
+      },
+    },
+    update: { nextNumber: 104 },
+    create: {
+      companyId: company.id,
+      type: "INVOICE",
+      year: 2026,
+      prefix: "F",
+      nextNumber: 104,
+    },
+  });
+
+  // Note de frais approuvée (débit à matcher)
+  await prisma.expense.upsert({
+    where: { id: "exp_seed_sncf" },
+    update: {
+      status: "APPROVED",
+      merchantName: "SNCF",
+      amountTtc: 89,
+      expenseDate: new Date("2026-07-18"),
+    },
+    create: {
+      id: "exp_seed_sncf",
+      companyId: company.id,
+      status: "APPROVED",
+      category: "TRANSPORT",
+      merchantName: "SNCF",
+      description: "Aller-retour Lille-Paris",
+      expenseDate: new Date("2026-07-18"),
+      amountTtc: 89,
+      amountHt: 80.91,
+      vatAmount: 8.09,
+      vatRate: 10,
+      employeeId: "emp_camille",
+    },
+  });
+
+  const bankAccount = await prisma.bankAccount.upsert({
+    where: { id: "ba_bnp_courant" },
+    update: {
+      name: "Compte courant BNP",
+      iban: "FR7610096000501234567890185",
+      balance: 42870.14,
+      lastSyncedAt: new Date("2026-07-28"),
+    },
+    create: {
+      id: "ba_bnp_courant",
+      companyId: company.id,
+      name: "Compte courant BNP",
+      iban: "FR7610096000501234567890185",
+      currency: "EUR",
+      provider: "CSV",
+      balance: 42870.14,
+      lastSyncedAt: new Date("2026-07-28"),
+    },
+  });
+
+  const txns = [
+    {
+      id: "btx_seed_dupont",
+      bookingDate: new Date("2026-07-24"),
+      label: "VIR DUPONT SARL F-2026-0101",
+      amount: 3000,
+      externalId: "seed-dupont-3000",
+    },
+    {
+      id: "btx_seed_lumiere",
+      bookingDate: new Date("2026-07-08"),
+      label: "VIREMENT STUDIO LUMIERE",
+      amount: 2160,
+      externalId: "seed-lumiere-2160",
+    },
+    {
+      id: "btx_seed_urssaf",
+      bookingDate: new Date("2026-07-22"),
+      label: "PRLV URSSAF NORD JUILLET",
+      amount: -1842.36,
+      externalId: "seed-urssaf",
+    },
+    {
+      id: "btx_seed_sncf",
+      bookingDate: new Date("2026-07-19"),
+      label: "CB SNCF CONNECT",
+      amount: -89,
+      externalId: "seed-sncf",
+    },
+    {
+      id: "btx_seed_fees",
+      bookingDate: new Date("2026-07-17"),
+      label: "FRAIS TENUE COMPTE",
+      amount: -12.5,
+      externalId: "seed-fees",
+    },
+    {
+      id: "btx_seed_unknown",
+      bookingDate: new Date("2026-07-12"),
+      label: "VIR REF 998877 INCONNU",
+      amount: 450,
+      externalId: "seed-unknown",
+    },
+  ];
+
+  for (const txn of txns) {
+    await prisma.bankTransaction.upsert({
+      where: { id: txn.id },
+      update: {
+        label: txn.label,
+        amount: txn.amount,
+        bookingDate: txn.bookingDate,
+        status: "UNMATCHED",
+        isMatched: false,
+        matchedInvoiceId: null,
+        matchedExpenseId: null,
+      },
+      create: {
+        id: txn.id,
+        bankAccountId: bankAccount.id,
+        externalId: txn.externalId,
+        bookingDate: txn.bookingDate,
+        label: txn.label,
+        amount: txn.amount,
+        currency: "EUR",
+        status: "UNMATCHED",
+        isMatched: false,
       },
     });
-
-    console.log("Seeded invoice", invoice.number);
   }
 
   console.log("Seed OK — company", company.name);
+  console.log(
+    `  ${openInvoices.length} factures ouvertes, ${txns.length} transactions UNMATCHED`,
+  );
 }
 
 main()

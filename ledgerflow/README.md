@@ -4,9 +4,9 @@ Application comptable modulaire inspirée de Pennylane / QuickBooks / Xero, adap
 
 ## Les 6 piliers
 
-1. **Facturation intelligente** — Devis → Facture → Relance auto ✅ (CRUD + PDF)
+1. **Facturation intelligente** — Devis → Facture → Relance auto ✅
 2. **Notes de frais** — Photo → OCR → Validation
-3. **Trésorerie & Banque** — Import / agrégateur + lettrage
+3. **Trésorerie & Banque** — Import CSV + lettrage heuristique ✅
 4. **Journal comptable** — PCG, règles, export FEC
 5. **Tableau de bord** — KPIs temps réel
 6. **Collaboration** — Espace expert-comptable (phase 2)
@@ -33,6 +33,24 @@ npm run dev
 ```
 
 Ouvre [http://localhost:3000/facturation](http://localhost:3000/facturation).
+
+## Pilier 3 — Trésorerie & Lettrage
+
+- Page `/tresorerie` : import CSV (drag & drop) + tableau de rapprochement
+- Moteur heuristique `src/lib/reconciliation-engine.ts`
+  - Montant exact (tolérance 1 €)
+  - Date ± 5 jours
+  - Libellé contient le nom client / n° facture
+- Validation 1 clic (≥ 80 %) ou lettrage manuel (dialog)
+- Soft actions : ignorer, annuler un lettrage
+- Fixture : `fixtures/sample-qonto.csv`
+
+```bash
+npm run db:seed
+npx tsx scripts/test-reconciliation.ts
+npm run dev
+# ouvrir http://localhost:3000/tresorerie
+```
 
 ## Pilier 1 — Facturation
 
