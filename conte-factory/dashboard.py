@@ -31,7 +31,7 @@ st.markdown(
 
 render_engine_status(ctx, "home")
 
-a, b = st.columns(2)
+a, b, c = st.columns(3)
 with a:
     st.markdown(
         """
@@ -62,6 +62,22 @@ with b:
         go_page("pages/2_Creation.py")
     st.markdown(
         '<a class="nav-pill" href="/Creation" target="_blank">Nouvel onglet</a>',
+        unsafe_allow_html=True,
+    )
+with c:
+    st.markdown(
+        """
+<div class="hero-card">
+  <h3>Projet Dev</h3>
+  <p>Diagnostic, architecture, onboarding developpeur.</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if st.button("Ouvrir Projet Dev", use_container_width=True):
+        go_page("pages/3_Projet_Dev.py")
+    st.markdown(
+        '<a class="nav-pill" href="/Projet_Dev" target="_blank">Nouvel onglet</a>',
         unsafe_allow_html=True,
     )
 

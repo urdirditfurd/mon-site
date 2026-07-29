@@ -199,7 +199,7 @@ def go_page(path: str) -> None:
 
 
 def nav_buttons(current: str) -> None:
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         if st.button("Accueil", use_container_width=True, disabled=current == "Accueil"):
             go_page("dashboard.py")
@@ -218,6 +218,13 @@ def nav_buttons(current: str) -> None:
             type="primary",
         ):
             go_page("pages/2_Creation.py")
+    with c4:
+        if st.button(
+            "Projet",
+            use_container_width=True,
+            disabled=current == "Projet",
+        ):
+            go_page("pages/3_Projet_Dev.py")
 
 
 def boot_app(page_title: str = "video ia") -> dict:
@@ -309,7 +316,8 @@ def render_sidebar(active: str) -> None:
     st.sidebar.markdown(
         """
 <a class="nav-pill" href="/Tableau_de_bord" target="_blank">Suivi</a><br/>
-<a class="nav-pill" href="/Creation" target="_blank">Creation</a>
+<a class="nav-pill" href="/Creation" target="_blank">Creation</a><br/>
+<a class="nav-pill" href="/Projet_Dev" target="_blank">Projet Dev</a>
 """,
         unsafe_allow_html=True,
     )
