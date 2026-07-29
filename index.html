@@ -276,7 +276,10 @@
             <td class="py-3 text-zinc-400 text-xs">${new Date(item.created_at).toLocaleString('fr-FR')}</td>
             <td class="py-3 font-medium text-zinc-700">${escapeHtml(item.seo_title || '—')}</td>
             <td class="py-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + ' €' : '—'}</td>
-            <td class="py-3 text-right"><button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition">Voir</button></td>
+            <td class="py-3 text-right flex gap-2 justify-end">
+              <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition">Voir</button>
+              <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-medium transition">Publier eBay</button>
+            </td>
           </tr>
         `).join('');
       } catch (_) {
@@ -296,6 +299,26 @@
         document.getElementById('listing-modal').classList.add('flex');
       } catch (_) {
         alert('Impossible de charger ce listing.');
+      }
+    }
+
+    async function publishListing(id, btn) {
+      if (!confirm('Publier ce listing sur eBay Sandbox ?')) return;
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳...';
+      try {
+        const res = await fetch(API_BASE + '/api/publish-to-ebay/' + id, { method: 'POST' });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        btn.textContent = '✅ Publié';
+        btn.classList.replace('bg-blue-50', 'bg-green-50');
+        btn.classList.replace('text-blue-600', 'text-green-600');
+        alert('Listing publié sur eBay Sandbox !\nListing ID: ' + (json.data.listingId || 'N/A'));
+      } catch (err) {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        alert('Erreur publication eBay : ' + err.message);
       }
     }
 

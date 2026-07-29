@@ -3,6 +3,7 @@ const express = require("express");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { generateListing } = require("./ai-brain");
+const { publishToEbay } = require("./ebay-api");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -84,6 +85,22 @@ app.get("/api/listings/:id", (req, res) => {
     return res.json({ success: true, data: listing });
   } catch (err) {
     return res.status(500).json({ success: false, error: "Erreur base de données." });
+  }
+});
+
+// Publier un listing sur eBay (Sandbox)
+app.post("/api/publish-to-ebay/:id", async (req, res) => {
+  try {
+    const listing = getListingById.get(req.params.id);
+    if (!listing) {
+      return res.status(404).json({ success: false, error: "Listing introuvable." });
+    }
+
+    const result = await publishToEbay(listing, listing.id);
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("[EBX] Erreur eBay :", err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
