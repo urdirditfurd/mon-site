@@ -54,21 +54,37 @@ npm run dev
 
 Ouvre [http://localhost:3000](http://localhost:3000).
 
-#### Si tu vois `query_engine-windows.dll.node is not a valid Win32 application`
-C’est un moteur Prisma téléchargé pour la **mauvaise architecture** (souvent Node ARM vs x64, ou `node_modules` corrompu). Corrige ainsi :
+#### PC Windows ARM64 (`node -p "process.arch"` → `arm64`)
+
+Prisma **n’a pas** de moteur natif Windows ARM. Deux solutions :
+
+**Option A (recommandée)** — installer **Node.js Windows x64** (pas ARM64) depuis [nodejs.org](https://nodejs.org) → « Windows Installer (.msi) » **x64**. Puis :
 
 ```powershell
-# Vérifie Node : doit afficher x64 ou arm64 (un seul)
-node -p "process.arch"
-
-Remove-Item -Recurse -Force node_modules, .prisma -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force node_modules\.prisma -ErrorAction SilentlyContinue
-npm cache clean --force
+node -p "process.arch"   # doit afficher x64
+cd $HOME\Documents\mon-site\ledgerflow
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
 npm install
 npx prisma generate
 ```
 
-Si Node est en **32-bit**, réinstalle la version **64-bit** depuis nodejs.org.
+**Option B** — garder Node ARM64, forcer le moteur binaire (process séparé) :
+
+```powershell
+cd $HOME\Documents\mon-site\ledgerflow
+Add-Content .env "`nPRISMA_CLIENT_ENGINE_TYPE=binary"
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+npm install
+$env:PRISMA_CLIENT_ENGINE_TYPE="binary"
+npx prisma generate
+npx prisma migrate dev
+npm run db:seed
+npm run dev
+```
+
+#### Si tu vois `query_engine-windows.dll.node is not a valid Win32 application`
+Sur **x64** : réinstalle `node_modules` + `npx prisma generate`.  
+Sur **arm64** : applique l’Option A ou B ci-dessus.
 
 #### Si tu vois `P1001: Can't reach database server`
 PostgreSQL n’écoute pas sur `localhost:5432`. Lance Docker Desktop, puis :
