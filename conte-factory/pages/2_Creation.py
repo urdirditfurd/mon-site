@@ -51,21 +51,14 @@ job = status.get("job") or {}
 running = bool(job.get("running") and status.get("alive"))
 
 # --- Formulaire ---
-SCRIPT_PCR = str((ROOT / "assets" / "scripts" / "petit_chaperon_rouge.json").resolve())
 
 with st.form("create_form", clear_on_submit=False):
-    use_script = st.checkbox(
-        "Utiliser le script structure Petit Chaperon Rouge (Pixar 3D, 11 scenes)",
-        value=False,
-        help="Recommande : prompts scene-par-scene, 11 clips, style 3d_mignon. "
-        "Sinon le theme libre produit une histoire auto (plus fragile).",
-    )
     theme = st.text_area(
-        "Theme ou prompt (ignore si script structure coche)",
+        "Theme ou prompt de l'histoire",
         value=st.session_state.get("last_theme", ""),
         placeholder="ex: un dragon violet fonce qui vole et chante dans les nuages",
         height=120,
-        help="Decris le heros / l'action. Pour un conte complet, prefere le script JSON.",
+        help="Decris le heros, l'univers et l'action. Le pipeline genere l'histoire complete.",
     )
     duration = st.slider(
         "Duree de la video (minutes)", min_value=1, max_value=60, value=5
@@ -151,16 +144,10 @@ with st.form("create_form", clear_on_submit=False):
     publish = st.checkbox("Publier sur YouTube a la fin", value=False)
     force_new = st.checkbox(
         "Forcer un nouveau projet (meme si histoire deja generee)",
-        value=use_script,
-        help="Utile avec le script Petit Chaperon pour ne pas reprendre un vieux projet.",
+        value=False,
     )
 
-    scenes = estimate_ai_clips(float(duration), age_group=age_group)
-    # I2V : 1 clip / scene narrative (plafond anti-crash)
-    if use_script:
-        scenes = 11
-    else:
-        scenes = min(int(scenes), 15)
+    scenes = min(int(estimate_ai_clips(float(duration), age_group=age_group)), 15)
     est_low, est_high = estimate_render_minutes(float(duration), age_group=age_group)
     provider = VIDEO_PROVIDER.lower().strip()
     yp = youth_profile(age_group)
@@ -184,7 +171,7 @@ with st.form("create_form", clear_on_submit=False):
     st.markdown(
         f"""
 {mode_txt}  
-**Spec jeunesse :** {yp['label']} · **{yp['fps']} FPS** · **{yp['resolution_label']}** · plans {yp['shot_sec_min']:.0f}-{yp['shot_sec_max']:.0f}s · musique -14 dB  
+**Spec jeunesse :** {yp['label']} · **{yp['fps']} FPS** · **{yp['resolution_label']}** · plans {yp['shot_sec_min']:.0f}-{yp['shot_sec_max']:.0f}s · musique -16 dB  
 **Temps de creation estime :** environ **{est_low}–{est_high} minutes**  
 **Style :** {style_label} · **Format :** {aspect_key} · **Musique :** {MUSIC_OPTIONS.get(music, music)}
 
@@ -200,28 +187,24 @@ Vraie animation : personnage qui bouge, camera, decor vivant (Wan I2V) — pas u
     )
 
 if submitted:
-    if use_script and not Path(SCRIPT_PCR).is_file():
-        st.error(f"Script introuvable : {SCRIPT_PCR}")
-    elif (not use_script) and not theme.strip():
-        st.error("Indique un theme, ou coche le script Petit Chaperon.")
+    if not theme.strip():
+        st.error("Indique un theme ou une histoire pour generer la video.")
     elif ctx["uses_wan"] and not ctx["wan_ok"]:
         st.error("Moteur video pas encore pret — attends puis reessaie.")
     else:
         st.session_state["last_theme"] = theme.strip()
-        # Script structure impose son style JSON sauf override UI explicite
-        effective_style = style_key
         payload = {
-            "theme": theme.strip() or "le petit chaperon rouge",
+            "theme": theme.strip(),
             "duration_min": float(duration),
             "voice": voice,
             "subtitles": subtitles,
             "publish": publish,
             "age_group": age_group,
-            "style_key": effective_style,
+            "style_key": style_key,
             "aspect": aspect_key,
             "music": music,
-            "script_path": SCRIPT_PCR if use_script else None,
-            "force_new": bool(force_new and use_script),
+            "script_path": None,
+            "force_new": bool(force_new),
         }
         params = inspect.signature(start_generation_job).parameters
         has_var_kw = any(
