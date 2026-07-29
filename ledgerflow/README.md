@@ -7,7 +7,7 @@ Application comptable modulaire inspirée de Pennylane / QuickBooks / Xero, adap
 1. **Facturation intelligente** — Devis → Facture → Relance auto ✅
 2. **Notes de frais** — Photo → OCR → Validation
 3. **Trésorerie & Banque** — Import CSV + lettrage heuristique ✅
-4. **Journal comptable** — PCG, règles, export FEC
+4. **Journal comptable** — PCG, règles, export FEC ✅ (cerveau catégorisation)
 5. **Tableau de bord** — KPIs temps réel
 6. **Collaboration** — Espace expert-comptable (phase 2)
 

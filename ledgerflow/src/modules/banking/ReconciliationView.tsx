@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Ban, Search, Undo2 } from "lucide-react";
+import { Check, Ban, Pencil, Search, Undo2 } from "lucide-react";
 import {
   suggestMatches,
   type MatchableExpense,
@@ -16,11 +16,17 @@ import {
   matchTransactionToInvoice,
   unmatchTransaction,
 } from "@/app/actions/banking";
+import { confirmCategory } from "@/app/actions/categorization";
+import { extractMemorableKeyword } from "@/lib/categorization-engine";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -28,6 +34,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+
+export interface PcgAccountOption {
+  id: string;
+  number: string;
+  label: string;
+}
+
+export interface CategorySuggestionView {
+  accountId: string;
+  accountNumber: string;
+  accountName: string;
+  confidence: number;
+  reason: string;
+  source: string;
+}
 
 export interface ReconciliationTxn {
   id: string;
@@ -37,23 +58,39 @@ export interface ReconciliationTxn {
   status: "UNMATCHED" | "MATCHED" | "IGNORED";
   matchedInvoiceNumber?: string | null;
   matchedPartyName?: string | null;
+  categorizedAccountNumber?: string | null;
+  categorizedAccountName?: string | null;
+  categorySuggestion?: CategorySuggestionView | null;
 }
 
 interface ReconciliationViewProps {
   transactions: ReconciliationTxn[];
   openInvoices: MatchableInvoice[];
   openExpenses: MatchableExpense[];
+  pcgAccounts: PcgAccountOption[];
+}
+
+function confidenceVariant(
+  confidence: number,
+): "success" | "warning" | "danger" {
+  if (confidence > 80) return "success";
+  if (confidence >= 50) return "warning";
+  return "danger";
 }
 
 export function ReconciliationView({
   transactions,
   openInvoices,
   openExpenses,
+  pcgAccounts,
 }: ReconciliationViewProps) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [manualTxn, setManualTxn] = useState<ReconciliationTxn | null>(null);
+  const [categoryTxn, setCategoryTxn] = useState<ReconciliationTxn | null>(
+    null,
+  );
   const [statusFilter, setStatusFilter] = useState<
     "UNMATCHED" | "ALL" | "MATCHED" | "IGNORED"
   >("UNMATCHED");
@@ -87,6 +124,7 @@ export function ReconciliationView({
       }
       toast.success(success);
       setManualTxn(null);
+      setCategoryTxn(null);
       router.refresh();
     });
   };
@@ -112,9 +150,10 @@ export function ReconciliationView({
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle>Rapprochement bancaire</CardTitle>
+            <CardTitle>Rapprochement & catégorisation</CardTitle>
             <CardDescription>
-              Moteur heuristique · montant strict · date ±5 j · libellé client
+              Lettrage factures · Cerveau PCG (règles → heuristique → LLM →
+              fallback)
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -149,7 +188,8 @@ export function ReconciliationView({
                   <th className="px-4 py-3 font-medium">Date</th>
                   <th className="px-4 py-3 font-medium">Libellé</th>
                   <th className="px-4 py-3 text-right font-medium">Montant</th>
-                  <th className="px-4 py-3 font-medium">Suggestion</th>
+                  <th className="px-4 py-3 font-medium">Lettrage</th>
+                  <th className="px-4 py-3 font-medium">Suggestion comptable</th>
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -158,6 +198,7 @@ export function ReconciliationView({
                   const busy = pending && pendingId === txn.id;
                   const best = suggestion.best;
                   const highConfidence = best && best.confidence >= 80;
+                  const cat = txn.categorySuggestion;
 
                   return (
                     <tr
@@ -165,9 +206,11 @@ export function ReconciliationView({
                       className={`transition-colors ${
                         txn.status === "MATCHED"
                           ? "bg-emerald-50/40"
-                          : txn.status === "IGNORED"
-                            ? "bg-slate-50/80"
-                            : "hover:bg-slate-50/80"
+                          : txn.categorizedAccountNumber
+                            ? "bg-sky-50/30"
+                            : txn.status === "IGNORED"
+                              ? "bg-slate-50/80"
+                              : "hover:bg-slate-50/80"
                       }`}
                     >
                       <td className="px-4 py-3 text-slate-600">
@@ -215,31 +258,118 @@ export function ReconciliationView({
                             </p>
                           </div>
                         ) : (
-                          <Badge variant="muted">Aucune suggestion</Badge>
+                          <Badge variant="muted">Sans facture</Badge>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {txn.status === "UNMATCHED" && highConfidence && best ? (
+                        {txn.categorizedAccountNumber ? (
+                          <Badge variant="navy">
+                            {txn.categorizedAccountNumber} —{" "}
+                            {txn.categorizedAccountName}
+                          </Badge>
+                        ) : cat ? (
+                          <Tooltip content={cat.reason}>
+                            <div className="space-y-1">
+                              <Badge variant={confidenceVariant(cat.confidence)}>
+                                {cat.accountNumber} — {cat.accountName} (
+                                {cat.confidence}%)
+                              </Badge>
+                              <p className="text-[11px] text-slate-500">
+                                {cat.source}
+                              </p>
+                            </div>
+                          </Tooltip>
+                        ) : (
+                          <Badge variant="muted">—</Badge>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {txn.status === "UNMATCHED" &&
+                          highConfidence &&
+                          best ? (
                             <Button
                               size="sm"
                               disabled={busy}
                               onClick={() => validateSuggestion(txn.id, best)}
                             >
-                              {busy ? <Spinner /> : <Check className="h-3.5 w-3.5" />}
-                              Valider
+                              {busy ? (
+                                <Spinner />
+                              ) : (
+                                <Check className="h-3.5 w-3.5" />
+                              )}
+                              Lettrer
                             </Button>
                           ) : null}
-                          {txn.status === "UNMATCHED" ? (
+
+                          {txn.status === "UNMATCHED" &&
+                          !txn.categorizedAccountNumber &&
+                          cat ? (
                             <>
+                              <Button
+                                size="sm"
+                                variant={
+                                  highConfidence && best
+                                    ? "secondary"
+                                    : "default"
+                                }
+                                disabled={busy}
+                                onClick={() =>
+                                  run(
+                                    txn.id,
+                                    () =>
+                                      confirmCategory(
+                                        txn.id,
+                                        cat.accountId,
+                                        false,
+                                      ),
+                                    `Catégorisé ${cat.accountNumber}`,
+                                  )
+                                }
+                              >
+                                {busy ? (
+                                  <Spinner />
+                                ) : (
+                                  <Check className="h-3.5 w-3.5" />
+                                )}
+                                Valider PCG
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="secondary"
                                 disabled={busy}
+                                onClick={() => setCategoryTxn(txn)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Modifier
+                              </Button>
+                            </>
+                          ) : null}
+
+                          {txn.status === "UNMATCHED" &&
+                          !txn.categorizedAccountNumber &&
+                          !cat ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => setCategoryTxn(txn)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Catégoriser
+                            </Button>
+                          ) : null}
+
+                          {txn.status === "UNMATCHED" ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
                                 onClick={() => setManualTxn(txn)}
+                                title="Lettrage manuel facture"
                               >
                                 <Search className="h-3.5 w-3.5" />
-                                Manuel
                               </Button>
                               <Button
                                 size="icon"
@@ -258,7 +388,9 @@ export function ReconciliationView({
                               </Button>
                             </>
                           ) : null}
-                          {txn.status === "MATCHED" || txn.status === "IGNORED" ? (
+
+                          {txn.status === "MATCHED" ||
+                          txn.status === "IGNORED" ? (
                             <Button
                               size="sm"
                               variant="secondary"
@@ -271,7 +403,11 @@ export function ReconciliationView({
                                 )
                               }
                             >
-                              {busy ? <Spinner /> : <Undo2 className="h-3.5 w-3.5" />}
+                              {busy ? (
+                                <Spinner />
+                              ) : (
+                                <Undo2 className="h-3.5 w-3.5" />
+                              )}
                               Annuler
                             </Button>
                           ) : null}
@@ -283,11 +419,10 @@ export function ReconciliationView({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-4 py-10 text-center text-sm text-slate-500"
                     >
-                      Aucune transaction dans ce filtre. Importez un CSV pour
-                      commencer.
+                      Aucune transaction dans ce filtre.
                     </td>
                   </tr>
                 ) : null}
@@ -321,7 +456,138 @@ export function ReconciliationView({
           );
         }}
       />
+
+      <CategoryEditDialog
+        open={Boolean(categoryTxn)}
+        txn={categoryTxn}
+        pcgAccounts={pcgAccounts}
+        pending={pending}
+        onClose={() => setCategoryTxn(null)}
+        onConfirm={(accountId, createRule, keyword) => {
+          if (!categoryTxn) return;
+          run(
+            categoryTxn.id,
+            () =>
+              confirmCategory(categoryTxn.id, accountId, createRule, keyword),
+            createRule
+              ? "Catégorie validée + règle mémorisée"
+              : "Catégorie validée",
+          );
+        }}
+      />
     </>
+  );
+}
+
+function CategoryEditDialog({
+  open,
+  txn,
+  pcgAccounts,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  txn: ReconciliationTxn | null;
+  pcgAccounts: PcgAccountOption[];
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: (accountId: string, createRule: boolean, keyword: string) => void;
+}) {
+  const [accountId, setAccountId] = useState("");
+  const [createRule, setCreateRule] = useState(true);
+  const [keyword, setKeyword] = useState("");
+
+  useEffect(() => {
+    if (!txn) return;
+    setAccountId(
+      txn.categorySuggestion?.accountId ||
+        pcgAccounts.find((a) => a.number === "671000")?.id ||
+        pcgAccounts[0]?.id ||
+        "",
+    );
+    setKeyword(extractMemorableKeyword(txn.label));
+    setCreateRule(true);
+  }, [txn, pcgAccounts]);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+      title="Modifier la catégorie PCG"
+      description={
+        txn
+          ? `${txn.label} · ${formatCurrency(txn.amount)}`
+          : undefined
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="pcg">Compte PCG</Label>
+          <Select
+            id="pcg"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+          >
+            {pcgAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.number} — {account.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <label className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={createRule}
+            onChange={(e) => setCreateRule(e.target.checked)}
+          />
+          <span>
+            Mémoriser cette règle pour l&apos;avenir
+            <span className="mt-0.5 block text-xs text-slate-500">
+              La prochaine fois, ce mot-clé sera classé automatiquement
+              (confidence 100 %).
+            </span>
+          </span>
+        </label>
+
+        {createRule ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="keyword">Mot-clé</Label>
+            <Input
+              id="keyword"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value.toUpperCase())}
+              placeholder="SPOTIFY"
+            />
+          </div>
+        ) : null}
+
+        {txn?.categorySuggestion ? (
+          <p className="text-xs text-slate-500">
+            Suggestion actuelle : {txn.categorySuggestion.reason}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            type="button"
+            disabled={pending || !accountId}
+            onClick={() => onConfirm(accountId, createRule, keyword)}
+          >
+            {pending ? <Spinner /> : null}
+            Valider
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 

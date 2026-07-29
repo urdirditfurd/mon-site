@@ -264,6 +264,99 @@ async function main() {
     },
   });
 
+  // Plan Comptable Général (extrait essentiel)
+  const pcgAccounts: Array<{
+    id: string;
+    number: string;
+    label: string;
+    type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+  }> = [
+    {
+      id: "pcg_512000",
+      number: "512000",
+      label: "Banque",
+      type: "ASSET",
+    },
+    {
+      id: "pcg_606000",
+      number: "606000",
+      label: "Achats non stockés de matières et fournitures",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_625000",
+      number: "625000",
+      label: "Déplacements, missions et réceptions",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_626000",
+      number: "626000",
+      label: "Frais postaux et de télécommunications",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_627000",
+      number: "627000",
+      label: "Services bancaires et assimilés",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_641000",
+      number: "641000",
+      label: "Rémunération du personnel",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_671000",
+      number: "671000",
+      label: "Charges exceptionnelles",
+      type: "EXPENSE",
+    },
+    {
+      id: "pcg_706000",
+      number: "706000",
+      label: "Prestations de services",
+      type: "REVENUE",
+    },
+  ];
+
+  for (const account of pcgAccounts) {
+    await prisma.account.upsert({
+      where: {
+        companyId_number: { companyId: company.id, number: account.number },
+      },
+      update: { label: account.label, type: account.type, isActive: true },
+      create: {
+        id: account.id,
+        companyId: company.id,
+        number: account.number,
+        label: account.label,
+        type: account.type,
+      },
+    });
+  }
+
+  // Règle apprise d'exemple (Spotify déjà mémorisé)
+  const spotifyAccount = await prisma.account.findFirst({
+    where: { companyId: company.id, number: "626000" },
+  });
+  if (spotifyAccount) {
+    await prisma.categorizationRule.upsert({
+      where: {
+        companyId_keyword: { companyId: company.id, keyword: "SPOTIFY" },
+      },
+      update: { accountId: spotifyAccount.id, isActive: true },
+      create: {
+        companyId: company.id,
+        keyword: "SPOTIFY",
+        accountId: spotifyAccount.id,
+        priority: 10,
+        hitCount: 1,
+      },
+    });
+  }
+
   const txns = [
     {
       id: "btx_seed_dupont",
@@ -282,8 +375,8 @@ async function main() {
     {
       id: "btx_seed_urssaf",
       bookingDate: new Date("2026-07-22"),
-      label: "PRLV URSSAF NORD JUILLET",
-      amount: -1842.36,
+      label: "VIR URSSAF",
+      amount: -1500,
       externalId: "seed-urssaf",
     },
     {
@@ -299,6 +392,20 @@ async function main() {
       label: "FRAIS TENUE COMPTE",
       amount: -12.5,
       externalId: "seed-fees",
+    },
+    {
+      id: "btx_seed_spotify",
+      bookingDate: new Date("2026-07-21"),
+      label: "PRELEVEMENT SPOTIFY",
+      amount: -12.99,
+      externalId: "seed-spotify",
+    },
+    {
+      id: "btx_seed_aws",
+      bookingDate: new Date("2026-07-20"),
+      label: "CARTE CB AMAZON AWS",
+      amount: -45.5,
+      externalId: "seed-aws",
     },
     {
       id: "btx_seed_unknown",
@@ -320,6 +427,8 @@ async function main() {
         isMatched: false,
         matchedInvoiceId: null,
         matchedExpenseId: null,
+        categorizedAccountId: null,
+        categorizedAt: null,
       },
       create: {
         id: txn.id,
@@ -337,7 +446,7 @@ async function main() {
 
   console.log("Seed OK — company", company.name);
   console.log(
-    `  ${openInvoices.length} factures ouvertes, ${txns.length} transactions UNMATCHED`,
+    `  ${openInvoices.length} factures ouvertes, ${txns.length} transactions, ${pcgAccounts.length} comptes PCG`,
   );
 }
 
