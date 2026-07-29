@@ -13,7 +13,8 @@
     "db:seed": "npx tsx prisma/seed.ts",
     "db:push": "prisma db push",
     "test:reconciliation": "npx tsx scripts/test-reconciliation.ts",
-    "test:categorization": "npx tsx scripts/test-categorization.ts"
+    "test:categorization": "npx tsx scripts/test-categorization.ts",
+    "test:financial": "npx tsx scripts/test-financial-engine.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

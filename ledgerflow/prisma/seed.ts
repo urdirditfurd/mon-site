@@ -200,6 +200,95 @@ async function main() {
     });
   }
 
+  // Factures PAYÉES (TVA collectée sur encaissements — dashboard)
+  const paidInvoices = [
+    {
+      id: "inv_seed_paid_june",
+      partyId: "party_dupont",
+      number: "F-2026-0095",
+      issueDate: new Date("2026-06-05"),
+      dueDate: new Date("2026-06-20"),
+      paidAt: new Date("2026-06-18"),
+      subtotalHt: 1000,
+      vatAmount: 200,
+      totalTtc: 1200,
+      line: "Atelier stratégique",
+    },
+    {
+      id: "inv_seed_paid_july_a",
+      partyId: "party_technova",
+      number: "F-2026-0098",
+      issueDate: new Date("2026-07-02"),
+      dueDate: new Date("2026-07-16"),
+      paidAt: new Date("2026-07-14"),
+      subtotalHt: 3500,
+      vatAmount: 700,
+      totalTtc: 4200,
+      line: "Sprint produit",
+    },
+    {
+      id: "inv_seed_paid_july_b",
+      partyId: "party_lefevre",
+      number: "F-2026-0099",
+      issueDate: new Date("2026-07-08"),
+      dueDate: new Date("2026-07-22"),
+      paidAt: new Date("2026-07-20"),
+      subtotalHt: 800,
+      vatAmount: 160,
+      totalTtc: 960,
+      line: "Conseil fiscal",
+    },
+  ];
+
+  for (const inv of paidInvoices) {
+    await prisma.invoice.upsert({
+      where: { id: inv.id },
+      update: {
+        status: "PAID",
+        partyId: inv.partyId,
+        number: inv.number,
+        issueDate: inv.issueDate,
+        dueDate: inv.dueDate,
+        paidAt: inv.paidAt,
+        subtotalHt: inv.subtotalHt,
+        vatAmount: inv.vatAmount,
+        totalTtc: inv.totalTtc,
+      },
+      create: {
+        id: inv.id,
+        companyId: company.id,
+        partyId: inv.partyId,
+        type: "INVOICE",
+        status: "PAID",
+        number: inv.number,
+        issueDate: inv.issueDate,
+        dueDate: inv.dueDate,
+        paidAt: inv.paidAt,
+        subtotalHt: inv.subtotalHt,
+        vatAmount: inv.vatAmount,
+        totalTtc: inv.totalTtc,
+        vatRate: 20,
+        lines: {
+          create: [
+            {
+              description: inv.line,
+              quantity: 1,
+              unitPriceHt: inv.subtotalHt,
+              vatRate: 20,
+              amountHt: inv.subtotalHt,
+              sortOrder: 0,
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  await prisma.company.update({
+    where: { id: company.id },
+    data: { vatRegime: "ENCASHMENT" },
+  });
+
   await prisma.invoiceSequence.upsert({
     where: {
       companyId_type_year_prefix: {
@@ -444,9 +533,131 @@ async function main() {
     });
   }
 
+  // Historique cashflow (mois précédents) + catégorisation avec TVA estimée
+  const historyTxns = [
+    {
+      id: "btx_hist_may_in",
+      bookingDate: new Date("2026-05-15"),
+      label: "VIR CLIENT MAI",
+      amount: 4800,
+      externalId: "hist-may-in",
+    },
+    {
+      id: "btx_hist_may_out",
+      bookingDate: new Date("2026-05-20"),
+      label: "CB FOURNITURES MAI",
+      amount: -320,
+      externalId: "hist-may-out",
+    },
+    {
+      id: "btx_hist_june_in",
+      bookingDate: new Date("2026-06-18"),
+      label: "VIR DUPONT SARL F-2026-0095",
+      amount: 1200,
+      externalId: "hist-june-in",
+    },
+    {
+      id: "btx_hist_june_out",
+      bookingDate: new Date("2026-06-22"),
+      label: "PRLV OVH CLOUD",
+      amount: -72,
+      externalId: "hist-june-out",
+    },
+  ];
+
+  for (const txn of historyTxns) {
+    await prisma.bankTransaction.upsert({
+      where: { id: txn.id },
+      update: {
+        label: txn.label,
+        amount: txn.amount,
+        bookingDate: txn.bookingDate,
+      },
+      create: {
+        id: txn.id,
+        bankAccountId: bankAccount.id,
+        externalId: txn.externalId,
+        bookingDate: txn.bookingDate,
+        label: txn.label,
+        amount: txn.amount,
+        currency: "EUR",
+        status: "UNMATCHED",
+        isMatched: false,
+      },
+    });
+  }
+
+  const byNumber = async (number: string) =>
+    prisma.account.findFirst({ where: { companyId: company.id, number } });
+
+  const acc626 = await byNumber("626000");
+  const acc641 = await byNumber("641000");
+  const acc627 = await byNumber("627000");
+
+  // AWS 45.50 TTC → TVA estimée 7.58 ; Spotify 12.99 → 2.17 ; URSSAF hors TVA
+  const categorizations: Array<{
+    id: string;
+    accountId: string | undefined;
+    vatAmount: number | null;
+    estimated: boolean;
+  }> = [
+    {
+      id: "btx_seed_aws",
+      accountId: acc626?.id,
+      vatAmount: 7.58,
+      estimated: true,
+    },
+    {
+      id: "btx_seed_spotify",
+      accountId: acc626?.id,
+      vatAmount: 2.17,
+      estimated: true,
+    },
+    {
+      id: "btx_seed_fees",
+      accountId: acc627?.id,
+      vatAmount: 0,
+      estimated: false,
+    },
+    {
+      id: "btx_seed_urssaf",
+      accountId: acc641?.id,
+      vatAmount: null,
+      estimated: false,
+    },
+    {
+      id: "btx_hist_june_out",
+      accountId: acc626?.id,
+      vatAmount: 12,
+      estimated: true,
+    },
+  ];
+
+  for (const item of categorizations) {
+    if (!item.accountId) continue;
+    await prisma.bankTransaction.update({
+      where: { id: item.id },
+      data: {
+        categorizedAccountId: item.accountId,
+        categorizedAt: new Date("2026-07-28"),
+        suggestedAccountId: item.accountId,
+        suggestionConfidence: 100,
+        suggestionReason: "Seed dashboard",
+        suggestionSource: "HEURISTIC",
+        vatAmount: item.vatAmount,
+        vatEstimated: item.estimated,
+      },
+    });
+  }
+
+  await prisma.bankAccount.update({
+    where: { id: bankAccount.id },
+    data: { balance: 42870.14 },
+  });
+
   console.log("Seed OK — company", company.name);
   console.log(
-    `  ${openInvoices.length} factures ouvertes, ${txns.length} transactions, ${pcgAccounts.length} comptes PCG`,
+    `  ${openInvoices.length} factures ouvertes, ${paidInvoices.length} payées, ${txns.length}+ historique txns, ${pcgAccounts.length} comptes PCG`,
   );
 }
 

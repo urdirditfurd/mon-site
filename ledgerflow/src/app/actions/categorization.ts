@@ -8,6 +8,10 @@ import {
   extractMemorableKeyword,
   type CategorySuggestion,
 } from "@/lib/categorization-engine";
+import {
+  estimateVatFromTtc,
+  isVatDeductibleChargeAccount,
+} from "@/lib/financial-engine";
 
 export type CategoryActionResult<T = undefined> =
   | { ok: true; data?: T }
@@ -163,6 +167,13 @@ export async function confirmCategory(
     if (!account) return { ok: false, error: "Compte PCG introuvable" };
 
     await prisma.$transaction(async (tx) => {
+      const vatEligible =
+        account.type === "EXPENSE" &&
+        isVatDeductibleChargeAccount(account.number);
+      const estimatedVat = vatEligible
+        ? estimateVatFromTtc(Number(txn.amount))
+        : null;
+
       await tx.bankTransaction.update({
         where: { id: transactionId },
         data: {
@@ -174,6 +185,8 @@ export async function confirmCategory(
             ? "Validé + règle mémorisée"
             : "Validé manuellement",
           suggestionSource: createRule ? "RULE" : "MANUAL",
+          vatAmount: estimatedVat,
+          vatEstimated: Boolean(estimatedVat),
         },
       });
 

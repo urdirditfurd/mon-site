@@ -8,7 +8,7 @@ Application comptable modulaire inspirée de Pennylane / QuickBooks / Xero, adap
 2. **Notes de frais** — Photo → OCR → Validation
 3. **Trésorerie & Banque** — Import CSV + lettrage heuristique ✅
 4. **Journal comptable** — PCG, règles, export FEC ✅ (cerveau catégorisation)
-5. **Tableau de bord** — KPIs temps réel
+5. **Tableau de bord** — KPIs temps réel + TVA ✅
 6. **Collaboration** — Espace expert-comptable (phase 2)
 
 ## Stack
@@ -33,6 +33,18 @@ npm run dev
 ```
 
 Ouvre [http://localhost:3000/facturation](http://localhost:3000/facturation).
+
+## Pilier 5 — Tableau de bord & TVA
+
+- Moteur `src/lib/financial-engine.ts` : trésorerie, TVA (encaissements/débits), créances, résultat estimé
+- KPIs + sparkline + courbe 6 mois + récap TVA 3 mois
+- TVA déductible estimée marquée `*` (transparence fiscale)
+- Sélecteur période : mois / trimestre / année (`/?period=`)
+
+```bash
+npm run db:seed
+npm run test:financial
+```
 
 ## Pilier 4 — Cerveau PCG (catégorisation)
 
