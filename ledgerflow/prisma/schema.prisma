@@ -1,0 +1,516 @@
+// LedgerFlow — schéma Prisma (comptabilité française / 6 piliers)
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum InvoiceType {
+  QUOTE
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  PAID
+  OVERDUE
+  CANCELLED
+  REJECTED
+}
+
+enum ExpenseStatus {
+  DRAFT
+  PENDING
+  PENDING_OCR
+  EXTRACTED
+  PENDING_MANAGER
+  PENDING_ACCOUNTANT
+  APPROVED
+  REJECTED
+  REIMBURSED
+}
+
+enum ExpenseCategory {
+  RESTAURANT
+  TRANSPORT
+  HOTEL
+  SUPPLIES
+  SOFTWARE
+  TRAINING
+  OTHER
+}
+
+enum BankProvider {
+  CSV
+  BRIDGE
+  BUDGET_INSIGHT
+  GOCARDLESS
+}
+
+enum BankMatchStatus {
+  UNMATCHED
+  MATCHED
+  IGNORED
+}
+
+enum CategorizationSource {
+  RULE
+  HEURISTIC
+  LLM
+  FALLBACK
+  MANUAL
+}
+
+/// Régime de TVA de l'entreprise (défaut : encaissements = plus sûr trésorerie).
+enum VatRegime {
+  ENCASHMENT
+  DEBIT
+}
+
+enum EntrySource {
+  MANUAL
+  INVOICE
+  EXPENSE
+  BANK
+  IMPORT
+  AI
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  CANCELLED
+  FAILED
+}
+
+enum CollaborationRole {
+  OWNER
+  ACCOUNTANT
+  MANAGER
+  EMPLOYEE
+  VIEWER
+}
+
+// ─── Company ─────────────────────────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  siret     String?  @unique
+  siren     String?
+  vatNumber String?
+  address   String?
+  city      String?
+  zipCode   String?
+  country   String   @default("FR")
+  email     String?
+  phone     String?
+  logoUrl   String?
+  vatExempt Boolean  @default(false) // art. 293 B CGI (franchise en base)
+  vatRegime VatRegime @default(ENCASHMENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parties           Party[]
+  invoices          Invoice[]
+  expenses          Expense[]
+  bankAccounts      BankAccount[]
+  accounts          Account[]
+  accountingEntries AccountingEntry[]
+  matchingRules       MatchingRule[]
+  categorizationRules CategorizationRule[]
+  memberships         CompanyMembership[]
+  invoiceSequences    InvoiceSequence[]
+}
+
+model CompanyMembership {
+  id        String            @id @default(cuid())
+  companyId String
+  userId    String
+  role      CollaborationRole @default(EMPLOYEE)
+  createdAt DateTime          @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+// ─── Tiers (clients / fournisseurs) ──────────────────────────────────────────
+
+model Party {
+  id        String    @id @default(cuid())
+  companyId String
+  type      PartyType
+  name      String
+  email     String?
+  phone     String?
+  siret     String?
+  vatNumber String?
+  address   String?
+  city      String?
+  zipCode   String?
+  country   String    @default("FR")
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices  Invoice[]
+  expenses  Expense[]
+  entries   AccountingEntry[]
+
+  @@index([companyId, type])
+  @@index([companyId, name])
+}
+
+// ─── Pilier 1 : Facturation ──────────────────────────────────────────────────
+
+model InvoiceSequence {
+  id         String      @id @default(cuid())
+  companyId  String
+  type       InvoiceType
+  prefix     String
+  year       Int
+  nextNumber Int         @default(1)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, type, year, prefix])
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  companyId     String
+  partyId       String
+  type          InvoiceType   @default(INVOICE)
+  status        InvoiceStatus @default(DRAFT)
+  number        String?
+  quoteId       String?
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime?
+  acceptedAt    DateTime?
+  paidAt        DateTime?
+  currency      String        @default("EUR")
+  subtotalHt    Decimal       @db.Decimal(12, 2)
+  vatAmount     Decimal       @db.Decimal(12, 2)
+  totalTtc      Decimal       @db.Decimal(12, 2)
+  vatRate       Decimal       @default(20) @db.Decimal(5, 2)
+  notes         String?
+  pdfUrl        String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  party     Party              @relation(fields: [partyId], references: [id])
+  quote     Invoice?           @relation("QuoteToInvoice", fields: [quoteId], references: [id])
+  invoices  Invoice[]          @relation("QuoteToInvoice")
+  lines     InvoiceLine[]
+  reminders Reminder[]
+  entries   AccountingEntry[]
+  bankMatches BankTransaction[] @relation("InvoiceBankMatch")
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, type])
+  @@index([dueDate])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @db.Decimal(12, 3)
+  unitPriceHt Decimal @db.Decimal(12, 2)
+  vatRate     Decimal @default(20) @db.Decimal(5, 2)
+  amountHt    Decimal @db.Decimal(12, 2)
+  accountId   String?
+  sortOrder   Int     @default(0)
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model Reminder {
+  id          String         @id @default(cuid())
+  invoiceId   String
+  scheduledAt DateTime
+  sentAt      DateTime?
+  status      ReminderStatus @default(SCHEDULED)
+  offsetDays  Int
+  subject     String?
+  body        String?
+  createdAt   DateTime       @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId, status])
+  @@index([scheduledAt])
+}
+
+// ─── Pilier 2 : Notes de frais ───────────────────────────────────────────────
+
+model Expense {
+  id              String          @id @default(cuid())
+  companyId       String
+  partyId         String?
+  employeeId      String?
+  status          ExpenseStatus   @default(PENDING_OCR)
+  category        ExpenseCategory @default(OTHER)
+  description     String?
+  merchantName    String?
+  expenseDate     DateTime?
+  amountTtc       Decimal?        @db.Decimal(12, 2)
+  amountHt        Decimal?        @db.Decimal(12, 2)
+  vatAmount       Decimal?        @db.Decimal(12, 2)
+  vatRate         Decimal?        @db.Decimal(5, 2)
+  currency        String          @default("EUR")
+  photoUrl        String?
+  ocrRawText      String?
+  ocrConfidence   Float?
+  ocrData         Json?
+  vatEstimated    Boolean         @default(false)
+  note            String?
+  accountId       String?
+  managerId       String?
+  managerNote     String?
+  accountantId    String?
+  accountantNote  String?
+  approvedAt      DateTime?
+  reimbursedAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  party   Party?             @relation(fields: [partyId], references: [id])
+  account Account?           @relation(fields: [accountId], references: [id])
+  entries AccountingEntry[]
+  bankMatches BankTransaction[] @relation("ExpenseBankMatch")
+
+  @@index([companyId, status])
+  @@index([companyId, category])
+  @@index([expenseDate])
+}
+
+// ─── Pilier 3 : Trésorerie & Banque ──────────────────────────────────────────
+
+model BankAccount {
+  id            String       @id @default(cuid())
+  companyId     String
+  name          String
+  iban          String?
+  bic           String?
+  currency      String       @default("EUR")
+  provider      BankProvider @default(CSV)
+  externalId    String?
+  balance       Decimal      @default(0) @db.Decimal(14, 2)
+  lastSyncedAt  DateTime?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  company      Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  transactions BankTransaction[]
+
+  @@index([companyId])
+  @@unique([companyId, iban])
+}
+
+model BankTransaction {
+  id                   String                 @id @default(cuid())
+  bankAccountId        String
+  externalId           String?
+  bookingDate          DateTime
+  valueDate            DateTime?
+  label                String
+  amount               Decimal                @db.Decimal(14, 2)
+  vatAmount            Decimal?               @db.Decimal(12, 2)
+  vatEstimated         Boolean                @default(false)
+  currency             String                 @default("EUR")
+  status               BankMatchStatus        @default(UNMATCHED)
+  isMatched            Boolean                @default(false)
+  matchedAt            DateTime?
+  matchedInvoiceId     String?
+  matchedExpenseId     String?
+  matchedEntryId       String?
+  suggestedAccountId   String?
+  suggestionConfidence Float?
+  suggestionReason     String?
+  suggestionSource     CategorizationSource?
+  categorizedAccountId String?
+  categorizedAt        DateTime?
+  duplicateOfId        String?
+  rawPayload           Json?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  bankAccount        BankAccount       @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  matchedInvoice     Invoice?          @relation("InvoiceBankMatch", fields: [matchedInvoiceId], references: [id])
+  matchedExpense     Expense?          @relation("ExpenseBankMatch", fields: [matchedExpenseId], references: [id])
+  matchedEntry       AccountingEntry?  @relation("TxnMatchedEntry", fields: [matchedEntryId], references: [id])
+  suggestedAccount   Account?          @relation("TxnSuggestedAccount", fields: [suggestedAccountId], references: [id])
+  categorizedAccount Account?          @relation("TxnCategorizedAccount", fields: [categorizedAccountId], references: [id])
+  duplicateOf        BankTransaction?  @relation("TxnDuplicates", fields: [duplicateOfId], references: [id])
+  duplicates         BankTransaction[] @relation("TxnDuplicates")
+
+  @@index([bankAccountId, bookingDate])
+  @@index([bankAccountId, isMatched])
+  @@index([bankAccountId, status])
+  @@index([label])
+  @@unique([bankAccountId, externalId])
+}
+
+model MatchingRule {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  pattern     String
+  accountId   String
+  priority    Int      @default(100)
+  isActive    Boolean  @default(true)
+  hitCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([companyId, isActive, priority])
+}
+
+/// Mémoire utilisateur : mot-clé → compte PCG (apprentissage des corrections).
+model CategorizationRule {
+  id        String   @id @default(cuid())
+  companyId String
+  keyword   String
+  accountId String
+  priority  Int      @default(100)
+  hitCount  Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([companyId, keyword])
+  @@index([companyId, isActive, priority])
+}
+
+// ─── Pilier 4 : Journal comptable & PCG ──────────────────────────────────────
+
+model Account {
+  id          String      @id @default(cuid())
+  companyId   String
+  number      String
+  label       String
+  type        AccountType
+  parentId    String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent              Account?             @relation("AccountTree", fields: [parentId], references: [id])
+  children            Account[]            @relation("AccountTree")
+  lines               AccountingLine[]
+  invoiceLines        InvoiceLine[]
+  expenses            Expense[]
+  matchingRules       MatchingRule[]
+  categorizationRules CategorizationRule[]
+  suggestedTxns       BankTransaction[]    @relation("TxnSuggestedAccount")
+  categorizedTxns     BankTransaction[]    @relation("TxnCategorizedAccount")
+
+  @@unique([companyId, number])
+  @@index([companyId, type])
+}
+
+model AccountingEntry {
+  id          String     @id @default(cuid())
+  companyId   String
+  journalCode String     @default("OD")
+  journalLabel String?
+  entryDate   DateTime
+  pieceRef    String?
+  label       String
+  source      EntrySource @default(MANUAL)
+  isValidated Boolean    @default(false)
+  validatedAt DateTime?
+  partyId     String?
+  invoiceId   String?
+  expenseId   String?
+  attachmentUrl String?
+  aiConfidence Float?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  party    Party?           @relation(fields: [partyId], references: [id])
+  invoice  Invoice?         @relation(fields: [invoiceId], references: [id])
+  expense  Expense?         @relation(fields: [expenseId], references: [id])
+  lines    AccountingLine[]
+  bankTxns BankTransaction[] @relation("TxnMatchedEntry")
+  comments EntryComment[]
+
+  @@index([companyId, entryDate])
+  @@index([companyId, isValidated])
+  @@index([journalCode])
+}
+
+model AccountingLine {
+  id        String  @id @default(cuid())
+  entryId   String
+  accountId String
+  label     String?
+  debit     Decimal @default(0) @db.Decimal(14, 2)
+  credit    Decimal @default(0) @db.Decimal(14, 2)
+
+  entry   AccountingEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account Account         @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+// ─── Pilier 6 : Collaboration ────────────────────────────────────────────────
+
+model EntryComment {
+  id        String   @id @default(cuid())
+  entryId   String
+  authorId  String
+  authorName String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entry AccountingEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+}
