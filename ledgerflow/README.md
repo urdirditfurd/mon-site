@@ -34,6 +34,21 @@ npm run dev
 
 Ouvre [http://localhost:3000/facturation](http://localhost:3000/facturation).
 
+## Pilier 4 — Cerveau PCG (catégorisation)
+
+- Moteur hybride `src/lib/categorization-engine.ts`
+  1. Règles mémorisées (`CategorizationRule`) → confiance 100 %
+  2. Heuristiques métier (Spotify, URSSAF, AWS, SNCF…)
+  3. LLM optionnel si `OPENAI_API_KEY`
+  4. Fallback prudent `671000` (30 %)
+- UI : colonne « Suggestion comptable », Valider / Modifier + checkbox « Mémoriser »
+- Actions : `suggestCategory`, `confirmCategory`
+
+```bash
+npm run db:seed
+npm run test:categorization
+```
+
 ## Pilier 3 — Trésorerie & Lettrage
 
 - Page `/tresorerie` : import CSV (drag & drop) + tableau de rapprochement
