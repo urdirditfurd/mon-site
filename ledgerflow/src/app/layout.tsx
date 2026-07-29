@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -29,6 +30,7 @@ export default function RootLayout({
     <html lang="fr">
       <body className={`${dmSans.variable} ${fraunces.variable} antialiased`}>
         {children}
+        <Toaster richColors position="top-right" closeButton />
       </body>
     </html>
   );

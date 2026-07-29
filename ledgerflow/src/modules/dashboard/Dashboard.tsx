@@ -39,7 +39,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { InvoiceList } from "@/modules/invoicing/InvoiceList";
+import Link from "next/link";
 
 function KpiCard({
   title,
@@ -345,7 +345,22 @@ export function Dashboard() {
         </Card>
       </section>
 
-      <InvoiceList compact />
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Facturation</CardTitle>
+            <CardDescription>
+              CRUD connecté à PostgreSQL · PDF conforme disponible
+            </CardDescription>
+          </div>
+          <Link
+            href="/facturation"
+            className="text-xs font-medium text-[#0B1F33] underline-offset-2 hover:underline"
+          >
+            Ouvrir le module →
+          </Link>
+        </CardHeader>
+      </Card>
     </div>
   );
 }
