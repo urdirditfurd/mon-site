@@ -10,3 +10,5 @@ ebx/*.db
 ebx/*.db-shm
 ebx/*.db-wal
 ebx/env.example
+live-cache.json
+ebx/live-cache.json

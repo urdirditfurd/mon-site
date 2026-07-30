@@ -142,8 +142,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
         Type: ["Exercise Bike"],
       },
       imageUrls: [
-        "https://i.ebayimg.com/images/g/placeholder/s-l1600.jpg",
-        "https://picsum.photos/seed/ebx/800/800",
+        "https://picsum.photos/seed/ebxproduct/800/800",
       ],
     },
   };

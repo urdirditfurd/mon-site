@@ -180,6 +180,7 @@ function normalizeSeller(summaries, seller, production) {
     title: it.title,
     price: it.price?.value ? Number(it.price.value) : 0,
     url: it.itemWebUrl,
+    image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
     sold: estimateSold(it),
   }));
   const prices = items.map((i) => i.price).filter((p) => p > 0);
@@ -201,7 +202,9 @@ function normalizeSeller(summaries, seller, production) {
       price: i.price,
       sold: i.sold || Math.round(Math.random() * 40 + 5),
       url: i.url,
+      image: i.image || null,
     })),
+    location: "France",
     live: true,
     api: production ? "browse-production" : "browse-sandbox",
   };

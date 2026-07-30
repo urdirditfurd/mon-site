@@ -3,6 +3,14 @@ let themeColor = "#667eea";
 let titleData = null;
 let titleTab = "keywords";
 let selectedKeywords = [];
+let kwPageIdx = 0;
+const KW_PER_PAGE = 8;
+let rankingsPeriod = "month";
+let competitorPeriod = "month";
+let lastCompetitor = null;
+let lastDesc = null;
+let descImages = [];
+let replaceImgIdx = 0;
 
 const PAGE_META = {
   dashboard: ["Dashboard", "Vue d'ensemble de votre activité"],
@@ -21,7 +29,8 @@ function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function navigate(page) {
@@ -36,6 +45,7 @@ function navigate(page) {
   if (page === "dashboard") loadDashboard();
   if (page === "analytics") loadAnalytics();
   if (page === "rankings") loadRankings();
+  if (page === "competitors") loadCompetitorHistory();
   if (page === "auto-order") loadOrders();
   if (page === "listings") loadListings();
   if (page === "settings") loadSettings();
@@ -48,6 +58,51 @@ document.querySelectorAll(".nav-link").forEach((link) => {
   });
 });
 
+document.getElementById("rankings-period")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-period]");
+  if (!btn) return;
+  rankingsPeriod = btn.dataset.period;
+  document.querySelectorAll("#rankings-period .period-pill").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  loadRankings();
+});
+
+document.getElementById("sniper-tabs")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-stab]");
+  if (!btn) return;
+  document.querySelectorAll(".sniper-tab").forEach((b) => {
+    b.classList.remove("active");
+    b.classList.add("text-zinc-500", "bg-zinc-100");
+  });
+  btn.classList.add("active");
+  btn.classList.remove("text-zinc-500", "bg-zinc-100");
+  const tab = btn.dataset.stab;
+  document.getElementById("sniper-auto").classList.toggle("hidden", tab !== "auto");
+  document.getElementById("sniper-bulking").classList.toggle("hidden", tab !== "bulking");
+  document.getElementById("sniper-sub").classList.toggle("hidden", tab !== "sub");
+});
+
+document.querySelectorAll(".desc-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".desc-tab").forEach((b) => {
+      b.classList.remove("active");
+      b.classList.add("text-zinc-500");
+    });
+    btn.classList.add("active");
+    btn.classList.remove("text-zinc-500");
+    const tab = btn.dataset.dtab;
+    document.getElementById("desc-preview-wrap").classList.toggle("hidden", tab !== "preview");
+    document.getElementById("desc-html-wrap").classList.toggle("hidden", tab !== "html");
+  });
+});
+
+document.getElementById("snipe-real")?.addEventListener("change", (e) => {
+  if (e.target.checked) document.getElementById("snipe-test").checked = false;
+});
+document.getElementById("snipe-test")?.addEventListener("change", (e) => {
+  if (e.target.checked) document.getElementById("snipe-real").checked = false;
+});
+
 async function checkHealth() {
   const el = document.getElementById("api-status");
   try {
@@ -56,6 +111,8 @@ async function checkHealth() {
     el.className = "text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium";
     el.textContent = "● API connectée";
     document.getElementById("settings-llm").textContent = json.llm_url || "—";
+    const mode = document.getElementById("settings-mode");
+    if (mode) mode.textContent = json.mode || "live+fallback";
   } catch {
     el.className = "text-xs bg-red-50 text-red-500 px-2.5 py-1 rounded-full font-medium";
     el.textContent = "● API hors ligne";
@@ -79,7 +136,23 @@ async function loadDashboard() {
     .join("");
 }
 
-function loadAnalytics() {
+async function loadAnalytics() {
+  try {
+    const res = await fetch(API + "/api/dashboard");
+    const d = (await res.json()).data || {};
+    document.getElementById("analytics-kpis").innerHTML = [
+      ["CA", `${(d.revenue || 0).toFixed(0)} €`],
+      ["Commandes", d.orders || 0],
+      ["En attente", d.pendingOrders || 0],
+    ]
+      .map(
+        ([l, v]) =>
+          `<div class="bg-white rounded-2xl border p-5"><p class="text-xs text-zinc-400">${l}</p><p class="text-2xl font-bold mt-1">${v}</p></div>`
+      )
+      .join("");
+  } catch (_) {
+    document.getElementById("analytics-kpis").innerHTML = "";
+  }
   const rows = [
     ["Conversion", 64],
     ["Sell-through", 42],
@@ -94,47 +167,225 @@ function loadAnalytics() {
     .join("");
 }
 
+function periodFactor(period) {
+  if (period === "day") return 0.05;
+  if (period === "week") return 0.28;
+  return 1;
+}
+
 async function loadRankings() {
-  const res = await fetch(API + "/api/rankings");
+  const res = await fetch(API + `/api/rankings?period=${rankingsPeriod}`);
   const json = await res.json();
-  document.getElementById("rankings-body").innerHTML = (json.data || [])
-    .map(
-      (p) =>
-        `<tr class="border-b border-zinc-50"><td class="p-3 font-semibold text-brand-600">${p.rank}</td><td class="p-3">${escapeHtml(p.title)}</td><td class="p-3 text-zinc-500">${escapeHtml(p.category)}</td><td class="p-3">${p.price.toFixed(2)} €</td><td class="p-3">${p.sold}</td></tr>`
-    )
+  const factor = periodFactor(rankingsPeriod);
+  const src = document.getElementById("rankings-source");
+  if (src) {
+    src.textContent = json.live
+      ? `Données live (${json.source || "eBay"})`
+      : "Fallback local (ajoutez EBAY_PROD_CLIENT_ID pour le live)";
+  }
+  const list = document.getElementById("rankings-list");
+  list.innerHTML = (json.data || [])
+    .map((p, i) => {
+      const rank = p.rank || i + 1;
+      const sold = Math.max(1, Math.round((p.sold || 10) * factor));
+      const price = Number(p.price || 0);
+      const oldPrice = price > 0 ? (price * 1.35).toFixed(2) : null;
+      const img = p.image
+        ? `<img src="${escapeHtml(p.image)}" class="w-14 h-14 rounded-lg object-cover bg-zinc-100" alt="" />`
+        : `<div class="w-14 h-14 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-300 text-xs">—</div>`;
+      const rankClass = rank <= 3 ? `rank-${rank}` : "text-zinc-400";
+      const href = p.url || "#";
+      return `<a href="${escapeHtml(href)}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50 transition">
+        <span class="w-8 text-center font-bold text-lg ${rankClass}">${rank}</span>
+        ${img}
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-sm truncate">${escapeHtml(p.title)}</p>
+          <p class="text-xs text-zinc-400 mt-0.5">${escapeHtml(p.category || "eBay")}</p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class="text-sm text-emerald-600 font-medium">${sold} vendus</p>
+          <p class="text-sm font-semibold">${price.toFixed(2)} €</p>
+          ${oldPrice ? `<p class="text-xs text-zinc-400 line-through">${oldPrice} €</p>` : ""}
+        </div>
+      </a>`;
+    })
+    .join("") || `<p class="p-8 text-center text-zinc-300">Aucun classement.</p>`;
+}
+
+async function loadCompetitorHistory() {
+  const res = await fetch(API + "/api/competitors/history");
+  const json = await res.json();
+  const box = document.getElementById("competitor-history");
+  const rows = json.data || [];
+  if (!rows.length) {
+    box.innerHTML = `<p class="text-sm text-zinc-400 col-span-2">Aucune analyse récente.</p>`;
+    return;
+  }
+  box.innerHTML = rows
+    .map((r) => {
+      let revenue = "—";
+      try {
+        const p = JSON.parse(r.payload || "{}");
+        if (p.revenue != null) revenue = `${Number(p.revenue).toFixed(2)} €/mois`;
+      } catch (_) {}
+      return `<div class="bg-white border rounded-2xl p-4 flex items-center gap-3">
+        <span class="text-xl">🇫🇷</span>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium truncate">${escapeHtml(r.seller_name)}</p>
+          <p class="text-xs text-emerald-600">${revenue}</p>
+        </div>
+        <button onclick="viewCompetitorHistory(${r.id})" class="text-xs px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Voir les stats</button>
+        <button onclick="deleteCompetitorHistory(${r.id})" class="text-zinc-300 hover:text-red-500 text-lg leading-none" title="Supprimer">🗑</button>
+      </div>`;
+    })
     .join("");
+}
+
+async function viewCompetitorHistory(id) {
+  const res = await fetch(API + "/api/competitors/history/" + id);
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  renderCompetitor(json.data);
+}
+
+async function deleteCompetitorHistory(id) {
+  await fetch(API + "/api/competitors/history/" + id, { method: "DELETE" });
+  loadCompetitorHistory();
 }
 
 async function analyzeCompetitor() {
   const seller = document.getElementById("competitor-input").value.trim();
   if (!seller) return alert("Nom vendeur requis");
-  const res = await fetch(API + "/api/competitors", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seller }),
-  });
-  const json = await res.json();
-  if (!json.success) return alert(json.error || "Erreur");
-  const d = json.data;
+  const btn = document.getElementById("competitor-btn");
+  btn.disabled = true;
+  btn.textContent = "Analyse...";
+  try {
+    const res = await fetch(API + "/api/competitors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seller, marketplace: "FR" }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Erreur");
+    renderCompetitor(json.data);
+    loadCompetitorHistory();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analyser";
+  }
+}
+
+function renderCompetitor(d) {
+  lastCompetitor = d;
+  competitorPeriod = "month";
   const box = document.getElementById("competitor-result");
   box.classList.remove("hidden");
+  const ebayUrl = `https://www.ebay.fr/usr/${encodeURIComponent(d.seller)}`;
+  const location = d.location || "France";
   box.innerHTML = `
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Chiffre d'Affaires / mois</p><p class="text-xl font-bold">${d.revenue.toFixed(2)} €</p></div>
-      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Annonces actives</p><p class="text-xl font-bold">${d.activeListings}</p></div>
-      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Prix moyen</p><p class="text-xl font-bold">${d.avgPrice.toFixed(2)} €</p></div>
-      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Taux de vente</p><p class="text-xl font-bold">${d.sellThrough}%</p></div>
+    <div class="bg-white rounded-2xl border p-5 flex flex-wrap items-center gap-4">
+      <div class="flex-1">
+        <div class="flex items-center gap-2"><span class="text-xl">🇫🇷</span><h3 class="text-xl font-bold">${escapeHtml(d.seller)}</h3>
+          ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">fallback</span>' : '<span class="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">live</span>'}
+        </div>
+        <p class="text-sm text-zinc-400 mt-1">${escapeHtml(location)}</p>
+      </div>
+      <a href="${ebayUrl}" target="_blank" class="px-4 py-2 border rounded-xl text-sm font-medium">Voir sur eBay</a>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="bg-brand-600 text-white rounded-2xl p-5 col-span-2 lg:col-span-1">
+        <div class="flex gap-1 mb-2 text-[10px] font-medium">
+          <button data-cp="day" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Jour</button>
+          <button data-cp="week" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Semaine</button>
+          <button data-cp="month" class="cp-pill px-2 py-0.5 rounded-full bg-white">Mois</button>
+        </div>
+        <p class="text-xs opacity-80">Chiffre d'Affaires</p>
+        <p class="text-2xl font-bold mt-1" id="comp-revenue">${Number(d.revenue || 0).toFixed(2)} €</p>
+        <p class="text-[10px] opacity-70 mt-1" id="comp-revenue-label">/ mois (estimé)</p>
+      </div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Annonces actives</p><p class="text-xl font-bold mt-1">${d.activeListings || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Prix moyen</p><p class="text-xl font-bold mt-1">${Number(d.avgPrice || 0).toFixed(2)} €</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Taux de vente</p><p class="text-xl font-bold mt-1 text-emerald-600">${d.sellThrough || 0}%</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Ventes réussies</p><p class="text-xl font-bold mt-1">${d.successfulSales || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Objets vendus</p><p class="text-xl font-bold mt-1">${d.totalSold || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Abonnés</p><p class="text-xl font-bold mt-1">${d.followers || 0}</p></div>
     </div>
     <div class="bg-white rounded-2xl border overflow-hidden">
-      <div class="p-4 border-b font-semibold">Meilleures ventes — ${escapeHtml(d.seller)}</div>
-      <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">Produit</th><th class="p-3">Prix</th><th class="p-3">Vendus</th></tr></thead>
-      <tbody>${d.bestsellers
-        .map(
-          (b) =>
-            `<tr class="border-b border-zinc-50"><td class="p-3"><a class="text-brand-600 hover:underline" href="${b.url}" target="_blank">${escapeHtml(b.title)}</a></td><td class="p-3">${b.price.toFixed(2)} €</td><td class="p-3">${b.sold}</td></tr>`
-        )
-        .join("")}</tbody></table>
+      <div class="p-4 border-b flex items-center justify-between">
+        <div class="font-semibold">Meilleures ventes — ${escapeHtml(d.seller)}</div>
+        <div class="flex gap-1 text-xs" id="best-period">
+          <button data-bp="day" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Jour</button>
+          <button data-bp="week" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Semaine</button>
+          <button data-bp="month" class="bp-pill px-2 py-1 rounded-full bg-brand-600 text-white">Mois</button>
+        </div>
+      </div>
+      <div id="comp-bestsellers" class="divide-y"></div>
+      <div class="p-3 text-center border-t"><button id="comp-more" class="text-sm text-brand-600 font-medium">Voir plus</button></div>
     </div>`;
+
+  box.querySelectorAll(".cp-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      competitorPeriod = btn.dataset.cp;
+      box.querySelectorAll(".cp-pill").forEach((b) => {
+        b.classList.remove("bg-white");
+        b.classList.add("bg-white/20");
+      });
+      btn.classList.add("bg-white");
+      btn.classList.remove("bg-white/20");
+      const f = periodFactor(competitorPeriod);
+      const labels = { day: "/ jour (estimé)", week: "/ semaine (estimé)", month: "/ mois (estimé)" };
+      document.getElementById("comp-revenue").textContent =
+        (Number(d.revenue || 0) * f).toFixed(2) + " €";
+      document.getElementById("comp-revenue-label").textContent = labels[competitorPeriod];
+    });
+  });
+
+  let showAll = false;
+  const renderBest = (period) => {
+    const f = periodFactor(period);
+    const items = d.bestsellers || [];
+    const visible = showAll ? items : items.slice(0, 4);
+    document.getElementById("comp-bestsellers").innerHTML = visible
+      .map((b, i) => {
+        const sold = Math.max(1, Math.round((b.sold || 5) * f));
+        const price = Number(b.price || 0);
+        return `<a href="${escapeHtml(b.url || "#")}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50">
+          <span class="w-6 font-bold text-brand-600">${i + 1}</span>
+          <div class="flex-1 min-w-0"><p class="text-sm font-medium truncate">${escapeHtml(b.title)}</p></div>
+          <div class="text-right"><p class="text-sm text-emerald-600">${sold} vendus</p><p class="text-sm font-semibold">${price.toFixed(2)} €</p></div>
+        </a>`;
+      })
+      .join("");
+  };
+  renderBest("month");
+
+  box.querySelectorAll(".bp-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      box.querySelectorAll(".bp-pill").forEach((b) => {
+        b.className = "bp-pill px-2 py-1 rounded-full bg-zinc-100";
+      });
+      btn.className = "bp-pill px-2 py-1 rounded-full bg-brand-600 text-white";
+      renderBest(btn.dataset.bp);
+    });
+  });
+
+  document.getElementById("comp-more")?.addEventListener("click", () => {
+    showAll = !showAll;
+    document.getElementById("comp-more").textContent = showAll ? "Voir moins" : "Voir plus";
+    const active = box.querySelector(".bp-pill.bg-brand-600")?.dataset.bp || "month";
+    renderBest(active);
+  });
+}
+
+function colorizeLog(msg) {
+  const safe = escapeHtml(msg);
+  if (/\[ERROR\]/i.test(msg)) return `<div class="err">${safe}</div>`;
+  if (/\[WARN\]/i.test(msg)) return `<div class="warn">${safe}</div>`;
+  if (/\[OK\]|\[DONE\]|\[SIMULATION\]|Listé|importé/i.test(msg)) return `<div class="ok">${safe}</div>`;
+  if (/\[INIT\]|\[CONFIG\]|\[SCAN\]|\[PROTECT\]/i.test(msg)) return `<div class="info">${safe}</div>`;
+  return `<div class="ok">${safe}</div>`;
 }
 
 async function runSnipe() {
@@ -142,13 +393,17 @@ async function runSnipe() {
   const cons = document.getElementById("snipe-console");
   btn.disabled = true;
   cons.innerHTML = "";
+  const testMode = document.getElementById("snipe-test").checked;
+  const realMode = document.getElementById("snipe-real").checked;
   const body = {
     query: document.getElementById("snipe-query")?.value || "gadgets",
     count: Number(document.getElementById("snipe-count").value),
     margin: Number(document.getElementById("snipe-margin").value),
     marketplace: document.getElementById("snipe-market").value,
     ticket: document.getElementById("snipe-ticket").value,
-    testMode: document.getElementById("snipe-test").checked,
+    source: document.getElementById("snipe-source").value,
+    autoList: document.getElementById("snipe-autolist").checked,
+    testMode: realMode ? false : testMode,
   };
 
   const res = await fetch(API + "/api/auto-snipe", {
@@ -173,7 +428,7 @@ async function runSnipe() {
       try {
         const ev = JSON.parse(line);
         if (ev.type === "log") {
-          cons.innerHTML += `<div>${escapeHtml(ev.message)}</div>`;
+          cons.innerHTML += colorizeLog(ev.message);
           cons.scrollTop = cons.scrollHeight;
         }
         if (ev.type === "stats" || ev.type === "done") {
@@ -200,9 +455,21 @@ async function loadOrders() {
   document.getElementById("orders-body").innerHTML = (json.data || [])
     .map(
       (o) =>
-        `<tr class="border-b border-zinc-50"><td class="p-3 font-mono text-xs">${o.id}</td><td class="p-3">${escapeHtml(o.product)}</td><td class="p-3">${escapeHtml(o.supplier)}</td><td class="p-3">${o.amount.toFixed(2)} €</td><td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${colors[o.status] || ""}">${o.status}</span></td></tr>`
+        `<tr class="border-b border-zinc-50">
+          <td class="p-3 font-mono text-xs">${escapeHtml(o.id)}</td>
+          <td class="p-3">${escapeHtml(o.product)}</td>
+          <td class="p-3">${escapeHtml(o.supplier)}</td>
+          <td class="p-3">${Number(o.amount || 0).toFixed(2)} €</td>
+          <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${colors[o.status] || ""}">${escapeHtml(o.status)}</span></td>
+          <td class="p-3"><button onclick="advanceOrder('${escapeHtml(o.id)}')" class="text-xs text-brand-600">Avancer</button></td>
+        </tr>`
     )
-    .join("");
+    .join("") || `<tr><td colspan="6" class="p-8 text-center text-zinc-300">Aucune commande.</td></tr>`;
+}
+
+async function advanceOrder(id) {
+  await fetch(API + "/api/auto-orders/" + encodeURIComponent(id) + "/advance", { method: "POST" });
+  loadOrders();
 }
 
 async function loadListings() {
@@ -265,36 +532,72 @@ async function publishListing(id, btn) {
 async function runTitleBuilder() {
   const query = document.getElementById("title-query").value.trim();
   if (!query) return;
-  const res = await fetch(API + "/api/title-builder", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-  });
-  const json = await res.json();
-  titleData = json.data;
-  selectedKeywords = [query];
-  document.getElementById("title-results").classList.remove("hidden");
-  document.getElementById("title-meta").textContent = `${titleData.analyzedListings} annonces analysées${titleData.live === false ? " (fallback)" : " (live)"}`;
-  updateFinalTitle();
-  renderKeywords();
+  const btn = document.getElementById("title-btn");
+  btn.disabled = true;
+  btn.textContent = "Analyse...";
+  try {
+    const exclude = document.getElementById("title-exclude").value.trim();
+    const res = await fetch(API + "/api/title-builder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        marketplace: document.getElementById("title-market").value,
+        exclude,
+      }),
+    });
+    const json = await res.json();
+    titleData = json.data;
+    selectedKeywords = [query];
+    kwPageIdx = 0;
+    document.getElementById("title-results").classList.remove("hidden");
+    document.getElementById("title-meta").textContent = `${titleData.analyzedListings} annonces analysées${
+      titleData.live === false ? " (fallback)" : " (live)"
+    }`;
+    updateFinalTitle();
+    renderKeywords();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Générer";
+  }
 }
 
 function updateFinalTitle() {
-  document.getElementById("final-title").value = selectedKeywords.join(" ").slice(0, 80);
+  const t = selectedKeywords.join(" ").slice(0, 80);
+  document.getElementById("final-title").value = t;
+  document.getElementById("title-count").textContent = `${t.length}/80`;
+}
+
+function onTitleEdit() {
+  const t = document.getElementById("final-title").value.slice(0, 80);
+  document.getElementById("title-count").textContent = `${t.length}/80`;
 }
 
 function renderKeywords() {
   if (!titleData) return;
   const list = titleData[titleTab] || [];
-  document.getElementById("kw-list").innerHTML = list
+  const start = kwPageIdx * KW_PER_PAGE;
+  const page = list.slice(start, start + KW_PER_PAGE);
+  const maxPage = Math.max(1, Math.ceil(list.length / KW_PER_PAGE));
+  document.getElementById("kw-page-label").textContent = `Page ${kwPageIdx + 1} / ${maxPage}`;
+  document.getElementById("kw-list").innerHTML = page
     .map(
       (k) =>
-        `<button class="keyword-chip px-3 py-2 rounded-xl border text-left text-sm bg-zinc-50" onclick="addKeyword('${escapeHtml(k.keyword).replace(/'/g, "\\'")}')">
-          <div class="font-medium">${escapeHtml(k.keyword)}</div>
-          <div class="text-[10px] text-zinc-400">${k.searches} searches · ${k.sales} sales</div>
-        </button>`
+        `<tr class="keyword-row border-b border-zinc-50 cursor-pointer" onclick="addKeyword(${JSON.stringify(k.keyword)})">
+          <td class="p-3 font-medium text-brand-700">${escapeHtml(k.keyword)}</td>
+          <td class="p-3 text-zinc-500">${Number(k.searches || 0).toLocaleString("fr-FR")}</td>
+          <td class="p-3 text-zinc-500">${Number(k.sales || 0).toLocaleString("fr-FR")}</td>
+        </tr>`
     )
     .join("");
+}
+
+function kwPage(dir) {
+  if (!titleData) return;
+  const list = titleData[titleTab] || [];
+  const maxPage = Math.max(0, Math.ceil(list.length / KW_PER_PAGE) - 1);
+  kwPageIdx = Math.min(maxPage, Math.max(0, kwPageIdx + dir));
+  renderKeywords();
 }
 
 function addKeyword(kw) {
@@ -311,6 +614,7 @@ document.getElementById("kw-tabs")?.addEventListener("click", (e) => {
   const btn = e.target.closest(".kw-tab");
   if (!btn) return;
   titleTab = btn.dataset.tab;
+  kwPageIdx = 0;
   document.querySelectorAll(".kw-tab").forEach((b) => {
     b.className = "kw-tab px-3 py-1.5 rounded-lg text-sm text-zinc-500";
   });
@@ -318,8 +622,86 @@ document.getElementById("kw-tabs")?.addEventListener("click", (e) => {
   renderKeywords();
 });
 
-function setTheme(color) {
+function setTheme(color, el) {
   themeColor = color;
+  document.querySelectorAll(".theme-dot").forEach((d) => d.classList.remove("active"));
+  (el || document.querySelector(`.theme-dot[data-theme="${color}"]`))?.classList.add("active");
+  if (lastDesc) regenerateDescTheme();
+}
+
+async function regenerateDescTheme() {
+  if (!lastDesc?.product) return;
+  try {
+    const res = await fetch(API + "/api/rebuild-description", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        product: { ...lastDesc.product, images: descImages.length ? descImages : lastDesc.product.images },
+        themeColor,
+      }),
+    });
+    const json = await res.json();
+    if (json.success) applyDescResult(json.data);
+  } catch (_) {}
+}
+
+function applyDescResult(data) {
+  lastDesc = data;
+  const html = data.html_description || "";
+  descImages = data.images || descImages || [];
+  document.getElementById("desc-html").textContent = html;
+  const preview = document.getElementById("desc-preview");
+  preview.classList.remove("flex", "items-center", "justify-center", "text-zinc-300");
+  preview.innerHTML = html;
+  bindPreviewImages(preview);
+
+  const banner = document.getElementById("desc-banner");
+  banner.classList.remove("hidden");
+  document.getElementById("desc-detected").textContent =
+    "Produit détecté : " + (data.product_name || data.seo_title || "").slice(0, 80);
+  document.getElementById("desc-img-badge").textContent = `${(data.images || []).length} images`;
+  document.getElementById("desc-source-badge").textContent = data.source || "generic";
+}
+
+function bindPreviewImages(preview) {
+  preview.querySelectorAll("img").forEach((img, idx) => {
+    img.style.cursor = "pointer";
+    img.title = "Changer l'image";
+    img.onclick = () => openImgModal(idx);
+  });
+}
+
+function openImgModal(idx) {
+  replaceImgIdx = idx;
+  const grid = document.getElementById("img-grid");
+  grid.innerHTML = (descImages || [])
+    .map(
+      (src, i) =>
+        `<button onclick="pickImage(${i})" class="rounded-xl overflow-hidden border hover:ring-2 ring-brand-400">
+          <img src="${escapeHtml(src)}" class="w-full h-32 object-cover" alt="" />
+        </button>`
+    )
+    .join("") || `<p class="text-sm text-zinc-400">Aucune image disponible</p>`;
+  const m = document.getElementById("img-modal");
+  m.classList.remove("hidden");
+  m.classList.add("flex");
+}
+
+function closeImgModal() {
+  const m = document.getElementById("img-modal");
+  m.classList.add("hidden");
+  m.classList.remove("flex");
+}
+
+async function pickImage(i) {
+  if (!descImages[i]) return;
+  const chosen = descImages[i];
+  const imgs = [...descImages];
+  imgs.splice(i, 1);
+  imgs.unshift(chosen);
+  descImages = imgs;
+  closeImgModal();
+  await regenerateDescTheme();
 }
 
 async function generateFromUrl() {
@@ -327,7 +709,8 @@ async function generateFromUrl() {
   if (!productUrl) return alert("URL requise");
   const btn = document.getElementById("desc-btn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span> Génération...';
+  btn.innerHTML =
+    '<span class="spinner inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span> Analyse et génération en cours...';
   try {
     const res = await fetch(API + "/api/generate-listing", {
       method: "POST",
@@ -336,12 +719,7 @@ async function generateFromUrl() {
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || "Erreur");
-    const html = json.data.html_description || "";
-    document.getElementById("desc-html").textContent = html;
-    document.getElementById("desc-preview").innerHTML = html;
-    if (json.data.live === false && json.data.scrape_error) {
-      console.warn("Scrape fallback:", json.data.scrape_error);
-    }
+    applyDescResult(json.data);
   } catch (err) {
     alert("Erreur: " + err.message);
   } finally {
@@ -353,6 +731,70 @@ async function generateFromUrl() {
 function copyHtml() {
   navigator.clipboard.writeText(document.getElementById("desc-html").textContent);
   alert("HTML copié");
+}
+
+async function runBulking() {
+  const raw = document.getElementById("bulk-urls").value.trim();
+  const urls = raw.split(/\n+/).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u));
+  const cons = document.getElementById("bulk-console");
+  const btn = document.getElementById("bulk-btn");
+  if (!urls.length) return alert("Ajoutez au moins une URL");
+  btn.disabled = true;
+  cons.innerHTML = "";
+  const margin = Number(document.getElementById("bulk-margin").value) || 25;
+  for (const url of urls) {
+    cons.innerHTML += colorizeLog(`[IMPORT] ${url.slice(0, 80)}`);
+    try {
+      const res = await fetch(API + "/api/generate-listing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productUrl: url, themeColor }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "fail");
+      const price = json.data.suggested_price
+        ? Number((json.data.suggested_price * (1 + margin / 100) / 1.8).toFixed(2))
+        : null;
+      cons.innerHTML += colorizeLog(
+        `[OK] ${String(json.data.seo_title || "").slice(0, 60)} — id ${json.data.id}${price ? " ~" + price + "€" : ""}`
+      );
+    } catch (err) {
+      cons.innerHTML += colorizeLog(`[ERROR] ${err.message}`);
+    }
+    cons.scrollTop = cons.scrollHeight;
+  }
+  cons.innerHTML += colorizeLog(`[DONE] Bulking terminé — ${urls.length} URL(s)`);
+  btn.disabled = false;
+}
+
+async function runSubstitution() {
+  const oldUrl = document.getElementById("sub-old").value.trim();
+  const newUrl = document.getElementById("sub-new").value.trim();
+  if (!newUrl) return alert("URL fournisseur requise");
+  const btn = document.getElementById("sub-btn");
+  btn.disabled = true;
+  btn.textContent = "Substitution...";
+  try {
+    const res = await fetch(API + "/api/generate-listing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productUrl: newUrl, themeColor }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Erreur");
+    const box = document.getElementById("sub-result");
+    box.classList.remove("hidden");
+    box.innerHTML = `<p class="font-medium text-emerald-700 mb-1">Substitution prête</p>
+      <p><span class="text-zinc-400">Ancien :</span> ${escapeHtml(oldUrl || "(non fourni)")}</p>
+      <p><span class="text-zinc-400">Nouveau :</span> ${escapeHtml(json.data.seo_title || "")}</p>
+      <p><span class="text-zinc-400">Listing local #${json.data.id}</span> — ${json.data.suggested_price?.toFixed?.(2) || "—"} €</p>
+      <button onclick="navigate('listings')" class="mt-3 text-brand-600 text-sm font-medium">Voir dans Mes Listings →</button>`;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Substituer";
+  }
 }
 
 function loadSettings() {

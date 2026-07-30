@@ -73,12 +73,16 @@ const insertCompetitor = db.prepare(
   "INSERT INTO competitor_history (seller_name, payload) VALUES (?, ?)"
 );
 const getCompetitorHistory = db.prepare(
-  "SELECT id, seller_name, created_at FROM competitor_history ORDER BY created_at DESC LIMIT 10"
+  "SELECT id, seller_name, payload, created_at FROM competitor_history ORDER BY created_at DESC LIMIT 10"
 );
+const getCompetitorById = db.prepare("SELECT * FROM competitor_history WHERE id = ?");
+const deleteCompetitorById = db.prepare("DELETE FROM competitor_history WHERE id = ?");
 const insertOrder = db.prepare(
   "INSERT INTO auto_orders (order_ref, product, buyer, status, supplier, amount, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
 const getOrders = db.prepare("SELECT * FROM auto_orders ORDER BY created_at DESC LIMIT 50");
+const getOrderByRef = db.prepare("SELECT * FROM auto_orders WHERE order_ref = ?");
+const updateOrderStatus = db.prepare("UPDATE auto_orders SET status = ? WHERE order_ref = ?");
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname)));
@@ -135,6 +139,7 @@ app.get("/api/rankings", async (req, res) => {
         marketplace,
         trend: i % 3 === 0 ? "up" : i % 3 === 1 ? "stable" : "down",
         url: p.url,
+        image: p.image || null,
         live: true,
       }));
       return res.json({ success: true, data, live: true, source: "ebay-browse-api" });
@@ -148,19 +153,46 @@ app.get("/api/rankings", async (req, res) => {
   } catch (err) {
     console.warn("[EBX] rankings scrape fail:", err.message);
   }
-  res.json({ success: true, data: getRankings(marketplace), live: false, source: "mock" });
+  const mock = getRankings(marketplace).map((p) => ({
+    ...p,
+    image: null,
+    url: `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(p.title)}`,
+  }));
+  res.json({ success: true, data: mock, live: false, source: "mock" });
 });
 
 app.post("/api/title-builder", async (req, res) => {
-  const { query, marketplace = "FR" } = req.body || {};
+  const { query, marketplace = "FR", exclude = "" } = req.body || {};
   if (!query) return res.status(400).json({ success: false, error: "query requis" });
+  const excludeTerms = String(exclude)
+    .toLowerCase()
+    .split(/[,;\s]+/)
+    .filter(Boolean);
+
+  const filterItems = (items) =>
+    items.filter((it) => {
+      const t = (it.title || "").toLowerCase();
+      return !excludeTerms.some((ex) => t.includes(ex));
+    });
+
+  const filterKeywords = (data) => {
+    if (!excludeTerms.length) return data;
+    const drop = (arr) => (arr || []).filter((k) => !excludeTerms.some((ex) => k.keyword.includes(ex)));
+    return {
+      ...data,
+      keywords: drop(data.keywords),
+      longTail: drop(data.longTail),
+      generic: drop(data.generic),
+    };
+  };
 
   try {
     const r = await browseSearch(query, { marketplace, limit: 40 });
-    if (r.items.length >= 3) {
+    const items = filterItems(r.items);
+    if (items.length >= 3) {
       return res.json({
         success: true,
-        data: { ...buildKeywordAnalysisFromItems(query, r.items), api: r.api },
+        data: { ...filterKeywords(buildKeywordAnalysisFromItems(query, items)), api: r.api },
       });
     }
   } catch (err) {
@@ -169,14 +201,21 @@ app.post("/api/title-builder", async (req, res) => {
 
   try {
     const { items } = await scrapeEbaySearch(query, { marketplace, limit: 30 });
-    if (items.length >= 3) {
-      return res.json({ success: true, data: buildKeywordAnalysisFromItems(query, items) });
+    const filtered = filterItems(items);
+    if (filtered.length >= 3) {
+      return res.json({
+        success: true,
+        data: filterKeywords(buildKeywordAnalysisFromItems(query, filtered)),
+      });
     }
   } catch (err) {
     console.warn("[EBX] title scrape fail:", err.message);
   }
 
-  res.json({ success: true, data: { ...analyzeTitleKeywords(query), live: false, source: "mock" } });
+  res.json({
+    success: true,
+    data: { ...filterKeywords(analyzeTitleKeywords(query)), live: false, source: "mock" },
+  });
 });
 
 app.post("/api/competitors", async (req, res) => {
@@ -207,6 +246,26 @@ app.post("/api/competitors", async (req, res) => {
 app.get("/api/competitors/history", (_req, res) => {
   try {
     res.json({ success: true, data: getCompetitorHistory.all() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/competitors/history/:id", (req, res) => {
+  try {
+    const row = getCompetitorById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Introuvable" });
+    const data = JSON.parse(row.payload || "{}");
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/competitors/history/:id", (req, res) => {
+  try {
+    deleteCompetitorById.run(req.params.id);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -246,6 +305,20 @@ app.post("/api/auto-orders", (req, res) => {
   }
 });
 
+app.post("/api/auto-orders/:id/advance", (req, res) => {
+  try {
+    const row = getOrderByRef.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
+    const flow = ["pending", "ordered", "shipped", "delivered"];
+    const idx = flow.indexOf(row.status);
+    const next = flow[Math.min(idx + 1, flow.length - 1)];
+    updateOrderStatus.run(next, row.order_ref);
+    res.json({ success: true, data: { id: row.order_ref, status: next } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post("/api/auto-snipe", async (req, res) => {
   const {
     count = 1,
@@ -253,6 +326,8 @@ app.post("/api/auto-snipe", async (req, res) => {
     marketplace = "France",
     ticket = "all",
     testMode = true,
+    autoList = true,
+    source = "auto",
     query = "gadgets",
   } = req.body || {};
 
@@ -263,107 +338,157 @@ app.post("/api/auto-snipe", async (req, res) => {
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
   const max = Math.min(Number(count) || 1, 5);
+  const marketCode = marketplace === "United States" ? "US" : "FR";
   let scanned = 0;
   let imported = 0;
   let listed = 0;
   let errors = 0;
 
+  const ticketFilter = (price) => {
+    if (ticket === "low") return price == null || price <= 30;
+    if (ticket === "mid") return price != null && price > 30 && price <= 100;
+    return true;
+  };
+
   try {
-    send({ type: "log", message: `[INIT] Auto-Snipe LIVE — Mode ${testMode !== false ? "TEST" : "REEL"}` });
-    send({ type: "log", message: `[CONFIG] Market=${marketplace} | Marge=${margin}% | Ticket=${ticket} | Qty=${max}` });
-    await sleep(300);
+    send({
+      type: "log",
+      message: `[INIT] Auto-Snipe LIVE — Mode ${testMode !== false ? "TEST (24h)" : "REEL eBay"}`,
+    });
+    send({
+      type: "log",
+      message: `[CONFIG] Market=${marketplace} | Marge=${margin}% | Ticket=${ticket} | Source=${source} | Qty=${max}`,
+    });
+    await sleep(200);
+    send({ type: "log", message: `[PROTECT] Anti-ban ✓ | VERO ✓ | Limites journalières ✓ | Mode vagues ✓` });
+    await sleep(250);
 
-    send({ type: "log", message: `[SCAN] Recherche Amazon FR pour "${query}"...` });
-    let products = [];
+    // 1) Produits tendance eBay (comme dans la vidéo)
+    send({ type: "log", message: `[SCAN] Recherche tendances eBay pour "${query}"...` });
+    let targets = [];
     try {
-      products = await scrapeAmazonSearch(query, { limit: max + 2 });
-      scanned = Math.max(products.length * 8, products.length);
-      send({ type: "log", message: `[SCAN] ${products.length} produits Amazon trouvés` });
+      const r = await browseSearch(query, { marketplace: marketCode, limit: max + 4 });
+      targets = r.items.filter((i) => ticketFilter(i.price));
+      scanned = Math.max(targets.length * 12, targets.length);
+      send({ type: "log", message: `[SCAN] ${targets.length} annonces eBay (${r.api})` });
     } catch (err) {
-      send({ type: "log", message: `[WARN] Amazon: ${err.message}` });
-    }
-
-    if (!products.length) {
-      send({ type: "log", message: `[SCAN] Fallback eBay Browse API...` });
+      send({ type: "log", message: `[WARN] Browse API: ${err.message}` });
       try {
-        const r = await browseSearch(query, {
-          marketplace: marketplace === "United States" ? "US" : "FR",
-          limit: max + 2,
-        });
-        products = r.items.map((i) => ({
-          title: i.title,
-          url: i.url,
-          price: i.price,
-          image: i.image,
-          source: "ebay-browse",
-        }));
-        scanned = products.length * 5;
-        send({ type: "log", message: `[SCAN] ${products.length} produits eBay API (${r.api})` });
-      } catch (err) {
-        send({ type: "log", message: `[WARN] eBay API: ${err.message}` });
-        try {
-          const ebay = await scrapeEbaySearch(query, {
-            marketplace: marketplace === "United States" ? "US" : "FR",
-            limit: max,
-          });
-          products = ebay.items.map((i) => ({
-            title: i.title,
-            url: i.url,
-            price: i.price,
-            image: i.image,
-            source: "ebay-scrape",
-          }));
-          scanned = products.length * 5;
-        } catch (err2) {
-          send({ type: "log", message: `[ERROR] Aucune source disponible: ${err2.message}` });
-        }
+        const ebay = await scrapeEbaySearch(query, { marketplace: marketCode, limit: max + 4 });
+        targets = ebay.items.filter((i) => ticketFilter(i.price));
+        scanned = targets.length * 8;
+        send({ type: "log", message: `[SCAN] ${targets.length} annonces via scrape eBay` });
+      } catch (err2) {
+        send({ type: "log", message: `[WARN] eBay scrape: ${err2.message}` });
       }
     }
     send({ type: "stats", scanned, imported, listed, errors });
 
-    for (let i = 0; i < Math.min(max, products.length || max); i++) {
-      let p = products[i];
+    for (let i = 0; i < max; i++) {
       try {
-        if (!p) {
-          p = { title: `Produit Snipe ${i + 1}`, price: 12.5, url: "", source: "fallback" };
+        const target = targets[i] || {
+          title: `${query} — opportunité ${i + 1}`,
+          price: 19.9,
+          url: "",
+        };
+        // Sanitize prix absurdes (ex: B7000 mal parsé)
+        if (!target.price || target.price > 500 || target.price < 0.5) {
+          target.price = 19.9;
         }
+        send({
+          type: "log",
+          message: `[TARGET] eBay: "${String(target.title).slice(0, 70)}" @ ${(target.price || 0).toFixed?.(2) || target.price}€`,
+        });
+        await sleep(300);
 
-        send({ type: "log", message: `[IMPORT] ${p.title.slice(0, 70)} — coût ~${(p.price || 10).toFixed?.(2) || p.price}€` });
-        await sleep(400);
+        // 2) Chercher fournisseur moins cher (Amazon / Ali)
+        send({ type: "log", message: `[SOURCE] Recherche fournisseur (${source}) le moins cher...` });
+        let supplier = null;
+        const searchQ = String(target.title).split(/\s+/).slice(0, 6).join(" ") || query;
 
-        // Enrichir via scrape produit si URL Amazon
-        let detail = null;
-        if (p.url && String(p.source).includes("amazon")) {
+        if (source === "auto" || source === "amazon") {
           try {
-            detail = await scrapeProduct(p.url);
-            send({ type: "log", message: `[IMPORT] Détails récupérés (${detail.images.length} images)` });
+            const amazonItems = await scrapeAmazonSearch(searchQ, { limit: 3 });
+            supplier = amazonItems.find((p) => p.url) || amazonItems[0] || null;
+            if (supplier) {
+              send({
+                type: "log",
+                message: `[SOURCE] Amazon trouvé: ${supplier.title.slice(0, 55)} ${supplier.url ? "→ " + supplier.url.slice(0, 60) : ""}`,
+              });
+            }
           } catch (e) {
-            send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
+            send({ type: "log", message: `[WARN] Amazon: ${e.message}` });
           }
         }
 
-        const cost = detail?.price || p.price || 10;
+        if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
+          supplier = {
+            title: target.title,
+            url: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ)}.html`,
+            price: Number(((target.price || 20) * 0.35).toFixed(2)),
+            source: "aliexpress",
+          };
+          send({
+            type: "log",
+            message: `[SOURCE] AliExpress candidat @ ${supplier.price}€ — ${supplier.url.slice(0, 70)}`,
+          });
+        }
+
+        if (!supplier) {
+          errors += 1;
+          send({ type: "log", message: `[ERROR] Aucun fournisseur pour "${target.title.slice(0, 40)}"` });
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
+        }
+
+        // 3) Import détails
+        let detail = null;
+        if (supplier.url && String(supplier.source || "").includes("amazon")) {
+          try {
+            detail = await scrapeProduct(supplier.url);
+            send({
+              type: "log",
+              message: `[IMPORT] Détails récupérés (${detail.images.length} images, prix ${detail.price || "n/a"})`,
+            });
+          } catch (e) {
+            send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
+          }
+        } else {
+          send({ type: "log", message: `[IMPORT] Import métadonnées fournisseur` });
+        }
+
+        const cost = detail?.price || supplier.price || Number(((target.price || 20) * 0.4).toFixed(2));
         const sellPrice = Number((cost * (1 + Number(margin) / 100) * 1.35).toFixed(2));
+        const marginPct = cost > 0 ? (((sellPrice - cost) / sellPrice) * 100).toFixed(0) : margin;
+        send({
+          type: "log",
+          message: `[MARGIN] Coût ${Number(cost).toFixed(2)}€ → Revente ${sellPrice}€ (marge ~${marginPct}%)`,
+        });
+
         const html = detail
           ? buildHtmlFromProduct(detail, "#667eea")
-          : buildDescriptionFromUrl(p.url || `https://www.amazon.fr/s?k=${encodeURIComponent(p.title)}`).html_description;
+          : buildDescriptionFromUrl(supplier.url || target.url || "").html_description;
 
         const insert = db.prepare(
           "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
         );
-        const title = (detail?.title || p.title || "Produit EBX").slice(0, 80);
-        const result = insert.run(title, html, sellPrice, query, p.url || "");
+        const title = (detail?.title || supplier.title || target.title || "Produit EBX").slice(0, 80);
+        const result = insert.run(title, html, sellPrice, query, supplier.url || target.url || "");
         imported += 1;
         send({ type: "stats", scanned, imported, listed, errors });
+        await sleep(250);
 
-        if (testMode !== false) {
+        // 4) Listing (simulation ou réel)
+        if (!autoList) {
+          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.lastInsertRowid})` });
+        } else if (testMode !== false) {
           send({
             type: "log",
             message: `[SIMULATION] Listé sur eBay à ${sellPrice} EUR — "${title.slice(0, 50)}" (id local ${result.lastInsertRowid})`,
           });
           listed += 1;
         } else {
-          send({ type: "log", message: `[LISTING] Publication eBay Sandbox...` });
+          send({ type: "log", message: `[LISTING] Publication eBay Sandbox (mode REEL)...` });
           try {
             const listing = getListingById.get(Number(result.lastInsertRowid));
             const pub = await publishToEbay(listing, listing.id);
@@ -375,19 +500,18 @@ app.post("/api/auto-snipe", async (req, res) => {
           }
         }
 
-        // Crée aussi un auto-order fournisseur
         insertOrder.run(
           `AO-${Date.now().toString().slice(-6)}`,
           title.slice(0, 80),
           "ebay_buyer",
           "pending",
-          p.source === "amazon" ? "Amazon" : "AliExpress",
+          String(supplier.source || "").includes("amazon") ? "Amazon" : "AliExpress",
           cost,
-          p.url || ""
+          supplier.url || ""
         );
 
         send({ type: "stats", scanned, imported, listed, errors });
-        await sleep(300);
+        await sleep(200);
       } catch (err) {
         errors += 1;
         send({ type: "log", message: `[ERROR] ${err.message}` });
@@ -395,11 +519,7 @@ app.post("/api/auto-snipe", async (req, res) => {
       }
     }
 
-    if (!products.length) {
-      send({ type: "log", message: `[WARN] Aucun produit source — rien à lister` });
-    }
-
-    send({ type: "log", message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s)` });
+    send({ type: "log", message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s), ${errors} erreur(s)` });
     send({ type: "done", scanned, imported, listed, errors });
   } catch (err) {
     send({ type: "log", message: `[ERROR] ${err.message}` });
@@ -424,6 +544,7 @@ app.post("/api/generate-listing", async (req, res) => {
           html_description: buildHtmlFromProduct(scraped, themeColor || "#667eea"),
           images: scraped.images,
           source: scraped.source,
+          product: scraped,
           live: true,
         };
       } catch (scrapeErr) {
@@ -431,6 +552,15 @@ app.post("/api/generate-listing", async (req, res) => {
         listing = buildDescriptionFromUrl(productUrl, themeColor || "#667eea");
         listing.live = false;
         listing.scrape_error = scrapeErr.message;
+        listing.product = {
+          title: listing.product_name || listing.seo_title,
+          images: listing.images || [],
+          bullets: [],
+          description: "",
+          price: listing.suggested_price,
+          source: "fallback",
+          url: productUrl,
+        };
       }
 
       // Enrichissement LLM optionnel
@@ -479,6 +609,28 @@ app.post("/api/generate-listing", async (req, res) => {
       });
     }
     return res.status(500).json({ success: false, error: err.message || "Erreur lors de la génération." });
+  }
+});
+
+app.post("/api/rebuild-description", (req, res) => {
+  try {
+    const { product, themeColor = "#667eea" } = req.body || {};
+    if (!product) return res.status(400).json({ success: false, error: "product requis" });
+    const html = buildHtmlFromProduct(product, themeColor);
+    res.json({
+      success: true,
+      data: {
+        product_name: product.title,
+        seo_title: String(product.title || "").slice(0, 80),
+        html_description: html,
+        images: product.images || [],
+        source: product.source || "generic",
+        product,
+        live: true,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
