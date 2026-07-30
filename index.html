@@ -133,13 +133,16 @@
             <h3 class="text-xl font-bold">Auto-Snipe</h3>
             <p class="text-sm text-zinc-400">Listing automatique 100% mains libres</p>
           </div>
-          <div class="grid md:grid-cols-4 gap-4">
+          <div class="grid md:grid-cols-5 gap-4">
+            <div class="md:col-span-2"><label class="text-xs text-zinc-500">Mot-clé sourcing</label><input id="snipe-query" type="text" value="coque iphone" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
             <div><label class="text-xs text-zinc-500">Produits à sniper</label><input id="snipe-count" type="number" min="1" max="5" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
             <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
             <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option></select></div>
-            <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
           </div>
-          <label class="flex items-center gap-2 text-sm"><input id="snipe-test" type="checkbox" checked /> Mode Test (24h)</label>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
+            <label class="flex items-center gap-2 text-sm mt-6"><input id="snipe-test" type="checkbox" checked /> Mode Test (24h)</label>
+          </div>
           <button id="snipe-btn" onclick="runSnipe()" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Lancer Auto-Snipe</button>
           <div class="grid grid-cols-4 gap-3 text-center text-sm">
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-scanned" class="font-bold text-lg">0</div>Scannés</div>

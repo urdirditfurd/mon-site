@@ -143,6 +143,7 @@ async function runSnipe() {
   btn.disabled = true;
   cons.innerHTML = "";
   const body = {
+    query: document.getElementById("snipe-query")?.value || "gadgets",
     count: Number(document.getElementById("snipe-count").value),
     margin: Number(document.getElementById("snipe-margin").value),
     marketplace: document.getElementById("snipe-market").value,
@@ -273,7 +274,7 @@ async function runTitleBuilder() {
   titleData = json.data;
   selectedKeywords = [query];
   document.getElementById("title-results").classList.remove("hidden");
-  document.getElementById("title-meta").textContent = `${titleData.analyzedListings} annonces analysées`;
+  document.getElementById("title-meta").textContent = `${titleData.analyzedListings} annonces analysées${titleData.live === false ? " (fallback)" : " (live)"}`;
   updateFinalTitle();
   renderKeywords();
 }
@@ -338,6 +339,9 @@ async function generateFromUrl() {
     const html = json.data.html_description || "";
     document.getElementById("desc-html").textContent = html;
     document.getElementById("desc-preview").innerHTML = html;
+    if (json.data.live === false && json.data.scrape_error) {
+      console.warn("Scrape fallback:", json.data.scrape_error);
+    }
   } catch (err) {
     alert("Erreur: " + err.message);
   } finally {
