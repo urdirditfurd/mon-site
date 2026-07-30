@@ -1,2 +1,12 @@
-node_modules/\n.env
-ebx.db
+node_modules/
+.env
+*.db
+*.db-shm
+*.db-wal
+env.example
+ebx/node_modules/
+ebx/.env
+ebx/*.db
+ebx/*.db-shm
+ebx/*.db-wal
+ebx/env.example
