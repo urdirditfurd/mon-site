@@ -3,15 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EBX — AI Dropshipping Dashboard</title>
+  <title>EBX — Dropshipping Automation</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwindcss.config = {
       theme: {
         extend: {
           colors: {
-            brand: { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9' },
-            surface: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7' }
+            brand: { 50:'#f5f3ff',100:'#ede9fe',200:'#ddd6fe',300:'#c4b5fd',400:'#a78bfa',500:'#8b5cf6',600:'#7c3aed',700:'#6d28d9' }
           }
         }
       }
@@ -19,327 +18,232 @@
   </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; }
-    .code-editor { font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; }
-    .skeleton { background: linear-gradient(90deg, #e4e4e7 25%, #f4f4f5 50%, #e4e4e7 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
-    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    body { font-family: Inter, sans-serif; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .nav-link.active { background: #f5f3ff; color: #6d28d9; }
+    .console { font-family: ui-monospace, monospace; font-size: 12px; }
+    .keyword-chip { cursor: pointer; }
+    .keyword-chip:hover { outline: 2px solid #a78bfa; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { animation: spin 0.8s linear infinite; }
-    .phone-frame { border-radius: 2rem; box-shadow: 0 0 0 8px #27272a, 0 0 0 10px #3f3f46; }
+    .spinner { animation: spin .8s linear infinite; }
   </style>
 </head>
-<body class="bg-surface-50 text-zinc-800 min-h-screen flex">
-
-  <!-- Sidebar -->
-  <aside class="w-64 bg-white border-r border-zinc-200 flex flex-col shrink-0 sticky top-0 h-screen">
+<body class="bg-zinc-50 text-zinc-800 min-h-screen flex">
+  <aside class="w-64 bg-white border-r border-zinc-200 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
     <div class="p-5 border-b border-zinc-100">
-      <h1 class="text-2xl font-bold text-brand-600 tracking-tight">⚡ EBX</h1>
-      <p class="text-xs text-zinc-400 mt-0.5">Dropshipping Automation</p>
+      <h1 class="text-2xl font-bold text-brand-600">⚡ EBX</h1>
+      <p class="text-xs text-zinc-400">Dropshipping Automation</p>
     </div>
-    <nav class="flex-1 p-3 space-y-1" id="sidebar-nav">
-      <a href="#" data-page="dashboard" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
-        Dashboard
-      </a>
-      <a href="#" data-page="ai-optimizer" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-50 text-brand-700">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z"/></svg>
-        AI Optimizer
-      </a>
-      <a href="#" data-page="auto-listing" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>
-        Auto-Listing
-      </a>
-      <a href="#" data-page="auto-order" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"/></svg>
-        Auto-Order
-      </a>
-      <a href="#" data-page="settings" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        Paramètres
-      </a>
-    </nav>
-    <div class="p-4 border-t border-zinc-100">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 text-sm font-bold">E</div>
-        <div>
-          <p class="text-sm font-medium">EBX User</p>
-          <p class="text-xs text-zinc-400">Plan Pro</p>
-        </div>
+    <nav class="flex-1 p-3 space-y-4 text-sm">
+      <div>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Principal</p>
+        <a href="#" data-page="dashboard" class="nav-link active flex items-center gap-2 px-3 py-2 rounded-lg font-medium">Dashboard</a>
+        <a href="#" data-page="analytics" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Analytics</a>
+        <a href="#" data-page="rankings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Classements <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
       </div>
+      <div>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Recherche</p>
+        <a href="#" data-page="competitors" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Compétiteurs</a>
+      </div>
+      <div>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Outils</p>
+        <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Product Sniper <span class="ml-auto text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded">Pro</span></a>
+        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Auto-Order <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
+        <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Mes Listings</a>
+        <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Title Builder</a>
+        <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Description Builder</a>
+      </div>
+      <div>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Compte</p>
+        <a href="#" data-page="settings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Paramètres</a>
+      </div>
+    </nav>
+    <div class="p-4 border-t border-zinc-100 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-bold">E</div>
+      <div><p class="text-sm font-medium">EBX User</p><p class="text-xs text-zinc-400">Plan Pro</p></div>
     </div>
   </aside>
 
-  <!-- Main Content -->
   <main class="flex-1 overflow-auto">
     <header class="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-zinc-200 px-8 py-4 flex items-center justify-between">
       <div>
-        <h2 class="text-lg font-semibold">AI Description Generator</h2>
-        <p class="text-sm text-zinc-400">Générez des descriptions eBay optimisées par l'IA</p>
+        <h2 id="page-title" class="text-lg font-semibold">Dashboard</h2>
+        <p id="page-subtitle" class="text-sm text-zinc-400">Vue d'ensemble de votre activité</p>
       </div>
-      <div class="flex items-center gap-3">
-        <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
-      </div>
+      <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
     </header>
 
-    <div class="p-8 space-y-6">
-      <!-- Input Section -->
-      <section class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-zinc-600 mb-1.5">Nom du produit</label>
-            <input id="product-name" type="text" value="Vélo Spinning UMAY CBE20" placeholder="Ex: Vélo Spinning UMAY CBE20"
-              class="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-surface-50 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-zinc-600 mb-1.5">Mots-clés bruts</label>
-            <input id="keywords" type="text" value="fitness, cardio, home gym, silencieux, LCD, résistance magnétique" placeholder="fitness, cardio, home gym..."
-              class="w-full px-4 py-2.5 rounded-xl border border-zinc-200 bg-surface-50 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition" />
+    <div class="p-8">
+      <!-- DASHBOARD -->
+      <section id="page-dashboard" class="page active space-y-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="dash-cards"></div>
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <h3 class="font-semibold mb-2">Actions rapides</h3>
+          <div class="flex flex-wrap gap-3">
+            <button onclick="navigate('sniper')" class="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium">Lancer Auto-Snipe</button>
+            <button onclick="navigate('description')" class="px-4 py-2 bg-zinc-900 text-white rounded-xl text-sm font-medium">Description Builder</button>
+            <button onclick="navigate('competitors')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">Analyser un concurrent</button>
           </div>
         </div>
-        <button id="generate-btn" onclick="handleGenerate()"
-          class="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-brand-200 transition active:scale-[0.97]">
-          <span id="btn-icon">✨</span>
-          <span id="btn-text">Générer avec l'IA EBX</span>
-        </button>
       </section>
 
-      <!-- Two-column: Code Editor + Preview -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Code Editor -->
-        <section class="bg-zinc-900 rounded-2xl overflow-hidden flex flex-col min-h-[500px]">
-          <div class="flex items-center gap-2 px-4 py-3 bg-zinc-800 border-b border-zinc-700">
-            <span class="w-3 h-3 rounded-full bg-red-400"></span>
-            <span class="w-3 h-3 rounded-full bg-yellow-400"></span>
-            <span class="w-3 h-3 rounded-full bg-green-400"></span>
-            <span class="ml-3 text-xs text-zinc-400 font-medium">description.html</span>
-          </div>
-          <div id="code-skeleton" class="p-4 space-y-2 hidden">
-            <div class="skeleton h-4 rounded w-3/4"></div>
-            <div class="skeleton h-4 rounded w-full"></div>
-            <div class="skeleton h-4 rounded w-5/6"></div>
-            <div class="skeleton h-4 rounded w-2/3"></div>
-            <div class="skeleton h-4 rounded w-full"></div>
-            <div class="skeleton h-4 rounded w-4/5"></div>
-          </div>
-          <pre id="code-output" class="code-editor flex-1 p-4 text-green-400 overflow-auto whitespace-pre-wrap"><span class="text-zinc-500">// Cliquez sur "Générer" pour voir le code HTML ici...</span></pre>
-        </section>
+      <!-- ANALYTICS -->
+      <section id="page-analytics" class="page space-y-6">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <h3 class="font-semibold mb-4">Performance (démo)</h3>
+          <div class="space-y-3" id="analytics-bars"></div>
+        </div>
+      </section>
 
-        <!-- eBay Preview -->
-        <section class="flex flex-col items-center">
-          <p class="text-sm font-medium text-zinc-500 mb-3">📱 eBay Preview</p>
-          <div class="phone-frame bg-white w-[340px] h-[620px] overflow-hidden flex flex-col">
-            <div class="bg-white px-4 py-3 border-b border-zinc-100 flex items-center justify-between shrink-0">
-              <span class="text-xs font-bold text-blue-600 tracking-wide">eBay</span>
-              <span class="text-[10px] text-zinc-400">Mobile Preview</span>
+      <!-- RANKINGS -->
+      <section id="page-rankings" class="page">
+        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <div class="p-5 border-b border-zinc-100 flex items-center justify-between">
+            <div>
+              <h3 class="font-semibold">Meilleures ventes</h3>
+              <p class="text-sm text-zinc-400">Classements eBay (données démo locales)</p>
             </div>
-            <div id="preview-skeleton" class="p-4 space-y-3 hidden">
-              <div class="skeleton h-40 rounded-lg w-full"></div>
-              <div class="skeleton h-5 rounded w-2/3"></div>
-              <div class="skeleton h-4 rounded w-full"></div>
-              <div class="skeleton h-4 rounded w-5/6"></div>
-            </div>
-            <div id="preview-output" class="flex-1 overflow-auto">
-              <div class="flex items-center justify-center h-full text-zinc-300 text-sm">Aperçu en temps réel</div>
-            </div>
+            <button onclick="loadRankings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
           </div>
-        </section>
-      </div>
-
-      <!-- Historique -->
-      <section class="bg-white rounded-2xl border border-zinc-200 p-6">
-        <h3 class="text-base font-semibold mb-4">📋 Historique des générations</h3>
-        <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-zinc-100 text-left text-zinc-400">
-                <th class="pb-3 font-medium">Date</th>
-                <th class="pb-3 font-medium">Titre SEO</th>
-                <th class="pb-3 font-medium">Prix</th>
-                <th class="pb-3 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody id="history-body">
-              <tr><td colspan="4" class="py-8 text-center text-zinc-300">Aucun listing généré pour le moment.</td></tr>
-            </tbody>
+            <thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">#</th><th class="p-3">Produit</th><th class="p-3">Catégorie</th><th class="p-3">Prix</th><th class="p-3">Vendus</th></tr></thead>
+            <tbody id="rankings-body"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- COMPETITORS -->
+      <section id="page-competitors" class="page space-y-6">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <h3 class="font-semibold">Analysez vos concurrents</h3>
+          <p class="text-sm text-zinc-400 mb-4">Découvrez le chiffre d'affaires de n'importe quel vendeur eBay</p>
+          <div class="flex gap-3">
+            <input id="competitor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 text-sm" placeholder="Nom du vendeur eBay..." value="vaissellebio-lsbio" />
+            <button onclick="analyzeCompetitor()" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Analyser</button>
+          </div>
+        </div>
+        <div id="competitor-result" class="hidden space-y-4"></div>
+      </section>
+
+      <!-- SNIPER -->
+      <section id="page-sniper" class="page space-y-6">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+          <div>
+            <h3 class="text-xl font-bold">Auto-Snipe</h3>
+            <p class="text-sm text-zinc-400">Listing automatique 100% mains libres</p>
+          </div>
+          <div class="grid md:grid-cols-4 gap-4">
+            <div><label class="text-xs text-zinc-500">Produits à sniper</label><input id="snipe-count" type="number" min="1" max="5" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
+            <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
+            <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option></select></div>
+            <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
+          </div>
+          <label class="flex items-center gap-2 text-sm"><input id="snipe-test" type="checkbox" checked /> Mode Test (24h)</label>
+          <button id="snipe-btn" onclick="runSnipe()" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Lancer Auto-Snipe</button>
+          <div class="grid grid-cols-4 gap-3 text-center text-sm">
+            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-scanned" class="font-bold text-lg">0</div>Scannés</div>
+            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-imported" class="font-bold text-lg">0</div>Importés</div>
+            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-listed" class="font-bold text-lg">0</div>Listés</div>
+            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-errors" class="font-bold text-lg">0</div>Erreurs</div>
+          </div>
+          <div id="snipe-console" class="console bg-zinc-900 text-green-400 rounded-xl p-4 h-56 overflow-auto"></div>
+        </div>
+      </section>
+
+      <!-- AUTO ORDER -->
+      <section id="page-auto-order" class="page">
+        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <div class="p-5 border-b"><h3 class="font-semibold">Auto-Order</h3><p class="text-sm text-zinc-400">Commandes fournisseurs automatisées (démo)</p></div>
+          <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">ID</th><th class="p-3">Produit</th><th class="p-3">Fournisseur</th><th class="p-3">Montant</th><th class="p-3">Statut</th></tr></thead><tbody id="orders-body"></tbody></table>
+        </div>
+      </section>
+
+      <!-- LISTINGS -->
+      <section id="page-listings" class="page">
+        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <div class="p-5 border-b flex justify-between items-center"><div><h3 class="font-semibold">Mes Listings</h3><p class="text-sm text-zinc-400">Historique SQLite local</p></div><button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button></div>
+          <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">Date</th><th class="p-3">Titre SEO</th><th class="p-3">Prix</th><th class="p-3 text-right">Actions</th></tr></thead><tbody id="listings-body"></tbody></table>
+        </div>
+      </section>
+
+      <!-- TITLE BUILDER -->
+      <section id="page-title-builder" class="page space-y-6">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <h3 class="font-semibold">Title Builder</h3>
+          <p class="text-sm text-zinc-400 mb-4">Analysez les ventes réelles, construisez votre titre.</p>
+          <div class="flex gap-3">
+            <input id="title-query" class="flex-1 px-4 py-2.5 rounded-xl border text-sm" value="colle b7000" placeholder="Mot-clé produit..." />
+            <button onclick="runTitleBuilder()" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Analyser</button>
+          </div>
+        </div>
+        <div id="title-results" class="hidden space-y-4">
+          <div class="bg-white rounded-2xl border p-6">
+            <p class="text-xs text-zinc-400 mb-1">Titre eBay final</p>
+            <div class="flex gap-3 items-center">
+              <input id="final-title" class="flex-1 px-4 py-2.5 rounded-xl border text-sm font-medium" />
+              <button onclick="copyTitle()" class="px-4 py-2.5 bg-zinc-900 text-white rounded-xl text-sm">Copier</button>
+            </div>
+            <p id="title-meta" class="text-xs text-zinc-400 mt-2"></p>
+          </div>
+          <div class="bg-white rounded-2xl border p-4">
+            <div class="flex gap-2 mb-3" id="kw-tabs">
+              <button data-tab="keywords" class="kw-tab px-3 py-1.5 rounded-lg text-sm bg-brand-50 text-brand-700">Keywords</button>
+              <button data-tab="longTail" class="kw-tab px-3 py-1.5 rounded-lg text-sm text-zinc-500">Long Tail</button>
+              <button data-tab="generic" class="kw-tab px-3 py-1.5 rounded-lg text-sm text-zinc-500">Generic</button>
+            </div>
+            <div id="kw-list" class="flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DESCRIPTION BUILDER -->
+      <section id="page-description" class="page space-y-6">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+          <div>
+            <h3 class="font-semibold text-lg">Générer ta description en 1 clic</h3>
+            <p class="text-sm text-zinc-400">Collez le lien du produit (Amazon, AliExpress, eBay, Cdiscount)</p>
+          </div>
+          <input id="desc-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="URL du produit *" value="https://www.amazon.fr/LEGO-Voiture-Course-F1" />
+          <div class="flex flex-wrap gap-3 items-center">
+            <span class="text-xs text-zinc-500">Thème :</span>
+            <button onclick="setTheme('#667eea')" class="w-7 h-7 rounded-full bg-[#667eea] ring-2 ring-offset-2 ring-brand-400" data-theme></button>
+            <button onclick="setTheme('#10b981')" class="w-7 h-7 rounded-full bg-emerald-500" data-theme></button>
+            <button onclick="setTheme('#f59e0b')" class="w-7 h-7 rounded-full bg-amber-500" data-theme></button>
+            <button onclick="setTheme('#ef4444')" class="w-7 h-7 rounded-full bg-red-500" data-theme></button>
+            <button id="desc-btn" onclick="generateFromUrl()" class="ml-auto px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Générer la description</button>
+          </div>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-6">
+          <div class="bg-zinc-900 rounded-2xl overflow-hidden min-h-[420px]">
+            <div class="px-4 py-3 bg-zinc-800 text-xs text-zinc-400 flex justify-between"><span>HTML</span><button onclick="copyHtml()" class="text-brand-300">Copier HTML</button></div>
+            <pre id="desc-html" class="p-4 text-green-400 text-xs overflow-auto whitespace-pre-wrap h-[380px]">// Collez une URL puis générez...</pre>
+          </div>
+          <div class="bg-white rounded-2xl border border-zinc-200 p-4">
+            <p class="text-sm text-zinc-500 mb-2">Aperçu</p>
+            <div id="desc-preview" class="border rounded-xl p-3 min-h-[380px] overflow-auto text-sm text-zinc-300 flex items-center justify-center">Aperçu en temps réel</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="page-settings" class="page">
+        <div class="bg-white rounded-2xl border p-6 space-y-3 max-w-xl">
+          <h3 class="font-semibold">Paramètres</h3>
+          <p class="text-sm text-zinc-500">LLM : <code id="settings-llm" class="bg-zinc-100 px-2 py-0.5 rounded">...</code></p>
+          <p class="text-sm text-zinc-500">Les clés eBay restent dans ton fichier <code>.env</code> local (jamais sur GitHub).</p>
         </div>
       </section>
     </div>
   </main>
 
-  <!-- Modal pour "Voir" un listing -->
-  <div id="listing-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center">
-    <div class="bg-white rounded-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 id="modal-title" class="text-lg font-semibold">Listing</h3>
-        <button onclick="closeModal()" class="text-zinc-400 hover:text-zinc-600 text-xl">&times;</button>
-      </div>
-      <div id="modal-content" class="border border-zinc-200 rounded-xl p-4"></div>
+  <div id="modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-auto p-6">
+      <div class="flex justify-between mb-4"><h3 id="modal-title" class="font-semibold"></h3><button onclick="closeModal()" class="text-xl text-zinc-400">&times;</button></div>
+      <div id="modal-content"></div>
     </div>
   </div>
 
-  <script>
-    const API_BASE = window.location.origin;
-
-    // Health check on load
-    async function checkHealth() {
-      const el = document.getElementById('api-status');
-      try {
-        const res = await fetch(API_BASE + '/api/health');
-        if (res.ok) {
-          el.className = 'text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium';
-          el.textContent = '● API connectée';
-        } else { throw new Error(); }
-      } catch (_) {
-        el.className = 'text-xs bg-red-50 text-red-500 px-2.5 py-1 rounded-full font-medium';
-        el.textContent = '● API hors ligne';
-      }
-    }
-
-    function escapeHtml(str) {
-      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
-    function setLoading(loading) {
-      const btn = document.getElementById('generate-btn');
-      const btnIcon = document.getElementById('btn-icon');
-      const btnText = document.getElementById('btn-text');
-      const codeSkeleton = document.getElementById('code-skeleton');
-      const codeOutput = document.getElementById('code-output');
-      const previewSkeleton = document.getElementById('preview-skeleton');
-
-      if (loading) {
-        btn.disabled = true;
-        btn.classList.add('opacity-70', 'cursor-not-allowed');
-        btnIcon.innerHTML = '<svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
-        btnText.textContent = 'Génération en cours...';
-        codeSkeleton.classList.remove('hidden');
-        codeOutput.classList.add('hidden');
-        previewSkeleton.classList.remove('hidden');
-      } else {
-        btn.disabled = false;
-        btn.classList.remove('opacity-70', 'cursor-not-allowed');
-        btnIcon.innerHTML = '✨';
-        btnText.textContent = "Générer avec l'IA EBX";
-        codeSkeleton.classList.add('hidden');
-        codeOutput.classList.remove('hidden');
-        previewSkeleton.classList.add('hidden');
-      }
-    }
-
-    async function handleGenerate() {
-      const productName = document.getElementById('product-name').value.trim();
-      const rawKeywords = document.getElementById('keywords').value.trim();
-
-      if (!productName) { alert('Veuillez saisir un nom de produit.'); return; }
-
-      setLoading(true);
-
-      try {
-        const res = await fetch(API_BASE + '/api/generate-listing', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productName, rawKeywords })
-        });
-
-        const json = await res.json();
-
-        if (!res.ok || !json.success) {
-          throw new Error(json.error || 'Erreur serveur');
-        }
-
-        const html = json.data.html_description || '';
-        document.getElementById('code-output').innerHTML = escapeHtml(html);
-        document.getElementById('preview-output').innerHTML = html;
-
-        loadHistory();
-      } catch (err) {
-        alert('Erreur : ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    async function loadHistory() {
-      const tbody = document.getElementById('history-body');
-      try {
-        const res = await fetch(API_BASE + '/api/listings');
-        const json = await res.json();
-
-        if (!json.success || !json.data.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-zinc-300">Aucun listing généré pour le moment.</td></tr>';
-          return;
-        }
-
-        tbody.innerHTML = json.data.map(item => `
-          <tr class="border-b border-zinc-50 hover:bg-surface-50 transition">
-            <td class="py-3 text-zinc-400 text-xs">${new Date(item.created_at).toLocaleString('fr-FR')}</td>
-            <td class="py-3 font-medium text-zinc-700">${escapeHtml(item.seo_title || '—')}</td>
-            <td class="py-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + ' €' : '—'}</td>
-            <td class="py-3 text-right flex gap-2 justify-end">
-              <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition">Voir</button>
-              <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-medium transition">Publier eBay</button>
-            </td>
-          </tr>
-        `).join('');
-      } catch (_) {
-        tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-red-400">Erreur de chargement.</td></tr>';
-      }
-    }
-
-    async function viewListing(id) {
-      try {
-        const res = await fetch(API_BASE + '/api/listings/' + id);
-        const json = await res.json();
-        if (!json.success) throw new Error();
-
-        document.getElementById('modal-title').textContent = json.data.seo_title || 'Listing #' + id;
-        document.getElementById('modal-content').innerHTML = json.data.html_description || '<p>Pas de contenu.</p>';
-        document.getElementById('listing-modal').classList.remove('hidden');
-        document.getElementById('listing-modal').classList.add('flex');
-      } catch (_) {
-        alert('Impossible de charger ce listing.');
-      }
-    }
-
-    async function publishListing(id, btn) {
-      if (!confirm('Publier ce listing sur eBay Sandbox ?')) return;
-      const originalText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '⏳...';
-      try {
-        const res = await fetch(API_BASE + '/api/publish-to-ebay/' + id, { method: 'POST' });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error);
-        btn.textContent = '✅ Publié';
-        btn.classList.replace('bg-blue-50', 'bg-green-50');
-        btn.classList.replace('text-blue-600', 'text-green-600');
-        alert('Listing publié sur eBay Sandbox !\nListing ID: ' + (json.data.listingId || 'N/A'));
-      } catch (err) {
-        btn.textContent = originalText;
-        btn.disabled = false;
-        alert('Erreur publication eBay : ' + err.message);
-      }
-    }
-
-    function closeModal() {
-      document.getElementById('listing-modal').classList.add('hidden');
-      document.getElementById('listing-modal').classList.remove('flex');
-    }
-
-    document.querySelectorAll('.nav-link').forEach(link => {
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.querySelectorAll('.nav-link').forEach(l => {
-          l.className = 'nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-500 hover:bg-brand-50 hover:text-brand-600 transition';
-        });
-        link.className = 'nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-50 text-brand-700';
-      });
-    });
-
-    // Init
-    checkHealth();
-    loadHistory();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
