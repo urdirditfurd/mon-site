@@ -74,10 +74,60 @@ async function getAccessToken() {
 }
 
 /**
+ * Crée le lieu d'inventaire "default" s'il n'existe pas encore.
+ */
+async function ensureInventoryLocation(token) {
+  const key = process.env.EBAY_MERCHANT_LOCATION_KEY || "default";
+  const getUrl = `${EBAY_API_BASE}/sell/inventory/v1/location/${key}`;
+
+  const existing = await fetch(getUrl, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (existing.status === 200) return key;
+
+  const createUrl = `${EBAY_API_BASE}/sell/inventory/v1/location/${key}`;
+  const body = {
+    name: "EBX Warehouse",
+    merchantLocationStatus: "ENABLED",
+    location: {
+      address: {
+        addressLine1: "2121 41st Ave",
+        city: "San Francisco",
+        stateOrProvince: "CA",
+        postalCode: "94116",
+        country: "US",
+      },
+    },
+    locationTypes: ["WAREHOUSE"],
+  };
+
+  const res = await fetch(createUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "en-US",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status !== 204 && res.status !== 200 && res.status !== 201) {
+    const err = await res.text();
+    // 409 = déjà existant
+    if (res.status !== 409) {
+      throw new Error(`Inventory location error (${res.status}): ${err}`);
+    }
+  }
+
+  return key;
+}
+
+/**
  * Crée ou met à jour un item dans l'inventaire eBay (Inventory API).
  */
 async function createOrReplaceInventoryItem(token, sku, listing) {
   const url = `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`;
+  const title = (listing.seo_title || "EBX Product").slice(0, 80);
 
   const body = {
     availability: {
@@ -85,10 +135,16 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     },
     condition: "NEW",
     product: {
-      title: listing.seo_title.slice(0, 80),
-      description: listing.html_description,
-      aspects: {},
-      imageUrls: ["https://via.placeholder.com/600x600.png?text=EBX+Product"],
+      title,
+      description: listing.html_description || title,
+      aspects: {
+        Brand: ["Unbranded"],
+        Type: ["Exercise Bike"],
+      },
+      imageUrls: [
+        "https://i.ebayimg.com/images/g/placeholder/s-l1600.jpg",
+        "https://picsum.photos/seed/ebx/800/800",
+      ],
     },
   };
 
@@ -97,7 +153,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "fr-FR",
+      "Content-Language": "en-US",
     },
     body: JSON.stringify(body),
   });
@@ -142,7 +198,7 @@ async function createOffer(token, sku, listing) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "fr-FR",
+      "Content-Language": "en-US",
     },
     body: JSON.stringify(body),
   });
@@ -180,12 +236,13 @@ async function publishOffer(token, offerId) {
 }
 
 /**
- * Flux complet : inventory → offer → publish.
+ * Flux complet : location → inventory → offer → publish.
  */
 async function publishToEbay(listing, listingDbId) {
   const token = await getAccessToken();
   const sku = `EBX-${listingDbId}-${Date.now()}`;
 
+  await ensureInventoryLocation(token);
   await createOrReplaceInventoryItem(token, sku, listing);
   const { offerId } = await createOffer(token, sku, listing);
   const { listingId } = await publishOffer(token, offerId);
