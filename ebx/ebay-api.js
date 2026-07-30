@@ -118,18 +118,18 @@ async function createOffer(token, sku, listing) {
 
   const body = {
     sku,
-    marketplaceId: "EBAY_FR",
+    marketplaceId: process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
     format: "FIXED_PRICE",
     listingDescription: listing.html_description,
     availableQuantity: 10,
     pricingSummary: {
       price: {
         value: String(listing.suggested_price || 29.99),
-        currency: "EUR",
+        currency: process.env.EBAY_CURRENCY || "USD",
       },
     },
-    categoryId: "7294",
-    merchantLocationKey: "default",
+    categoryId: process.env.EBAY_CATEGORY_ID || "175672",
+    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY || "default",
     listingPolicies: {
       fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID || "",
       paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID || "",
