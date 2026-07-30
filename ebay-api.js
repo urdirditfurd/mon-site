@@ -15,15 +15,24 @@ const EBAY_AUTH_URL = process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com
 const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID || "";
 const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET || "";
 const EBAY_REFRESH_TOKEN = process.env.EBAY_REFRESH_TOKEN || "";
+// Token obtenu via "Sign in to Sandbox for OAuth" (valable ~2h) — mode Sandbox rapide
+const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN || "";
 
 let cachedToken = null;
 let tokenExpiry = 0;
 
 /**
- * Obtient un access token OAuth2 via le refresh token (User Token).
- * Le token est mis en cache jusqu'à expiration.
+ * Obtient un access token.
+ * Priorité :
+ *   1. EBAY_USER_TOKEN (copié depuis le portail développeur, ~2h)
+ *   2. Refresh Token OAuth (renouvellement automatique, ~18 mois)
  */
 async function getAccessToken() {
+  // Mode Sandbox rapide : token collé depuis le portail
+  if (EBAY_USER_TOKEN) {
+    return EBAY_USER_TOKEN;
+  }
+
   if (cachedToken && Date.now() < tokenExpiry) {
     return cachedToken;
   }
@@ -33,7 +42,9 @@ async function getAccessToken() {
   }
 
   if (!EBAY_REFRESH_TOKEN) {
-    throw new Error("EBAY_REFRESH_TOKEN requis dans .env — voir README pour l'obtenir");
+    throw new Error(
+      "Aucun token eBay. Ajoute EBAY_USER_TOKEN (token du portail) ou EBAY_REFRESH_TOKEN dans .env"
+    );
   }
 
   const credentials = Buffer.from(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`).toString("base64");
