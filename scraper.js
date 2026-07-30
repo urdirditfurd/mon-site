@@ -275,44 +275,147 @@ async function scrapeProduct(url) {
 }
 
 /**
- * Recherche eBay (page résultats) — pour Title Builder / Classements / Sniper
+ * Recherche eBay via DuckDuckGo HTML (fallback si eBay 403 / API absente)
  */
-async function scrapeEbaySearch(query, { marketplace = "FR", limit = 20 } = {}) {
-  const domain = marketplace === "US" ? "www.ebay.com" : "www.ebay.fr";
-  const url = `https://${domain}/sch/i.html?_nkw=${encodeURIComponent(query)}&_ipg=60&rt=nc`;
-  const { html, finalUrl } = await fetchHtml(url);
+async function scrapeEbayViaDuckDuckGo(query, { marketplace = "FR", limit = 20 } = {}) {
+  const site = marketplace === "US" ? "ebay.com" : "ebay.fr";
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:${site} ${query}`)}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": UA,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    method: "POST",
+    body: new URLSearchParams({ q: `site:${site} ${query}`, b: "" }),
+  });
+  if (!res.ok) throw new Error(`DDG HTTP ${res.status}`);
+  const html = await res.text();
   const $ = cheerio.load(html);
   const items = [];
-
-  $(".s-item").each((_, el) => {
+  $(".result").each((_, el) => {
     if (items.length >= limit) return;
     const root = $(el);
-    const title = cleanText(root.find(".s-item__title").text()).replace(/^Nouvel objet\s*/i, "");
-    if (!title || /shop on ebay/i.test(title)) return;
-    const price = parsePrice(root.find(".s-item__price").first().text());
-    const link = absUrl(finalUrl, root.find("a.s-item__link").attr("href"));
-    const soldText = cleanText(root.find(".s-item__hotness, .s-item__quantitySold, .s-item__dynamic").text());
-    const soldMatch = soldText.match(/(\d[\d\s.]*)\s*(vendu|sold)/i);
-    const sold = soldMatch ? Number(soldMatch[1].replace(/\s|\./g, "")) : 0;
-    const img = absUrl(finalUrl, root.find("img").attr("src") || root.find("img").attr("data-src"));
-    const seller = cleanText(root.find(".s-item__seller-info-text").text());
-    items.push({ title, price, url: link, sold, image: img, seller });
+    const title = cleanText(root.find(".result__a").text());
+    let link = root.find(".result__a").attr("href") || "";
+    // DDG redirect links
+    const uddg = link.match(/uddg=([^&]+)/);
+    if (uddg) link = decodeURIComponent(uddg[1]);
+    if (!title || !link.includes("ebay.")) return;
+    const snippet = cleanText(root.find(".result__snippet").text());
+    const price = parsePrice(snippet.match(/(\d+[.,]\d{2})\s*€/)?.[0] || "");
+    items.push({
+      title,
+      price,
+      url: link,
+      sold: 0,
+      image: null,
+      seller: "",
+    });
   });
+  if (!items.length) throw new Error("DDG: aucun résultat eBay");
+  return { query, marketplace, url, items, live: true, source: "duckduckgo" };
+}
 
-  // Fallback sélecteurs modernes
-  if (!items.length) {
-    $("[data-view*='item'], .su-card-container").each((_, el) => {
-      if (items.length >= limit) return;
-      const root = $(el);
-      const title = cleanText(root.find("h3, .s-card__title, a").first().text());
-      if (!title || title.length < 5) return;
-      const price = parsePrice(root.text().match(/([\d]+[.,]\d{2})\s*€/)?.[0] || "");
-      const link = absUrl(finalUrl, root.find("a").attr("href"));
-      items.push({ title, price, url: link, sold: 0, image: null, seller: "" });
+async function scrapeEbayViaJina(query, { marketplace = "FR", limit = 20 } = {}) {
+  const domain = marketplace === "US" ? "www.ebay.com" : "www.ebay.fr";
+  const url = `https://${domain}/sch/i.html?_nkw=${encodeURIComponent(query)}&_ipg=60`;
+
+  let content = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/plain",
+        "X-Return-Format": "markdown",
+      },
+    });
+    if (!res.ok) throw new Error(`Jina eBay HTTP ${res.status}`);
+    content = await res.text();
+    if (!/Error Page \| eBay|Something went wrong/i.test(content) && content.length > 5000) break;
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+
+  const items = [];
+  const seen = new Set();
+
+  // Pattern riche: lien itm + prix EUR (+ vendus optionnel)
+  const re =
+    /\[([^\]]{8,180}?)(?:\s*La page s'ouvre[^\]]*)?\]\((https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+[^)]*)\)[\s\S]{0,260}?(\d+[.,]\d{2})\s*EUR(?:[\s\S]{0,160}?(\d[\d\s.]*)\s*vendus?)?/gi;
+  let m;
+  while ((m = re.exec(content)) && items.length < limit) {
+    const title = cleanText(m[1]).replace(/La page s'ouvre.*$/i, "").trim();
+    const link = m[2].split("&itmprp")[0].split("?")[0] + (m[2].includes("?") ? "" : "");
+    const cleanLink = m[2].match(/https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+/)?.[0] || m[2];
+    if (/shop on ebay/i.test(title) || seen.has(cleanLink)) continue;
+    seen.add(cleanLink);
+    items.push({
+      title,
+      price: parsePrice(m[3]),
+      url: cleanLink,
+      sold: m[4] ? Number(String(m[4]).replace(/\s|\./g, "")) : 0,
+      image: null,
+      seller: "",
     });
   }
 
-  return { query, marketplace, url: finalUrl, items };
+  // Pattern image carousel: ![Image N: TITLE](ebayimg) linked to /itm/
+  if (items.length < 3) {
+    const imgRe =
+      /!\[Image\s*\d+:\s*([^\]]{8,160})\]\((https:\/\/i\.ebayimg\.com[^)]+)\)\]\((https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+)/gi;
+    while ((m = imgRe.exec(content)) && items.length < limit) {
+      const title = cleanText(m[1]);
+      const cleanLink = m[3];
+      if (/shop on ebay/i.test(title) || seen.has(cleanLink)) continue;
+      seen.add(cleanLink);
+      items.push({ title, price: null, url: cleanLink, sold: 0, image: m[2], seller: "" });
+    }
+  }
+
+  if (!items.length) throw new Error("Jina eBay: aucun item");
+  return { query, marketplace, url, items, live: true, source: "ebay+jina" };
+}
+
+async function scrapeEbaySearch(query, { marketplace = "FR", limit = 20 } = {}) {
+  const domain = marketplace === "US" ? "www.ebay.com" : "www.ebay.fr";
+  const url = `https://${domain}/sch/i.html?_nkw=${encodeURIComponent(query)}&_ipg=60&rt=nc`;
+  try {
+    const { html, finalUrl } = await fetchHtml(url);
+    const $ = cheerio.load(html);
+    const items = [];
+
+    $(".s-item").each((_, el) => {
+      if (items.length >= limit) return;
+      const root = $(el);
+      const title = cleanText(root.find(".s-item__title").text()).replace(/^Nouvel objet\s*/i, "");
+      if (!title || /shop on ebay/i.test(title)) return;
+      const price = parsePrice(root.find(".s-item__price").first().text());
+      const link = absUrl(finalUrl, root.find("a.s-item__link").attr("href"));
+      const soldText = cleanText(root.find(".s-item__hotness, .s-item__quantitySold, .s-item__dynamic").text());
+      const soldMatch = soldText.match(/(\d[\d\s.]*)\s*(vendu|sold)/i);
+      const sold = soldMatch ? Number(soldMatch[1].replace(/\s|\./g, "")) : 0;
+      const img = absUrl(finalUrl, root.find("img").attr("src") || root.find("img").attr("data-src"));
+      const seller = cleanText(root.find(".s-item__seller-info-text").text());
+      items.push({ title, price, url: link, sold, image: img, seller });
+    });
+
+    if (items.length) return { query, marketplace, url: finalUrl, items, live: true, source: "ebay-html" };
+  } catch (err) {
+    console.warn("[ebay html]", err.message);
+  }
+
+  try {
+    return await scrapeEbayViaJina(query, { marketplace, limit });
+  } catch (err) {
+    console.warn("[ebay jina]", err.message);
+  }
+
+  try {
+    return await scrapeEbayViaDuckDuckGo(query, { marketplace, limit });
+  } catch (err) {
+    console.warn("[ebay ddg]", err.message);
+  }
+
+  throw new Error("Recherche eBay indisponible");
 }
 
 /**
