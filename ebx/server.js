@@ -1,16 +1,15 @@
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
-const Database = require("better-sqlite3");
+const { DatabaseSync } = require("node:sqlite");
 const { generateListing } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// SQLite init
-const db = new Database(path.join(__dirname, "ebx.db"));
-db.pragma("journal_mode = WAL");
+// SQLite natif Node.js (pas de compilation native — compatible Windows ARM)
+const db = new DatabaseSync(path.join(__dirname, "ebx.db"));
 db.exec(`
   CREATE TABLE IF NOT EXISTS listings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +32,6 @@ const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Génération + sauvegarde
 app.post("/api/generate-listing", async (req, res) => {
   const { productName, rawKeywords } = req.body;
 
@@ -51,7 +49,7 @@ app.post("/api/generate-listing", async (req, res) => {
       rawKeywords || ""
     );
 
-    return res.json({ success: true, data: { ...listing, id: result.lastInsertRowid } });
+    return res.json({ success: true, data: { ...listing, id: Number(result.lastInsertRowid) } });
   } catch (err) {
     console.error("[EBX] Erreur LLM :", err.message);
 
@@ -66,7 +64,6 @@ app.post("/api/generate-listing", async (req, res) => {
   }
 });
 
-// Historique des 10 derniers listings
 app.get("/api/listings", (_req, res) => {
   try {
     const listings = getRecentListings.all();
@@ -77,7 +74,6 @@ app.get("/api/listings", (_req, res) => {
   }
 });
 
-// Détail d'un listing
 app.get("/api/listings/:id", (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
@@ -88,7 +84,6 @@ app.get("/api/listings/:id", (req, res) => {
   }
 });
 
-// Publier un listing sur eBay (Sandbox)
 app.post("/api/publish-to-ebay/:id", async (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
@@ -104,7 +99,6 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
   }
 });
 
-// Health check
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", llm_url: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1" });
 });

@@ -5,10 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "policies": "node create-policies.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonrepair": "^3.11.2",
