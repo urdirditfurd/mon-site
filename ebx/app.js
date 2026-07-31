@@ -865,6 +865,8 @@ document.addEventListener("DOMContentLoaded", () => {
   ];
   for (const [id, fn] of map) {
     const el = document.getElementById(id);
+    // Ne pas re-binder si onclick HTML est déjà présent (évite double exécution)
+    if (el && el.getAttribute("onclick")) continue;
     if (el && typeof window[fn] === "function" && !el.dataset.bound) {
       el.addEventListener("click", (e) => {
         e.preventDefault();
