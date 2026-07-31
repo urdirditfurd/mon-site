@@ -398,9 +398,18 @@
 
   <!-- Image picker modal (Description Builder) -->
   <div id="img-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[80vh] overflow-auto p-6">
-      <div class="flex justify-between mb-4"><h3 class="font-semibold">Choisir une image</h3><button onclick="closeImgModal()" class="text-xl text-zinc-400">&times;</button></div>
-      <div id="img-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+    <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[85vh] overflow-auto p-6 shadow-xl">
+      <div class="flex justify-between items-start mb-2 gap-3">
+        <div>
+          <h3 class="font-semibold text-lg">Choisir une image</h3>
+          <p id="img-modal-hint" class="text-xs text-zinc-400 mt-1">Clique « Utiliser » pour remplacer l’image de l’aperçu</p>
+        </div>
+        <button type="button" onclick="closeImgModal()" class="text-2xl leading-none text-zinc-400 hover:text-zinc-700">&times;</button>
+      </div>
+      <div id="img-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4"></div>
+      <div class="mt-5 flex justify-end">
+        <button type="button" onclick="closeImgModal()" class="px-4 py-2 rounded-xl border text-sm">Fermer</button>
+      </div>
     </div>
   </div>
 

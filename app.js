@@ -803,17 +803,36 @@ function bindPreviewImages(preview) {
 }
 
 function openImgModal(idx) {
-  replaceImgIdx = idx;
+  replaceImgIdx = Number(idx) || 0;
   const grid = document.getElementById("img-grid");
+  const hint = document.getElementById("img-modal-hint");
+  if (hint) hint.textContent = `Image #${replaceImgIdx + 1} de l’aperçu — choisis un visuel puis « Utiliser »`;
+
+  // Déduplique aussi côté client
+  const uniq = [];
+  const seen = new Set();
+  for (const src of descImages || []) {
+    const key = String(src).replace(/\._[^.\/]+_\./g, ".").split("?")[0].toLowerCase();
+    const id = (key.match(/\/images\/i\/([a-z0-9]+)/i) || [])[1] || key;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    uniq.push(src);
+  }
+  descImages = uniq;
+
   if (!descImages.length) {
-    grid.innerHTML = `<p class="text-sm text-zinc-400">Aucune image scrapée — régénère avec une URL Amazon valide.</p>`;
+    grid.innerHTML = `<p class="text-sm text-zinc-400 col-span-full">Aucune image scrapée — régénère avec une URL Amazon valide.</p>`;
   } else {
     grid.innerHTML = descImages
       .map(
         (src, i) =>
-          `<button type="button" data-pick-img="${i}" class="rounded-xl overflow-hidden border hover:ring-2 ring-brand-400 ${i === 0 ? "ring-2 ring-brand-500" : ""}">
-          <img src="${escapeHtml(src)}" class="w-full h-32 object-cover pointer-events-none" alt="" />
-        </button>`
+          `<div class="rounded-xl overflow-hidden border bg-zinc-50 ${i === replaceImgIdx ? "ring-2 ring-brand-500" : ""}">
+            <img src="${escapeHtml(src)}" class="w-full h-36 object-cover" alt="Proposition ${i + 1}" />
+            <div class="p-2 flex items-center justify-between gap-2">
+              <span class="text-[11px] text-zinc-400">#${i + 1}</span>
+              <button type="button" data-pick-img="${i}" class="btn-primary !px-3 !py-1.5 text-xs">Utiliser</button>
+            </div>
+          </div>`
       )
       .join("");
   }
@@ -833,11 +852,17 @@ async function pickImage(i) {
   if (!descImages[idx]) return;
   const chosen = descImages[idx];
   const imgs = [...descImages];
+  // Remplace le slot cliqué dans l'aperçu (ou met en principal)
+  const slot = Math.min(replaceImgIdx, Math.max(0, imgs.length - 1));
   imgs.splice(idx, 1);
-  imgs.unshift(chosen);
-  descImages = imgs;
+  imgs.splice(slot, 0, chosen);
+  // Assure que l'image choisie est aussi en première (visuel principal du template)
+  descImages = [chosen, ...imgs.filter((u) => u !== chosen)];
   closeImgModal();
+  const tip = document.getElementById("desc-theme-status");
+  if (tip) tip.textContent = "Image mise à jour…";
   await regenerateDescTheme();
+  if (tip) tip.textContent = "Image appliquée";
 }
 
 document.getElementById("img-grid")?.addEventListener("click", (e) => {

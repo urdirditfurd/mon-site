@@ -37,6 +37,30 @@ function cleanText(t) {
     .trim();
 }
 
+/** Déduplique les images produit (Amazon renvoie souvent 8× la même en tailles différentes) */
+function uniqueProductImages(urls, { limit = 8 } = {}) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of urls || []) {
+    if (!raw) continue;
+    let u = String(raw).trim();
+    if (!/^https?:\/\//i.test(u)) continue;
+    if (/spinner|grey-pixel|pixel|sprite|transparent-pixel|base64/i.test(u)) continue;
+    // Normalise la clé Amazon: /images/I/XXXXX._AC_SL1500_.jpg → XXXXX
+    const idMatch = u.match(/\/images\/I\/([A-Za-z0-9%+-]+)/i) || u.match(/\/I\/([A-Za-z0-9%+-]+)/i);
+    let key = idMatch ? idMatch[1].split(".")[0].toLowerCase() : u.replace(/\._[^.\/]+_\./g, ".").split("?")[0].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Préfère une version hi-res si possible
+    if (/media-amazon|ssl-images-amazon/i.test(u)) {
+      u = u.replace(/\._[A-Z0-9,_]+(?=\.\w+$)/i, "._AC_SL1500_");
+    }
+    out.push(u);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function detectSource(url) {
   const u = url.toLowerCase();
   if (u.includes("amazon.")) return "amazon";
@@ -67,10 +91,14 @@ function parseAmazon($, baseUrl) {
   const images = new Set();
   const og = $("meta[property='og:image']").attr("content");
   if (og) images.add(og);
-  $("#imgTagWrapperId img, #landingImage, #main-image").each((_, el) => {
-    const src = $(el).attr("data-old-hires") || $(el).attr("data-src") || $(el).attr("src");
+  $("#imgTagWrapperId img, #landingImage, #main-image, #altImages img, #imageBlock img").each((_, el) => {
+    const src =
+      $(el).attr("data-old-hires") ||
+      $(el).attr("data-a-hires") ||
+      $(el).attr("data-src") ||
+      $(el).attr("src");
     const u = absUrl(baseUrl, src);
-    if (u && !u.includes("spinner") && !u.includes("grey-pixel")) images.add(u);
+    if (u) images.add(u);
   });
   // dynamic image data
   const dynamic = $("#imgTagWrapperId img, #landingImage").attr("data-a-dynamic-image");
@@ -79,6 +107,16 @@ function parseAmazon($, baseUrl) {
       Object.keys(JSON.parse(dynamic)).forEach((k) => images.add(k));
     } catch (_) {}
   }
+  // Scripts colorImages / imageGalleryData
+  $("script").each((_, el) => {
+    const txt = $(el).html() || "";
+    if (!/colorImages|hiRes|large"|"main"/.test(txt)) return;
+    const re = /https?:\/\/[^"'\\\s]+?\.(?:jpg|jpeg|png|webp)/gi;
+    const matches = txt.match(re) || [];
+    matches.forEach((u) => {
+      if (/media-amazon|ssl-images-amazon/i.test(u)) images.add(u.replace(/\\u002F/g, "/"));
+    });
+  });
 
   const description =
     cleanText($("#productDescription p").text()) ||
@@ -92,7 +130,7 @@ function parseAmazon($, baseUrl) {
     currency: "EUR",
     bullets: bullets.slice(0, 8),
     description,
-    images: [...images].slice(0, 8),
+    images: uniqueProductImages([...images], { limit: 8 }),
     url: baseUrl,
   };
 }
@@ -124,7 +162,7 @@ function parseAliExpress($, baseUrl) {
     currency: "EUR",
     bullets: [],
     description: cleanText($("meta[name='description']").attr("content") || "").slice(0, 600),
-    images: [...images].slice(0, 8),
+    images: uniqueProductImages([...images], { limit: 8 }),
     url: baseUrl,
   };
 }
@@ -155,7 +193,7 @@ function parseEbayItem($, baseUrl) {
     currency: "EUR",
     bullets: [],
     description: cleanText($("meta[name='description']").attr("content") || "").slice(0, 600),
-    images: [...images].slice(0, 8),
+    images: uniqueProductImages([...images], { limit: 8 }),
     url: baseUrl,
   };
 }
@@ -175,7 +213,7 @@ function parseGeneric($, baseUrl) {
     currency: "EUR",
     bullets: [],
     description: cleanText($("meta[name='description']").attr("content") || "").slice(0, 600),
-    images: [...images].filter(Boolean).slice(0, 8),
+    images: uniqueProductImages([...images].filter(Boolean), { limit: 8 }),
     url: baseUrl,
   };
 }
@@ -240,7 +278,7 @@ async function scrapeProductViaJina(url) {
     currency: "EUR",
     bullets,
     description: cleanText(data.description || bullets.slice(0, 2).join(" ")).slice(0, 600),
-    images: [...new Set(images)].slice(0, 8),
+    images: uniqueProductImages(images, { limit: 8 }),
     url,
     live: true,
   };
