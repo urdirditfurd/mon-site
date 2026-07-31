@@ -132,7 +132,9 @@ app.get("/api/setup", async (_req, res) => {
   const setup = {
     prodKeys: envPresent(process.env.EBAY_PROD_CLIENT_ID) && envPresent(process.env.EBAY_PROD_CLIENT_SECRET),
     sandboxKeys: envPresent(process.env.EBAY_CLIENT_ID) && envPresent(process.env.EBAY_CLIENT_SECRET),
+    refreshToken: envPresent(process.env.EBAY_REFRESH_TOKEN),
     userToken: envPresent(process.env.EBAY_USER_TOKEN),
+    ruName: envPresent(process.env.EBAY_RU_NAME),
     policies:
       envPresent(process.env.EBAY_FULFILLMENT_POLICY_ID) &&
       envPresent(process.env.EBAY_PAYMENT_POLICY_ID) &&

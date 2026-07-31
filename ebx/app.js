@@ -489,9 +489,10 @@ async function loadListings() {
         hint.classList.remove("hidden");
         hint.textContent =
           "Pour Publier eBay : ajoute EBAY_FULFILLMENT/PAYMENT/RETURN_POLICY_ID dans .env (ex. 6240367000 / 6240368000 / 6240369000) + token Sandbox valide.";
-      } else if (!setup.data?.userToken) {
+      } else if (!setup.data?.refreshToken && !setup.data?.userToken) {
         hint.classList.remove("hidden");
-        hint.textContent = "EBAY_USER_TOKEN manquant ou invalide — renouvelle le token Sandbox sur developer.ebay.com.";
+        hint.textContent =
+          "Pas de token durable : lance npm run oauth pour EBAY_REFRESH_TOKEN (~18 mois), ou colle temporairement EBAY_USER_TOKEN (~2h).";
       } else {
         hint.classList.add("hidden");
       }
@@ -1004,7 +1005,8 @@ async function loadSetupStatus() {
     const rows = [
       ["Browse API Production (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "Ajoute EBAY_PROD_* dans .env"],
       ["Clés Sandbox (publish)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
-      ["User token eBay", d.userToken, d.userToken ? "OK" : "EBAY_USER_TOKEN (portail)"],
+      ["Refresh token eBay", d.refreshToken, d.refreshToken ? "OK (~18 mois)" : "npm run oauth"],
+      ["User token eBay (~2h)", d.userToken, d.userToken ? "OK" : "optionnel si refresh"],
       ["Business policies", d.policies, d.policies ? "OK" : "node create-policies.js"],
       ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis pour scraper"],
     ];

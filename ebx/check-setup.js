@@ -25,7 +25,9 @@ async function main() {
     ["EBAY_PROD_CLIENT_SECRET", present(process.env.EBAY_PROD_CLIENT_SECRET), mask(process.env.EBAY_PROD_CLIENT_SECRET)],
     ["EBAY_CLIENT_ID (Sandbox)", present(process.env.EBAY_CLIENT_ID), mask(process.env.EBAY_CLIENT_ID)],
     ["EBAY_CLIENT_SECRET (Sandbox)", present(process.env.EBAY_CLIENT_SECRET), mask(process.env.EBAY_CLIENT_SECRET)],
-    ["EBAY_USER_TOKEN", present(process.env.EBAY_USER_TOKEN), mask(process.env.EBAY_USER_TOKEN)],
+    ["EBAY_RU_NAME", present(process.env.EBAY_RU_NAME), mask(process.env.EBAY_RU_NAME)],
+    ["EBAY_REFRESH_TOKEN (~18 mois)", present(process.env.EBAY_REFRESH_TOKEN), mask(process.env.EBAY_REFRESH_TOKEN)],
+    ["EBAY_USER_TOKEN (~2h)", present(process.env.EBAY_USER_TOKEN), mask(process.env.EBAY_USER_TOKEN)],
     ["Policies (fulfill/pay/return)", present(process.env.EBAY_FULFILLMENT_POLICY_ID) && present(process.env.EBAY_PAYMENT_POLICY_ID) && present(process.env.EBAY_RETURN_POLICY_ID), "ok / manquant"],
     ["LOCAL_LLM_URL", true, process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"],
   ];

@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "policies": "node create-policies.js",
+    "oauth": "node get-refresh-token.js",
     "check": "node check-setup.js"
   },
   "engines": {

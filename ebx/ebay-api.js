@@ -24,58 +24,58 @@ let tokenExpiry = 0;
 /**
  * Obtient un access token.
  * Priorité :
- *   1. EBAY_USER_TOKEN (copié depuis le portail développeur, ~2h)
- *   2. Refresh Token OAuth (renouvellement automatique, ~18 mois)
+ *   1. EBAY_REFRESH_TOKEN → access token auto (~18 mois, recommandé)
+ *   2. EBAY_USER_TOKEN collé depuis le portail (~2h, dépannage uniquement)
  */
 async function getAccessToken() {
-  // Mode Sandbox rapide : token collé depuis le portail
+  if (cachedToken && Date.now() < tokenExpiry) {
+    return cachedToken;
+  }
+
+  if (EBAY_REFRESH_TOKEN) {
+    if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) {
+      throw new Error("EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis pour utiliser EBAY_REFRESH_TOKEN");
+    }
+
+    const credentials = Buffer.from(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`).toString("base64");
+    const res = await fetch(EBAY_AUTH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: EBAY_REFRESH_TOKEN,
+        scope:
+          "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`eBay OAuth refresh failed (${res.status}): ${err}`);
+    }
+
+    const data = await res.json();
+    cachedToken = data.access_token;
+    tokenExpiry = Date.now() + (Number(data.expires_in || 7200) - 60) * 1000;
+    return cachedToken;
+  }
+
+  // Fallback dépannage : token portail (~2h)
   if (EBAY_USER_TOKEN) {
     if (EBAY_USER_TOKEN.length < 80) {
       throw new Error(
-        "EBAY_USER_TOKEN trop court (souvent tronqué par #). Mets-le entre guillemets doubles dans .env"
+        "EBAY_USER_TOKEN trop court (souvent tronqué par #). Mets-le entre guillemets doubles dans .env — ou mieux : npm run oauth pour un refresh token."
       );
     }
     return EBAY_USER_TOKEN;
   }
 
-  if (cachedToken && Date.now() < tokenExpiry) {
-    return cachedToken;
-  }
-
-  if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) {
-    throw new Error("EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis dans .env");
-  }
-
-  if (!EBAY_REFRESH_TOKEN) {
-    throw new Error(
-      "Aucun token eBay. Ajoute EBAY_USER_TOKEN (token du portail) ou EBAY_REFRESH_TOKEN dans .env"
-    );
-  }
-
-  const credentials = Buffer.from(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`).toString("base64");
-
-  const res = await fetch(EBAY_AUTH_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: EBAY_REFRESH_TOKEN,
-      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account",
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`eBay OAuth failed (${res.status}): ${err}`);
-  }
-
-  const data = await res.json();
-  cachedToken = data.access_token;
-  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return cachedToken;
+  throw new Error(
+    "Aucun token eBay durable. Lance `npm run oauth` pour obtenir EBAY_REFRESH_TOKEN, ou colle temporairement EBAY_USER_TOKEN (~2h)."
+  );
 }
 
 /**
