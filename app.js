@@ -476,6 +476,22 @@ async function loadListings() {
   const res = await fetch(API + "/api/listings");
   const json = await res.json();
   const rows = json.data || [];
+  try {
+    const setup = await (await fetch(API + "/api/setup")).json();
+    const hint = document.getElementById("listings-publish-hint");
+    if (hint) {
+      if (!setup.data?.policies) {
+        hint.classList.remove("hidden");
+        hint.textContent =
+          "Pour Publier eBay : ajoute EBAY_FULFILLMENT/PAYMENT/RETURN_POLICY_ID dans .env (ex. 6240367000 / 6240368000 / 6240369000) + token Sandbox valide.";
+      } else if (!setup.data?.userToken) {
+        hint.classList.remove("hidden");
+        hint.textContent = "EBAY_USER_TOKEN manquant ou invalide — renouvelle le token Sandbox sur developer.ebay.com.";
+      } else {
+        hint.classList.add("hidden");
+      }
+    }
+  } catch (_) {}
   document.getElementById("listings-body").innerHTML = rows.length
     ? rows
         .map(
@@ -569,13 +585,34 @@ async function runTitleBuilder() {
 
 function updateFinalTitle() {
   const t = selectedKeywords.join(" ").slice(0, 80);
-  document.getElementById("final-title").value = t;
-  document.getElementById("title-count").textContent = `${t.length}/80`;
+  const input = document.getElementById("final-title");
+  const count = document.getElementById("title-count");
+  input.value = t;
+  count.textContent = `${t.length}/80`;
+  count.className =
+    t.length >= 80
+      ? "text-xs text-red-500 font-semibold"
+      : t.length >= 70
+        ? "text-xs text-amber-600 font-medium"
+        : "text-xs text-zinc-400";
+  const chips = document.getElementById("title-chips");
+  if (chips) {
+    chips.innerHTML = selectedKeywords
+      .map(
+        (k, i) =>
+          `<button type="button" onclick="removeKeyword(${i})" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100">${escapeHtml(k)} ×</button>`
+      )
+      .join("");
+  }
 }
 
 function onTitleEdit() {
   const t = document.getElementById("final-title").value.slice(0, 80);
-  document.getElementById("title-count").textContent = `${t.length}/80`;
+  document.getElementById("final-title").value = t;
+  const count = document.getElementById("title-count");
+  count.textContent = `${t.length}/80`;
+  count.className =
+    t.length >= 80 ? "text-xs text-red-500 font-semibold" : t.length >= 70 ? "text-xs text-amber-600" : "text-xs text-zinc-400";
 }
 
 function renderKeywords() {
@@ -586,14 +623,14 @@ function renderKeywords() {
   const maxPage = Math.max(1, Math.ceil(list.length / KW_PER_PAGE));
   document.getElementById("kw-page-label").textContent = `Page ${kwPageIdx + 1} / ${maxPage}`;
   document.getElementById("kw-list").innerHTML = page
-    .map(
-      (k) =>
-        `<tr class="keyword-row border-b border-zinc-50 cursor-pointer" onclick="addKeyword(${JSON.stringify(k.keyword)})">
-          <td class="p-3 font-medium text-brand-700">${escapeHtml(k.keyword)}</td>
+    .map((k) => {
+      const selected = selectedKeywords.includes(k.keyword);
+      return `<tr class="keyword-row border-b border-zinc-50 cursor-pointer ${selected ? "bg-brand-50" : ""}" onclick="addKeyword(${JSON.stringify(k.keyword)})">
+          <td class="p-3 font-medium text-brand-700">${selected ? "✓ " : ""}${escapeHtml(k.keyword)}</td>
           <td class="p-3 text-zinc-500">${Number(k.searches || 0).toLocaleString("fr-FR")}</td>
           <td class="p-3 text-zinc-500">${Number(k.sales || 0).toLocaleString("fr-FR")}</td>
-        </tr>`
-    )
+        </tr>`;
+    })
     .join("");
 }
 
@@ -608,6 +645,14 @@ function kwPage(dir) {
 function addKeyword(kw) {
   if (!selectedKeywords.includes(kw)) selectedKeywords.push(kw);
   updateFinalTitle();
+  renderKeywords();
+}
+
+function removeKeyword(idx) {
+  selectedKeywords.splice(idx, 1);
+  if (!selectedKeywords.length) selectedKeywords = [titleData?.query || "produit"];
+  updateFinalTitle();
+  renderKeywords();
 }
 
 function copyTitle() {
@@ -852,7 +897,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","closeModal","closeImgModal","pickImage","addKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

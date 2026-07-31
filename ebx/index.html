@@ -221,7 +221,7 @@
           <textarea id="bulk-urls" class="w-full h-40 px-4 py-3 rounded-xl border text-sm font-mono" placeholder="https://www.amazon.fr/dp/..."></textarea>
           <div class="flex gap-3 items-center">
             <label class="text-sm flex items-center gap-2"><input id="bulk-margin" type="number" value="25" class="w-20 px-2 py-1 border rounded-lg" /> Marge %</label>
-            <button onclick="runBulking()" id="bulk-btn" class="ml-auto px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Importer en masse</button>
+            <button onclick="runBulking()" id="bulk-btn" class="btn-primary ml-auto">Importer en masse</button>
           </div>
           <div id="bulk-console" class="console bg-zinc-950 text-green-400 rounded-xl p-4 h-40 overflow-auto text-xs"></div>
         </div>
@@ -234,7 +234,7 @@
             <div><label class="text-xs text-zinc-500">URL produit actuel (eBay / listing)</label><input id="sub-old" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="URL listing à remplacer" /></div>
             <div><label class="text-xs text-zinc-500">Nouveau fournisseur (Amazon / Ali)</label><input id="sub-new" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="URL fournisseur" /></div>
           </div>
-          <button onclick="runSubstitution()" id="sub-btn" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Substituer</button>
+          <button onclick="runSubstitution()" id="sub-btn" class="btn-primary">Substituer</button>
           <div id="sub-result" class="hidden text-sm bg-zinc-50 rounded-xl p-4"></div>
         </div>
       </section>
@@ -253,7 +253,8 @@
       <!-- LISTINGS -->
       <section id="page-listings" class="page">
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div class="p-5 border-b flex justify-between items-center"><div><h3 class="font-semibold">Mes Listings</h3><p class="text-sm text-zinc-400">Historique SQLite local</p></div><button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button></div>
+          <div class="p-5 border-b flex justify-between items-center"><div><h3 class="font-semibold">Mes Listings</h3><p class="text-sm text-zinc-400">Historique SQLite local — Publier eBay = Sandbox</p></div><button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button></div>
+          <div id="listings-publish-hint" class="hidden px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100"></div>
           <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">Date</th><th class="p-3">Titre SEO</th><th class="p-3">Prix</th><th class="p-3 text-right">Actions</th></tr></thead><tbody id="listings-body"></tbody></table>
         </div>
       </section>
@@ -286,7 +287,9 @@
               <input id="final-title" class="flex-1 px-4 py-2.5 rounded-xl border text-sm font-medium" maxlength="80" oninput="onTitleEdit()" />
               <button onclick="copyTitle()" class="px-4 py-2.5 bg-zinc-900 text-white rounded-xl text-sm">Copier</button>
             </div>
-            <p id="title-meta" class="text-xs text-zinc-400 mt-2"></p>
+            <div id="title-chips" class="flex flex-wrap gap-1.5 mt-2"></div>
+            <p class="text-[11px] text-zinc-400 mt-2">Clique un mot-clé dans le tableau pour l’ajouter au titre (max 80 car.).</p>
+            <p id="title-meta" class="text-xs text-zinc-400 mt-1"></p>
           </div>
           <div class="bg-white rounded-2xl border overflow-hidden">
             <div class="flex gap-1 p-3 border-b" id="kw-tabs">
@@ -343,6 +346,7 @@
             <button onclick="copyHtml()" class="text-sm px-3 py-1.5 bg-zinc-900 text-white rounded-lg">Copier HTML</button>
           </div>
           <div id="desc-preview-wrap" class="p-4 min-h-[420px]">
+            <p class="text-[11px] text-zinc-400 mb-2">Astuce vidéo : clique une image de l’aperçu pour la remplacer · change le thème avec les pastilles couleur</p>
             <div id="desc-preview" class="border rounded-xl p-3 min-h-[400px] overflow-auto text-sm text-zinc-300 flex items-center justify-center">Aperçu en temps réel</div>
           </div>
           <div id="desc-html-wrap" class="hidden bg-zinc-900 min-h-[420px]">
@@ -366,6 +370,10 @@
           </div>
           <div id="setup-browse-sample" class="text-xs text-zinc-400 hidden"></div>
           <p class="text-xs text-zinc-400">Tokens eBay avec <code>#</code> → guillemets doubles. Test CLI : <code>node check-setup.js</code></p>
+          <div class="p-4 rounded-xl border border-dashed border-zinc-200 text-sm space-y-1">
+            <p class="font-medium">LLM (optionnel, comme ebx.army IA)</p>
+            <p class="text-xs text-zinc-500">Installe <a class="text-brand-600 underline" href="https://lmstudio.ai/" target="_blank">LM Studio</a>, charge un modèle, démarre le serveur local sur le port 1234. Les descriptions seront enrichies automatiquement.</p>
+          </div>
         </div>
       </section>
     </div>

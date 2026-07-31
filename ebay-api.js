@@ -14,9 +14,9 @@ const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com
 const EBAY_AUTH_URL = process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
 const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID || "";
 const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET || "";
-const EBAY_REFRESH_TOKEN = process.env.EBAY_REFRESH_TOKEN || "";
+const EBAY_REFRESH_TOKEN = String(process.env.EBAY_REFRESH_TOKEN || "").trim().replace(/^["']|["']$/g, "");
 // Token obtenu via "Sign in to Sandbox for OAuth" (valable ~2h) — mode Sandbox rapide
-const EBAY_USER_TOKEN = process.env.EBAY_USER_TOKEN || "";
+const EBAY_USER_TOKEN = String(process.env.EBAY_USER_TOKEN || "").trim().replace(/^["']|["']$/g, "");
 
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -30,6 +30,11 @@ let tokenExpiry = 0;
 async function getAccessToken() {
   // Mode Sandbox rapide : token collé depuis le portail
   if (EBAY_USER_TOKEN) {
+    if (EBAY_USER_TOKEN.length < 80) {
+      throw new Error(
+        "EBAY_USER_TOKEN trop court (souvent tronqué par #). Mets-le entre guillemets doubles dans .env"
+      );
+    }
     return EBAY_USER_TOKEN;
   }
 
@@ -238,6 +243,17 @@ async function publishOffer(token, offerId) {
  * Flux complet : location → inventory → offer → publish.
  */
 async function publishToEbay(listing, listingDbId) {
+  const missing = [];
+  if (!process.env.EBAY_FULFILLMENT_POLICY_ID) missing.push("EBAY_FULFILLMENT_POLICY_ID");
+  if (!process.env.EBAY_PAYMENT_POLICY_ID) missing.push("EBAY_PAYMENT_POLICY_ID");
+  if (!process.env.EBAY_RETURN_POLICY_ID) missing.push("EBAY_RETURN_POLICY_ID");
+  if (missing.length) {
+    throw new Error(
+      `Policies manquantes dans .env : ${missing.join(", ")}. ` +
+        `Ajoute les IDs (ex. 6240367000 / 6240368000 / 6240369000) ou lance npm run policies.`
+    );
+  }
+
   const token = await getAccessToken();
   const sku = `EBX-${listingDbId}-${Date.now()}`;
 
