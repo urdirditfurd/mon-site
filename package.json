@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "policies": "node create-policies.js"
+    "policies": "node create-policies.js",
+    "check": "node check-setup.js"
   },
   "engines": {
     "node": ">=22.5.0"

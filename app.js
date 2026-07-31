@@ -799,6 +799,47 @@ async function runSubstitution() {
 
 function loadSettings() {
   checkHealth();
+  loadSetupStatus();
+}
+
+async function loadSetupStatus() {
+  const box = document.getElementById("setup-checklist");
+  const sample = document.getElementById("setup-browse-sample");
+  if (!box) return;
+  box.innerHTML = `<p class="text-sm text-zinc-400">Vérification…</p>`;
+  try {
+    const res = await fetch(API + "/api/setup");
+    const json = await res.json();
+    const d = json.data || {};
+    const rows = [
+      ["Browse API Production (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "Ajoute EBAY_PROD_* dans .env"],
+      ["Clés Sandbox (publish)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
+      ["User token eBay", d.userToken, d.userToken ? "OK" : "EBAY_USER_TOKEN (portail)"],
+      ["Business policies", d.policies, d.policies ? "OK" : "node create-policies.js"],
+      ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis pour scraper"],
+    ];
+    box.innerHTML = rows
+      .map(
+        ([label, ok, detail]) =>
+          `<div class="flex items-start gap-3 p-3 rounded-xl border ${ok ? "bg-green-50 border-green-100" : "bg-amber-50 border-amber-100"}">
+            <span class="text-lg leading-none">${ok ? "✅" : "⚠️"}</span>
+            <div class="min-w-0"><p class="text-sm font-medium">${label}</p><p class="text-xs text-zinc-500 truncate">${escapeHtml(String(detail || ""))}</p></div>
+          </div>`
+      )
+      .join("");
+    if (sample) {
+      if (d.browse?.sample) {
+        sample.classList.remove("hidden");
+        sample.textContent = "Exemple live : " + d.browse.sample;
+      } else {
+        sample.classList.add("hidden");
+      }
+    }
+    const mode = document.getElementById("settings-mode");
+    if (mode) mode.textContent = d.browse?.ok ? "live browse-api" : "fallback / scrape";
+  } catch (err) {
+    box.innerHTML = `<p class="text-sm text-red-500">Impossible de charger le statut : ${escapeHtml(err.message)}</p>`;
+  }
 }
 
 checkHealth();

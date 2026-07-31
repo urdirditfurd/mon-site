@@ -99,6 +99,49 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+function envPresent(v) {
+  return Boolean(v && String(v).trim() && !String(v).includes("your_"));
+}
+
+app.get("/api/setup", async (_req, res) => {
+  const setup = {
+    prodKeys: envPresent(process.env.EBAY_PROD_CLIENT_ID) && envPresent(process.env.EBAY_PROD_CLIENT_SECRET),
+    sandboxKeys: envPresent(process.env.EBAY_CLIENT_ID) && envPresent(process.env.EBAY_CLIENT_SECRET),
+    userToken: envPresent(process.env.EBAY_USER_TOKEN),
+    policies:
+      envPresent(process.env.EBAY_FULFILLMENT_POLICY_ID) &&
+      envPresent(process.env.EBAY_PAYMENT_POLICY_ID) &&
+      envPresent(process.env.EBAY_RETURN_POLICY_ID),
+    llmUrl: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1",
+    browse: { ok: false, api: null, error: null, sample: null },
+    llm: { ok: false },
+  };
+
+  try {
+    const { getAppToken, browseSearch } = require("./ebay-browse");
+    await getAppToken({ production: true });
+    const r = await browseSearch("coque iphone", { marketplace: "FR", limit: 2 });
+    setup.browse = {
+      ok: r.items.length > 0,
+      api: r.api || "browse",
+      error: null,
+      sample: r.items[0]?.title?.slice(0, 80) || null,
+    };
+  } catch (err) {
+    setup.browse = { ok: false, api: null, error: err.message, sample: null };
+  }
+
+  try {
+    const base = setup.llmUrl.replace(/\/v1\/?$/, "");
+    const r = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    setup.llm.ok = r.ok;
+  } catch (_) {
+    setup.llm.ok = false;
+  }
+
+  res.json({ success: true, data: setup });
+});
+
 app.get("/api/dashboard", (_req, res) => {
   try {
     const listings = getRecentListings.all();

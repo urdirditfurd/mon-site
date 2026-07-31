@@ -340,15 +340,19 @@
 
       <!-- SETTINGS -->
       <section id="page-settings" class="page">
-        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-2xl">
-          <h3 class="font-semibold text-lg">Paramètres</h3>
+        <div class="bg-white rounded-2xl border p-6 space-y-5 max-w-2xl">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="font-semibold text-lg">Paramètres & installation</h3>
+            <button onclick="loadSettings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Revérifier</button>
+          </div>
+          <p class="text-sm text-zinc-500">Fichier à éditer : <code class="bg-zinc-100 px-1.5 py-0.5 rounded text-xs">ebx/.env</code> (local uniquement)</p>
+          <div id="setup-checklist" class="space-y-2"></div>
           <div class="grid sm:grid-cols-2 gap-4 text-sm">
             <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">LLM local</p><code id="settings-llm" class="text-xs">...</code></div>
             <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Mode API</p><span id="settings-mode">live+fallback</span></div>
-            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">eBay</p><span>Clés dans <code>.env</code> local</span></div>
-            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Policies</p><span>node create-policies.js</span></div>
           </div>
-          <p class="text-xs text-zinc-400">Ne committez jamais votre fichier .env. Les tokens eBay contenant # doivent être entre guillemets doubles.</p>
+          <div id="setup-browse-sample" class="text-xs text-zinc-400 hidden"></div>
+          <p class="text-xs text-zinc-400">Tokens eBay avec <code>#</code> → guillemets doubles. Test CLI : <code>node check-setup.js</code></p>
         </div>
       </section>
     </div>
