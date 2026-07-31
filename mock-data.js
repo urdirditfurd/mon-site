@@ -109,6 +109,9 @@ function analyzeCompetitor(sellerName) {
     totalSold: Math.floor(500 + rand() * 4000),
     followers: Math.floor(20 + rand() * 800),
     bestsellers,
+    location: "France",
+    live: false,
+    source: "mock",
   };
 }
 

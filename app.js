@@ -288,7 +288,8 @@ function renderCompetitor(d) {
     <div class="bg-white rounded-2xl border p-5 flex flex-wrap items-center gap-4">
       <div class="flex-1">
         <div class="flex items-center gap-2"><span class="text-xl">🇫🇷</span><h3 class="text-xl font-bold">${escapeHtml(d.seller)}</h3>
-          ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">fallback</span>' : '<span class="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">live</span>'}
+          ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">estimé</span>' : '<span class="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">live</span>'}
+          ${d.source || d.api ? `<span class="text-[10px] text-zinc-400">${escapeHtml(d.source || d.api || "")}</span>` : ""}
         </div>
         <p class="text-sm text-zinc-400 mt-1">${escapeHtml(location)}</p>
       </div>
@@ -351,8 +352,12 @@ function renderCompetitor(d) {
       .map((b, i) => {
         const sold = Math.max(1, Math.round((b.sold || 5) * f));
         const price = Number(b.price || 0);
+        const img = b.image
+          ? `<img src="${escapeHtml(b.image)}" class="w-12 h-12 rounded-lg object-cover bg-zinc-100" alt="" />`
+          : `<div class="w-12 h-12 rounded-lg bg-zinc-100"></div>`;
         return `<a href="${escapeHtml(b.url || "#")}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50">
           <span class="w-6 font-bold text-brand-600">${i + 1}</span>
+          ${img}
           <div class="flex-1 min-w-0"><p class="text-sm font-medium truncate">${escapeHtml(b.title)}</p></div>
           <div class="text-right"><p class="text-sm text-emerald-600">${sold} vendus</p><p class="text-sm font-semibold">${price.toFixed(2)} €</p></div>
         </a>`;

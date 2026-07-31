@@ -266,19 +266,31 @@ app.post("/api/competitors", async (req, res) => {
     const { seller, marketplace = "FR" } = req.body || {};
     if (!seller) return res.status(400).json({ success: false, error: "seller requis" });
 
-    let data;
+    let data = null;
+    const attempts = [];
+
     try {
       data = await browseSellerItems(seller, { marketplace });
+      attempts.push("browse");
     } catch (err) {
       console.warn("[EBX] competitor browse fail:", err.message);
+    }
+
+    if (!data || !data.activeListings) {
       try {
         data = await scrapeEbaySeller(seller, { marketplace });
+        attempts.push("scrape");
       } catch (err2) {
         console.warn("[EBX] competitor scrape fail:", err2.message);
-        data = { ...analyzeCompetitor(seller), live: false, source: "mock" };
       }
     }
 
+    if (!data || !data.activeListings) {
+      data = { ...analyzeCompetitor(seller), live: false, source: "mock" };
+      attempts.push("mock");
+    }
+
+    data._pipeline = attempts.join("→");
     insertCompetitor.run(seller, JSON.stringify(data));
     res.json({ success: true, data });
   } catch (err) {

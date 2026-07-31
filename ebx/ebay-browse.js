@@ -123,7 +123,6 @@ function estimateSold(it) {
 }
 
 async function browseSellerItems(seller, { marketplace = "FR", limit = 30 } = {}) {
-  // Filtre vendeur via Browse API
   const tokenAttempts = [
     { production: true, base: EBAY_BROWSE_BASE },
     { production: false, base: EBAY_API_BASE },
@@ -133,46 +132,59 @@ async function browseSellerItems(seller, { marketplace = "FR", limit = 30 } = {}
   for (const attempt of tokenAttempts) {
     try {
       const token = await getAppToken({ production: attempt.production });
-      const url = new URL(`${attempt.base}/buy/browse/v1/item_summary/search`);
-      url.searchParams.set("q", seller);
-      url.searchParams.set("limit", String(limit));
-      url.searchParams.set("filter", `sellers:{${seller}}`);
-
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-EBAY-C-MARKETPLACE-ID": marketplaceId(marketplace),
+      const strategies = [
+        () => {
+          const url = new URL(`${attempt.base}/buy/browse/v1/item_summary/search`);
+          url.searchParams.set("q", seller);
+          url.searchParams.set("limit", String(limit));
+          url.searchParams.set("filter", `sellers:{${seller}}`);
+          return url;
         },
-      });
+        () => {
+          const url = new URL(`${attempt.base}/buy/browse/v1/item_summary/search`);
+          url.searchParams.set("q", `"${seller}"`);
+          url.searchParams.set("limit", String(limit));
+          url.searchParams.set("filter", `sellers:{${seller}}`);
+          return url;
+        },
+        () => {
+          const url = new URL(`${attempt.base}/buy/browse/v1/item_summary/search`);
+          url.searchParams.set("q", seller);
+          url.searchParams.set("limit", String(limit));
+          return url;
+        },
+      ];
 
-      if (!res.ok) {
-        // retry without filter
-        const url2 = new URL(`${attempt.base}/buy/browse/v1/item_summary/search`);
-        url2.searchParams.set("q", `seller ${seller}`);
-        url2.searchParams.set("limit", String(limit));
-        const res2 = await fetch(url2, {
+      for (const makeUrl of strategies) {
+        const url = makeUrl();
+        const res = await fetch(url, {
           headers: {
             Authorization: `Bearer ${token}`,
             "X-EBAY-C-MARKETPLACE-ID": marketplaceId(marketplace),
+            "Content-Type": "application/json",
           },
         });
-        if (!res2.ok) {
-          lastError = new Error(await res2.text());
+        if (!res.ok) {
+          lastError = new Error(`Browse seller ${res.status}: ${await res.text()}`);
           continue;
         }
-        const data2 = await res2.json();
-        return normalizeSeller((data2.itemSummaries || []).filter((i) =>
-          (i.seller?.username || "").toLowerCase().includes(seller.toLowerCase())
-        ), seller, attempt.production);
+        const data = await res.json();
+        let summaries = data.itemSummaries || [];
+        // Si pas de filtre sellers, garder seulement le bon vendeur
+        if (!String(url.searchParams.get("filter") || "").includes("sellers:")) {
+          summaries = summaries.filter((i) =>
+            (i.seller?.username || "").toLowerCase().includes(seller.toLowerCase())
+          );
+        }
+        if (summaries.length) {
+          return normalizeSeller(summaries, seller, attempt.production);
+        }
       }
-
-      const data = await res.json();
-      return normalizeSeller(data.itemSummaries || [], seller, attempt.production);
     } catch (err) {
       lastError = err;
     }
   }
-  throw lastError || new Error("Seller browse failed");
+  throw lastError || new Error(`Aucune annonce trouvée pour le vendeur ${seller}`);
 }
 
 function normalizeSeller(summaries, seller, production) {
