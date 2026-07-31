@@ -602,22 +602,34 @@ function updateFinalTitle() {
         : "text-xs text-zinc-400";
   const chips = document.getElementById("title-chips");
   if (chips) {
-    chips.innerHTML = selectedKeywords
-      .map(
-        (k, i) =>
-          `<button type="button" onclick="removeKeyword(${i})" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100">${escapeHtml(k)} ×</button>`
-      )
-      .join("");
+    chips.innerHTML = selectedKeywords.length
+      ? selectedKeywords
+          .map(
+            (k, i) =>
+              `<button type="button" data-remove-kw="${i}" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100 hover:bg-red-50">${escapeHtml(k)} ×</button>`
+          )
+          .join("")
+      : `<span class="text-xs text-zinc-400">Aucun mot-clé — clique dans le tableau</span>`;
   }
 }
 
 function onTitleEdit() {
-  const t = document.getElementById("final-title").value.slice(0, 80);
-  document.getElementById("final-title").value = t;
+  const raw = document.getElementById("final-title").value.slice(0, 80);
+  document.getElementById("final-title").value = raw;
+  selectedKeywords = raw.trim() ? raw.trim().split(/\s+/) : [];
   const count = document.getElementById("title-count");
-  count.textContent = `${t.length}/80`;
+  count.textContent = `${raw.length}/80`;
   count.className =
-    t.length >= 80 ? "text-xs text-red-500 font-semibold" : t.length >= 70 ? "text-xs text-amber-600" : "text-xs text-zinc-400";
+    raw.length >= 80 ? "text-xs text-red-500 font-semibold" : raw.length >= 70 ? "text-xs text-amber-600" : "text-xs text-zinc-400";
+  const chips = document.getElementById("title-chips");
+  if (chips) {
+    chips.innerHTML = selectedKeywords
+      .map(
+        (k, i) =>
+          `<button type="button" data-remove-kw="${i}" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100">${escapeHtml(k)} ×</button>`
+      )
+      .join("");
+  }
 }
 
 function renderKeywords() {
@@ -630,7 +642,7 @@ function renderKeywords() {
   document.getElementById("kw-list").innerHTML = page
     .map((k) => {
       const selected = selectedKeywords.includes(k.keyword);
-      return `<tr class="keyword-row border-b border-zinc-50 cursor-pointer ${selected ? "bg-brand-50" : ""}" onclick="addKeyword(${JSON.stringify(k.keyword)})">
+      return `<tr class="keyword-row border-b border-zinc-50 cursor-pointer ${selected ? "bg-brand-50" : ""}" data-add-kw="${escapeHtml(k.keyword)}">
           <td class="p-3 font-medium text-brand-700">${selected ? "✓ " : ""}${escapeHtml(k.keyword)}</td>
           <td class="p-3 text-zinc-500">${Number(k.searches || 0).toLocaleString("fr-FR")}</td>
           <td class="p-3 text-zinc-500">${Number(k.sales || 0).toLocaleString("fr-FR")}</td>
@@ -648,17 +660,34 @@ function kwPage(dir) {
 }
 
 function addKeyword(kw) {
-  if (!selectedKeywords.includes(kw)) selectedKeywords.push(kw);
+  const word = String(kw || "").trim();
+  if (!word) return;
+  if (!selectedKeywords.includes(word)) selectedKeywords.push(word);
   updateFinalTitle();
   renderKeywords();
 }
 
 function removeKeyword(idx) {
-  selectedKeywords.splice(idx, 1);
-  if (!selectedKeywords.length) selectedKeywords = [titleData?.query || "produit"];
+  const i = Number(idx);
+  if (!Number.isFinite(i) || i < 0) return;
+  selectedKeywords.splice(i, 1);
   updateFinalTitle();
   renderKeywords();
 }
+
+// Délégation d'événements (évite les onclick cassés par les guillemets)
+document.getElementById("kw-list")?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-add-kw]");
+  if (!row) return;
+  addKeyword(row.getAttribute("data-add-kw"));
+});
+
+document.getElementById("title-chips")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove-kw]");
+  if (!btn) return;
+  removeKeyword(btn.getAttribute("data-remove-kw"));
+});
+
 
 function copyTitle() {
   navigator.clipboard.writeText(document.getElementById("final-title").value);
