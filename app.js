@@ -531,7 +531,7 @@ async function publishListing(id, btn) {
 
 async function runTitleBuilder() {
   const query = document.getElementById("title-query").value.trim();
-  if (!query) return;
+  if (!query) return alert("Saisis un mot-clé");
   const btn = document.getElementById("title-btn");
   btn.disabled = true;
   btn.textContent = "Analyse...";
@@ -547,15 +547,20 @@ async function runTitleBuilder() {
       }),
     });
     const json = await res.json();
+    if (!json.success && json.error) throw new Error(json.error);
     titleData = json.data;
+    if (!titleData) throw new Error("Aucune donnée renvoyée");
     selectedKeywords = [query];
     kwPageIdx = 0;
     document.getElementById("title-results").classList.remove("hidden");
-    document.getElementById("title-meta").textContent = `${titleData.analyzedListings} annonces analysées${
+    document.getElementById("title-meta").textContent = `${titleData.analyzedListings || 0} annonces analysées${
       titleData.live === false ? " (fallback)" : " (live)"
     }`;
     updateFinalTitle();
     renderKeywords();
+  } catch (err) {
+    alert("Title Builder: " + err.message);
+    console.error(err);
   } finally {
     btn.disabled = false;
     btn.textContent = "Générer";
