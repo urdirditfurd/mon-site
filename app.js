@@ -710,29 +710,64 @@ function setTheme(color, el) {
   themeColor = color;
   document.querySelectorAll(".theme-dot").forEach((d) => d.classList.remove("active"));
   (el || document.querySelector(`.theme-dot[data-theme="${color}"]`))?.classList.add("active");
-  if (lastDesc) regenerateDescTheme();
+  if (lastDesc) {
+    const tip = document.getElementById("desc-theme-status");
+    if (tip) tip.textContent = "Thème mis à jour…";
+    regenerateDescTheme().then(() => {
+      if (tip) tip.textContent = "Thème appliqué";
+    });
+  }
 }
 
 async function regenerateDescTheme() {
-  if (!lastDesc?.product) return;
+  const product =
+    lastDesc?.product ||
+    (lastDesc
+      ? {
+          title: lastDesc.product_name || lastDesc.seo_title || "Produit",
+          images: descImages.length ? descImages : lastDesc.images || [],
+          bullets: [],
+          description: "",
+          price: lastDesc.suggested_price,
+          source: lastDesc.source || "generic",
+        }
+      : null);
+  if (!product) return;
   try {
     const res = await fetch(API + "/api/rebuild-description", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        product: { ...lastDesc.product, images: descImages.length ? descImages : lastDesc.product.images },
+        product: { ...product, images: descImages.length ? descImages : product.images || [] },
         themeColor,
       }),
     });
     const json = await res.json();
-    if (json.success) applyDescResult(json.data);
-  } catch (_) {}
+    if (json.success) applyDescResult({ ...lastDesc, ...json.data, product: json.data.product || product });
+  } catch (err) {
+    console.error(err);
+    alert("Impossible d'appliquer le thème: " + err.message);
+  }
 }
 
 function applyDescResult(data) {
-  lastDesc = data;
+  const product =
+    data.product ||
+    {
+      title: data.product_name || data.seo_title || "Produit",
+      images: data.images || [],
+      bullets: [],
+      description: "",
+      price: data.suggested_price,
+      source: data.source || "generic",
+      url: data.source_url || "",
+    };
+  lastDesc = { ...data, product };
   const html = data.html_description || "";
-  descImages = data.images || descImages || [];
+  descImages = (data.images && data.images.length ? data.images : product.images) || descImages || [];
+  lastDesc.images = descImages;
+  lastDesc.product.images = descImages;
+
   document.getElementById("desc-html").textContent = html;
   const preview = document.getElementById("desc-preview");
   preview.classList.remove("flex", "items-center", "justify-center", "text-zinc-300");
@@ -743,29 +778,45 @@ function applyDescResult(data) {
   banner.classList.remove("hidden");
   document.getElementById("desc-detected").textContent =
     "Produit détecté : " + (data.product_name || data.seo_title || "").slice(0, 80);
-  document.getElementById("desc-img-badge").textContent = `${(data.images || []).length} images`;
+  document.getElementById("desc-img-badge").textContent = `${descImages.length} images`;
   document.getElementById("desc-source-badge").textContent = data.source || "generic";
 }
 
 function bindPreviewImages(preview) {
   preview.querySelectorAll("img").forEach((img, idx) => {
     img.style.cursor = "pointer";
-    img.title = "Changer l'image";
-    img.onclick = () => openImgModal(idx);
+    img.style.outline = "2px solid transparent";
+    img.style.transition = "outline .15s";
+    img.title = "Cliquer pour changer l'image";
+    img.onmouseenter = () => {
+      img.style.outline = "2px solid #7c3aed";
+    };
+    img.onmouseleave = () => {
+      img.style.outline = "2px solid transparent";
+    };
+    img.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openImgModal(idx);
+    };
   });
 }
 
 function openImgModal(idx) {
   replaceImgIdx = idx;
   const grid = document.getElementById("img-grid");
-  grid.innerHTML = (descImages || [])
-    .map(
-      (src, i) =>
-        `<button onclick="pickImage(${i})" class="rounded-xl overflow-hidden border hover:ring-2 ring-brand-400">
-          <img src="${escapeHtml(src)}" class="w-full h-32 object-cover" alt="" />
+  if (!descImages.length) {
+    grid.innerHTML = `<p class="text-sm text-zinc-400">Aucune image scrapée — régénère avec une URL Amazon valide.</p>`;
+  } else {
+    grid.innerHTML = descImages
+      .map(
+        (src, i) =>
+          `<button type="button" data-pick-img="${i}" class="rounded-xl overflow-hidden border hover:ring-2 ring-brand-400 ${i === 0 ? "ring-2 ring-brand-500" : ""}">
+          <img src="${escapeHtml(src)}" class="w-full h-32 object-cover pointer-events-none" alt="" />
         </button>`
-    )
-    .join("") || `<p class="text-sm text-zinc-400">Aucune image disponible</p>`;
+      )
+      .join("");
+  }
   const m = document.getElementById("img-modal");
   m.classList.remove("hidden");
   m.classList.add("flex");
@@ -778,15 +829,22 @@ function closeImgModal() {
 }
 
 async function pickImage(i) {
-  if (!descImages[i]) return;
-  const chosen = descImages[i];
+  const idx = Number(i);
+  if (!descImages[idx]) return;
+  const chosen = descImages[idx];
   const imgs = [...descImages];
-  imgs.splice(i, 1);
+  imgs.splice(idx, 1);
   imgs.unshift(chosen);
   descImages = imgs;
   closeImgModal();
   await regenerateDescTheme();
 }
+
+document.getElementById("img-grid")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-pick-img]");
+  if (!btn) return;
+  pickImage(btn.getAttribute("data-pick-img"));
+});
 
 async function generateFromUrl() {
   const productUrl = document.getElementById("desc-url").value.trim();

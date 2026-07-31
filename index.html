@@ -338,15 +338,24 @@
         </div>
 
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div class="px-4 py-3 border-b flex items-center justify-between gap-3">
+          <div class="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3">
             <div class="flex gap-1 bg-zinc-100 rounded-lg p-1">
               <button class="desc-tab active px-3 py-1.5 rounded-md text-sm" data-dtab="preview">Aperçu</button>
               <button class="desc-tab px-3 py-1.5 rounded-md text-sm text-zinc-500" data-dtab="html">HTML</button>
             </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-zinc-400">Couleur :</span>
+              <button onclick="setTheme('#667eea', this)" class="theme-dot w-6 h-6 rounded-full bg-[#667eea]" data-theme="#667eea"></button>
+              <button onclick="setTheme('#10b981', this)" class="theme-dot w-6 h-6 rounded-full bg-emerald-500" data-theme="#10b981"></button>
+              <button onclick="setTheme('#ef4444', this)" class="theme-dot w-6 h-6 rounded-full bg-red-500" data-theme="#ef4444"></button>
+              <button onclick="setTheme('#3b82f6', this)" class="theme-dot w-6 h-6 rounded-full bg-blue-500" data-theme="#3b82f6"></button>
+              <button onclick="setTheme('#f59e0b', this)" class="theme-dot w-6 h-6 rounded-full bg-amber-500" data-theme="#f59e0b"></button>
+              <span id="desc-theme-status" class="text-[11px] text-zinc-400 ml-2"></span>
+            </div>
             <button onclick="copyHtml()" class="text-sm px-3 py-1.5 bg-zinc-900 text-white rounded-lg">Copier HTML</button>
           </div>
           <div id="desc-preview-wrap" class="p-4 min-h-[420px]">
-            <p class="text-[11px] text-zinc-400 mb-2">Astuce vidéo : clique une image de l’aperçu pour la remplacer · change le thème avec les pastilles couleur</p>
+            <p class="text-[11px] text-zinc-400 mb-2">1) Génère · 2) change une pastille couleur · 3) clique une image de l’aperçu pour ouvrir la galerie</p>
             <div id="desc-preview" class="border rounded-xl p-3 min-h-[400px] overflow-auto text-sm text-zinc-300 flex items-center justify-center">Aperçu en temps réel</div>
           </div>
           <div id="desc-html-wrap" class="hidden bg-zinc-900 min-h-[420px]">
