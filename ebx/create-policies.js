@@ -211,6 +211,17 @@ async function createReturnPolicy() {
 
 async function main() {
   console.log(`\n⚡ EBX — Business Policies Sandbox (${MARKETPLACE})\n`);
+  diagnoseToken(TOKEN);
+
+  const ok = await probeToken();
+  if (!ok) {
+    console.log("Astuce : si tu avais déjà créé les policies avant, remets dans .env :");
+    console.log("  EBAY_FULFILLMENT_POLICY_ID=6240367000");
+    console.log("  EBAY_PAYMENT_POLICY_ID=6240368000");
+    console.log("  EBAY_RETURN_POLICY_ID=6240369000");
+    console.log("  (IDs de ta session précédente — à confirmer dans le Seller Hub Sandbox)\n");
+    process.exit(1);
+  }
 
   await optIn();
   const fulfillmentId = await createFulfillmentPolicy();

@@ -505,14 +505,37 @@ async function loadListings() {
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
         <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}</td>
         <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
-        <td class="p-3 text-right space-x-2">
+        <td class="p-3 text-right space-x-2 whitespace-nowrap">
           <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Voir</button>
           <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">Publier eBay</button>
+          <button onclick="deleteListing(${item.id})" class="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg">Suppr.</button>
         </td>
       </tr>`
         )
         .join("")
     : `<tr><td colspan="4" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+}
+
+async function deleteListing(id) {
+  if (!confirm("Supprimer ce listing local ?")) return;
+  await fetch(API + "/api/listings/" + id, { method: "DELETE" });
+  loadListings();
+}
+
+async function dedupeListings() {
+  const res = await fetch(API + "/api/listings/dedupe", { method: "POST" });
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  alert(`${json.removed} doublon(s) supprimé(s) — ${json.remaining} restant(s)`);
+  loadListings();
+}
+
+async function scrubListingImages() {
+  const res = await fetch(API + "/api/listings/scrub-images", { method: "POST" });
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  alert(`${json.fixed} listing(s) : images aléatoires (picsum) retirées`);
+  loadListings();
 }
 
 async function viewListing(id) {
@@ -1014,7 +1037,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

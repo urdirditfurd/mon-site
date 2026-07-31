@@ -253,7 +253,17 @@
       <!-- LISTINGS -->
       <section id="page-listings" class="page">
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div class="p-5 border-b flex justify-between items-center"><div><h3 class="font-semibold">Mes Listings</h3><p class="text-sm text-zinc-400">Historique SQLite local — Publier eBay = Sandbox</p></div><button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button></div>
+          <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
+            <div>
+              <h3 class="font-semibold">Mes Listings</h3>
+              <p class="text-sm text-zinc-400">Historique SQLite local — Publier eBay = Sandbox</p>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="dedupeListings()" class="text-sm px-3 py-1.5 border rounded-lg">Nettoyer doublons</button>
+              <button onclick="scrubListingImages()" class="text-sm px-3 py-1.5 border rounded-lg">Réparer images</button>
+              <button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+            </div>
+          </div>
           <div id="listings-publish-hint" class="hidden px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100"></div>
           <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">Date</th><th class="p-3">Titre SEO</th><th class="p-3">Prix</th><th class="p-3 text-right">Actions</th></tr></thead><tbody id="listings-body"></tbody></table>
         </div>

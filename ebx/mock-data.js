@@ -177,7 +177,7 @@ function buildDescriptionFromUrl(url, themeColor = "#667eea") {
     <p style="font-size:13px;opacity:.9;margin:0;">Découvrez le Produit — Qualité &amp; Authenticité</p>
   </div>
   <div style="text-align:center;margin-bottom:20px;">
-    <img src="https://picsum.photos/seed/${encodeURIComponent(name)}/800/500" alt="${escapeHtml(name)}" style="width:100%;border-radius:12px;max-height:280px;object-fit:cover;" />
+    <div style="background:#f4f4f5;border-radius:12px;padding:40px 16px;color:#71717a;font-size:13px;">Image produit à ajouter (pas d’image source)</div>
   </div>
   <div style="background:#fafafe;border-radius:12px;padding:16px;margin-bottom:16px;">
     <h2 style="font-size:15px;margin:0 0 10px;color:#2d2d5e;">Pourquoi Ce Produit ?</h2>

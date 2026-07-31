@@ -20,6 +20,7 @@ const {
   scrapeAmazonSearch,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  isRealProductImage,
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
 
@@ -69,6 +70,30 @@ const getRecentListings = db.prepare(
   "SELECT id, seo_title, suggested_price, keywords, source_url, created_at FROM listings ORDER BY created_at DESC LIMIT 50"
 );
 const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
+const deleteListingById = db.prepare("DELETE FROM listings WHERE id = ?");
+const insertListingStmt = db.prepare(
+  "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
+);
+const findRecentDuplicate = db.prepare(
+  `SELECT id FROM listings
+   WHERE seo_title = ?
+     AND ABS(suggested_price - ?) < 0.01
+     AND datetime(created_at) >= datetime('now', '-30 seconds')
+   ORDER BY id DESC LIMIT 1`
+);
+
+/** Insert listing; si même titre+prix dans les 30s → réutilise l'id (anti double-clic / double sniper). */
+function insertListingSafe({ seoTitle, html, price, keywords = "", sourceUrl = "" }) {
+  const title = String(seoTitle || "").slice(0, 80);
+  const suggested = Number(price) || 0;
+  const recent = findRecentDuplicate.get(title, suggested);
+  if (recent) {
+    return { id: Number(recent.id), duplicate: true };
+  }
+  const result = insertListingStmt.run(title, String(html || ""), suggested, String(keywords || ""), String(sourceUrl || ""));
+  return { id: Number(result.lastInsertRowid), duplicate: false };
+}
+
 const insertCompetitor = db.prepare(
   "INSERT INTO competitor_history (seller_name, payload) VALUES (?, ?)"
 );
@@ -496,7 +521,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
-        // 3) Import détails
+        // 3) Import détails — privilégier vraie image eBay/Amazon, jamais picsum aléatoire
         let detail = null;
         if (supplier.url && String(supplier.source || "").includes("amazon")) {
           try {
@@ -509,7 +534,7 @@ app.post("/api/auto-snipe", async (req, res) => {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
           }
         } else {
-          send({ type: "log", message: `[IMPORT] Import métadonnées fournisseur` });
+          send({ type: "log", message: `[IMPORT] Métadonnées eBay + fournisseur` });
         }
 
         const cost = detail?.price || supplier.price || Number(((target.price || 20) * 0.4).toFixed(2));
@@ -520,32 +545,62 @@ app.post("/api/auto-snipe", async (req, res) => {
           message: `[MARGIN] Coût ${Number(cost).toFixed(2)}€ → Revente ${sellPrice}€ (marge ~${marginPct}%)`,
         });
 
-        const html = detail
-          ? buildHtmlFromProduct(detail, "#667eea")
-          : buildDescriptionFromUrl(supplier.url || target.url || "").html_description;
-
-        const insert = db.prepare(
-          "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
-        );
         const title = (detail?.title || supplier.title || target.title || "Produit EBX").slice(0, 80);
-        const result = insert.run(title, html, sellPrice, query, supplier.url || target.url || "");
+        const images = [
+          ...(detail?.images || []),
+          target.image,
+          supplier.image,
+        ].filter(isRealProductImage);
+
+        const html = buildHtmlFromProduct(
+          {
+            title,
+            images,
+            bullets: detail?.bullets?.length
+              ? detail.bullets
+              : [
+                  "Produit sélectionné via Auto-Snipe",
+                  `Source: ${supplier.source || "fournisseur"}`,
+                  "Description à enrichir avant publication",
+                ],
+            description:
+              detail?.description ||
+              `Opportunité eBay : ${target.title || title}. Fournisseur estimé à ${Number(cost).toFixed(2)}€.`,
+            price: cost,
+            source: detail?.source || supplier.source || "snipe",
+          },
+          "#667eea"
+        );
+
+        const result = insertListingSafe({
+          seoTitle: title,
+          html,
+          price: sellPrice,
+          keywords: query,
+          sourceUrl: supplier.url || target.url || "",
+        });
+        if (result.duplicate) {
+          send({ type: "log", message: `[SKIP] Doublon récent ignoré — "${title.slice(0, 40)}" (id ${result.id})` });
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
+        }
         imported += 1;
         send({ type: "stats", scanned, imported, listed, errors });
         await sleep(250);
 
         // 4) Listing (simulation ou réel)
         if (!autoList) {
-          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.lastInsertRowid})` });
+          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.id})` });
         } else if (testMode !== false) {
           send({
             type: "log",
-            message: `[SIMULATION] Listé sur eBay à ${sellPrice} EUR — "${title.slice(0, 50)}" (id local ${result.lastInsertRowid})`,
+            message: `[SIMULATION] Listé sur eBay à ${sellPrice} EUR — "${title.slice(0, 50)}" (id local ${result.id})`,
           });
           listed += 1;
         } else {
           send({ type: "log", message: `[LISTING] Publication eBay Sandbox (mode REEL)...` });
           try {
-            const listing = getListingById.get(Number(result.lastInsertRowid));
+            const listing = getListingById.get(Number(result.id));
             const pub = await publishToEbay(listing, listing.id);
             send({ type: "log", message: `[OK] Publié — listingId=${pub.listingId || "n/a"}` });
             listed += 1;
@@ -592,6 +647,7 @@ app.post("/api/generate-listing", async (req, res) => {
     if (productUrl) {
       try {
         scraped = await scrapeProduct(productUrl);
+        scraped.images = (scraped.images || []).filter(isRealProductImage);
         listing = {
           product_name: scraped.title,
           seo_title: `${scraped.title}`.slice(0, 80),
@@ -643,18 +699,18 @@ app.post("/api/generate-listing", async (req, res) => {
       listing = await generateListing(productName, rawKeywords || "");
     }
 
-    const insert = db.prepare(
-      "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
-    );
-    const result = insert.run(
-      listing.seo_title || "",
-      listing.html_description || "",
-      listing.suggested_price || 0,
-      rawKeywords || "",
-      productUrl || ""
-    );
+    const result = insertListingSafe({
+      seoTitle: listing.seo_title || "",
+      html: listing.html_description || "",
+      price: listing.suggested_price || 0,
+      keywords: rawKeywords || "",
+      sourceUrl: productUrl || "",
+    });
 
-    return res.json({ success: true, data: { ...listing, id: Number(result.lastInsertRowid) } });
+    return res.json({
+      success: true,
+      data: { ...listing, id: result.id, duplicate: result.duplicate || false },
+    });
   } catch (err) {
     console.error("[EBX] Erreur génération :", err);
     if (err.code === "ECONNREFUSED") {
@@ -704,6 +760,67 @@ app.get("/api/listings/:id", (req, res) => {
     return res.json({ success: true, data: listing });
   } catch (err) {
     return res.status(500).json({ success: false, error: "Erreur base de données." });
+  }
+});
+
+app.delete("/api/listings/:id", (req, res) => {
+  try {
+    deleteListingById.run(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/listings/dedupe", (_req, res) => {
+  try {
+    // Garde le plus récent par titre SEO normalisé
+    const rows = db.prepare("SELECT id, seo_title, created_at FROM listings ORDER BY created_at DESC").all();
+    const seen = new Set();
+    let removed = 0;
+    for (const row of rows) {
+      const key = String(row.seo_title || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 60);
+      if (!key) continue;
+      if (seen.has(key)) {
+        deleteListingById.run(row.id);
+        removed += 1;
+      } else {
+        seen.add(key);
+      }
+    }
+    return res.json({ success: true, removed, remaining: getRecentListings.all().length });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Remplace les images picsum (aléatoires) dans le HTML des listings existants. */
+app.post("/api/listings/scrub-images", (_req, res) => {
+  try {
+    const rows = db.prepare("SELECT id, html_description FROM listings").all();
+    const update = db.prepare("UPDATE listings SET html_description = ? WHERE id = ?");
+    const placeholder =
+      '<div style="background:#f4f4f5;border-radius:14px;padding:40px 16px;text-align:center;color:#71717a;font-size:13px;">Image produit à ajouter (ancienne image aléatoire retirée)</div>';
+    let fixed = 0;
+    for (const row of rows) {
+      const html = String(row.html_description || "");
+      if (!/picsum\.photos/i.test(html)) continue;
+      const cleaned = html.replace(
+        /<img[^>]+src=["'][^"']*picsum\.photos[^"']*["'][^>]*>/gi,
+        placeholder
+      );
+      if (cleaned !== html) {
+        update.run(cleaned, row.id);
+        fixed += 1;
+      }
+    }
+    return res.json({ success: true, fixed });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

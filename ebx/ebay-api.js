@@ -128,11 +128,33 @@ async function ensureInventoryLocation(token) {
 }
 
 /**
+ * Extrait les URLs d'images produit depuis le HTML (ignore picsum / placeholders).
+ */
+function extractImageUrls(html) {
+  const urls = [];
+  const re = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    const src = m[1];
+    if (!/^https?:\/\//i.test(src)) continue;
+    if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel/i.test(src)) continue;
+    if (!urls.includes(src)) urls.push(src);
+  }
+  return urls;
+}
+
+/**
  * Crée ou met à jour un item dans l'inventaire eBay (Inventory API).
  */
 async function createOrReplaceInventoryItem(token, sku, listing) {
   const url = `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`;
   const title = (listing.seo_title || "EBX Product").slice(0, 80);
+  const imageUrls = extractImageUrls(listing.html_description).slice(0, 8);
+  if (!imageUrls.length) {
+    throw new Error(
+      "Aucune image produit dans le listing HTML. Rouvre Description Builder / Auto-Snipe avec une vraie image avant de publier."
+    );
+  }
 
   const body = {
     availability: {
@@ -146,9 +168,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
         Brand: ["Unbranded"],
         Type: ["Exercise Bike"],
       },
-      imageUrls: [
-        "https://picsum.photos/seed/ebxproduct/800/800",
-      ],
+      imageUrls,
     },
   };
 

@@ -308,9 +308,8 @@ async function scrapeProduct(url) {
     }
 
     if (product.title && product.title.length >= 3 && !/robot|captcha|sign in|error page/i.test(product.title)) {
-      if (!product.images.length) {
-        product.images = [`https://picsum.photos/seed/${encodeURIComponent(product.title.slice(0, 20))}/800/800`];
-      }
+      // Jamais picsum : image incohérente avec le produit (ex. pinceaux → photo random)
+      product.images = (product.images || []).filter(isRealProductImage);
       product.live = true;
       return product;
     }
@@ -327,10 +326,18 @@ async function scrapeProduct(url) {
   ) {
     throw new Error(`Impossible d'extraire le produit (${source}) — essayez une autre URL`);
   }
-  if (!viaJina.images.length) {
-    viaJina.images = [`https://picsum.photos/seed/${encodeURIComponent(viaJina.title.slice(0, 20))}/800/800`];
-  }
+  viaJina.images = (viaJina.images || []).filter(isRealProductImage);
   return viaJina;
+}
+
+function isRealProductImage(src) {
+  if (!src || typeof src !== "string") return false;
+  const u = src.trim();
+  if (!/^https?:\/\//i.test(u)) return false;
+  if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel|lorem\.picsum/i.test(u)) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -786,15 +793,16 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
 }
 
 function buildHtmlFromProduct(product, themeColor = "#667eea") {
-  const imgs = (product.images || []).slice(0, 6);
+  const imgs = (product.images || []).filter(isRealProductImage).slice(0, 6);
   const bullets = (product.bullets || []).slice(0, 6);
   const bulletHtml = bullets.length
     ? bullets.map((b) => `<li style="margin:0 0 6px;">${escapeHtml(b)}</li>`).join("\n")
     : `<li>Qualité premium sélectionnée</li><li>Livraison soignée</li><li>Satisfaction client</li>`;
 
+  const placeholder = `<div style="background:#f4f4f5;border-radius:14px;padding:48px 16px;text-align:center;color:#71717a;font-size:13px;">Image produit à ajouter</div>`;
   const mainImg = imgs[0]
     ? `<img src="${escapeHtml(imgs[0])}" alt="${escapeHtml(product.title)}" style="width:100%;border-radius:14px;max-height:280px;object-fit:cover;" />`
-    : "";
+    : placeholder;
   const sideImgs = imgs
     .slice(1, 3)
     .map(
@@ -876,4 +884,5 @@ module.exports = {
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   detectSource,
+  isRealProductImage,
 };
