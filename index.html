@@ -6,7 +6,7 @@
   <title>EBX — Dropshipping Automation</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwindcss.config = {
+    tailwind.config = {
       theme: {
         extend: {
           colors: {
@@ -41,6 +41,19 @@
     .toggle:checked::after { left: 22px; }
     .theme-dot.active { outline: 2px solid #7c3aed; outline-offset: 2px; }
     .desc-tab.active { background: #18181b; color: #fff; }
+    /* CTA toujours visibles même si Tailwind CDN rate la couleur brand */
+    .btn-primary {
+      background: #7c3aed !important;
+      color: #fff !important;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      border-radius: 0.75rem;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.875rem;
+    }
+    .btn-primary:hover { background: #6d28d9 !important; }
+    .btn-primary:disabled { opacity: 0.6; cursor: wait; }
   </style>
 </head>
 <body class="bg-zinc-50 text-zinc-800 min-h-screen flex">
@@ -95,7 +108,7 @@
         <div class="bg-white rounded-2xl border border-zinc-200 p-6">
           <h3 class="font-semibold mb-2">Actions rapides</h3>
           <div class="flex flex-wrap gap-3">
-            <button onclick="navigate('sniper')" class="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium">Lancer Auto-Snipe</button>
+            <button onclick="navigate('sniper')" class="btn-primary">Lancer Auto-Snipe</button>
             <button onclick="navigate('description')" class="px-4 py-2 bg-zinc-900 text-white rounded-xl text-sm font-medium">Description Builder</button>
             <button onclick="navigate('competitors')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">Analyser un concurrent</button>
             <button onclick="navigate('title-builder')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">Title Builder</button>
@@ -141,7 +154,7 @@
           <div class="flex gap-3">
             <div class="flex items-center gap-2 px-3 border border-zinc-200 rounded-xl bg-zinc-50 text-sm">🇫🇷 FR</div>
             <input id="competitor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 text-sm" placeholder="Nom du vendeur eBay..." value="vaissellebio-lsbio" />
-            <button onclick="analyzeCompetitor()" id="competitor-btn" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Analyser</button>
+            <button onclick="analyzeCompetitor()" id="competitor-btn" class="btn-primary">Analyser</button>
           </div>
         </div>
         <div>
@@ -165,7 +178,7 @@
               <h3 class="text-xl font-bold">Auto-Snipe</h3>
               <p class="text-sm text-zinc-400">Listing automatique 100% mains libres</p>
             </div>
-            <button id="snipe-btn" onclick="runSnipe()" class="px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold shrink-0">Lancer Auto-Snipe</button>
+            <button id="snipe-btn" onclick="runSnipe()" class="btn-primary shrink-0">Lancer Auto-Snipe</button>
           </div>
 
           <div>
@@ -311,7 +324,7 @@
             <button onclick="setTheme('#ef4444', this)" class="theme-dot w-7 h-7 rounded-full bg-red-500" data-theme="#ef4444"></button>
             <button onclick="setTheme('#3b82f6', this)" class="theme-dot w-7 h-7 rounded-full bg-blue-500" data-theme="#3b82f6"></button>
             <button onclick="setTheme('#f59e0b', this)" class="theme-dot w-7 h-7 rounded-full bg-amber-500" data-theme="#f59e0b"></button>
-            <button id="desc-btn" onclick="generateFromUrl()" class="ml-auto px-5 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold">Générer la description</button>
+            <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary ml-auto">Générer la description</button>
           </div>
         </div>
 
