@@ -849,3 +849,28 @@ async function loadSetupStatus() {
 
 checkHealth();
 loadDashboard();
+
+
+// Expose handlers for onclick + bind as backup
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","closeModal","closeImgModal","pickImage","addKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
+  if (typeof globalThis[name] === "function") window[name] = globalThis[name];
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const map = [
+    ["title-btn", "runTitleBuilder"],
+    ["desc-btn", "generateFromUrl"],
+    ["snipe-btn", "runSnipe"],
+    ["competitor-btn", "analyzeCompetitor"],
+  ];
+  for (const [id, fn] of map) {
+    const el = document.getElementById(id);
+    if (el && typeof window[fn] === "function" && !el.dataset.bound) {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        window[fn]();
+      });
+      el.dataset.bound = "1";
+    }
+  }
+});
