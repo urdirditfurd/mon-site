@@ -1,6 +1,6 @@
 const { loadEbayEnv } = require("./load-env");
 loadEbayEnv();
-require("dotenv").config(); // fallback autres clés éventuelles
+// Ne pas rappeler dotenv après : il coupe les valeurs contenant # si mal quotées
 const express = require("express");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");

@@ -60,6 +60,9 @@ function describeAuthState() {
  *   2. EBAY_USER_TOKEN collé depuis le portail (~2h, dépannage uniquement)
  */
 async function getAccessToken() {
+  // Recharge .env à chaque appel (évite un vieux node server.js avec env périmé)
+  loadEbayEnv();
+
   if (cachedToken && Date.now() < tokenExpiry) {
     return cachedToken;
   }
@@ -104,25 +107,18 @@ async function getAccessToken() {
     return userToken;
   }
 
+  // Ignore USER_TOKEN fantôme (ligne vide / 5 car.) — message clair
   const state = describeAuthState();
-  const hints = [];
-  if (state.refreshLen > 0 && state.refreshLen < 40) {
-    hints.push(
-      `EBAY_REFRESH_TOKEN trop court (${state.refreshLen} car.) — souvent coupé par un #. Mets TOUTE la valeur entre guillemets doubles.`
-    );
-  } else if (state.refreshLen === 0) {
-    hints.push("EBAY_REFRESH_TOKEN absent ou vide dans .env");
-    hints.push("Lance: npm run env-check");
-  }
-  if (state.userLen > 0 && state.userLen < 80) {
-    hints.push(
-      `EBAY_USER_TOKEN trop court (${state.userLen} car.) — commente-le (# EBAY_USER_TOKEN=) et utilise le refresh.`
-    );
-  }
-  hints.push('Exemple: EBAY_REFRESH_TOKEN="v^1.1#i^1#...."');
-  hints.push("Puis: npm run oauth  (si besoin de régénérer) → npm run policies");
-
-  throw new Error(hints.join("\n"));
+  throw new Error(
+    [
+      "Impossible d'obtenir un access token eBay.",
+      `REFRESH_TOKEN=${state.refreshLen} car. | USER_TOKEN=${state.userLen} car.`,
+      state.refreshLen === 0
+        ? "→ EBAY_REFRESH_TOKEN manquant dans .env — npm run oauth"
+        : "→ EBAY_REFRESH_TOKEN trop court — vérifie les guillemets / npm run oauth",
+      "Puis ARRÊTE le serveur (Ctrl+C) et relance: node server.js",
+    ].join("\n")
+  );
 }
 
 /**

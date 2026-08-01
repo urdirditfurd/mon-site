@@ -97,6 +97,13 @@ function loadEbayEnv({ override = true } = {}) {
     }
   }
 
+  // Si USER_TOKEN n'est plus dans .env, efface une éventuelle valeur héritée (Windows / vieux process)
+  if (!result.keys.includes("EBAY_USER_TOKEN")) {
+    delete process.env.EBAY_USER_TOKEN;
+  } else if (cleanEnvToken(process.env.EBAY_USER_TOKEN).length < 80) {
+    delete process.env.EBAY_USER_TOKEN;
+  }
+
   const refresh = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
   const user = cleanEnvToken(process.env.EBAY_USER_TOKEN);
   if (!result.keys.includes("EBAY_REFRESH_TOKEN")) {
