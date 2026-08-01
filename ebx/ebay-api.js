@@ -309,10 +309,7 @@ async function publishOffer(token, offerId) {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers: ebaySellHeaders(token, { withContentLanguage: true }),
   });
 
   const data = await res.json();
