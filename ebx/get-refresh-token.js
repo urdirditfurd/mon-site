@@ -28,9 +28,11 @@ const SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.account",
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+  "https://api.ebay.com/oauth/api_scope/sell.marketing",
 ].join(" ");
 
 function buildConsentUrl() {
+  // URLSearchParams encode correctement les espaces des scopes
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: "code",

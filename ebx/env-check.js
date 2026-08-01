@@ -21,7 +21,10 @@ console.log("\n— Longueurs (pas les valeurs) —");
 console.log(`  EBAY_CLIENT_ID      : ${cid.length} car. ${cid.length > 10 ? "✅" : "❌"}`);
 console.log(`  EBAY_CLIENT_SECRET  : ${secret.length} car. ${secret.length > 10 ? "✅" : "❌"}`);
 console.log(`  EBAY_RU_NAME        : ${ru.length} car. ${ru.length > 5 ? "✅" : "⚠️"}`);
-console.log(`  EBAY_REFRESH_TOKEN  : ${refresh.length} car. ${refresh.length >= 40 ? "✅" : "❌"}`);
+  console.log(`  EBAY_REFRESH_TOKEN  : ${refresh.length} car. ${refresh.length >= 40 ? "✅" : "❌"}`);
+  if (refresh.length > 0 && refresh.length < 150) {
+    console.log("  ⚠️  Refresh court (<150) — souvent scopes incomplets → npm run oauth");
+  }
 console.log(`  EBAY_USER_TOKEN     : ${user.length} car. ${user.length === 0 ? "✅ (vide OK)" : user.length >= 80 ? "fallback OK" : "⚠️ court"}`);
 console.log(`  Policies fulfill/pay/return : ${
   process.env.EBAY_FULFILLMENT_POLICY_ID && process.env.EBAY_PAYMENT_POLICY_ID && process.env.EBAY_RETURN_POLICY_ID

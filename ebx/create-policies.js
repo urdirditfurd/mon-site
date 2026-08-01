@@ -190,10 +190,20 @@ async function createReturnPolicy(token) {
 async function main() {
   console.log(`\n⚡ EBX — Business Policies Sandbox (${MARKETPLACE})\n`);
 
+  const existing = {
+    fulfillment: process.env.EBAY_FULFILLMENT_POLICY_ID,
+    payment: process.env.EBAY_PAYMENT_POLICY_ID,
+    return: process.env.EBAY_RETURN_POLICY_ID,
+  };
+  const hasExisting = existing.fulfillment && existing.payment && existing.return;
+
   const auth = describeAuthState();
   console.log("— Auth .env —");
   console.log(`  CLIENT_ID/SECRET : ${auth.hasClientId && auth.hasClientSecret ? "OK" : "MANQUANT"}`);
   console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌ trop court / vide"}`);
+  if (auth.refreshLen > 0 && auth.refreshLen < 150) {
+    console.log("  ⚠️  Refresh token court (<150) — souvent scopes incomplets. Préfère npm run oauth.");
+  }
   console.log(`  USER_TOKEN       : ${auth.userLen} car. ${auth.userLen >= 80 ? "(ok fallback)" : "(ignoré si court)"}`);
   console.log("");
 
@@ -203,11 +213,28 @@ async function main() {
     console.log("  Auth: access token OK\n");
   } catch (err) {
     console.error("❌", err.message);
+    if (hasExisting) {
+      console.log("\nTes policy IDs sont déjà dans .env — tu peux publier sans relancer policies :");
+      console.log(`  EBAY_FULFILLMENT_POLICY_ID=${existing.fulfillment}`);
+      console.log(`  EBAY_PAYMENT_POLICY_ID=${existing.payment}`);
+      console.log(`  EBAY_RETURN_POLICY_ID=${existing.return}`);
+      console.log("  → node server.js puis Publier eBay\n");
+      process.exit(0);
+    }
     process.exit(1);
   }
 
   const ok = await probeToken(token);
   if (!ok) {
+    if (hasExisting) {
+      console.log("⚠️  Privilege API refusée (scopes OAuth incomplets), mais tes IDs existent déjà.");
+      console.log("Tu peux continuer à publier. Pour corriger les scopes : npm run oauth\n");
+      console.log(`EBAY_FULFILLMENT_POLICY_ID=${existing.fulfillment}`);
+      console.log(`EBAY_PAYMENT_POLICY_ID=${existing.payment}`);
+      console.log(`EBAY_RETURN_POLICY_ID=${existing.return}`);
+      console.log(`EBAY_MARKETPLACE_ID=${MARKETPLACE}\n`);
+      process.exit(0);
+    }
     console.log("Astuce : si tu avais déjà créé les policies avant, remets dans .env :");
     console.log("  EBAY_FULFILLMENT_POLICY_ID=6240367000");
     console.log("  EBAY_PAYMENT_POLICY_ID=6240368000");
