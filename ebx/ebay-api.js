@@ -287,7 +287,6 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
       description: shortDesc,
       aspects: {
         Brand: ["Unbranded"],
-        Type: ["Exercise Bike"],
       },
       imageUrls,
     },
