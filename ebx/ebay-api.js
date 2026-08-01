@@ -36,11 +36,44 @@ function ebayClientSecret() {
 }
 
 function ebayApiBase() {
+  // EBAY_ENV=production → API réelle (ne pas activer tant que refresh/policies prod pas prêts)
+  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
+    return env("EBAY_API_BASE", "https://api.ebay.com");
+  }
   return env("EBAY_API_BASE", "https://api.sandbox.ebay.com");
 }
 
 function ebayAuthUrl() {
+  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
+    return env("EBAY_AUTH_URL", "https://api.ebay.com/identity/v1/oauth2/token");
+  }
   return env("EBAY_AUTH_URL", "https://api.sandbox.ebay.com/identity/v1/oauth2/token");
+}
+
+function ebayTradingUrl() {
+  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
+    return "https://api.ebay.com/ws/api.dll";
+  }
+  return "https://api.sandbox.ebay.com/ws/api.dll";
+}
+
+function ebaySiteId() {
+  // SiteID Trading API
+  switch (env("EBAY_MARKETPLACE_ID", "EBAY_US")) {
+    case "EBAY_FR":
+      return "71";
+    case "EBAY_GB":
+      return "3";
+    case "EBAY_DE":
+      return "77";
+    case "EBAY_IT":
+      return "101";
+    case "EBAY_ES":
+      return "186";
+    case "EBAY_US":
+    default:
+      return "0";
+  }
 }
 
 let cachedToken = null;
@@ -251,13 +284,131 @@ function extractImageUrls(html) {
   return urls;
 }
 
+async function downloadImageBuffer(imageUrl) {
+  const res = await fetch(imageUrl, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      Referer: "https://www.amazon.fr/",
+    },
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`download image HTTP ${res.status}`);
+  const contentType = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+  if (!/^image\//i.test(contentType) && !/octet-stream/i.test(contentType)) {
+    throw new Error(`pas une image (${contentType})`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 500) throw new Error("image trop petite");
+  if (buf.length > 12 * 1024 * 1024) throw new Error("image trop lourde (>12MB)");
+  return { buf, contentType: /^image\//i.test(contentType) ? contentType : "image/jpeg" };
+}
+
+/**
+ * Héberge une image sur eBay Picture Services (EPS) — corrige "Gallery picture".
+ * Amazon bloque souvent eBay → on télécharge nous-mêmes puis on upload en binaire.
+ */
+async function uploadImageToEbayEps(token, imageUrl, index = 0) {
+  const { buf, contentType } = await downloadImageBuffer(imageUrl);
+  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+  const boundary = `----EBX${Date.now()}${index}`;
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+  <WarningLevel>High</WarningLevel>
+  <PictureName>ebx_${index}</PictureName>
+</UploadSiteHostedPicturesRequest>`;
+
+  const preamble =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="XML Payload"\r\n` +
+    `Content-Type: text/xml; charset=UTF-8\r\n\r\n` +
+    `${xml}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="image"; filename="ebx_${index}.${ext}"\r\n` +
+    `Content-Type: ${contentType}\r\n` +
+    `Content-Transfer-Encoding: binary\r\n\r\n`;
+  const closing = `\r\n--${boundary}--\r\n`;
+  const body = Buffer.concat([Buffer.from(preamble, "utf8"), buf, Buffer.from(closing, "utf8")]);
+
+  const tradingUrl = new URL(ebayTradingUrl());
+  const responseText = await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: tradingUrl.protocol,
+        hostname: tradingUrl.hostname,
+        port: 443,
+        path: tradingUrl.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": body.length,
+          "X-EBAY-API-IAF-TOKEN": token,
+          "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
+          "X-EBAY-API-SITEID": ebaySiteId(),
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "1399",
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      }
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+
+  const ack = (responseText.match(/<Ack>([^<]+)<\/Ack>/i) || [])[1] || "";
+  const fullUrl =
+    (responseText.match(/<FullURL>([^<]+)<\/FullURL>/i) || [])[1] ||
+    (responseText.match(/<SiteHostedPictureDetails>[\s\S]*?<FullURL>([^<]+)<\/FullURL>/i) || [])[1];
+  if (!/Success|Warning/i.test(ack) || !fullUrl) {
+    const shortErr = (responseText.match(/<ShortMessage>([^<]+)<\/ShortMessage>/i) || [])[1] || "";
+    const longErr = (responseText.match(/<LongMessage>([^<]+)<\/LongMessage>/i) || [])[1] || "";
+    throw new Error(`EPS upload fail (${ack || "no-ack"}): ${shortErr || longErr || responseText.slice(0, 220)}`);
+  }
+  return fullUrl.replace(/&amp;/g, "&");
+}
+
+/** Convertit les URLs Amazon/etc. en URLs hébergées eBay (EPS). */
+async function hostImagesForGallery(token, sourceUrls) {
+  const hosted = [];
+  for (let i = 0; i < Math.min(sourceUrls.length, 8); i++) {
+    const src = sourceUrls[i];
+    try {
+      // Déjà hébergée chez eBay
+      if (/ebayimg\.com|ebaystatic\.com/i.test(src)) {
+        hosted.push(src);
+        continue;
+      }
+      const eps = await uploadImageToEbayEps(token, src, i);
+      console.log(`[EBX] Image EPS ${i + 1}/${sourceUrls.length}: OK`);
+      hosted.push(eps);
+    } catch (err) {
+      console.warn(`[EBX] Image EPS ${i + 1} skip: ${err.message}`);
+    }
+  }
+  return hosted;
+}
+
 async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
   const title = (listing.seo_title || "EBX Product").slice(0, 80);
-  const imageUrls = extractImageUrls(listing.html_description).slice(0, 8);
-  if (!imageUrls.length) {
+  const sourceImages = extractImageUrls(listing.html_description).slice(0, 8);
+  if (!sourceImages.length) {
     throw new Error(
       "Aucune image produit dans le listing HTML. Rouvre Description Builder / Auto-Snipe avec une vraie image avant de publier."
+    );
+  }
+
+  console.log(`[EBX] Hébergement galerie EPS (${sourceImages.length} image(s))…`);
+  const imageUrls = await hostImagesForGallery(token, sourceImages);
+  if (!imageUrls.length) {
+    throw new Error(
+      "Impossible d'héberger les images sur eBay (Gallery). Vérifie que les images source sont accessibles."
     );
   }
 
@@ -304,7 +455,7 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
     throw new Error(`Inventory API error (${res.status}) [locale=${res.locale}]: ${res.text}`);
   }
 
-  return { sku, status: "inventory_created" };
+  return { sku, status: "inventory_created", imageUrls };
 }
 
 function categoryTreeIdForMarketplace(marketplaceId) {
