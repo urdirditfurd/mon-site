@@ -6,10 +6,12 @@
  *   2. Créer une application Sandbox → récupérer Client ID + Client Secret
  *   3. Remplir le .env avec les valeurs
  *
- * Ce module utilise l'API REST eBay (Inventory API + OAuth2 Client Credentials).
+ * Ce module utilise l'API REST eBay (Inventory API + OAuth2).
  * En Sandbox, les listings ne sont pas réels — parfait pour tester.
  */
 
+const https = require("https");
+const { URL } = require("url");
 const { loadEbayEnv, cleanEnvToken } = require("./load-env");
 loadEbayEnv();
 
@@ -60,7 +62,6 @@ function describeAuthState() {
  *   2. EBAY_USER_TOKEN collé depuis le portail (~2h, dépannage uniquement)
  */
 async function getAccessToken() {
-  // Recharge .env à chaque appel (évite un vieux node server.js avec env périmé)
   loadEbayEnv();
 
   if (cachedToken && Date.now() < tokenExpiry) {
@@ -86,8 +87,6 @@ async function getAccessToken() {
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refresh,
-        // Ne pas renvoyer de scope ici : eBay exige un sous-ensemble exact
-        // des scopes du consentement. Sans scope → conserve ceux d'origine.
       }),
     });
 
@@ -107,7 +106,6 @@ async function getAccessToken() {
     return userToken;
   }
 
-  // Ignore USER_TOKEN fantôme (ligne vide / 5 car.) — message clair
   const state = describeAuthState();
   throw new Error(
     [
@@ -116,12 +114,13 @@ async function getAccessToken() {
       state.refreshLen === 0
         ? "→ EBAY_REFRESH_TOKEN manquant dans .env — npm run oauth"
         : "→ EBAY_REFRESH_TOKEN trop court — vérifie les guillemets / npm run oauth",
-      "Puis ARRÊTE le serveur (Ctrl+C) et relance: node server.js",
+      "Puis ARRÊTE le serveur et relance: node server.js",
     ].join("\n")
   );
 }
 
 function ebayMarketplaceLocale() {
+  // Inventory Sandbox US exige en-US. Ne pas dériver de Windows FR.
   const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
   switch (market) {
     case "EBAY_FR":
@@ -135,36 +134,79 @@ function ebayMarketplaceLocale() {
     case "EBAY_ES":
       return "es-ES";
     case "EBAY_US":
+      return "en-US";
     default:
       return "en-US";
   }
 }
 
-/** Headers Inventory API — Force locale (sinon Windows FR envoie Accept-Language: fr → erreur 25709). */
-function ebaySellHeaders(token, { withContentLanguage = false } = {}) {
+/**
+ * HTTP eBay Sell via https natif.
+ * Évite que fetch/undici injecte Accept-Language: fr sous Windows FR (erreur 25709).
+ */
+function ebayHttpsRequest(method, urlString, { token, body, contentLanguage = false } = {}) {
   const locale = ebayMarketplaceLocale();
+  const url = new URL(urlString);
+  const payload = body == null ? null : typeof body === "string" ? body : JSON.stringify(body);
+
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: "application/json",
     "Accept-Language": locale,
+    "User-Agent": "EBX-Dropshipping/1.0",
+    Connection: "close",
   };
-  if (withContentLanguage) {
+
+  if (payload != null) {
     headers["Content-Type"] = "application/json";
+    headers["Content-Length"] = Buffer.byteLength(payload);
+  }
+  if (contentLanguage || payload != null) {
     headers["Content-Language"] = locale;
   }
-  return headers;
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname + url.search,
+        method,
+        headers,
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            status: res.statusCode || 0,
+            ok: (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300,
+            text,
+            json: () => {
+              try {
+                return text ? JSON.parse(text) : null;
+              } catch {
+                return { raw: text };
+              }
+            },
+            locale,
+          });
+        });
+      }
+    );
+    req.on("error", reject);
+    if (payload != null) req.write(payload);
+    req.end();
+  });
 }
 
-/**
- * Crée le lieu d'inventaire "default" s'il n'existe pas encore.
- */
 async function ensureInventoryLocation(token) {
   const key = process.env.EBAY_MERCHANT_LOCATION_KEY || "default";
   const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
 
-  const existing = await fetch(getUrl, {
-    headers: ebaySellHeaders(token),
-  });
+  const existing = await ebayHttpsRequest("GET", getUrl, { token });
   if (existing.status === 200) return key;
 
   const createUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
@@ -183,26 +225,19 @@ async function ensureInventoryLocation(token) {
     locationTypes: ["WAREHOUSE"],
   };
 
-  const res = await fetch(createUrl, {
-    method: "POST",
-    headers: ebaySellHeaders(token, { withContentLanguage: true }),
-    body: JSON.stringify(body),
+  const res = await ebayHttpsRequest("POST", createUrl, {
+    token,
+    body,
+    contentLanguage: true,
   });
 
-  if (res.status !== 204 && res.status !== 200 && res.status !== 201) {
-    const err = await res.text();
-    // 409 = déjà existant
-    if (res.status !== 409) {
-      throw new Error(`Inventory location error (${res.status}): ${err}`);
-    }
+  if (res.status !== 204 && res.status !== 200 && res.status !== 201 && res.status !== 409) {
+    throw new Error(`Inventory location error (${res.status}) [locale=${res.locale}]: ${res.text}`);
   }
 
   return key;
 }
 
-/**
- * Extrait les URLs d'images produit depuis le HTML (ignore picsum / placeholders).
- */
 function extractImageUrls(html) {
   const urls = [];
   const re = /<img[^>]+src=["']([^"']+)["']/gi;
@@ -216,11 +251,8 @@ function extractImageUrls(html) {
   return urls;
 }
 
-/**
- * Crée ou met à jour un item dans l'inventaire eBay (Inventory API).
- */
 async function createOrReplaceInventoryItem(token, sku, listing) {
-  const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${sku}`;
+  const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
   const title = (listing.seo_title || "EBX Product").slice(0, 80);
   const imageUrls = extractImageUrls(listing.html_description).slice(0, 8);
   if (!imageUrls.length) {
@@ -245,23 +277,19 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     },
   };
 
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: ebaySellHeaders(token, { withContentLanguage: true }),
-    body: JSON.stringify(body),
+  const res = await ebayHttpsRequest("PUT", url, {
+    token,
+    body,
+    contentLanguage: true,
   });
 
   if (res.status !== 204 && res.status !== 200) {
-    const err = await res.text();
-    throw new Error(`Inventory API error (${res.status}): ${err}`);
+    throw new Error(`Inventory API error (${res.status}) [locale=${res.locale}]: ${res.text}`);
   }
 
   return { sku, status: "inventory_created" };
 }
 
-/**
- * Crée une offre (prix + politique) pour un item inventaire.
- */
 async function createOffer(token, sku, listing) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
 
@@ -286,45 +314,41 @@ async function createOffer(token, sku, listing) {
     },
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: ebaySellHeaders(token, { withContentLanguage: true }),
-    body: JSON.stringify(body),
+  const res = await ebayHttpsRequest("POST", url, {
+    token,
+    body,
+    contentLanguage: true,
   });
 
-  const data = await res.json();
+  const data = res.json();
 
   if (!res.ok) {
-    throw new Error(`Offer API error (${res.status}): ${JSON.stringify(data)}`);
+    throw new Error(`Offer API error (${res.status}) [locale=${res.locale}]: ${JSON.stringify(data)}`);
   }
 
   return { offerId: data.offerId, status: "offer_created" };
 }
 
-/**
- * Publie une offre (la rend visible sur eBay).
- */
 async function publishOffer(token, offerId) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer/${offerId}/publish`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: ebaySellHeaders(token, { withContentLanguage: true }),
+  const res = await ebayHttpsRequest("POST", url, {
+    token,
+    body: {},
+    contentLanguage: true,
   });
 
-  const data = await res.json();
+  const data = res.json();
 
   if (!res.ok) {
-    throw new Error(`Publish error (${res.status}): ${JSON.stringify(data)}`);
+    throw new Error(`Publish error (${res.status}) [locale=${res.locale}]: ${JSON.stringify(data)}`);
   }
 
   return { listingId: data.listingId, status: "published" };
 }
 
-/**
- * Flux complet : location → inventory → offer → publish.
- */
 async function publishToEbay(listing, listingDbId) {
+  loadEbayEnv();
   const missing = [];
   if (!process.env.EBAY_FULFILLMENT_POLICY_ID) missing.push("EBAY_FULFILLMENT_POLICY_ID");
   if (!process.env.EBAY_PAYMENT_POLICY_ID) missing.push("EBAY_PAYMENT_POLICY_ID");
@@ -338,6 +362,10 @@ async function publishToEbay(listing, listingDbId) {
 
   const token = await getAccessToken();
   const sku = `EBX-${listingDbId}-${Date.now()}`;
+
+  console.log(
+    `[EBX] Publish SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")}`
+  );
 
   await ensureInventoryLocation(token);
   await createOrReplaceInventoryItem(token, sku, listing);

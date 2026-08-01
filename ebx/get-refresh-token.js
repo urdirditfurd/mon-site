@@ -142,19 +142,44 @@ Créer le RuName :
     : "~540";
 
   console.log(`
-✅ OK — refresh token obtenu (≈ ${expiresDays} jours)
+✅ OK — refresh token obtenu (≈ ${expiresDays} jours, ${data.refresh_token.length} car.)
 
-Colle ceci dans ebx/.env (guillemets obligatoires si #) :
+Scopes demandés :
+  ${SCOPES}
+
+Colle ceci dans ebx/.env (guillemets obligatoires) :
 
 EBAY_REFRESH_TOKEN="${data.refresh_token}"
 
-# Important : vide ou commente EBAY_USER_TOKEN pour que le refresh soit utilisé
 # EBAY_USER_TOKEN=
 
-Puis redémarre : node server.js
-
-Le serveur renouvellera l'access token automatiquement (~2h) via ce refresh token.
+Puis : npm run env-check → npm run policies (ou directement node server.js si policies déjà OK)
 `);
+
+  // Vérifie que le token a bien les droits vendeur
+  if (data.access_token) {
+    try {
+      const probe = await fetch(
+        (process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com") + "/sell/account/v1/privilege",
+        {
+          headers: {
+            Authorization: `Bearer ${data.access_token}`,
+            Accept: "application/json",
+          },
+        }
+      );
+      if (probe.ok) {
+        console.log("✅ Privilege API OK — scopes vendeur corrects\n");
+      } else {
+        const t = await probe.text();
+        console.log(`⚠️  Privilege API ${probe.status} — scopes peut-être incomplets:`);
+        console.log(`   ${t.slice(0, 200)}`);
+        console.log("   Sur developer.ebay.com → ton app Sandbox → active les OAuth scopes Sell (inventory, account, fulfillment).\n");
+      }
+    } catch (e) {
+      console.log("⚠️  Impossible de tester privilege:", e.message);
+    }
+  }
 }
 
 main().catch((err) => {
