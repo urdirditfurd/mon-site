@@ -251,7 +251,7 @@ function extractImageUrls(html) {
   return urls;
 }
 
-async function createOrReplaceInventoryItem(token, sku, listing) {
+async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
   const title = (listing.seo_title || "EBX Product").slice(0, 80);
   const imageUrls = extractImageUrls(listing.html_description).slice(0, 8);
@@ -262,7 +262,6 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
   }
 
   // product.description Inventory API : max 4000 car. (erreur 25718)
-  // Le HTML complet va dans l'offre (listingDescription), pas ici.
   const rawDesc = String(listing.html_description || title);
   const plain = rawDesc
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -277,6 +276,11 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     .trim();
   const shortDesc = (plain || title).slice(0, 4000);
 
+  const mergedAspects = {
+    Brand: ["Unbranded"],
+    ...aspects,
+  };
+
   const body = {
     availability: {
       shipToLocationAvailability: { quantity: 10 },
@@ -285,9 +289,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     product: {
       title,
       description: shortDesc,
-      aspects: {
-        Brand: ["Unbranded"],
-      },
+      aspects: mergedAspects,
       imageUrls,
     },
   };
@@ -358,11 +360,15 @@ async function suggestLeafCategoryId(token, title) {
 }
 
 async function resolveCategoryId(token, title) {
-  // Ancienne valeur d'exemple (non-leaf) → ignorer
+  // 175672 = ancienne valeur d'exemple NON-LEAF → toujours ignorer
   const fromEnv = env("EBAY_CATEGORY_ID");
   const badDefaults = new Set(["175672", "0", "1"]);
 
-  if (fromEnv && !badDefaults.has(fromEnv)) {
+  if (fromEnv && badDefaults.has(fromEnv)) {
+    console.warn(
+      `[EBX] EBAY_CATEGORY_ID=${fromEnv} ignoré (catégorie non-feuille). Suggestion Taxonomy…`
+    );
+  } else if (fromEnv) {
     console.log(`[EBX] Catégorie .env: ${fromEnv}`);
     return fromEnv;
   }
@@ -370,17 +376,129 @@ async function resolveCategoryId(token, title) {
   const suggested = await suggestLeafCategoryId(token, title);
   if (suggested) return suggested;
 
-  // Fallback feuille US souvent valide en Sandbox (Cell Phones & Smartphones)
   console.warn("[EBX] Taxonomy indisponible — fallback catégorie 9355");
   return "9355";
 }
 
-async function createOffer(token, sku, listing) {
+/**
+ * Aspects requis pour une catégorie (Taxonomy get_item_aspects_for_category).
+ */
+async function fetchRequiredAspectNames(token, categoryId) {
+  const marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const treeId = categoryTreeIdForMarketplace(marketplaceId);
+  const url =
+    `${ebayApiBase()}/commerce/taxonomy/v1/category_tree/${treeId}` +
+    `/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`;
+
+  try {
+    const res = await ebayHttpsRequest("GET", url, { token });
+    if (!res.ok) {
+      console.warn(`[EBX] Aspects catégorie HTTP ${res.status}`);
+      return [];
+    }
+    const data = res.json();
+    const aspects = data?.aspects || [];
+    return aspects
+      .filter((a) => a?.aspectConstraint?.aspectRequired)
+      .map((a) => ({
+        name: a.localizedAspectName || a.aspectName,
+        values: (a.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean),
+      }))
+      .filter((a) => a.name);
+  } catch (err) {
+    console.warn("[EBX] fetchRequiredAspectNames:", err.message);
+    return [];
+  }
+}
+
+function guessAspectValue(aspectName, title, allowedValues) {
+  const name = String(aspectName || "").toLowerCase();
+  const t = String(title || "");
+  const tl = t.toLowerCase();
+
+  const pickAllowed = (...candidates) => {
+    if (!allowedValues?.length) return candidates[0] || "Yes";
+    for (const c of candidates) {
+      const hit = allowedValues.find((v) => String(v).toLowerCase() === String(c).toLowerCase());
+      if (hit) return hit;
+    }
+    // partial match
+    for (const c of candidates) {
+      const hit = allowedValues.find((v) => String(v).toLowerCase().includes(String(c).toLowerCase()));
+      if (hit) return hit;
+    }
+    return allowedValues[0];
+  };
+
+  if (/internet\s*connectivity|connectivity|network|wifi|wi-?fi/.test(name)) {
+    if (/cellular|5g|4g|lte|wifi\s*\+\s*cellular|wi-?fi\s*\+\s*cell/i.test(t)) {
+      return pickAllowed("Wi-Fi + Cellular", "WiFi + Cellular", "Cellular", "5G");
+    }
+    return pickAllowed("Wi-Fi", "WiFi", "Wireless", "Yes");
+  }
+  if (/^brand$|marque/.test(name)) {
+    const brands = ["Apple", "Samsung", "Google", "Sony", "Microsoft", "Amazon", "Lenovo", "HP", "Dell"];
+    for (const b of brands) {
+      if (new RegExp(`\\b${b}\\b`, "i").test(t)) return pickAllowed(b);
+    }
+    return pickAllowed("Unbranded", "Does not apply", "Generic");
+  }
+  if (/storage|capacity|capacite/.test(name)) {
+    const m = t.match(/\b(32|64|128|256|512)\s*GB\b/i) || t.match(/\b(1|2)\s*TB\b/i);
+    if (m) return pickAllowed(m[0].replace(/\s+/g, ""), m[0]);
+    return pickAllowed("64 GB", "64GB", "Does Not Apply");
+  }
+  if (/screen|display|taille|size/.test(name) && /inch|pouce|"/.test(tl)) {
+    const m = t.match(/\b(\d{1,2}(?:\.\d)?)\s*(?:-?inch|pouces?|"|”)/i);
+    if (m) return pickAllowed(`${m[1]} in`, `${m[1]}"`, m[1]);
+  }
+  if (/color|couleur/.test(name)) {
+    const colors = ["Pink", "Black", "White", "Blue", "Gray", "Grey", "Silver", "Gold", "Purple", "Red", "Green"];
+    for (const c of colors) {
+      if (new RegExp(`\\b${c}\\b`, "i").test(t)) return pickAllowed(c);
+    }
+    return pickAllowed("Black", "Multicolor", "Does Not Apply");
+  }
+  if (/model|mod[eè]le/.test(name)) {
+    if (/ipad\s*air/i.test(t)) return pickAllowed("iPad Air", "Apple iPad Air");
+    if (/ipad\s*pro/i.test(t)) return pickAllowed("iPad Pro");
+    if (/iphone/i.test(t)) return pickAllowed("iPhone");
+    return pickAllowed(t.slice(0, 50), "Does Not Apply");
+  }
+  if (/type|type de/.test(name)) {
+    if (/ipad|tablet/i.test(t)) return pickAllowed("Tablet", "iPad", "Slate");
+    return pickAllowed(allowedValues?.[0] || "Other", "Does Not Apply");
+  }
+
+  if (allowedValues?.length) return allowedValues[0];
+  return "Does Not Apply";
+}
+
+async function buildAspectsForCategory(token, categoryId, title) {
+  const required = await fetchRequiredAspectNames(token, categoryId);
+  const aspects = {};
+
+  // Toujours utiles
+  aspects.Brand = [guessAspectValue("Brand", title, ["Apple", "Samsung", "Unbranded"])];
+
+  for (const asp of required) {
+    const value = guessAspectValue(asp.name, title, asp.values);
+    aspects[asp.name] = [value];
+  }
+
+  // Filet de sécurité connu pour tablettes / iPad
+  if (/ipad|tablet|tab\b/i.test(title) && !aspects["Internet Connectivity"]) {
+    aspects["Internet Connectivity"] = [/cellular|5g|4g/i.test(title) ? "Wi-Fi + Cellular" : "Wi-Fi"];
+  }
+
+  console.log(`[EBX] Aspects: ${Object.keys(aspects).join(", ")}`);
+  return aspects;
+}
+
+async function createOffer(token, sku, listing, categoryId) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
 
-  // listingDescription eBay : typiquement jusqu'à ~500 000 car., on borne par sécurité
   const listingHtml = String(listing.html_description || listing.seo_title || "EBX Product").slice(0, 490000);
-  const categoryId = await resolveCategoryId(token, listing.seo_title || sku);
 
   const body = {
     sku,
@@ -451,17 +569,20 @@ async function publishToEbay(listing, listingDbId) {
 
   const token = await getAccessToken();
   const sku = `EBX-${listingDbId}-${Date.now()}`;
+  const title = listing.seo_title || "EBX Product";
+  const categoryId = await resolveCategoryId(token, title);
+  const aspects = await buildAspectsForCategory(token, categoryId, title);
 
   console.log(
-    `[EBX] Publish SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")}`
+    `[EBX] Publish SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")} category=${categoryId}`
   );
 
   await ensureInventoryLocation(token);
-  await createOrReplaceInventoryItem(token, sku, listing);
-  const { offerId } = await createOffer(token, sku, listing);
+  await createOrReplaceInventoryItem(token, sku, listing, aspects);
+  const { offerId } = await createOffer(token, sku, listing, categoryId);
   const { listingId } = await publishOffer(token, offerId);
 
-  return { sku, offerId, listingId, status: "published" };
+  return { sku, offerId, listingId, status: "published", categoryId };
 }
 
 module.exports = { publishToEbay, getAccessToken, describeAuthState };
