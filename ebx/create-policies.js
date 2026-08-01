@@ -10,7 +10,7 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
-const { getAccessToken } = require("./ebay-api");
+const { getAccessToken, describeAuthState } = require("./ebay-api");
 
 const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com";
 const MARKETPLACE = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";

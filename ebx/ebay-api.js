@@ -14,12 +14,34 @@ const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com
 const EBAY_AUTH_URL = process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
 const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID || "";
 const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET || "";
-const EBAY_REFRESH_TOKEN = String(process.env.EBAY_REFRESH_TOKEN || "").trim().replace(/^["']|["']$/g, "");
+
+/** Strip surrounding quotes; keep inner # (eBay tokens often contain #). */
+function cleanEnvToken(v) {
+  let s = String(v || "").trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1);
+  }
+  return s.trim();
+}
+
+const EBAY_REFRESH_TOKEN = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
 // Token obtenu via "Sign in to Sandbox for OAuth" (valable ~2h) — mode Sandbox rapide
-const EBAY_USER_TOKEN = String(process.env.EBAY_USER_TOKEN || "").trim().replace(/^["']|["']$/g, "");
+const EBAY_USER_TOKEN = cleanEnvToken(process.env.EBAY_USER_TOKEN);
 
 let cachedToken = null;
 let tokenExpiry = 0;
+
+function describeAuthState() {
+  return {
+    hasClientId: Boolean(EBAY_CLIENT_ID),
+    hasClientSecret: Boolean(EBAY_CLIENT_SECRET),
+    refreshLen: EBAY_REFRESH_TOKEN.length,
+    userLen: EBAY_USER_TOKEN.length,
+  };
+}
 
 /**
  * Obtient un access token.
@@ -32,7 +54,7 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  if (EBAY_REFRESH_TOKEN) {
+  if (EBAY_REFRESH_TOKEN.length >= 40) {
     if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) {
       throw new Error("EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis pour utiliser EBAY_REFRESH_TOKEN");
     }
@@ -63,19 +85,29 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  // Fallback dépannage : token portail (~2h)
-  if (EBAY_USER_TOKEN) {
-    if (EBAY_USER_TOKEN.length < 80) {
-      throw new Error(
-        "EBAY_USER_TOKEN trop court (souvent tronqué par #). Mets-le entre guillemets doubles dans .env — ou mieux : npm run oauth pour un refresh token."
-      );
-    }
+  // Fallback dépannage : token portail (~2h) — ignore si trop court (souvent # sans guillemets)
+  if (EBAY_USER_TOKEN.length >= 80) {
     return EBAY_USER_TOKEN;
   }
 
-  throw new Error(
-    "Aucun token eBay durable. Lance `npm run oauth` pour obtenir EBAY_REFRESH_TOKEN, ou colle temporairement EBAY_USER_TOKEN (~2h)."
-  );
+  const state = describeAuthState();
+  const hints = [];
+  if (state.refreshLen > 0 && state.refreshLen < 40) {
+    hints.push(
+      `EBAY_REFRESH_TOKEN trop court (${state.refreshLen} car.) — souvent coupé par un #. Mets TOUTE la valeur entre guillemets doubles.`
+    );
+  } else if (state.refreshLen === 0) {
+    hints.push("EBAY_REFRESH_TOKEN absent ou vide dans .env");
+  }
+  if (state.userLen > 0 && state.userLen < 80) {
+    hints.push(
+      `EBAY_USER_TOKEN trop court (${state.userLen} car.) — commente-le (# EBAY_USER_TOKEN=) et utilise le refresh.`
+    );
+  }
+  hints.push('Exemple: EBAY_REFRESH_TOKEN="v^1.1#i^1#...."');
+  hints.push("Puis: npm run oauth  (si besoin de régénérer) → npm run policies");
+
+  throw new Error(hints.join("\n"));
 }
 
 /**
@@ -285,4 +317,4 @@ async function publishToEbay(listing, listingDbId) {
   return { sku, offerId, listingId, status: "published" };
 }
 
-module.exports = { publishToEbay, getAccessToken };
+module.exports = { publishToEbay, getAccessToken, describeAuthState };
