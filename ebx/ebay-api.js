@@ -83,8 +83,8 @@ async function getAccessToken() {
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refresh,
-        scope:
-          "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+        // Ne pas renvoyer de scope ici : eBay exige un sous-ensemble exact
+        // des scopes du consentement. Sans scope → conserve ceux d'origine.
       }),
     });
 
