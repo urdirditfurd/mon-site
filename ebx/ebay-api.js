@@ -121,6 +121,40 @@ async function getAccessToken() {
   );
 }
 
+function ebayMarketplaceLocale() {
+  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  switch (market) {
+    case "EBAY_FR":
+      return "fr-FR";
+    case "EBAY_GB":
+      return "en-GB";
+    case "EBAY_DE":
+      return "de-DE";
+    case "EBAY_IT":
+      return "it-IT";
+    case "EBAY_ES":
+      return "es-ES";
+    case "EBAY_US":
+    default:
+      return "en-US";
+  }
+}
+
+/** Headers Inventory API — Force locale (sinon Windows FR envoie Accept-Language: fr → erreur 25709). */
+function ebaySellHeaders(token, { withContentLanguage = false } = {}) {
+  const locale = ebayMarketplaceLocale();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "Accept-Language": locale,
+  };
+  if (withContentLanguage) {
+    headers["Content-Type"] = "application/json";
+    headers["Content-Language"] = locale;
+  }
+  return headers;
+}
+
 /**
  * Crée le lieu d'inventaire "default" s'il n'existe pas encore.
  */
@@ -129,7 +163,7 @@ async function ensureInventoryLocation(token) {
   const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
 
   const existing = await fetch(getUrl, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    headers: ebaySellHeaders(token),
   });
   if (existing.status === 200) return key;
 
@@ -151,11 +185,7 @@ async function ensureInventoryLocation(token) {
 
   const res = await fetch(createUrl, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Content-Language": "en-US",
-    },
+    headers: ebaySellHeaders(token, { withContentLanguage: true }),
     body: JSON.stringify(body),
   });
 
@@ -217,11 +247,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
 
   const res = await fetch(url, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Content-Language": "en-US",
-    },
+    headers: ebaySellHeaders(token, { withContentLanguage: true }),
     body: JSON.stringify(body),
   });
 
@@ -262,11 +288,7 @@ async function createOffer(token, sku, listing) {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Content-Language": "en-US",
-    },
+    headers: ebaySellHeaders(token, { withContentLanguage: true }),
     body: JSON.stringify(body),
   });
 
