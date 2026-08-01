@@ -306,14 +306,88 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
   return { sku, status: "inventory_created" };
 }
 
+function categoryTreeIdForMarketplace(marketplaceId) {
+  switch (marketplaceId) {
+    case "EBAY_GB":
+      return "3";
+    case "EBAY_CA":
+      return "2";
+    case "EBAY_AU":
+      return "15";
+    case "EBAY_FR":
+      return "71";
+    case "EBAY_DE":
+      return "77";
+    case "EBAY_IT":
+      return "101";
+    case "EBAY_ES":
+      return "186";
+    case "EBAY_US":
+      return "0";
+    default:
+      return "0";
+  }
+}
+
+/**
+ * Suggère une catégorie feuille via Taxonomy API (évite erreur 25005 non-leaf).
+ */
+async function suggestLeafCategoryId(token, title) {
+  const marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const treeId = categoryTreeIdForMarketplace(marketplaceId);
+  const q = encodeURIComponent(String(title || "electronics").slice(0, 80));
+  const url = `${ebayApiBase()}/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${q}`;
+
+  try {
+    const res = await ebayHttpsRequest("GET", url, { token });
+    if (!res.ok) {
+      console.warn(`[EBX] Taxonomy suggest HTTP ${res.status}: ${res.text.slice(0, 180)}`);
+      return null;
+    }
+    const data = res.json();
+    const first = data?.categorySuggestions?.[0]?.category?.categoryId;
+    if (first) {
+      console.log(
+        `[EBX] Catégorie suggérée: ${first} (${data.categorySuggestions[0].category.categoryName || "?"})`
+      );
+      return String(first);
+    }
+  } catch (err) {
+    console.warn("[EBX] Taxonomy suggest fail:", err.message);
+  }
+  return null;
+}
+
+async function resolveCategoryId(token, title) {
+  // Ancienne valeur d'exemple (non-leaf) → ignorer
+  const fromEnv = env("EBAY_CATEGORY_ID");
+  const badDefaults = new Set(["175672", "0", "1"]);
+
+  if (fromEnv && !badDefaults.has(fromEnv)) {
+    console.log(`[EBX] Catégorie .env: ${fromEnv}`);
+    return fromEnv;
+  }
+
+  const suggested = await suggestLeafCategoryId(token, title);
+  if (suggested) return suggested;
+
+  // Fallback feuille US souvent valide en Sandbox (Cell Phones & Smartphones)
+  console.warn("[EBX] Taxonomy indisponible — fallback catégorie 9355");
+  return "9355";
+}
+
 async function createOffer(token, sku, listing) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
+
+  // listingDescription eBay : typiquement jusqu'à ~500 000 car., on borne par sécurité
+  const listingHtml = String(listing.html_description || listing.seo_title || "EBX Product").slice(0, 490000);
+  const categoryId = await resolveCategoryId(token, listing.seo_title || sku);
 
   const body = {
     sku,
     marketplaceId: process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
     format: "FIXED_PRICE",
-    listingDescription: listing.html_description,
+    listingDescription: listingHtml,
     availableQuantity: 10,
     pricingSummary: {
       price: {
@@ -321,7 +395,7 @@ async function createOffer(token, sku, listing) {
         currency: process.env.EBAY_CURRENCY || "USD",
       },
     },
-    categoryId: process.env.EBAY_CATEGORY_ID || "175672",
+    categoryId,
     merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY || "default",
     listingPolicies: {
       fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID || "",
