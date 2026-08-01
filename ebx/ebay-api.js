@@ -261,6 +261,22 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     );
   }
 
+  // product.description Inventory API : max 4000 car. (erreur 25718)
+  // Le HTML complet va dans l'offre (listingDescription), pas ici.
+  const rawDesc = String(listing.html_description || title);
+  const plain = rawDesc
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+  const shortDesc = (plain || title).slice(0, 4000);
+
   const body = {
     availability: {
       shipToLocationAvailability: { quantity: 10 },
@@ -268,7 +284,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
     condition: "NEW",
     product: {
       title,
-      description: listing.html_description || title,
+      description: shortDesc,
       aspects: {
         Brand: ["Unbranded"],
         Type: ["Exercise Bike"],
