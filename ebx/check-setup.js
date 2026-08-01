@@ -2,7 +2,8 @@
  * Vérifie la config locale EBX (.env) sans afficher les secrets.
  * Usage: node check-setup.js
  */
-require("dotenv").config();
+const { loadEbayEnv } = require("./load-env");
+loadEbayEnv();
 
 const { getAppToken, browseSearch } = require("./ebay-browse");
 

@@ -7,8 +7,8 @@
  *   3. Copier les 3 IDs affichés dans ton .env
  */
 
-const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+const { loadEbayEnv } = require("./load-env");
+loadEbayEnv();
 
 const { getAccessToken, describeAuthState } = require("./ebay-api");
 
@@ -190,10 +190,17 @@ async function createReturnPolicy(token) {
 async function main() {
   console.log(`\n⚡ EBX — Business Policies Sandbox (${MARKETPLACE})\n`);
 
+  const auth = describeAuthState();
+  console.log("— Auth .env —");
+  console.log(`  CLIENT_ID/SECRET : ${auth.hasClientId && auth.hasClientSecret ? "OK" : "MANQUANT"}`);
+  console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌ trop court / vide"}`);
+  console.log(`  USER_TOKEN       : ${auth.userLen} car. ${auth.userLen >= 80 ? "(ok fallback)" : "(ignoré si court)"}`);
+  console.log("");
+
   let token;
   try {
     token = await getAccessToken();
-    console.log("  Auth: refresh token ou user token OK\n");
+    console.log("  Auth: access token OK\n");
   } catch (err) {
     console.error("❌", err.message);
     process.exit(1);

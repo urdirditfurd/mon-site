@@ -13,9 +13,9 @@
  *   npm run oauth -- CODE  → échange le code contre refresh_token
  */
 
-const path = require("path");
 const readline = require("readline");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+const { loadEbayEnv } = require("./load-env");
+loadEbayEnv();
 
 const CLIENT_ID = String(process.env.EBAY_CLIENT_ID || "").trim();
 const CLIENT_SECRET = String(process.env.EBAY_CLIENT_SECRET || "").trim();

@@ -1,4 +1,6 @@
-require("dotenv").config();
+const { loadEbayEnv } = require("./load-env");
+loadEbayEnv();
+require("dotenv").config(); // fallback autres clés éventuelles
 const express = require("express");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");

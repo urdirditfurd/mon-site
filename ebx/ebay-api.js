@@ -10,36 +10,46 @@
  * En Sandbox, les listings ne sont pas réels — parfait pour tester.
  */
 
-const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com";
-const EBAY_AUTH_URL = process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
-const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID || "";
-const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET || "";
+const { loadEbayEnv, cleanEnvToken } = require("./load-env");
+loadEbayEnv();
 
-/** Strip surrounding quotes; keep inner # (eBay tokens often contain #). */
-function cleanEnvToken(v) {
-  let s = String(v || "").trim();
-  if (
-    (s.startsWith('"') && s.endsWith('"')) ||
-    (s.startsWith("'") && s.endsWith("'"))
-  ) {
-    s = s.slice(1, -1);
-  }
-  return s.trim();
+function env(name, fallback = "") {
+  return String(process.env[name] || fallback).trim();
 }
 
-const EBAY_REFRESH_TOKEN = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
-// Token obtenu via "Sign in to Sandbox for OAuth" (valable ~2h) — mode Sandbox rapide
-const EBAY_USER_TOKEN = cleanEnvToken(process.env.EBAY_USER_TOKEN);
+function ebayRefreshToken() {
+  return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
+}
+
+function ebayUserToken() {
+  return cleanEnvToken(process.env.EBAY_USER_TOKEN);
+}
+
+function ebayClientId() {
+  return env("EBAY_CLIENT_ID");
+}
+
+function ebayClientSecret() {
+  return env("EBAY_CLIENT_SECRET");
+}
+
+function ebayApiBase() {
+  return env("EBAY_API_BASE", "https://api.sandbox.ebay.com");
+}
+
+function ebayAuthUrl() {
+  return env("EBAY_AUTH_URL", "https://api.sandbox.ebay.com/identity/v1/oauth2/token");
+}
 
 let cachedToken = null;
 let tokenExpiry = 0;
 
 function describeAuthState() {
   return {
-    hasClientId: Boolean(EBAY_CLIENT_ID),
-    hasClientSecret: Boolean(EBAY_CLIENT_SECRET),
-    refreshLen: EBAY_REFRESH_TOKEN.length,
-    userLen: EBAY_USER_TOKEN.length,
+    hasClientId: Boolean(ebayClientId()),
+    hasClientSecret: Boolean(ebayClientSecret()),
+    refreshLen: ebayRefreshToken().length,
+    userLen: ebayUserToken().length,
   };
 }
 
@@ -54,13 +64,17 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  if (EBAY_REFRESH_TOKEN.length >= 40) {
-    if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) {
+  const refresh = ebayRefreshToken();
+  const clientId = ebayClientId();
+  const clientSecret = ebayClientSecret();
+
+  if (refresh.length >= 40) {
+    if (!clientId || !clientSecret) {
       throw new Error("EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis pour utiliser EBAY_REFRESH_TOKEN");
     }
 
-    const credentials = Buffer.from(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`).toString("base64");
-    const res = await fetch(EBAY_AUTH_URL, {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const res = await fetch(ebayAuthUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -68,7 +82,7 @@ async function getAccessToken() {
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: EBAY_REFRESH_TOKEN,
+        refresh_token: refresh,
         scope:
           "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment",
       }),
@@ -85,9 +99,9 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  // Fallback dépannage : token portail (~2h) — ignore si trop court (souvent # sans guillemets)
-  if (EBAY_USER_TOKEN.length >= 80) {
-    return EBAY_USER_TOKEN;
+  const userToken = ebayUserToken();
+  if (userToken.length >= 80) {
+    return userToken;
   }
 
   const state = describeAuthState();
@@ -98,6 +112,7 @@ async function getAccessToken() {
     );
   } else if (state.refreshLen === 0) {
     hints.push("EBAY_REFRESH_TOKEN absent ou vide dans .env");
+    hints.push("Lance: npm run env-check");
   }
   if (state.userLen > 0 && state.userLen < 80) {
     hints.push(
@@ -115,14 +130,14 @@ async function getAccessToken() {
  */
 async function ensureInventoryLocation(token) {
   const key = process.env.EBAY_MERCHANT_LOCATION_KEY || "default";
-  const getUrl = `${EBAY_API_BASE}/sell/inventory/v1/location/${key}`;
+  const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
 
   const existing = await fetch(getUrl, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   if (existing.status === 200) return key;
 
-  const createUrl = `${EBAY_API_BASE}/sell/inventory/v1/location/${key}`;
+  const createUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
   const body = {
     name: "EBX Warehouse",
     merchantLocationStatus: "ENABLED",
@@ -179,7 +194,7 @@ function extractImageUrls(html) {
  * Crée ou met à jour un item dans l'inventaire eBay (Inventory API).
  */
 async function createOrReplaceInventoryItem(token, sku, listing) {
-  const url = `${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`;
+  const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${sku}`;
   const title = (listing.seo_title || "EBX Product").slice(0, 80);
   const imageUrls = extractImageUrls(listing.html_description).slice(0, 8);
   if (!imageUrls.length) {
@@ -226,7 +241,7 @@ async function createOrReplaceInventoryItem(token, sku, listing) {
  * Crée une offre (prix + politique) pour un item inventaire.
  */
 async function createOffer(token, sku, listing) {
-  const url = `${EBAY_API_BASE}/sell/inventory/v1/offer`;
+  const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
 
   const body = {
     sku,
@@ -272,7 +287,7 @@ async function createOffer(token, sku, listing) {
  * Publie une offre (la rend visible sur eBay).
  */
 async function publishOffer(token, offerId) {
-  const url = `${EBAY_API_BASE}/sell/inventory/v1/offer/${offerId}/publish`;
+  const url = `${ebayApiBase()}/sell/inventory/v1/offer/${offerId}/publish`;
 
   const res = await fetch(url, {
     method: "POST",

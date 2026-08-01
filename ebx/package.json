@@ -8,6 +8,7 @@
     "dev": "node server.js",
     "policies": "node create-policies.js",
     "oauth": "node get-refresh-token.js",
+    "env-check": "node env-check.js",
     "check": "node check-setup.js"
   },
   "engines": {
