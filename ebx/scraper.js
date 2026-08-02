@@ -218,6 +218,39 @@ function parseGeneric($, baseUrl) {
   };
 }
 
+function parseCdiscount($, baseUrl) {
+  const title =
+    cleanText($("h1").first().text()) ||
+    cleanText($("meta[property='og:title']").attr("content")) ||
+    cleanText($("title").text());
+
+  const priceText =
+    cleanText($("[itemprop='price']").attr("content")) ||
+    cleanText($(".fpPrice, .price, [class*='Price']").first().text()) ||
+    cleanText($("meta[property='product:price:amount']").attr("content"));
+  const price = parsePrice(priceText);
+
+  const images = new Set();
+  const og = $("meta[property='og:image']").attr("content");
+  if (og) images.add(absUrl(baseUrl, og));
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") || $(el).attr("data-src") || $(el).attr("data-srcset");
+    const u = absUrl(baseUrl, String(src || "").split(" ")[0]);
+    if (u && /cdiscount|cdscdn|media/i.test(u) && u.length > 30) images.add(u.split("?")[0]);
+  });
+
+  return {
+    source: "cdiscount",
+    title: title || "Produit Cdiscount",
+    price,
+    currency: "EUR",
+    bullets: [],
+    description: cleanText($("meta[name='description']").attr("content") || "").slice(0, 600),
+    images: uniqueProductImages([...images], { limit: 8 }),
+    url: baseUrl,
+  };
+}
+
 function parsePrice(text) {
   if (text == null || text === "") return null;
   const raw = String(text);
@@ -255,7 +288,7 @@ async function scrapeProductViaJina(url) {
   const imgMatches = content.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/g);
   for (const m of imgMatches) {
     const src = m[1];
-    if (/media-amazon|ssl-images-amazon|alicdn|ebayimg/i.test(src)) images.push(src);
+    if (/media-amazon|ssl-images-amazon|alicdn|ebayimg|cdiscount|cdscdn/i.test(src)) images.push(src);
   }
   const bullets = [];
   for (const line of content.split("\n")) {
@@ -299,6 +332,9 @@ async function scrapeProduct(url) {
         break;
       case "aliexpress":
         product = parseAliExpress($, finalUrl);
+        break;
+      case "cdiscount":
+        product = parseCdiscount($, finalUrl);
         break;
       case "ebay":
         product = parseEbayItem($, finalUrl);
@@ -792,6 +828,347 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
   }
 }
 
+async function fetchJinaContent(url) {
+  const attempts = [
+    { headers: { Accept: "application/json", "User-Agent": UA } },
+    { headers: { Accept: "text/plain", "User-Agent": UA } },
+    { url: `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`, headers: { "User-Agent": UA } },
+  ];
+  let lastErr = null;
+  for (const opt of attempts) {
+    try {
+      const target = opt.url || `https://r.jina.ai/${url}`;
+      const res = await fetch(target, { headers: opt.headers });
+      if (!res.ok) {
+        lastErr = new Error(`Jina ${res.status}`);
+        continue;
+      }
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const payload = await res.json();
+        const text = String(payload.data?.content || payload.data?.text || "");
+        if (text.length > 80) return text;
+      } else {
+        const text = await res.text();
+        if (text.length > 80) return text;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Jina unavailable");
+}
+
+async function searchViaDuckDuckGo(siteQuery, { linkTest, limit = 5 } = {}) {
+  const attempts = [
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(siteQuery)}`,
+    `https://www.bing.com/search?q=${encodeURIComponent(siteQuery)}&count=20`,
+  ];
+  const items = [];
+  const seen = new Set();
+  for (const url of attempts) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "text/html", "Accept-Language": "fr-FR,fr;q=0.9" },
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const $ = cheerio.load(html);
+      $("a").each((_, el) => {
+        if (items.length >= limit) return;
+        const root = $(el);
+        let link = root.attr("href") || "";
+        const uddg = link.match(/uddg=([^&]+)/);
+        if (uddg) link = decodeURIComponent(uddg[1]);
+        const title = cleanText(root.text());
+        if (!title || title.length < 10) return;
+        if (!linkTest(link)) return;
+        link = link.split("&")[0].split("#")[0];
+        if (seen.has(link) || /duckduckgo|bing\.com|microsoft|privacy|login/i.test(title)) return;
+        seen.add(link);
+        items.push({
+          title: title.slice(0, 160),
+          url: link,
+          price: parsePrice(title) || null,
+          image: null,
+        });
+      });
+      if (items.length >= limit) break;
+    } catch (_) {}
+  }
+  return items.filter((i) => i.title.length > 12);
+}
+
+function extractPricesNear(text, index, window = 120) {
+  const slice = text.slice(Math.max(0, index - 40), index + window);
+  const prices = [];
+  const re = /(\d+[.,]\d{2})\s*(?:€|EUR|\$|USD)?|(?:€|EUR|\$)\s*(\d+[.,]\d{2})/gi;
+  let m;
+  while ((m = re.exec(slice))) {
+    const n = parsePrice(m[1] || m[2]);
+    if (n && n >= 0.5 && n < 5000) prices.push(n);
+  }
+  return prices;
+}
+
+/**
+ * Recherche AliExpress — Jina + DuckDuckGo + enrichissement fiche.
+ */
+async function scrapeAliExpressSearch(query, { limit = 5 } = {}) {
+  const q = encodeURIComponent(String(query || "").trim());
+  const urls = [
+    `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(String(query || "").trim().replace(/\s+/g, "-"))}.html`,
+    `https://fr.aliexpress.com/wholesale?SearchText=${q}`,
+    `https://www.aliexpress.com/wholesale?SearchText=${q}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const content = await fetchJinaContent(url);
+      const items = [];
+      const seen = new Set();
+      const linkRe =
+        /\[([^\]]{6,160})\]\((https?:\/\/(?:www\.|fr\.)?aliexpress\.[a-z.]+\/item\/\d+[^\s)]*)\)/gi;
+      let m;
+      while ((m = linkRe.exec(content)) && items.length < limit) {
+        const title = cleanText(m[1]);
+        let link = m[2].split(")")[0].split(" ")[0].replace(/&amp;/g, "&");
+        if (!title || seen.has(link)) continue;
+        if (/sign in|login|download|app|cookie|privacy|help center/i.test(title)) continue;
+        seen.add(link);
+        const near = extractPricesNear(content, m.index);
+        items.push({
+          title,
+          url: link,
+          price: near[0] || null,
+          image: null,
+          source: "aliexpress+jina",
+        });
+      }
+
+      if (items.length < limit) {
+        const bare = /https?:\/\/(?:www\.|fr\.)?aliexpress\.[a-z.]+\/item\/\d+\.html[^\s)\]"]*/gi;
+        let b;
+        while ((b = bare.exec(content)) && items.length < limit) {
+          const link = b[0].replace(/[),.;]+$/, "").replace(/&amp;/g, "&");
+          if (seen.has(link)) continue;
+          seen.add(link);
+          const near = extractPricesNear(content, b.index);
+          items.push({
+            title: `${query} — AliExpress`,
+            url: link,
+            price: near[0] || null,
+            image: null,
+            source: "aliexpress+jina",
+          });
+        }
+      }
+
+      for (let i = 0; i < Math.min(items.length, 2); i++) {
+        if (items[i].price) continue;
+        try {
+          const detail = await scrapeProduct(items[i].url);
+          if (detail.price) items[i].price = detail.price;
+          if (detail.title && detail.title.length > 8) items[i].title = detail.title;
+          if (detail.images?.[0]) items[i].image = detail.images[0];
+        } catch (_) {}
+      }
+
+      if (items.length) return items.slice(0, limit);
+    } catch (err) {
+      console.warn("[aliexpress search]", err.message);
+    }
+  }
+
+  // Fallback moteurs de recherche
+  try {
+    const ddg = await searchViaDuckDuckGo(`site:aliexpress.com/item ${query}`, {
+      limit,
+      linkTest: (link) => /aliexpress\.[a-z.]+\/item\/\d+/i.test(link),
+    });
+    const items = ddg.map((i) => ({ ...i, source: "aliexpress+ddg" }));
+    for (let i = 0; i < Math.min(items.length, 2); i++) {
+      try {
+        const detail = await scrapeProduct(items[i].url);
+        if (detail.price) items[i].price = detail.price;
+        if (detail.title?.length > 8) items[i].title = detail.title;
+        if (detail.images?.[0]) items[i].image = detail.images[0];
+      } catch (_) {}
+    }
+    if (items.length) return items;
+  } catch (err) {
+    console.warn("[aliexpress ddg]", err.message);
+  }
+  return [];
+}
+
+/**
+ * Recherche Cdiscount — HTML direct puis Jina puis DuckDuckGo.
+ */
+async function scrapeCdiscountSearch(query, { limit = 5 } = {}) {
+  const slug = encodeURIComponent(String(query || "").trim());
+  const url = `https://www.cdiscount.com/search/10/${slug}.html#_his_`;
+
+  try {
+    const { html, finalUrl } = await fetchHtml(url, {
+      Referer: "https://www.cdiscount.com/",
+    });
+    const $ = cheerio.load(html);
+    const items = [];
+    $("a[href]").each((_, el) => {
+      if (items.length >= limit * 3) return;
+      const root = $(el);
+      const href = root.attr("href") || "";
+      const link = absUrl(finalUrl, href);
+      if (!link || !/cdiscount\.com/i.test(link)) return;
+      if (/\/search\/|connexion|panier|aide|cgu|espace-perso|mentions/i.test(link)) return;
+      // fiches produit typiques
+      if (!/\/f-\d+|\/mp-\d+|-\d+\.html/i.test(link)) return;
+      const title = cleanText(root.attr("title") || root.text());
+      if (!title || title.length < 10) return;
+      const parent = root.closest("li, article, div");
+      const price = parsePrice(
+        parent.find("[class*='price'], [class*='Price'], .stPrice, [itemprop='price']").first().text() ||
+          parent.text()
+      );
+      const image = parent.find("img").attr("src") || parent.find("img").attr("data-src");
+      items.push({
+        title: title.slice(0, 160),
+        url: link.split("?")[0],
+        price,
+        image: image ? absUrl(finalUrl, image) : null,
+        source: "cdiscount",
+      });
+    });
+    const uniq = [];
+    const seen = new Set();
+    for (const it of items) {
+      if (seen.has(it.url)) continue;
+      seen.add(it.url);
+      uniq.push(it);
+      if (uniq.length >= limit) break;
+    }
+    if (uniq.length) return uniq;
+  } catch (err) {
+    console.warn("[cdiscount search direct]", err.message);
+  }
+
+  try {
+    const content = await fetchJinaContent(url);
+    const items = [];
+    const seen = new Set();
+    const re = /\[([^\]]{8,160})\]\((https:\/\/www\.cdiscount\.com\/[^\s)]+\.html[^\s)]*)\)/gi;
+    let m;
+    while ((m = re.exec(content)) && items.length < limit) {
+      const title = cleanText(m[1]);
+      const link = m[2].split(")")[0].split(" ")[0].replace(/&amp;/g, "&");
+      if (seen.has(link) || /search\/10|connexion|panier/i.test(link)) continue;
+      if (/voir plus|filtre|livraison|ajouter/i.test(title)) continue;
+      seen.add(link);
+      const near = extractPricesNear(content, m.index);
+      items.push({
+        title,
+        url: link,
+        price: near[0] || null,
+        image: null,
+        source: "cdiscount+jina",
+      });
+    }
+    for (let i = 0; i < Math.min(items.length, 2); i++) {
+      if (items[i].price) continue;
+      try {
+        const detail = await scrapeProduct(items[i].url);
+        if (detail.price) items[i].price = detail.price;
+        if (detail.title?.length > 8) items[i].title = detail.title;
+        if (detail.images?.[0]) items[i].image = detail.images[0];
+      } catch (_) {}
+    }
+    if (items.length) return items.slice(0, limit);
+  } catch (err) {
+    console.warn("[cdiscount search jina]", err.message);
+  }
+
+  try {
+    const ddg = await searchViaDuckDuckGo(`site:cdiscount.com ${query}`, {
+      limit,
+      linkTest: (link) => /cdiscount\.com\/.+\.html/i.test(link) && !/search\/10/i.test(link),
+    });
+    const items = ddg.map((i) => ({ ...i, source: "cdiscount+ddg" }));
+    for (let i = 0; i < Math.min(items.length, 2); i++) {
+      try {
+        const detail = await scrapeProduct(items[i].url);
+        if (detail.price) items[i].price = detail.price;
+        if (detail.title?.length > 8) items[i].title = detail.title;
+        if (detail.images?.[0]) items[i].image = detail.images[0];
+      } catch (_) {}
+    }
+    return items;
+  } catch (err) {
+    console.warn("[cdiscount ddg]", err.message);
+    return [];
+  }
+}
+
+/**
+ * Compare Amazon / AliExpress / Cdiscount et retourne le moins cher avec prix réel si possible.
+ */
+async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3 } = {}) {
+  const pools = [];
+  const tasks = [];
+  const want = new Set(sources.includes("auto") ? ["amazon", "aliexpress", "cdiscount"] : sources);
+
+  if (want.has("amazon")) {
+    tasks.push(
+      scrapeAmazonSearch(query, { limit }).then((items) =>
+        items.map((i) => ({ ...i, source: i.source || "amazon" }))
+      )
+    );
+  }
+  if (want.has("aliexpress")) {
+    tasks.push(
+      scrapeAliExpressSearch(query, { limit }).then((items) =>
+        items.map((i) => ({ ...i, source: i.source || "aliexpress" }))
+      )
+    );
+  }
+  if (want.has("cdiscount")) {
+    tasks.push(
+      scrapeCdiscountSearch(query, { limit }).then((items) =>
+        items.map((i) => ({ ...i, source: i.source || "cdiscount" }))
+      )
+    );
+  }
+
+  const results = await Promise.allSettled(tasks);
+  for (const r of results) {
+    if (r.status === "fulfilled" && Array.isArray(r.value)) pools.push(...r.value);
+  }
+
+  // Enrichir les prix manquants (max 4 fiches) avant comparaison
+  const needPrice = pools.filter((p) => p.url && (p.price == null || p.price <= 0)).slice(0, 4);
+  for (const item of needPrice) {
+    if (/wholesale-|\/search\/|SearchText=/i.test(item.url)) continue;
+    try {
+      const detail = await scrapeProduct(item.url);
+      if (detail.price > 0) item.price = detail.price;
+      if (detail.title && detail.title.length > 12 && !/^produit |^cdiscount\.com$/i.test(detail.title)) {
+        item.title = detail.title;
+      }
+      if (detail.images?.[0]) item.image = detail.images[0];
+    } catch (_) {}
+  }
+
+  const withPrice = pools.filter((p) => p.url && p.price != null && p.price > 0);
+  const priced = withPrice.sort((a, b) => a.price - b.price);
+  if (priced.length) {
+    return { best: priced[0], candidates: priced.slice(0, 8), compared: priced.length };
+  }
+  const any = pools.find(
+    (p) => p.url && p.title && p.title.length > 12 && !/^cdiscount\.com$/i.test(p.title)
+  ) || pools.find((p) => p.url);
+  return { best: any || null, candidates: pools.slice(0, 8), compared: 0 };
+}
+
 function buildHtmlFromProduct(product, themeColor = "#667eea") {
   const imgs = (product.images || []).filter(isRealProductImage).slice(0, 6);
   const bullets = (product.bullets || []).slice(0, 6);
@@ -927,6 +1304,9 @@ module.exports = {
   scrapeEbaySeller,
   scrapeRankings,
   scrapeAmazonSearch,
+  scrapeAliExpressSearch,
+  scrapeCdiscountSearch,
+  findCheapestSupplier,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   injectProductImagesIntoHtml,

@@ -10,6 +10,9 @@ const {
   scrapeEbaySeller,
   scrapeRankings,
   scrapeAmazonSearch,
+  scrapeAliExpressSearch,
+  scrapeCdiscountSearch,
+  findCheapestSupplier,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   injectProductImagesIntoHtml,
@@ -622,80 +625,71 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         await antiBanDelay({ testMode: testMode !== false, label: "target" });
 
-        // 2) Chercher fournisseur moins cher (Amazon / Ali)
-        send({ type: "log", message: `[SOURCE] Recherche fournisseur (${source}) le moins cher...` });
+        // 2) Comparer fournisseurs Amazon / Ali / Cdiscount (prix réels si dispo)
+        send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})...` });
         let supplier = null;
         const searchQ = String(target.title).split(/\s+/).slice(0, 6).join(" ") || query;
 
-        if (source === "auto" || source === "amazon") {
-          try {
-            const amazonItems = await scrapeAmazonSearch(searchQ, { limit: 3 });
-            supplier = amazonItems.find((p) => p.url) || amazonItems[0] || null;
-            if (supplier) {
-              send({
-                type: "log",
-                message: `[SOURCE] Amazon trouvé: ${supplier.title.slice(0, 55)} ${supplier.url ? "→ " + supplier.url.slice(0, 60) : ""}`,
-              });
+        const sourceList =
+          source === "amazon"
+            ? ["amazon"]
+            : source === "aliexpress"
+              ? ["aliexpress"]
+              : source === "cdiscount"
+                ? ["cdiscount"]
+                : ["amazon", "aliexpress", "cdiscount"];
+
+        try {
+          const cmp = await findCheapestSupplier(searchQ, { sources: sourceList, limit: 3 });
+          if (cmp.best) {
+            supplier = cmp.best;
+            send({
+              type: "log",
+              message: `[SOURCE] ${cmp.compared} prix réels comparés → meilleur: ${String(supplier.source).split("+")[0]} @ ${
+                supplier.price != null ? Number(supplier.price).toFixed(2) + "€" : "prix n/a"
+              } — ${String(supplier.title || "").slice(0, 50)}`,
+            });
+            if (cmp.candidates.length > 1) {
+              const preview = cmp.candidates
+                .slice(0, 3)
+                .map((c) => `${String(c.source).split("+")[0]}:${c.price != null ? c.price.toFixed(2) : "?"}`)
+                .join(" | ");
+              send({ type: "log", message: `[SOURCE] Top: ${preview}` });
             }
-          } catch (e) {
-            send({ type: "log", message: `[WARN] Amazon: ${e.message}` });
           }
+        } catch (e) {
+          send({ type: "log", message: `[WARN] Comparaison fournisseurs: ${e.message}` });
         }
 
-        if (!supplier && source === "cdiscount") {
-          supplier = {
-            title: target.title,
-            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
-            price: Number(((target.price || 20) * 0.45).toFixed(2)),
-            source: "cdiscount",
-          };
-          send({
-            type: "log",
-            message: `[SOURCE] Cdiscount candidat @ ${supplier.price}€ — ${supplier.url.slice(0, 70)}`,
-          });
-        }
-
-        if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
+        // Fallback historique si aucun résultat scrape
+        if (!supplier) {
           supplier = {
             title: target.title,
             url: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ)}.html`,
-            price: Number(((target.price || 20) * 0.35).toFixed(2)),
-            source: "aliexpress",
+            price: Number(((target.price || 20) * 0.4).toFixed(2)),
+            source: "aliexpress-estimate",
           };
           send({
             type: "log",
-            message: `[SOURCE] AliExpress candidat @ ${supplier.price}€ — ${supplier.url.slice(0, 70)}`,
+            message: `[SOURCE] Fallback estimé AliExpress @ ${supplier.price}€ (scrapes vides)`,
           });
         }
 
-        if (!supplier && source === "auto") {
-          supplier = {
-            title: target.title,
-            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
-            price: Number(((target.price || 20) * 0.45).toFixed(2)),
-            source: "cdiscount",
-          };
-          send({
-            type: "log",
-            message: `[SOURCE] Cdiscount fallback @ ${supplier.price}€`,
-          });
-        }
-
-        if (!supplier) {
-          errors += 1;
-          send({ type: "log", message: `[ERROR] Aucun fournisseur pour "${target.title.slice(0, 40)}"` });
-          send({ type: "stats", scanned, imported, listed, errors });
-          continue;
-        }
-
-        // 3) Import détails — privilégier vraie image eBay/Amazon, jamais picsum aléatoire
+        // 3) Import détails — fiche produit si URL item (pas page recherche)
         let detail = null;
-        if (supplier.url && String(supplier.source || "").includes("amazon")) {
+        const isProductUrl =
+          supplier.url &&
+          !/wholesale-|\/search\/|SearchText=/i.test(supplier.url) &&
+          (/amazon\.|\/item\/|cdiscount\.com\/.+\.html/i.test(supplier.url));
+        if (isProductUrl) {
           try {
             detail = await scrapeProduct(supplier.url);
+            if (detail.price && (!supplier.price || detail.price < supplier.price)) {
+              supplier.price = detail.price;
+            }
             send({
               type: "log",
-              message: `[IMPORT] Détails récupérés (${detail.images.length} images, prix ${detail.price || "n/a"})`,
+              message: `[IMPORT] Détails récupérés (${(detail.images || []).length} images, prix ${detail.price || "n/a"})`,
             });
           } catch (e) {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
