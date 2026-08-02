@@ -124,14 +124,16 @@ async function loadDashboard() {
   const json = await res.json();
   const d = json.data || {};
   document.getElementById("dash-cards").innerHTML = [
-    ["CA estimé", `${(d.revenue || 0).toFixed(2)} €`],
-    ["Publiés eBay", d.published || 0],
-    ["Listings", d.listings || 0],
-    ["Auto-orders", d.pendingOrders || 0],
+    ["CA (commandes)", `${(d.revenue || 0).toFixed(2)} €`, d.revenueSource === "ebay_orders" ? "eBay sync" : d.revenueSource === "local_orders" ? "local" : "estim."],
+    ["Publiés eBay", d.published || 0, ""],
+    ["Listings", d.listings || 0, ""],
+    ["À traiter", d.pendingOrders || 0, d.ebaySynced ? `${d.ebaySynced} sync` : ""],
   ]
     .map(
-      ([label, value]) =>
-        `<div class="bg-white rounded-2xl border border-zinc-200 p-5"><p class="text-xs text-zinc-400">${label}</p><p class="text-2xl font-bold mt-1">${value}</p></div>`
+      ([label, value, sub]) =>
+        `<div class="bg-white rounded-2xl border border-zinc-200 p-5"><p class="text-xs text-zinc-400">${label}</p><p class="text-2xl font-bold mt-1">${value}</p>${
+          sub ? `<p class="text-[11px] text-zinc-400 mt-1">${sub}</p>` : ""
+        }</div>`
     )
     .join("");
   const feed = document.getElementById("pilotage-feed");
@@ -477,23 +479,78 @@ async function loadOrders() {
     delivered: "bg-green-50 text-green-700",
   };
   document.getElementById("orders-body").innerHTML = (json.data || [])
-    .map(
-      (o) =>
-        `<tr class="border-b border-zinc-50">
-          <td class="p-3 font-mono text-xs">${escapeHtml(o.id)}</td>
-          <td class="p-3">${escapeHtml(o.product)}</td>
-          <td class="p-3">${escapeHtml(o.supplier)}</td>
+    .map((o) => {
+      const id = String(o.id).replace(/'/g, "\\'");
+      return `<tr class="border-b border-zinc-50 align-top">
+          <td class="p-3 font-mono text-[11px]">${escapeHtml(o.id)}${
+            o.fromEbay ? `<div class="text-[10px] text-emerald-600 mt-1">eBay</div>` : ""
+          }</td>
+          <td class="p-3"><div class="font-medium">${escapeHtml(o.product)}</div>
+            ${
+              o.shipText
+                ? `<pre class="text-[10px] text-zinc-500 mt-1 whitespace-pre-wrap max-w-xs">${escapeHtml(
+                    o.shipText
+                  )}</pre>`
+                : `<div class="text-[10px] text-zinc-300 mt-1">Adresse après Sync eBay</div>`
+            }
+          </td>
+          <td class="p-3">${escapeHtml(o.supplier || "—")}</td>
           <td class="p-3">${Number(o.amount || 0).toFixed(2)} €</td>
-          <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${colors[o.status] || ""}">${escapeHtml(o.status)}</span></td>
-          <td class="p-3"><button onclick="advanceOrder('${escapeHtml(o.id)}')" class="text-xs text-brand-600">Avancer</button></td>
-        </tr>`
-    )
-    .join("") || `<tr><td colspan="6" class="p-8 text-center text-zinc-300">Aucune commande.</td></tr>`;
+          <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${colors[o.status] || ""}">${escapeHtml(
+            o.status
+          )}</span></td>
+          <td class="p-3 space-y-1 whitespace-nowrap">
+            <button onclick="openSupplierOrder('${id}')" class="block text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-lg">Ouvrir fournisseur</button>
+            <button onclick="copyShipAddress('${id}')" class="block text-xs bg-zinc-50 text-zinc-600 px-2 py-1 rounded-lg">Copier adresse</button>
+            <button onclick="advanceOrder('${id}')" class="block text-xs text-brand-600 px-2 py-1">Avancer statut</button>
+          </td>
+        </tr>`;
+    })
+    .join("") || `<tr><td colspan="6" class="p-8 text-center text-zinc-300">Aucune commande — clique « Sync ventes eBay ».</td></tr>`;
 }
 
 async function advanceOrder(id) {
   await fetch(API + "/api/auto-orders/" + encodeURIComponent(id) + "/advance", { method: "POST" });
   loadOrders();
+}
+
+async function openSupplierOrder(id) {
+  try {
+    const res = await fetch(API + "/api/auto-orders/" + encodeURIComponent(id) + "/open-supplier", {
+      method: "POST",
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    if (json.data.shipText) {
+      try {
+        await navigator.clipboard.writeText(json.data.shipText);
+      } catch (_) {}
+    }
+    window.open(json.data.url, "_blank", "noopener");
+    alert(
+      "Fournisseur ouvert." +
+        (json.data.shipText
+          ? "\nAdresse acheteur copiée dans le presse-papiers — colle-la à la livraison."
+          : "\nPas d'adresse : refais Sync ventes eBay.")
+    );
+    loadOrders();
+  } catch (err) {
+    alert("Erreur: " + err.message);
+  }
+}
+
+async function copyShipAddress(id) {
+  try {
+    const res = await fetch(API + "/api/auto-orders/" + encodeURIComponent(id));
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const text = json.data.shipText || json.data.notes || "";
+    if (!text) return alert("Pas d'adresse — Sync ventes eBay d'abord.");
+    await navigator.clipboard.writeText(text);
+    alert("Adresse copiée.");
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function loadListings() {

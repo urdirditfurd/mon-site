@@ -171,9 +171,26 @@ const deleteCompetitorById = db.prepare("DELETE FROM competitor_history WHERE id
 const insertOrder = db.prepare(
   "INSERT INTO auto_orders (order_ref, product, buyer, status, supplier, amount, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
-const getOrders = db.prepare("SELECT * FROM auto_orders ORDER BY created_at DESC LIMIT 50");
+const getOrders = db.prepare("SELECT * FROM auto_orders ORDER BY created_at DESC LIMIT 100");
 const getOrderByRef = db.prepare("SELECT * FROM auto_orders WHERE order_ref = ?");
 const updateOrderStatus = db.prepare("UPDATE auto_orders SET status = ? WHERE order_ref = ?");
+
+const orderCols = db.prepare("PRAGMA table_info(auto_orders)").all().map((c) => c.name);
+if (!orderCols.includes("ship_json")) {
+  db.exec("ALTER TABLE auto_orders ADD COLUMN ship_json TEXT DEFAULT ''");
+}
+if (!orderCols.includes("notes")) {
+  db.exec("ALTER TABLE auto_orders ADD COLUMN notes TEXT DEFAULT ''");
+}
+if (!orderCols.includes("qty")) {
+  db.exec("ALTER TABLE auto_orders ADD COLUMN qty INTEGER DEFAULT 1");
+}
+const updateOrderExtras = db.prepare(
+  "UPDATE auto_orders SET ship_json = ?, notes = ?, source_url = ?, supplier = ?, qty = ? WHERE order_ref = ?"
+);
+const updateOrderSource = db.prepare(
+  "UPDATE auto_orders SET source_url = ?, supplier = ? WHERE order_ref = ?"
+);
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname)));
@@ -276,14 +293,40 @@ app.get("/api/dashboard", async (_req, res) => {
       publishedToday,
     });
     const published = listings.filter((l) => l.ebay_listing_id).length;
+
+    // CA / commandes depuis auto_orders (sync eBay = données réelles)
+    const realRevenue = orders.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+    const ebaySynced = orders.filter((o) => String(o.order_ref || "").length > 10).length;
+    const pendingOrders = orders.filter((o) => o.status === "pending").length;
+    const delivered = orders.filter((o) => o.status === "delivered").length;
+    const avgTicket = orders.length ? realRevenue / orders.length : 0;
+    const estCost = realRevenue * 0.55;
+    const estFees = realRevenue * 0.13;
+    const estMarginPct =
+      realRevenue > 0 ? Number((((realRevenue - estCost - estFees) / realRevenue) * 100).toFixed(1)) : base.margin;
+
+    if (pendingOrders > 0) {
+      pilotage.unshift({
+        level: "warn",
+        title: `${pendingOrders} commande(s) à traiter`,
+        detail: "Auto-Order → Sync eBay → copie l'adresse → ouvre le fournisseur → Avancer.",
+      });
+    }
+
     res.json({
       success: true,
       data: {
         ...base,
+        revenue: Number(realRevenue.toFixed(2)),
+        revenueSource: ebaySynced ? "ebay_orders" : orders.length ? "local_orders" : "estimate",
+        margin: estMarginPct,
+        avgTicket: Number(avgTicket.toFixed(2)),
         listings: listings.length,
         published,
-        pendingOrders: orders.filter((o) => o.status === "pending").length,
-        orders: orders.length || base.orders,
+        pendingOrders,
+        delivered,
+        orders: orders.length,
+        ebaySynced,
         ebayEnv,
         sellerUserId: seller?.userId || null,
         pilotage,
@@ -294,6 +337,55 @@ app.get("/api/dashboard", async (_req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+function findSupplierForTitle(title) {
+  const t = String(title || "").toLowerCase();
+  const words = t.split(/\s+/).filter((w) => w.length > 3).slice(0, 5);
+  if (!words.length) return { source_url: "", supplier: "Fournisseur" };
+  const rows = getRecentListings.all();
+  let best = null;
+  let bestScore = 0;
+  for (const row of rows) {
+    const lt = String(row.seo_title || "").toLowerCase();
+    let score = 0;
+    for (const w of words) if (lt.includes(w)) score += 1;
+    if (row.source_url && score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  }
+  if (best && bestScore >= 2) {
+    const src = best.source_url || "";
+    const supplier = /amazon/i.test(src)
+      ? "Amazon"
+      : /cdiscount/i.test(src)
+        ? "Cdiscount"
+        : /aliexpress/i.test(src)
+          ? "AliExpress"
+          : "Fournisseur";
+    return { source_url: src, supplier, listingId: best.id };
+  }
+  return { source_url: "", supplier: "eBay→fournisseur" };
+}
+
+function formatShipAddress(order) {
+  const addr =
+    order?.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo ||
+    order?.buyer?.buyerRegistrationAddress ||
+    null;
+  if (!addr) return { text: "", json: "" };
+  const name = [addr.fullName, addr.companyName].filter(Boolean).join(" — ");
+  const lines = [
+    name,
+    addr.contactAddress?.addressLine1,
+    addr.contactAddress?.addressLine2,
+    [addr.contactAddress?.postalCode, addr.contactAddress?.city].filter(Boolean).join(" "),
+    addr.contactAddress?.stateOrProvince,
+    addr.contactAddress?.countryCode,
+    addr.primaryPhone?.phoneNumber ? `Tél: ${addr.primaryPhone.phoneNumber}` : "",
+  ].filter(Boolean);
+  return { text: lines.join("\n"), json: JSON.stringify(addr) };
+}
 
 app.get("/api/rankings", async (req, res) => {
   const marketplace = req.query.marketplace || "FR";
@@ -479,20 +571,79 @@ app.get("/api/auto-orders", (_req, res) => {
     if (rows.length) {
       return res.json({
         success: true,
-        data: rows.map((o) => ({
-          id: o.order_ref,
-          product: o.product,
-          buyer: o.buyer,
-          status: o.status,
-          supplier: o.supplier,
-          amount: o.amount,
-          created_at: o.created_at,
-        })),
+        data: rows.map((o) => {
+          let ship = null;
+          try {
+            ship = o.ship_json ? JSON.parse(o.ship_json) : null;
+          } catch (_) {}
+          return {
+            id: o.order_ref,
+            product: o.product,
+            buyer: o.buyer,
+            status: o.status,
+            supplier: o.supplier,
+            amount: o.amount,
+            source_url: o.source_url || "",
+            notes: o.notes || "",
+            qty: o.qty || 1,
+            shipText: o.notes || "",
+            ship,
+            created_at: o.created_at,
+            fromEbay: String(o.order_ref || "").length > 12,
+          };
+        }),
         live: true,
       });
     }
   } catch (_) {}
   res.json({ success: true, data: getAutoOrders(), live: false });
+});
+
+app.get("/api/auto-orders/:id", (req, res) => {
+  const row = getOrderByRef.get(req.params.id);
+  if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
+  let ship = null;
+  try {
+    ship = row.ship_json ? JSON.parse(row.ship_json) : null;
+  } catch (_) {}
+  res.json({
+    success: true,
+    data: {
+      ...row,
+      id: row.order_ref,
+      ship,
+      shipText: row.notes || "",
+    },
+  });
+});
+
+app.post("/api/auto-orders/:id/open-supplier", (req, res) => {
+  try {
+    const row = getOrderByRef.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
+    let url = row.source_url;
+    if (!url) {
+      const found = findSupplierForTitle(row.product);
+      url = found.source_url;
+      if (url) updateOrderSource.run(url, found.supplier, row.order_ref);
+    }
+    if (!url) {
+      const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 6).join(" "));
+      url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
+    }
+    if (row.status === "pending") updateOrderStatus.run("ordered", row.order_ref);
+    res.json({
+      success: true,
+      data: {
+        id: row.order_ref,
+        url,
+        shipText: row.notes || "",
+        status: row.status === "pending" ? "ordered" : row.status,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post("/api/auto-orders", (req, res) => {
@@ -1197,20 +1348,44 @@ app.post("/api/listings/:id/end", async (req, res) => {
 app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
   try {
     const { getRecentOrders } = require("./ebay-api");
-    const { orders } = await getRecentOrders({ limit: 25 });
+    const { orders } = await getRecentOrders({ limit: 40 });
     let created = 0;
+    let updated = 0;
     for (const o of orders) {
       const ref = String(o.orderId || "").slice(0, 40);
       if (!ref) continue;
-      const exists = getOrderByRef.get(ref);
-      if (exists) continue;
       const line = o.lineItems?.[0];
       const title = line?.title || "Commande eBay";
       const amount = Number(o.pricingSummary?.total?.value || line?.total?.value || 0);
-      insertOrder.run(ref, title.slice(0, 120), o.buyer?.username || "buyer", "pending", "eBay→fournisseur", amount, "");
-      created += 1;
+      const qty = Number(line?.quantity || 1);
+      const ship = formatShipAddress(o);
+      const match = findSupplierForTitle(title);
+      const exists = getOrderByRef.get(ref);
+      if (!exists) {
+        insertOrder.run(
+          ref,
+          title.slice(0, 120),
+          o.buyer?.username || "buyer",
+          "pending",
+          match.supplier,
+          amount,
+          match.source_url || ""
+        );
+        updateOrderExtras.run(ship.json || "", ship.text || "", match.source_url || "", match.supplier, qty, ref);
+        created += 1;
+      } else {
+        updateOrderExtras.run(
+          ship.json || exists.ship_json || "",
+          ship.text || exists.notes || "",
+          exists.source_url || match.source_url || "",
+          exists.supplier || match.supplier,
+          qty,
+          ref
+        );
+        updated += 1;
+      }
     }
-    res.json({ success: true, fetched: orders.length, created });
+    res.json({ success: true, fetched: orders.length, created, updated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
