@@ -8,7 +8,7 @@
  */
 
 const readline = require("readline");
-const { loadEbayEnv } = require("./load-env");
+const { loadEbayEnv, cleanEnvToken } = require("./load-env");
 loadEbayEnv();
 
 const isProd =
@@ -16,19 +16,19 @@ const isProd =
   process.argv.includes("prod") ||
   String(process.env.EBAY_ENV || "").toLowerCase() === "production";
 
-const CLIENT_ID = String(
-  (isProd ? process.env.EBAY_PROD_CLIENT_ID || process.env.EBAY_CLIENT_ID : process.env.EBAY_CLIENT_ID) || ""
-).trim();
-const CLIENT_SECRET = String(
-  (isProd
+const CLIENT_ID = cleanEnvToken(
+  isProd ? process.env.EBAY_PROD_CLIENT_ID || process.env.EBAY_CLIENT_ID : process.env.EBAY_CLIENT_ID
+);
+const CLIENT_SECRET = cleanEnvToken(
+  isProd
     ? process.env.EBAY_PROD_CLIENT_SECRET || process.env.EBAY_CLIENT_SECRET
-    : process.env.EBAY_CLIENT_SECRET) || ""
-).trim();
-const RU_NAME = String(
-  (isProd
+    : process.env.EBAY_CLIENT_SECRET
+);
+const RU_NAME = cleanEnvToken(
+  isProd
     ? process.env.EBAY_RU_NAME_PROD || process.env.EBAY_RU_NAME
-    : process.env.EBAY_RU_NAME || process.env.EBAY_REDIRECT_URI) || ""
-).trim();
+    : process.env.EBAY_RU_NAME || process.env.EBAY_REDIRECT_URI
+);
 
 const AUTH_URL = isProd
   ? process.env.EBAY_AUTH_URL_PROD || "https://api.ebay.com/identity/v1/oauth2/token"

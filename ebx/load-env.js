@@ -20,18 +20,25 @@ function stripBom(s) {
   return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
-function cleanEnvToken(v) {
-  let s = String(v || "").trim();
-  const open = s[0];
-  if (OPEN_QUOTES.includes(open) && CLOSE_FOR[open] && s.endsWith(CLOSE_FOR[open])) {
-    s = s.slice(1, -1);
-  } else if (
-    (s.startsWith('"') && s.endsWith('"')) ||
-    (s.startsWith("'") && s.endsWith("'"))
-  ) {
-    s = s.slice(1, -1);
+/** Enlève guillemets ASCII + Word/Notion même s'ils sont mal appariés (”…” ou ”…”). */
+function stripWrappingQuotes(s) {
+  let out = String(s || "").trim();
+  const quoteChars = new Set(['"', "'", "\u201C", "\u201D", "\u2018", "\u2019", "\u00AB", "\u00BB"]);
+  // Jusqu'à 2 passes (ex. ""value"")
+  for (let i = 0; i < 2; i++) {
+    if (out.length >= 2 && quoteChars.has(out[0]) && quoteChars.has(out[out.length - 1])) {
+      out = out.slice(1, -1).trim();
+    } else {
+      break;
+    }
   }
-  return s.trim();
+  // Guillemets orphelins collés
+  out = out.replace(/^[\u201C\u201D\u2018\u2019"']+|[\u201C\u201D\u2018\u2019"']+$/g, "").trim();
+  return out;
+}
+
+function cleanEnvToken(v) {
+  return stripWrappingQuotes(v);
 }
 
 /**
@@ -55,15 +62,17 @@ function parseLine(line) {
     if (end > 0) {
       return { key, value: raw.slice(1, end) };
     }
-    // guillemet ouvrant sans fermeture → prend tout (évite coupe sur #)
-    return { key, value: raw.slice(1) };
+    return { key, value: stripWrappingQuotes(raw) };
   }
 
-  // non quoté : coupe au commentaire #
+  // Guillemets Word mal appariés : ”value” (même caractère des deux côtés)
+  if (/^[\u201C\u201D\u2018\u2019]/.test(raw)) {
+    return { key, value: stripWrappingQuotes(raw) };
+  }
+
   const hash = raw.indexOf(" #");
   if (hash >= 0) raw = raw.slice(0, hash).trim();
-  // token eBay non quoté avec # → on garde tout (sinon casse le refresh)
-  return { key, value: raw };
+  return { key, value: stripWrappingQuotes(raw) };
 }
 
 function loadEbayEnv({ override = true } = {}) {
