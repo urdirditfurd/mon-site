@@ -49,15 +49,21 @@ function ebayClientSecret() {
 }
 
 function ebayApiBase() {
+  // En production, ignorer EBAY_API_BASE sandbox du .env
   if (isProduction()) {
-    return env("EBAY_API_BASE", "https://api.ebay.com");
+    const configured = env("EBAY_API_BASE");
+    if (configured && !/sandbox/i.test(configured)) return configured;
+    return "https://api.ebay.com";
   }
   return env("EBAY_API_BASE", "https://api.sandbox.ebay.com");
 }
 
 function ebayAuthUrl() {
+  // En production, ignorer EBAY_AUTH_URL sandbox du .env (sinon invalid_client)
   if (isProduction()) {
-    return env("EBAY_AUTH_URL", "https://api.ebay.com/identity/v1/oauth2/token");
+    const configured = env("EBAY_AUTH_URL");
+    if (configured && !/sandbox/i.test(configured)) return configured;
+    return "https://api.ebay.com/identity/v1/oauth2/token";
   }
   return env("EBAY_AUTH_URL", "https://api.sandbox.ebay.com/identity/v1/oauth2/token");
 }
@@ -138,8 +144,16 @@ async function getAccessToken() {
 
   if (refresh.length >= 40) {
     if (!clientId || !clientSecret) {
-      throw new Error("EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis pour utiliser EBAY_REFRESH_TOKEN");
+      throw new Error(
+        isProduction()
+          ? "EBAY_PROD_CLIENT_ID et EBAY_PROD_CLIENT_SECRET requis (mode production)"
+          : "EBAY_CLIENT_ID et EBAY_CLIENT_SECRET requis pour utiliser EBAY_REFRESH_TOKEN"
+      );
     }
+
+    console.log(
+      `[EBX] OAuth refresh → ${ebayAuthUrl()} (client ${clientId.slice(0, 16)}…, refresh ${refresh.length} car.)`
+    );
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
     const res = await fetch(ebayAuthUrl(), {
@@ -156,7 +170,12 @@ async function getAccessToken() {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`eBay OAuth refresh failed (${res.status}): ${err}`);
+      throw new Error(
+        `eBay OAuth refresh failed (${res.status}): ${err}` +
+          (isProduction()
+            ? "\n→ Vérifie EBAY_REFRESH_TOKEN_PROD + EBAY_PROD_CLIENT_ID/SECRET (guillemets droits)."
+            : "")
+      );
     }
 
     const data = await res.json();
@@ -773,4 +792,5 @@ module.exports = {
   describeAuthState,
   isProduction,
   ebayApiBase,
+  ebayAuthUrl,
 };

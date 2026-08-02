@@ -230,9 +230,15 @@ async function main() {
   console.log("— Auth .env —");
   console.log(`  ENV              : ${auth.env}`);
   console.log(`  API              : ${ebayApiBase()}`);
+  console.log(`  AUTH             : ${require("./ebay-api").ebayAuthUrl ? "—" : "—"}`);
+  try {
+    const { ebayAuthUrl: authUrlFn } = require("./ebay-api");
+  } catch (_) {}
   console.log(`  CLIENT_ID/SECRET : ${auth.hasClientId && auth.hasClientSecret ? "OK" : "MANQUANT"}`);
   console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌"}`);
-  console.log("");
+  if (prod && auth.refreshLen > 0 && !process.env.EBAY_REFRESH_TOKEN_PROD) {
+    console.log("  ⚠️  EBAY_REFRESH_TOKEN_PROD absent — utilise peut‑être le refresh Sandbox par erreur");
+  }
 
   let token;
   try {
