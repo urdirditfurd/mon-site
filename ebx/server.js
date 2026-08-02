@@ -617,27 +617,65 @@ app.get("/api/auto-orders/:id", (req, res) => {
   });
 });
 
-app.post("/api/auto-orders/:id/open-supplier", (req, res) => {
+app.post("/api/auto-orders/:id/open-supplier", async (req, res) => {
   try {
     const row = getOrderByRef.get(req.params.id);
     if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
     let url = row.source_url;
+    let supplier = row.supplier;
+
     if (!url) {
       const found = findSupplierForTitle(row.product);
       url = found.source_url;
-      if (url) updateOrderSource.run(url, found.supplier, row.order_ref);
+      supplier = found.supplier || supplier;
     }
+
+    // Re-sourcing live si pas de lien produit local
+    if (!url || /wholesale-|\/search\/|SearchText=/i.test(url)) {
+      try {
+        const q = String(row.product || "")
+          .split(/\s+/)
+          .slice(0, 6)
+          .join(" ");
+        const cmp = await findCheapestSupplier(q, {
+          sources: ["amazon", "aliexpress", "cdiscount"],
+          limit: 2,
+        });
+        if (cmp.best?.url) {
+          url = cmp.best.url;
+          supplier = String(cmp.best.source || "Fournisseur").split("+")[0];
+          if (cmp.best.price) {
+            // note coût estimé
+          }
+        }
+      } catch (e) {
+        console.warn("[EBX] open-supplier resourcing:", e.message);
+      }
+    }
+
     if (!url) {
       const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 6).join(" "));
       url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
+      supplier = supplier || "AliExpress";
     }
+
+    updateOrderSource.run(url, supplier || row.supplier || "Fournisseur", row.order_ref);
     if (row.status === "pending") updateOrderStatus.run("ordered", row.order_ref);
+
     res.json({
       success: true,
       data: {
         id: row.order_ref,
         url,
+        supplier,
         shipText: row.notes || "",
+        checklist: [
+          "1. Adresse acheteur copiée (si Sync eBay fait)",
+          "2. Page fournisseur ouverte",
+          "3. Colle l'adresse en livraison chez le fournisseur",
+          "4. Paie la commande fournisseur",
+          "5. Clique Avancer → ordered/shipped quand c'est fait",
+        ],
         status: row.status === "pending" ? "ordered" : row.status,
       },
     });
