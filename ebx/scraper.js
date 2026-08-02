@@ -874,29 +874,64 @@ async function searchViaDuckDuckGo(siteQuery, { linkTest, limit = 5 } = {}) {
       if (!res.ok) continue;
       const html = await res.text();
       const $ = cheerio.load(html);
-      $("a").each((_, el) => {
+
+      // DuckDuckGo result blocks
+      $(".result, .b_algo, li.b_algo").each((_, el) => {
         if (items.length >= limit) return;
         const root = $(el);
-        let link = root.attr("href") || "";
+        const a = root.find("a.result__a, h2 a, a").first();
+        let link = a.attr("href") || "";
         const uddg = link.match(/uddg=([^&]+)/);
         if (uddg) link = decodeURIComponent(uddg[1]);
-        const title = cleanText(root.text());
-        if (!title || title.length < 10) return;
+        let title = cleanText(a.text() || root.find("h2").text());
+        const snippet = cleanText(root.find(".result__snippet, .b_caption p, .b_lineclamp2").text());
+        if (!title || title.length < 8) return;
         if (!linkTest(link)) return;
         link = link.split("&")[0].split("#")[0];
-        if (seen.has(link) || /duckduckgo|bing\.com|microsoft|privacy|login/i.test(title)) return;
+        if (seen.has(link)) return;
+        if (/duckduckgo|bing\.com|microsoft|privacy|login|^https?:\/\/[^\/]+\/?$/i.test(title)) return;
+        if (/^cdiscount\.com$|^amazon\.|^aliexpress/i.test(title)) {
+          // titre = nom de domaine → utiliser snippet
+          if (snippet.length > 15) title = snippet.slice(0, 120);
+          else return;
+        }
         seen.add(link);
+        const price = parsePrice(title) || parsePrice(snippet) || null;
         items.push({
           title: title.slice(0, 160),
           url: link,
-          price: parsePrice(title) || null,
+          price,
           image: null,
+          snippet,
         });
       });
+
+      // Fallback: raw anchors
+      if (!items.length) {
+        $("a").each((_, el) => {
+          if (items.length >= limit) return;
+          const root = $(el);
+          let link = root.attr("href") || "";
+          const uddg = link.match(/uddg=([^&]+)/);
+          if (uddg) link = decodeURIComponent(uddg[1]);
+          const title = cleanText(root.text());
+          if (!title || title.length < 15) return;
+          if (!linkTest(link)) return;
+          link = link.split("&")[0].split("#")[0];
+          if (seen.has(link) || /duckduckgo|bing\.com|microsoft|privacy|login/i.test(title)) return;
+          seen.add(link);
+          items.push({
+            title: title.slice(0, 160),
+            url: link,
+            price: parsePrice(title) || null,
+            image: null,
+          });
+        });
+      }
       if (items.length >= limit) break;
     } catch (_) {}
   }
-  return items.filter((i) => i.title.length > 12);
+  return items.filter((i) => i.title.length > 12).slice(0, limit);
 }
 
 function extractPricesNear(text, index, window = 120) {
