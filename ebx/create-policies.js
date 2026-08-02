@@ -1,27 +1,41 @@
 /**
- * EBX — Création des Business Policies eBay Sandbox via API
+ * EBX — Création des Business Policies eBay
  *
  * Usage :
- *   1. Remplir ebx/.env avec EBAY_REFRESH_TOKEN (npm run oauth) ou EBAY_USER_TOKEN
- *   2. node create-policies.js
- *   3. Copier les 3 IDs affichés dans ton .env
+ *   npm run policies        → Sandbox
+ *   npm run policies:prod   → Production (vrai compte)
  */
 
 const { loadEbayEnv } = require("./load-env");
 loadEbayEnv();
 
-const { getAccessToken, describeAuthState } = require("./ebay-api");
+// Force prod après lecture .env (sinon EBAY_ENV=sandbox du fichier gagne)
+if (process.argv.includes("--prod") || process.argv.includes("prod")) {
+  process.env.EBAY_ENV = "production";
+}
 
-const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com";
-const MARKETPLACE = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+const { getAccessToken, describeAuthState, isProduction, ebayApiBase } = require("./ebay-api");
+
+function marketplace() {
+  return process.env.EBAY_MARKETPLACE_ID || (isProduction() ? "EBAY_FR" : "EBAY_US");
+}
+
+function localeForMarketplace() {
+  const m = marketplace();
+  if (m === "EBAY_FR") return "fr-FR";
+  if (m === "EBAY_GB") return "en-GB";
+  if (m === "EBAY_DE") return "de-DE";
+  return "en-US";
+}
 
 async function ebayFetch(method, pathName, body, token) {
-  const res = await fetch(`${EBAY_API_BASE}${pathName}`, {
+  const res = await fetch(`${ebayApiBase()}${pathName}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "en-US",
+      "Content-Language": localeForMarketplace(),
+      "Accept-Language": localeForMarketplace(),
       Accept: "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -42,15 +56,15 @@ async function probeToken(token) {
   console.log("→ Test token (GET privilege)...");
   const { status, data } = await ebayFetch("GET", "/sell/account/v1/privilege", null, token);
   if (status === 200) {
-    console.log("  ✅ Token Sandbox valide");
+    console.log("  ✅ Token valide");
     return true;
   }
   console.log(`  ❌ Token invalide (${status}):`, JSON.stringify(data));
-  console.log(`
-Corrige l'auth dans ebx/.env :
-  • Recommandé : npm run oauth → EBAY_REFRESH_TOKEN (≈18 mois)
-  • Ou temporaire : EBAY_USER_TOKEN du portail (≈2h), entre guillemets doubles
-`);
+  console.log(
+    isProduction()
+      ? "\nCorrige : npm run oauth:prod + EBAY_REFRESH_TOKEN_PROD\n"
+      : "\nCorrige : npm run oauth + EBAY_REFRESH_TOKEN\n"
+  );
   return false;
 }
 
@@ -72,9 +86,11 @@ async function optIn(token) {
 
 async function createFulfillmentPolicy(token) {
   console.log("→ Création Fulfillment (Shipping) Policy...");
+  const market = marketplace();
+  const currency = process.env.EBAY_CURRENCY || (market === "EBAY_US" ? "USD" : "EUR");
   const body = {
     name: "EBX Shipping",
-    marketplaceId: MARKETPLACE,
+    marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
     handlingTime: { value: 1, unit: "DAY" },
     shippingOptions: [
@@ -84,10 +100,10 @@ async function createFulfillmentPolicy(token) {
         shippingServices: [
           {
             sortOrder: 1,
-            shippingCarrierCode: "USPS",
-            shippingServiceCode: "USPSPriority",
-            shippingCost: { value: "5.99", currency: "USD" },
-            additionalShippingCost: { value: "2.00", currency: "USD" },
+            shippingCarrierCode: market === "EBAY_US" ? "USPS" : "LaPosteColissimo",
+            shippingServiceCode: market === "EBAY_US" ? "USPSPriority" : "FR_Colissimo",
+            shippingCost: { value: market === "EBAY_US" ? "5.99" : "4.90", currency },
+            additionalShippingCost: { value: "2.00", currency },
             freeShipping: false,
             buyerResponsibleForShipping: false,
             buyerResponsibleForPickup: false,
@@ -107,7 +123,7 @@ async function createFulfillmentPolicy(token) {
   console.log(`  ⚠️ Create failed (${status}), listing existing...`);
   const list = await ebayFetch(
     "GET",
-    `/sell/account/v1/fulfillment_policy?marketplace_id=${MARKETPLACE}`,
+    `/sell/account/v1/fulfillment_policy?marketplace_id=${market}`,
     null,
     token
   );
@@ -122,9 +138,10 @@ async function createFulfillmentPolicy(token) {
 
 async function createPaymentPolicy(token) {
   console.log("→ Création Payment Policy...");
+  const market = marketplace();
   const body = {
     name: "EBX Payment",
-    marketplaceId: MARKETPLACE,
+    marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
     paymentMethods: [],
     immediatePay: true,
@@ -139,7 +156,7 @@ async function createPaymentPolicy(token) {
   console.log(`  ⚠️ Create failed (${status}), listing existing...`);
   const list = await ebayFetch(
     "GET",
-    `/sell/account/v1/payment_policy?marketplace_id=${MARKETPLACE}`,
+    `/sell/account/v1/payment_policy?marketplace_id=${market}`,
     null,
     token
   );
@@ -154,9 +171,10 @@ async function createPaymentPolicy(token) {
 
 async function createReturnPolicy(token) {
   console.log("→ Création Return Policy...");
+  const market = marketplace();
   const body = {
     name: "EBX Returns",
-    marketplaceId: MARKETPLACE,
+    marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
     returnsAccepted: true,
     returnPeriod: { value: 30, unit: "DAY" },
@@ -174,7 +192,7 @@ async function createReturnPolicy(token) {
   console.log(`  ⚠️ Create failed (${status}), listing existing...`);
   const list = await ebayFetch(
     "GET",
-    `/sell/account/v1/return_policy?marketplace_id=${MARKETPLACE}`,
+    `/sell/account/v1/return_policy?marketplace_id=${market}`,
     null,
     token
   );
@@ -188,23 +206,32 @@ async function createReturnPolicy(token) {
 }
 
 async function main() {
-  console.log(`\n⚡ EBX — Business Policies Sandbox (${MARKETPLACE})\n`);
+  const prod = isProduction();
+  const market = marketplace();
+  console.log(`\n⚡ EBX — Business Policies ${prod ? "PRODUCTION" : "Sandbox"} (${market})\n`);
+  if (prod) {
+    console.log("⚠️  Compte vendeur RÉEL — les policies seront créées en Production.\n");
+  }
 
-  const existing = {
-    fulfillment: process.env.EBAY_FULFILLMENT_POLICY_ID,
-    payment: process.env.EBAY_PAYMENT_POLICY_ID,
-    return: process.env.EBAY_RETURN_POLICY_ID,
-  };
+  const existing = prod
+    ? {
+        fulfillment: process.env.EBAY_FULFILLMENT_POLICY_ID_PROD,
+        payment: process.env.EBAY_PAYMENT_POLICY_ID_PROD,
+        return: process.env.EBAY_RETURN_POLICY_ID_PROD,
+      }
+    : {
+        fulfillment: process.env.EBAY_FULFILLMENT_POLICY_ID,
+        payment: process.env.EBAY_PAYMENT_POLICY_ID,
+        return: process.env.EBAY_RETURN_POLICY_ID,
+      };
   const hasExisting = existing.fulfillment && existing.payment && existing.return;
 
   const auth = describeAuthState();
   console.log("— Auth .env —");
+  console.log(`  ENV              : ${auth.env}`);
+  console.log(`  API              : ${ebayApiBase()}`);
   console.log(`  CLIENT_ID/SECRET : ${auth.hasClientId && auth.hasClientSecret ? "OK" : "MANQUANT"}`);
-  console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌ trop court / vide"}`);
-  if (auth.refreshLen > 0 && auth.refreshLen < 150) {
-    console.log("  ⚠️  Refresh token court (<150) — souvent scopes incomplets. Préfère npm run oauth.");
-  }
-  console.log(`  USER_TOKEN       : ${auth.userLen} car. ${auth.userLen >= 80 ? "(ok fallback)" : "(ignoré si court)"}`);
+  console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌"}`);
   console.log("");
 
   let token;
@@ -213,33 +240,15 @@ async function main() {
     console.log("  Auth: access token OK\n");
   } catch (err) {
     console.error("❌", err.message);
-    if (hasExisting) {
-      console.log("\nTes policy IDs sont déjà dans .env — tu peux publier sans relancer policies :");
-      console.log(`  EBAY_FULFILLMENT_POLICY_ID=${existing.fulfillment}`);
-      console.log(`  EBAY_PAYMENT_POLICY_ID=${existing.payment}`);
-      console.log(`  EBAY_RETURN_POLICY_ID=${existing.return}`);
-      console.log("  → node server.js puis Publier eBay\n");
-      process.exit(0);
-    }
     process.exit(1);
   }
 
   const ok = await probeToken(token);
   if (!ok) {
     if (hasExisting) {
-      console.log("⚠️  Privilege API refusée (scopes OAuth incomplets), mais tes IDs existent déjà.");
-      console.log("Tu peux continuer à publier. Pour corriger les scopes : npm run oauth\n");
-      console.log(`EBAY_FULFILLMENT_POLICY_ID=${existing.fulfillment}`);
-      console.log(`EBAY_PAYMENT_POLICY_ID=${existing.payment}`);
-      console.log(`EBAY_RETURN_POLICY_ID=${existing.return}`);
-      console.log(`EBAY_MARKETPLACE_ID=${MARKETPLACE}\n`);
+      console.log("⚠️  Privilege refusée, mais IDs déjà présents — tu peux les garder.\n");
       process.exit(0);
     }
-    console.log("Astuce : si tu avais déjà créé les policies avant, remets dans .env :");
-    console.log("  EBAY_FULFILLMENT_POLICY_ID=6240367000");
-    console.log("  EBAY_PAYMENT_POLICY_ID=6240368000");
-    console.log("  EBAY_RETURN_POLICY_ID=6240369000");
-    console.log("  (IDs de ta session précédente — à confirmer dans le Seller Hub Sandbox)\n");
     process.exit(1);
   }
 
@@ -251,10 +260,20 @@ async function main() {
   console.log("\n════════════════════════════════════════");
   console.log("Copie ces lignes dans ton fichier ebx/.env :");
   console.log("════════════════════════════════════════\n");
-  if (fulfillmentId) console.log(`EBAY_FULFILLMENT_POLICY_ID=${fulfillmentId}`);
-  if (paymentId) console.log(`EBAY_PAYMENT_POLICY_ID=${paymentId}`);
-  if (returnId) console.log(`EBAY_RETURN_POLICY_ID=${returnId}`);
-  console.log(`EBAY_MARKETPLACE_ID=${MARKETPLACE}`);
+  if (prod) {
+    if (fulfillmentId) console.log(`EBAY_FULFILLMENT_POLICY_ID_PROD=${fulfillmentId}`);
+    if (paymentId) console.log(`EBAY_PAYMENT_POLICY_ID_PROD=${paymentId}`);
+    if (returnId) console.log(`EBAY_RETURN_POLICY_ID_PROD=${returnId}`);
+  } else {
+    if (fulfillmentId) console.log(`EBAY_FULFILLMENT_POLICY_ID=${fulfillmentId}`);
+    if (paymentId) console.log(`EBAY_PAYMENT_POLICY_ID=${paymentId}`);
+    if (returnId) console.log(`EBAY_RETURN_POLICY_ID=${returnId}`);
+  }
+  console.log(`EBAY_MARKETPLACE_ID=${market}`);
+  if (prod) {
+    console.log("\nQuand tout est prêt pour publier en réel :");
+    console.log("  EBAY_ENV=production");
+  }
   console.log("");
 }
 

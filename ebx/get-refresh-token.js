@@ -129,11 +129,20 @@ async function main() {
 Créer le RuName (${isProd ? "Production" : "Sandbox"}) :
   1. https://developer.ebay.com/my/auth/?env=${isProd ? "production" : "sandbox"}&index=0
   2. Get a Token from eBay via Your Application → Add/configure RuName
-  3. Copie dans .env :
-       ${isProd ? "EBAY_RU_NAME_PROD" : "EBAY_RU_NAME"}=TonRuName-...
+  3. Copie dans .env avec guillemets DROITS " (pas Word ”) :
+       ${isProd ? "EBAY_RU_NAME_PROD" : "EBAY_RU_NAME"}="TonRuName-..."
 `);
     process.exit(1);
   }
+
+  // Détecte encore des guillemets Word restants
+  if (/[\u201C\u201D\u2018\u2019]/.test(RU_NAME) || RU_NAME.startsWith("%")) {
+    console.error('❌ RuName contient encore des guillemets invalides. Utilise: EBAY_RU_NAME_PROD="xxx"');
+    process.exit(1);
+  }
+
+  console.log(`  Client ID : ${CLIENT_ID.slice(0, 12)}… (${CLIENT_ID.length} car.)`);
+  console.log(`  RuName    : ${RU_NAME} (${RU_NAME.length} car.)\n`);
 
   const argCode = process.argv
     .slice(2)
@@ -180,11 +189,11 @@ EBAY_ENV=production
 EBAY_CLIENT_ID=<ton App ID Production>
 EBAY_CLIENT_SECRET=<ton Cert ID Production>
 EBAY_RU_NAME=${RU_NAME}
-EBAY_REFRESH_TOKEN="${data.refresh_token}"
+EBAY_REFRESH_TOKEN_PROD="${data.refresh_token}"
 EBAY_API_BASE=https://api.ebay.com
 EBAY_AUTH_URL=https://api.ebay.com/identity/v1/oauth2/token
 
-Puis npm run policies (nouveaux IDs) et redémarre le serveur.
+Puis npm run policies:prod (nouveaux IDs) — ne mets EBAY_ENV=production qu'après.
 `);
   } else {
     console.log(`
