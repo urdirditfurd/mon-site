@@ -125,15 +125,34 @@ async function loadDashboard() {
   const d = json.data || {};
   document.getElementById("dash-cards").innerHTML = [
     ["CA estimé", `${(d.revenue || 0).toFixed(2)} €`],
-    ["Commandes", d.orders || 0],
+    ["Publiés eBay", d.published || 0],
     ["Listings", d.listings || 0],
-    ["Marge", `${d.margin || 0}%`],
+    ["Auto-orders", d.pendingOrders || 0],
   ]
     .map(
       ([label, value]) =>
         `<div class="bg-white rounded-2xl border border-zinc-200 p-5"><p class="text-xs text-zinc-400">${label}</p><p class="text-2xl font-bold mt-1">${value}</p></div>`
     )
     .join("");
+  const feed = document.getElementById("pilotage-feed");
+  if (feed) {
+    const alerts = d.pilotage || [];
+    feed.innerHTML = alerts.length
+      ? alerts
+          .map((a) => {
+            const color =
+              a.level === "ok"
+                ? "border-emerald-100 bg-emerald-50 text-emerald-900"
+                : a.level === "warn"
+                  ? "border-amber-100 bg-amber-50 text-amber-900"
+                  : "border-zinc-100 bg-zinc-50 text-zinc-700";
+            return `<div class="rounded-xl border px-4 py-3 ${color}"><p class="font-medium">${escapeHtml(
+              a.title
+            )}</p><p class="text-xs mt-0.5 opacity-80">${escapeHtml(a.detail)}</p></div>`;
+          })
+          .join("")
+      : `<p class="text-zinc-400">Aucune alerte.</p>`;
+  }
 }
 
 async function loadAnalytics() {
@@ -263,7 +282,7 @@ async function analyzeCompetitor() {
     const res = await fetch(API + "/api/competitors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seller, marketplace: "FR" }),
+      body: JSON.stringify({ seller, marketplace: document.getElementById("competitor-market")?.value || "FR" }),
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || "Erreur");
@@ -547,12 +566,139 @@ async function loadListings() {
           <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">${
             item.ebay_listing_id ? "Republier" : "Publier eBay"
           }</button>
+          <button onclick="syncListing(${item.id}, this)" class="text-xs bg-zinc-50 text-zinc-600 px-3 py-1.5 rounded-lg">Sync</button>
+          ${
+            item.ebay_offer_id
+              ? `<button onclick="endListingEbay(${item.id}, this)" class="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg">Fin eBay</button>`
+              : ""
+          }
           <button onclick="deleteListing(${item.id})" class="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg">Suppr.</button>
         </td>
       </tr>`;
         })
         .join("")
     : `<tr><td colspan="4" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+}
+
+async function syncListing(id, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "...";
+  try {
+    const res = await fetch(API + "/api/listings/" + id + "/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ margin: 35, quantity: 10 }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const m = json.data.margin || {};
+    alert(
+      `Sync OK\nPrix: ${json.data.price} | Marge nette ~${m.netPct || "?"}%` +
+        (json.data.offerUpdate ? "\nOffre eBay mise à jour." : "\n(pas d'offer_id — prix local seulement)")
+    );
+    loadListings();
+  } catch (err) {
+    alert("Erreur sync: " + err.message);
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+}
+
+async function endListingEbay(id, btn) {
+  if (!confirm("Mettre fin à l'annonce sur eBay (withdraw offer) ?")) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "...";
+  try {
+    const res = await fetch(API + "/api/listings/" + id + "/end", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    alert("Annonce terminée côté eBay (offer withdraw).");
+    loadListings();
+  } catch (err) {
+    alert("Erreur: " + err.message);
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+}
+
+async function syncEbayOrders() {
+  try {
+    const res = await fetch(API + "/api/auto-orders/sync-ebay", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    alert(`Sync eBay: ${json.fetched} commande(s) lues, ${json.created} nouvelle(s).`);
+    loadOrders();
+  } catch (err) {
+    alert("Sync ventes: " + err.message);
+  }
+}
+
+async function loadAccounts() {
+  const box = document.getElementById("accounts-list");
+  if (!box) return;
+  try {
+    const res = await fetch(API + "/api/accounts");
+    const json = await res.json();
+    const rows = json.data || [];
+    box.innerHTML = rows.length
+      ? rows
+          .map(
+            (a) => `<div class="flex items-center justify-between gap-2 p-3 rounded-xl border ${
+              a.is_active ? "bg-emerald-50 border-emerald-100" : "bg-white"
+            }">
+            <div><p class="font-medium">${escapeHtml(a.label || a.user_id)}</p>
+            <p class="text-xs text-zinc-400">${escapeHtml(a.user_id || "")} · ${escapeHtml(a.env)} · ${escapeHtml(
+              a.marketplace
+            )}${a.is_active ? " · ACTIF" : ""}</p></div>
+            <div class="flex gap-2">
+              ${
+                a.is_active
+                  ? ""
+                  : `<button onclick="activateEbayAccount(${a.id})" class="text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-lg">Activer</button>`
+              }
+              <button onclick="removeEbayAccount(${a.id})" class="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-lg">Suppr.</button>
+            </div>
+          </div>`
+          )
+          .join("")
+      : `<p class="text-zinc-400 text-xs">Aucun compte multi enregistré — utilise le .env ou ajoute un token ci-dessus.</p>`;
+  } catch (_) {
+    box.innerHTML = "";
+  }
+}
+
+async function addEbayAccount() {
+  const label = document.getElementById("acc-label")?.value.trim();
+  const marketplace = document.getElementById("acc-market")?.value || "EBAY_US";
+  const refreshToken = document.getElementById("acc-token")?.value.trim();
+  if (!refreshToken) return alert("Colle un refresh token");
+  const res = await fetch(API + "/api/accounts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, marketplace, refreshToken, env: "production" }),
+  });
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  document.getElementById("acc-token").value = "";
+  alert("Compte ajouté: " + (json.data?.userId || "OK"));
+  loadAccounts();
+}
+
+async function activateEbayAccount(id) {
+  const res = await fetch(API + "/api/accounts/" + id + "/activate", { method: "POST" });
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  alert("Compte actif: " + json.data.userId);
+  loadAccounts();
+  loadSettings();
+}
+
+async function removeEbayAccount(id) {
+  if (!confirm("Supprimer ce compte de la liste locale ?")) return;
+  await fetch(API + "/api/accounts/" + id, { method: "DELETE" });
+  loadAccounts();
 }
 
 async function deleteListing(id) {
@@ -654,7 +800,14 @@ async function runTitleBuilder() {
     document.getElementById("title-results").classList.remove("hidden");
     document.getElementById("title-meta").textContent = `${titleData.analyzedListings || 0} annonces analysées${
       titleData.live === false ? " (fallback)" : " (live)"
+    }${
+      titleData.seo
+        ? ` · Score SEO ${titleData.seo.score}/100 (${titleData.seo.grade})`
+        : ""
     }`;
+    if (titleData.suggestedTitle) {
+      selectedKeywords = titleData.suggestedTitle.split(/\s+/).filter(Boolean);
+    }
     updateFinalTitle();
     renderKeywords();
   } catch (err) {
@@ -1045,6 +1198,7 @@ async function runSubstitution() {
 function loadSettings() {
   checkHealth();
   loadSetupStatus();
+  loadAccounts();
 }
 
 async function loadSetupStatus() {
@@ -1108,7 +1262,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

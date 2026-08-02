@@ -116,6 +116,11 @@ function ebaySiteId() {
 let cachedToken = null;
 let tokenExpiry = 0;
 
+function clearTokenCache() {
+  cachedToken = null;
+  tokenExpiry = 0;
+}
+
 function describeAuthState() {
   return {
     env: isProduction() ? "production" : "sandbox",
@@ -937,10 +942,71 @@ async function getSellerIdentity() {
   };
 }
 
+async function getRecentOrders({ limit = 20 } = {}) {
+  loadEbayEnv();
+  const token = await getAccessToken();
+  const url =
+    `${ebayApiBase()}/sell/fulfillment/v1/order?limit=${Math.min(Number(limit) || 20, 50)}` +
+    `&filter=${encodeURIComponent("orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}")}`;
+  const res = await ebayHttpsRequest("GET", url, { token });
+  if (!res.ok) {
+    // Fallback sans filtre
+    const res2 = await ebayHttpsRequest(
+      "GET",
+      `${ebayApiBase()}/sell/fulfillment/v1/order?limit=${Math.min(Number(limit) || 20, 50)}`,
+      { token }
+    );
+    if (!res2.ok) {
+      throw new Error(`Orders API (${res2.status}): ${res2.text.slice(0, 200)}`);
+    }
+    const data2 = res2.json();
+    return { orders: data2?.orders || [], env: isProduction() ? "production" : "sandbox" };
+  }
+  const data = res.json();
+  return { orders: data?.orders || [], env: isProduction() ? "production" : "sandbox" };
+}
+
+async function updateOfferPriceQuantity(offerId, { price, quantity } = {}) {
+  loadEbayEnv();
+  const token = await getAccessToken();
+  const getUrl = `${ebayApiBase()}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`;
+  const existing = await ebayHttpsRequest("GET", getUrl, { token });
+  if (!existing.ok) throw new Error(`Offer GET (${existing.status}): ${existing.text.slice(0, 180)}`);
+  const offer = existing.json();
+  if (price != null) {
+    offer.pricingSummary = offer.pricingSummary || {};
+    offer.pricingSummary.price = {
+      value: String(Number(price).toFixed(2)),
+      currency: process.env.EBAY_CURRENCY || offer.pricingSummary?.price?.currency || "USD",
+    };
+  }
+  if (quantity != null) offer.availableQuantity = Number(quantity);
+  const put = await ebayHttpsRequest("PUT", getUrl, { token, body: offer, contentLanguage: true });
+  if (!put.ok && put.status !== 204) {
+    throw new Error(`Offer update (${put.status}): ${put.text.slice(0, 200)}`);
+  }
+  return { offerId, price, quantity, status: "updated" };
+}
+
+async function endEbayOffer(offerId) {
+  loadEbayEnv();
+  const token = await getAccessToken();
+  const url = `${ebayApiBase()}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`;
+  const res = await ebayHttpsRequest("POST", url, { token, body: {}, contentLanguage: true });
+  if (!res.ok && res.status !== 200 && res.status !== 204) {
+    throw new Error(`Withdraw offer (${res.status}): ${res.text.slice(0, 220)}`);
+  }
+  return { offerId, status: "ended" };
+}
+
 module.exports = {
   publishToEbay,
   getAccessToken,
   getSellerIdentity,
+  getRecentOrders,
+  updateOfferPriceQuantity,
+  endEbayOffer,
+  clearTokenCache,
   describeAuthState,
   isProduction,
   ebayApiBase,

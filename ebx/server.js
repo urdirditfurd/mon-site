@@ -4,16 +4,6 @@ loadEbayEnv();
 const express = require("express");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
-const { generateListing } = require("./ai-brain");
-const { publishToEbay } = require("./ebay-api");
-const {
-  getRankings,
-  analyzeTitleKeywords,
-  analyzeCompetitor,
-  buildDescriptionFromUrl,
-  getDashboardStats,
-  getAutoOrders,
-} = require("./mock-data");
 const {
   scrapeProduct,
   scrapeEbaySearch,
@@ -27,6 +17,24 @@ const {
   isRealProductImage,
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
+const {
+  antiBanDelay,
+  scanVero,
+  scoreSeoTitle,
+  buildAiTitle,
+  estimateMargin,
+  buildPilotageFeed,
+} = require("./business-engine");
+const {
+  getRankings,
+  analyzeTitleKeywords,
+  analyzeCompetitor,
+  buildDescriptionFromUrl,
+  getDashboardStats,
+  getAutoOrders,
+} = require("./mock-data");
+const { generateListing } = require("./ai-brain");
+const { publishToEbay } = require("./ebay-api");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,7 +98,7 @@ const getRecentListings = db.prepare(
              AND html_description NOT LIKE '%picsum.photos%'
             THEN 1 ELSE 0
           END AS has_images
-   FROM listings ORDER BY created_at DESC LIMIT 50`
+   FROM listings ORDER BY created_at DESC LIMIT 500`
 );
 const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
 const deleteListingById = db.prepare("DELETE FROM listings WHERE id = ?");
@@ -126,7 +134,34 @@ const insertCompetitor = db.prepare(
   "INSERT INTO competitor_history (seller_name, payload) VALUES (?, ?)"
 );
 const getCompetitorHistory = db.prepare(
-  "SELECT id, seller_name, payload, created_at FROM competitor_history ORDER BY created_at DESC LIMIT 10"
+  "SELECT id, seller_name, payload, created_at FROM competitor_history ORDER BY created_at DESC LIMIT 100"
+);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ebay_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT,
+    user_id TEXT,
+    refresh_token TEXT,
+    env TEXT DEFAULT 'production',
+    marketplace TEXT DEFAULT 'EBAY_US',
+    is_active INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+const listEbayAccounts = db.prepare(
+  "SELECT id, label, user_id, env, marketplace, is_active, created_at FROM ebay_accounts ORDER BY is_active DESC, id DESC"
+);
+const insertEbayAccount = db.prepare(
+  `INSERT INTO ebay_accounts (label, user_id, refresh_token, env, marketplace, is_active)
+   VALUES (?, ?, ?, ?, ?, 0)`
+);
+const clearActiveAccounts = db.prepare("UPDATE ebay_accounts SET is_active = 0");
+const activateEbayAccount = db.prepare("UPDATE ebay_accounts SET is_active = 1 WHERE id = ?");
+const getEbayAccountById = db.prepare("SELECT * FROM ebay_accounts WHERE id = ?");
+const deleteEbayAccount = db.prepare("DELETE FROM ebay_accounts WHERE id = ?");
+const getActiveEbayAccount = db.prepare(
+  "SELECT * FROM ebay_accounts WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
 );
 const getCompetitorById = db.prepare("SELECT * FROM competitor_history WHERE id = ?");
 const deleteCompetitorById = db.prepare("DELETE FROM competitor_history WHERE id = ?");
@@ -217,18 +252,39 @@ app.get("/api/setup", async (_req, res) => {
   res.json({ success: true, data: setup });
 });
 
-app.get("/api/dashboard", (_req, res) => {
+app.get("/api/dashboard", async (_req, res) => {
   try {
     const listings = getRecentListings.all();
     const orders = getOrders.all();
     const base = getDashboardStats(listings.length);
+    let seller = null;
+    let ebayEnv = "sandbox";
+    try {
+      const { isProduction, getSellerIdentity } = require("./ebay-api");
+      ebayEnv = isProduction() ? "production" : "sandbox";
+      seller = await getSellerIdentity();
+    } catch (_) {}
+    const publishedToday = listings.filter((l) => l.published_at).length;
+    const pilotage = buildPilotageFeed({
+      listings,
+      orders,
+      seller,
+      ebayEnv,
+      publishedToday,
+    });
+    const published = listings.filter((l) => l.ebay_listing_id).length;
     res.json({
       success: true,
       data: {
         ...base,
         listings: listings.length,
+        published,
         pendingOrders: orders.filter((o) => o.status === "pending").length,
         orders: orders.length || base.orders,
+        ebayEnv,
+        sellerUserId: seller?.userId || null,
+        pilotage,
+        plan: "Business",
       },
     });
   } catch (err) {
@@ -308,9 +364,22 @@ app.post("/api/title-builder", async (req, res) => {
     const r = await browseSearch(query, { marketplace, limit: 40 });
     const items = filterItems(r.items);
     if (items.length >= 3) {
+      const data = filterKeywords(buildKeywordAnalysisFromItems(query, items));
+      const suggested = buildAiTitle(
+        query,
+        (data.keywords || []).slice(0, 6).map((k) => k.keyword)
+      );
       return res.json({
         success: true,
-        data: { ...filterKeywords(buildKeywordAnalysisFromItems(query, items)), api: r.api },
+        data: {
+          ...data,
+          api: r.api,
+          suggestedTitle: suggested,
+          seo: scoreSeoTitle(
+            suggested,
+            (data.keywords || []).slice(0, 8).map((k) => k.keyword)
+          ),
+        },
       });
     }
   } catch (err) {
@@ -467,12 +536,20 @@ app.post("/api/auto-snipe", async (req, res) => {
   res.flushHeaders?.();
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-  const max = Math.min(Number(count) || 1, 5);
-  const marketCode = marketplace === "United States" ? "US" : "FR";
+  const max = Math.min(Math.max(Number(count) || 1, 1), 100);
+  const marketCode =
+    /united states|ebay_us|\bus\b/i.test(String(marketplace))
+      ? "US"
+      : /germany|ebay_de|\bde\b/i.test(String(marketplace))
+        ? "DE"
+        : /united kingdom|ebay_gb|\bgb\b/i.test(String(marketplace))
+          ? "GB"
+          : "FR";
   let scanned = 0;
   let imported = 0;
   let listed = 0;
   let errors = 0;
+  let veroBlocked = 0;
 
   const ticketFilter = (price) => {
     if (ticket === "low") return price == null || price <= 30;
@@ -483,15 +560,18 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe LIVE — Mode ${testMode !== false ? "TEST (24h)" : "REEL eBay"}`,
+      message: `[INIT] Auto-Snipe BUSINESS — Mode ${testMode !== false ? "TEST (délais courts)" : "REEL (anti-ban humain)"}`,
     });
     send({
       type: "log",
-      message: `[CONFIG] Market=${marketplace} | Marge=${margin}% | Ticket=${ticket} | Source=${source} | Qty=${max}`,
+      message: `[CONFIG] Market=${marketplace} (${marketCode}) | Marge=${margin}% | Ticket=${ticket} | Source=${source} | Qty=${max}`,
     });
-    await sleep(200);
-    send({ type: "log", message: `[PROTECT] Anti-ban ✓ | VERO ✓ | Limites journalières ✓ | Mode vagues ✓` });
-    await sleep(250);
+    const d0 = await antiBanDelay({ testMode: testMode !== false, label: "init" });
+    send({
+      type: "log",
+      message: `[PROTECT] Anti-ban ${testMode !== false ? "souple" : "humain"} ✓ (${d0.waitedMs}ms${d0.deferred ? ", hors horaires" : ""}) | VeRO scan ✓ | Sans quota abonnement ✓`,
+    });
+    await antiBanDelay({ testMode: testMode !== false, label: "scan" });
 
     // 1) Produits tendance eBay (comme dans la vidéo)
     send({ type: "log", message: `[SCAN] Recherche tendances eBay pour "${query}"...` });
@@ -529,7 +609,18 @@ app.post("/api/auto-snipe", async (req, res) => {
           type: "log",
           message: `[TARGET] eBay: "${String(target.title).slice(0, 70)}" @ ${(target.price || 0).toFixed?.(2) || target.price}€`,
         });
-        await sleep(300);
+        const vero = scanVero(target.title);
+        if (vero.level === "block") {
+          veroBlocked += 1;
+          send({ type: "log", message: `[VERO] BLOQUÉ — ${vero.message}` });
+          errors += 1;
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
+        }
+        if (!vero.ok) {
+          send({ type: "log", message: `[VERO] Attention — ${vero.message}` });
+        }
+        await antiBanDelay({ testMode: testMode !== false, label: "target" });
 
         // 2) Chercher fournisseur moins cher (Amazon / Ali)
         send({ type: "log", message: `[SOURCE] Recherche fournisseur (${source}) le moins cher...` });
@@ -551,6 +642,19 @@ app.post("/api/auto-snipe", async (req, res) => {
           }
         }
 
+        if (!supplier && source === "cdiscount") {
+          supplier = {
+            title: target.title,
+            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
+            price: Number(((target.price || 20) * 0.45).toFixed(2)),
+            source: "cdiscount",
+          };
+          send({
+            type: "log",
+            message: `[SOURCE] Cdiscount candidat @ ${supplier.price}€ — ${supplier.url.slice(0, 70)}`,
+          });
+        }
+
         if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
           supplier = {
             title: target.title,
@@ -561,6 +665,19 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({
             type: "log",
             message: `[SOURCE] AliExpress candidat @ ${supplier.price}€ — ${supplier.url.slice(0, 70)}`,
+          });
+        }
+
+        if (!supplier && source === "auto") {
+          supplier = {
+            title: target.title,
+            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
+            price: Number(((target.price || 20) * 0.45).toFixed(2)),
+            source: "cdiscount",
+          };
+          send({
+            type: "log",
+            message: `[SOURCE] Cdiscount fallback @ ${supplier.price}€`,
           });
         }
 
@@ -636,7 +753,7 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         imported += 1;
         send({ type: "stats", scanned, imported, listed, errors });
-        await sleep(250);
+        await antiBanDelay({ testMode: testMode !== false, label: "import" });
 
         // 4) Listing (simulation ou réel)
         if (!autoList) {
@@ -648,10 +765,18 @@ app.post("/api/auto-snipe", async (req, res) => {
           });
           listed += 1;
         } else {
-          send({ type: "log", message: `[LISTING] Publication eBay Sandbox (mode REEL)...` });
+          send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
           try {
             const listing = getListingById.get(Number(result.id));
             const pub = await publishToEbay(listing, listing.id);
+            if (pub?.listingId) {
+              updateListingPublish.run(
+                String(pub.listingId),
+                String(pub.offerId || ""),
+                String(pub.env || ""),
+                listing.id
+              );
+            }
             send({ type: "log", message: `[OK] Publié — listingId=${pub.listingId || "n/a"}` });
             listed += 1;
           } catch (e) {
@@ -660,18 +785,23 @@ app.post("/api/auto-snipe", async (req, res) => {
           }
         }
 
+        const supplierLabel = /amazon/i.test(supplier.source || "")
+          ? "Amazon"
+          : /cdiscount/i.test(supplier.source || "")
+            ? "Cdiscount"
+            : "AliExpress";
         insertOrder.run(
           `AO-${Date.now().toString().slice(-6)}`,
           title.slice(0, 80),
           "ebay_buyer",
           "pending",
-          String(supplier.source || "").includes("amazon") ? "Amazon" : "AliExpress",
+          supplierLabel,
           cost,
           supplier.url || ""
         );
 
         send({ type: "stats", scanned, imported, listed, errors });
-        await sleep(200);
+        await antiBanDelay({ testMode: testMode !== false, label: "loop" });
       } catch (err) {
         errors += 1;
         send({ type: "log", message: `[ERROR] ${err.message}` });
@@ -679,7 +809,10 @@ app.post("/api/auto-snipe", async (req, res) => {
       }
     }
 
-    send({ type: "log", message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s), ${errors} erreur(s)` });
+    send({
+      type: "log",
+      message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s), ${errors} erreur(s), VeRO bloqués=${veroBlocked}`,
+    });
     send({ type: "done", scanned, imported, listed, errors });
   } catch (err) {
     send({ type: "log", message: `[ERROR] ${err.message}` });
@@ -946,6 +1079,14 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
   try {
     let listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    const vero = scanVero(`${listing.seo_title} ${listing.html_description || ""}`);
+    if (vero.level === "block" && !req.body?.force) {
+      return res.status(400).json({
+        success: false,
+        error: `VeRO: ${vero.message}. Corrige le titre ou force=true si tu assumes le risque.`,
+        vero,
+      });
+    }
     listing = await ensureListingImages(listing);
     const { isProduction, getSellerIdentity } = require("./ebay-api");
     let sellerUserId = null;
@@ -953,11 +1094,13 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       const seller = await getSellerIdentity();
       sellerUserId = seller.userId;
       console.log(
-        `[EBX] Publish pour compte ${seller.userId} (${isProduction() ? "PRODUCTION" : "sandbox"})`
+        `[EBX] Publish pour compte ${seller.userId} (${isProduction() ? "PRODUCTION" : "sandbox"})` +
+          (vero.ok ? "" : ` | ${vero.message}`)
       );
     } catch (err) {
       console.warn("[EBX] GetUser avant publish:", err.message);
     }
+    await antiBanDelay({ testMode: false, label: "publish" });
     const result = await publishToEbay(listing, listing.id);
     if (result?.listingId) {
       updateListingPublish.run(
@@ -973,12 +1116,180 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     }
     return res.json({
       success: true,
-      data: { ...result, sellerUserId },
+      data: { ...result, sellerUserId, vero },
     });
   } catch (err) {
     console.error("[EBX] Erreur eBay :", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+app.post("/api/ai-title", (req, res) => {
+  try {
+    const { productName, keywords = [] } = req.body || {};
+    if (!productName) return res.status(400).json({ success: false, error: "productName requis" });
+    const title = buildAiTitle(productName, keywords);
+    const seo = scoreSeoTitle(title, keywords);
+    const vero = scanVero(title);
+    res.json({ success: true, data: { title, seo, vero } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/vero-scan", (req, res) => {
+  const text = req.body?.text || req.body?.title || "";
+  res.json({ success: true, data: scanVero(text) });
+});
+
+app.post("/api/listings/:id/sync", async (req, res) => {
+  try {
+    let listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable" });
+    listing = await ensureListingImages(listing);
+    const sourceUrl = String(listing.source_url || "").trim();
+    let cost = null;
+    if (sourceUrl && !/aliexpress\.com\/w\/wholesale|cdiscount\.com\/search/i.test(sourceUrl)) {
+      try {
+        const scraped = await scrapeProduct(sourceUrl);
+        cost = scraped.price || null;
+      } catch (e) {
+        console.warn("[EBX] sync scrape:", e.message);
+      }
+    }
+    const margin = Number(req.body?.margin) || 35;
+    let newPrice = listing.suggested_price;
+    if (cost && cost > 0) {
+      newPrice = Number((cost * (1 + margin / 100) * 1.35).toFixed(2));
+      db.prepare("UPDATE listings SET suggested_price = ? WHERE id = ?").run(newPrice, listing.id);
+    }
+    let offerUpdate = null;
+    if (listing.ebay_offer_id) {
+      const { updateOfferPriceQuantity } = require("./ebay-api");
+      offerUpdate = await updateOfferPriceQuantity(listing.ebay_offer_id, {
+        price: newPrice,
+        quantity: Number(req.body?.quantity) || 10,
+      });
+    }
+    const marginInfo = estimateMargin({ cost: cost || newPrice * 0.4, sellPrice: newPrice });
+    res.json({
+      success: true,
+      data: { id: listing.id, price: newPrice, cost, margin: marginInfo, offerUpdate },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/listings/:id/end", async (req, res) => {
+  try {
+    const listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable" });
+    if (!listing.ebay_offer_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Pas d'offer_id eBay mémorisé — mets fin à l'annonce depuis Mes ventes eBay.",
+      });
+    }
+    const { endEbayOffer } = require("./ebay-api");
+    await endEbayOffer(listing.ebay_offer_id);
+    updateListingPublish.run("", "", "", listing.id);
+    res.json({ success: true, data: { id: listing.id, status: "ended" } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
+  try {
+    const { getRecentOrders } = require("./ebay-api");
+    const { orders } = await getRecentOrders({ limit: 25 });
+    let created = 0;
+    for (const o of orders) {
+      const ref = String(o.orderId || "").slice(0, 40);
+      if (!ref) continue;
+      const exists = getOrderByRef.get(ref);
+      if (exists) continue;
+      const line = o.lineItems?.[0];
+      const title = line?.title || "Commande eBay";
+      const amount = Number(o.pricingSummary?.total?.value || line?.total?.value || 0);
+      insertOrder.run(ref, title.slice(0, 120), o.buyer?.username || "buyer", "pending", "eBay→fournisseur", amount, "");
+      created += 1;
+    }
+    res.json({ success: true, fetched: orders.length, created });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/accounts", (_req, res) => {
+  res.json({ success: true, data: listEbayAccounts.all() });
+});
+
+app.post("/api/accounts", async (req, res) => {
+  try {
+    const { label, refreshToken, env: accEnv = "production", marketplace = "EBAY_US" } = req.body || {};
+    const token = String(refreshToken || "").trim();
+    if (token.length < 40) {
+      return res.status(400).json({ success: false, error: "refreshToken trop court" });
+    }
+    // Probe user id with temporary env override
+    const prev = process.env.EBAY_REFRESH_TOKEN_PROD;
+    const prevEnv = process.env.EBAY_ENV;
+    process.env.EBAY_ENV = accEnv === "sandbox" ? "sandbox" : "production";
+    if (accEnv === "sandbox") process.env.EBAY_REFRESH_TOKEN = token;
+    else process.env.EBAY_REFRESH_TOKEN_PROD = token;
+    let userId = "";
+    try {
+      const { getSellerIdentity, clearTokenCache } = require("./ebay-api");
+      clearTokenCache();
+      const identity = await getSellerIdentity();
+      userId = identity.userId;
+    } catch (e) {
+      if (prev !== undefined) process.env.EBAY_REFRESH_TOKEN_PROD = prev;
+      if (prevEnv !== undefined) process.env.EBAY_ENV = prevEnv;
+      return res.status(400).json({ success: false, error: "Token invalide: " + e.message });
+    }
+    if (prev !== undefined) process.env.EBAY_REFRESH_TOKEN_PROD = prev;
+    if (prevEnv !== undefined) process.env.EBAY_ENV = prevEnv;
+
+    insertEbayAccount.run(label || userId || "Compte", userId, token, accEnv, marketplace);
+    res.json({ success: true, data: { userId } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/accounts/:id/activate", (req, res) => {
+  try {
+    const row = getEbayAccountById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Compte introuvable" });
+    clearActiveAccounts.run();
+    activateEbayAccount.run(row.id);
+    if (row.env === "sandbox") {
+      process.env.EBAY_ENV = "sandbox";
+      process.env.EBAY_REFRESH_TOKEN = row.refresh_token;
+    } else {
+      process.env.EBAY_ENV = "production";
+      process.env.EBAY_REFRESH_TOKEN_PROD = row.refresh_token;
+    }
+    if (row.marketplace) process.env.EBAY_MARKETPLACE_ID = row.marketplace;
+    try {
+      const { clearTokenCache } = require("./ebay-api");
+      clearTokenCache();
+    } catch (_) {}
+    res.json({
+      success: true,
+      data: { id: row.id, userId: row.user_id, env: row.env, marketplace: row.marketplace },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/accounts/:id", (req, res) => {
+  deleteEbayAccount.run(req.params.id);
+  res.json({ success: true });
 });
 
 app.listen(PORT, () => {

@@ -88,7 +88,7 @@
     </nav>
     <div class="p-4 border-t border-zinc-100 flex items-center gap-3">
       <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-bold">E</div>
-      <div><p class="text-sm font-medium">EBX User</p><p class="text-xs text-zinc-400">Plan Pro</p></div>
+      <div><p class="text-sm font-medium">EBX User</p><p class="text-xs text-zinc-400">Business · illimité</p></div>
     </div>
   </aside>
 
@@ -105,6 +105,11 @@
       <!-- DASHBOARD -->
       <section id="page-dashboard" class="page active space-y-6">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="dash-cards"></div>
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <h3 class="font-semibold mb-2">Pilotage</h3>
+          <p class="text-sm text-zinc-400 mb-4">Moins d'actions, plus de contrôle — alertes système</p>
+          <div id="pilotage-feed" class="space-y-2 text-sm"></div>
+        </div>
         <div class="bg-white rounded-2xl border border-zinc-200 p-6">
           <h3 class="font-semibold mb-2">Actions rapides</h3>
           <div class="flex flex-wrap gap-3">
@@ -152,7 +157,12 @@
           <h3 class="font-semibold text-lg">Analysez vos concurrents</h3>
           <p class="text-sm text-zinc-400 mb-4">Découvrez le chiffre d'affaires de n'importe quel vendeur eBay</p>
           <div class="flex gap-3">
-            <div class="flex items-center gap-2 px-3 border border-zinc-200 rounded-xl bg-zinc-50 text-sm">🇫🇷 FR</div>
+            <select id="competitor-market" class="px-3 border border-zinc-200 rounded-xl bg-zinc-50 text-sm">
+              <option value="FR">🇫🇷 FR</option>
+              <option value="US">🇺🇸 US</option>
+              <option value="DE">🇩🇪 DE</option>
+              <option value="GB">🇬🇧 GB</option>
+            </select>
             <input id="competitor-input" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 text-sm" placeholder="Nom du vendeur eBay..." value="vaissellebio-lsbio" />
             <button onclick="analyzeCompetitor()" id="competitor-btn" class="btn-primary">Analyser</button>
           </div>
@@ -185,13 +195,13 @@
             <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Paramètres</p>
             <div class="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
               <div class="lg:col-span-2"><label class="text-xs text-zinc-500">Mot-clé / niche</label><input id="snipe-query" type="text" value="éponge maquillage" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
-              <div><label class="text-xs text-zinc-500">Produits à sniper</label><input id="snipe-count" type="number" min="1" max="5" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
+              <div><label class="text-xs text-zinc-500">Produits à sniper</label><input id="snipe-count" type="number" min="1" max="100" value="3" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
               <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
-              <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option></select></div>
+              <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option><option>Germany</option><option>United Kingdom</option></select></div>
               <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
             </div>
             <div class="grid md:grid-cols-2 gap-3 mt-3">
-              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="auto">Auto (moins cher)</option><option value="amazon">Amazon</option><option value="aliexpress">AliExpress</option></select></div>
+              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="auto">Auto (Amazon → Ali → Cdiscount)</option><option value="amazon">Amazon</option><option value="aliexpress">AliExpress</option><option value="cdiscount">Cdiscount</option></select></div>
             </div>
           </div>
 
@@ -199,8 +209,8 @@
             <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Options</p>
             <div class="space-y-3">
               <label class="flex items-center justify-between gap-4 text-sm"><span>Listing automatique<br><span class="text-xs text-zinc-400">Lister directement sur eBay après import</span></span><input id="snipe-autolist" type="checkbox" class="toggle" checked /></label>
-              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode Test (24h)<br><span class="text-xs text-zinc-400">Ignorer les heures humaines — risque ban</span></span><input id="snipe-test" type="checkbox" class="toggle" checked /></label>
-              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode REEL eBay<br><span class="text-xs text-zinc-400">Publie via Sandbox / compte connecté dans Paramètres</span></span><input id="snipe-real" type="checkbox" class="toggle" /></label>
+              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode Test (délais courts)<br><span class="text-xs text-zinc-400">Pour démo — délais anti-ban réduits</span></span><input id="snipe-test" type="checkbox" class="toggle" checked /></label>
+              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode REEL eBay<br><span class="text-xs text-zinc-400">Publie via le compte OAuth (Production/Sandbox)</span></span><input id="snipe-real" type="checkbox" class="toggle" /></label>
             </div>
           </div>
 
@@ -243,8 +253,11 @@
       <section id="page-auto-order" class="page">
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
           <div class="p-5 border-b flex justify-between items-center">
-            <div><h3 class="font-semibold">Auto-Order</h3><p class="text-sm text-zinc-400">Commandes fournisseurs créées par Auto-Snipe</p></div>
-            <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+            <div><h3 class="font-semibold">Auto-Order</h3><p class="text-sm text-zinc-400">Commandes eBay → fournisseur (sync + suivi)</p></div>
+            <div class="flex gap-2">
+              <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes eBay</button>
+              <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+            </div>
           </div>
           <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">ID</th><th class="p-3">Produit</th><th class="p-3">Fournisseur</th><th class="p-3">Montant</th><th class="p-3">Statut</th><th class="p-3">Actions</th></tr></thead><tbody id="orders-body"></tbody></table>
         </div>
@@ -256,7 +269,7 @@
           <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
             <div>
               <h3 class="font-semibold">Mes Listings</h3>
-              <p class="text-sm text-zinc-400">Historique SQLite local — Publier eBay = Sandbox</p>
+              <p class="text-sm text-zinc-400">Illimité · sync prix/stock · fin d'annonce eBay</p>
             </div>
             <div class="flex gap-2 flex-wrap">
               <button onclick="dedupeListings()" class="text-sm px-3 py-1.5 border rounded-lg">Nettoyer doublons</button>
@@ -375,7 +388,7 @@
       </section>
 
       <!-- SETTINGS -->
-      <section id="page-settings" class="page">
+      <section id="page-settings" class="page space-y-6">
         <div class="bg-white rounded-2xl border p-6 space-y-5 max-w-2xl">
           <div class="flex items-center justify-between gap-3">
             <h3 class="font-semibold text-lg">Paramètres & installation</h3>
@@ -393,6 +406,22 @@
             <p class="font-medium">LLM (optionnel, comme ebx.army IA)</p>
             <p class="text-xs text-zinc-500">Installe <a class="text-brand-600 underline" href="https://lmstudio.ai/" target="_blank">LM Studio</a>, charge un modèle, démarre le serveur local sur le port 1234. Les descriptions seront enrichies automatiquement.</p>
           </div>
+        </div>
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-2xl">
+          <h3 class="font-semibold text-lg">Comptes eBay (multi)</h3>
+          <p class="text-sm text-zinc-400">Ajoute plusieurs refresh tokens Prod — active celui qui publie.</p>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <input id="acc-label" class="px-3 py-2 rounded-xl border text-sm" placeholder="Label (ex. Boutique FR)" />
+            <select id="acc-market" class="px-3 py-2 rounded-xl border text-sm">
+              <option value="EBAY_FR">EBAY_FR</option>
+              <option value="EBAY_US">EBAY_US</option>
+              <option value="EBAY_DE">EBAY_DE</option>
+              <option value="EBAY_GB">EBAY_GB</option>
+            </select>
+          </div>
+          <textarea id="acc-token" class="w-full h-24 px-3 py-2 rounded-xl border text-sm font-mono" placeholder="EBAY_REFRESH_TOKEN_PROD (colle le token)"></textarea>
+          <button onclick="addEbayAccount()" class="btn-primary">Ajouter le compte</button>
+          <div id="accounts-list" class="space-y-2 text-sm"></div>
         </div>
       </section>
     </div>
