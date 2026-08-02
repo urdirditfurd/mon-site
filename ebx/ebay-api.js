@@ -286,16 +286,54 @@ function ebayHttpsRequest(method, urlString, { token, body, contentLanguage = fa
   });
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function sanitizeEbayTitle(title) {
+  return String(title || "EBX Product")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+/** Aspects Inventory : uniquement { "Name": ["value"] } non vides. */
+function sanitizeAspects(aspects) {
+  const out = {};
+  for (const [rawKey, rawVal] of Object.entries(aspects || {})) {
+    const key = String(rawKey || "").trim();
+    if (!key) continue;
+    const values = (Array.isArray(rawVal) ? rawVal : [rawVal])
+      .map((v) => String(v == null ? "" : v).trim())
+      .filter((v) => v && v.toLowerCase() !== "undefined" && v.toLowerCase() !== "null")
+      .slice(0, 10);
+    if (values.length) out[key] = values;
+  }
+  if (!out.Brand) out.Brand = ["Unbranded"];
+  return out;
+}
+
+function isInventoryTransientError(status, text) {
+  if (status === 500 || status === 503 || status === 504) return true;
+  if (/25001|25025|internal error|try again/i.test(String(text || ""))) return true;
+  return false;
+}
+
 async function ensureInventoryLocation(token) {
-  const key = process.env.EBAY_MERCHANT_LOCATION_KEY || "default";
-  const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
+  // Évite la clé "default" parfois corrompue / réservée en Prod
+  const key = env("EBAY_MERCHANT_LOCATION_KEY", "ebx_us_wh");
+  const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${encodeURIComponent(key)}`;
 
   const existing = await ebayHttpsRequest("GET", getUrl, { token });
-  if (existing.status === 200) return key;
+  if (existing.status === 200) {
+    console.log(`[EBX] Inventory location OK: ${key}`);
+    return key;
+  }
 
-  const createUrl = `${ebayApiBase()}/sell/inventory/v1/location/${key}`;
+  const createUrl = `${ebayApiBase()}/sell/inventory/v1/location/${encodeURIComponent(key)}`;
   const body = {
-    name: "EBX Warehouse",
+    name: "EBX Warehouse US",
     merchantLocationStatus: "ENABLED",
     location: {
       address: {
@@ -309,16 +347,18 @@ async function ensureInventoryLocation(token) {
     locationTypes: ["WAREHOUSE"],
   };
 
+  // Location API : pas de Content-Language (évite des 500 parasites)
   const res = await ebayHttpsRequest("POST", createUrl, {
     token,
     body,
-    contentLanguage: true,
+    contentLanguage: false,
   });
 
   if (res.status !== 204 && res.status !== 200 && res.status !== 201 && res.status !== 409) {
-    throw new Error(`Inventory location error (${res.status}) [locale=${res.locale}]: ${res.text}`);
+    throw new Error(`Inventory location error (${res.status}): ${res.text}`);
   }
 
+  console.log(`[EBX] Inventory location créée: ${key} (HTTP ${res.status})`);
   return key;
 }
 
@@ -447,7 +487,7 @@ async function hostImagesForGallery(token, sourceUrls) {
 
 async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
-  const title = (listing.seo_title || "EBX Product").slice(0, 80);
+  const title = sanitizeEbayTitle(listing.seo_title);
   const sourceImages = extractImageUrls(listing.html_description).slice(0, 8);
   if (!sourceImages.length) {
     throw new Error(
@@ -474,39 +514,92 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   const shortDesc = (plain || title).slice(0, 4000);
+  const mergedAspects = sanitizeAspects({ Brand: ["Unbranded"], ...aspects });
 
-  const mergedAspects = {
-    Brand: ["Unbranded"],
-    ...aspects,
-  };
-
-  const body = {
-    availability: {
-      shipToLocationAvailability: { quantity: 10 },
+  // Tentative 1 : payload complet — tentatives suivantes : simplifié (anti 25001)
+  const attempts = [
+    {
+      label: "full",
+      body: {
+        availability: { shipToLocationAvailability: { quantity: 10 } },
+        condition: "NEW",
+        product: {
+          title,
+          description: shortDesc,
+          aspects: mergedAspects,
+          imageUrls,
+        },
+      },
     },
-    condition: "NEW",
-    product: {
-      title,
-      description: shortDesc,
-      aspects: mergedAspects,
-      imageUrls,
+    {
+      label: "minimal",
+      body: {
+        availability: { shipToLocationAvailability: { quantity: 10 } },
+        condition: "NEW",
+        product: {
+          title,
+          aspects: { Brand: mergedAspects.Brand || ["Unbranded"] },
+          imageUrls: imageUrls.slice(0, 1),
+        },
+      },
     },
-  };
+    {
+      label: "minimal-retry",
+      body: {
+        availability: { shipToLocationAvailability: { quantity: 5 } },
+        condition: "NEW",
+        product: {
+          title: title.slice(0, 60),
+          aspects: { Brand: ["Unbranded"] },
+          imageUrls: imageUrls.slice(0, 1),
+        },
+      },
+    },
+  ];
 
-  const res = await ebayHttpsRequest("PUT", url, {
-    token,
-    body,
-    contentLanguage: true,
-  });
+  let lastErr = "";
+  for (let i = 0; i < attempts.length; i++) {
+    const { label, body } = attempts[i];
+    if (i > 0) {
+      const wait = 1500 * i;
+      console.warn(`[EBX] Inventory retry ${i + 1}/${attempts.length} (${label}) dans ${wait}ms…`);
+      await sleep(wait);
+    } else {
+      console.log(`[EBX] Inventory PUT sku=${sku} images=${imageUrls.length} aspects=${Object.keys(mergedAspects).length}`);
+    }
 
-  if (res.status !== 204 && res.status !== 200) {
-    throw new Error(`Inventory API error (${res.status}) [locale=${res.locale}]: ${res.text}`);
+    const res = await ebayHttpsRequest("PUT", url, {
+      token,
+      body,
+      contentLanguage: true,
+    });
+
+    if (res.status === 204 || res.status === 200) {
+      console.log(`[EBX] Inventory item OK (${label})`);
+      return { sku, status: "inventory_created", imageUrls };
+    }
+
+    lastErr = `Inventory API error (${res.status}) [locale=${res.locale}]: ${res.text}`;
+    console.warn(`[EBX] Inventory ${label} fail: ${res.text.slice(0, 240)}`);
+
+    if (!isInventoryTransientError(res.status, res.text) && label === "full") {
+      // Erreur métier claire → pas la peine de retenter le même payload
+      continue;
+    }
+    if (!isInventoryTransientError(res.status, res.text) && i === attempts.length - 1) {
+      break;
+    }
   }
 
-  return { sku, status: "inventory_created", imageUrls };
+  throw new Error(
+    lastErr +
+      "\n→ Erreur 25001 eBay (souvent temporaire). Réessaie dans 1–2 min. " +
+      "Sinon vérifie Paramètres → Compte vendeur, et que le compte peut vendre sur EBAY_US."
+  );
 }
 
 function categoryTreeIdForMarketplace(marketplaceId) {
@@ -697,7 +790,7 @@ async function buildAspectsForCategory(token, categoryId, title) {
   return aspects;
 }
 
-async function createOffer(token, sku, listing, categoryId) {
+async function createOffer(token, sku, listing, categoryId, merchantLocationKey) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
 
   const listingHtml = String(listing.html_description || listing.seo_title || "EBX Product").slice(0, 490000);
@@ -710,12 +803,12 @@ async function createOffer(token, sku, listing, categoryId) {
     availableQuantity: 10,
     pricingSummary: {
       price: {
-        value: String(listing.suggested_price || 29.99),
+        value: String(Number(listing.suggested_price) > 0 ? Number(listing.suggested_price).toFixed(2) : "29.99"),
         currency: process.env.EBAY_CURRENCY || "USD",
       },
     },
     categoryId,
-    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY || "default",
+    merchantLocationKey: merchantLocationKey || env("EBAY_MERCHANT_LOCATION_KEY", "ebx_us_wh"),
     listingPolicies: {
       fulfillmentPolicyId: ebayFulfillmentPolicyId(),
       paymentPolicyId: ebayPaymentPolicyId(),
@@ -779,9 +872,9 @@ async function publishToEbay(listing, listingDbId) {
     `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")} category=${categoryId}`
   );
 
-  await ensureInventoryLocation(token);
+  const locationKey = await ensureInventoryLocation(token);
   await createOrReplaceInventoryItem(token, sku, listing, aspects);
-  const { offerId } = await createOffer(token, sku, listing, categoryId);
+  const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
   const { listingId } = await publishOffer(token, offerId);
 
   return { sku, offerId, listingId, status: "published", categoryId, env: isProduction() ? "production" : "sandbox" };
