@@ -481,38 +481,73 @@ async function loadListings() {
   const res = await fetch(API + "/api/listings");
   const json = await res.json();
   const rows = json.data || [];
+  let ebayEnv = "sandbox";
   try {
     const setup = await (await fetch(API + "/api/setup")).json();
+    ebayEnv = setup.data?.ebayEnv || setup.ebayEnv || "sandbox";
     const hint = document.getElementById("listings-publish-hint");
     if (hint) {
-      if (!setup.data?.policies) {
+      const d = setup.data || setup;
+      if (ebayEnv === "production") {
+        if (!d.policiesProd) {
+          hint.classList.remove("hidden");
+          hint.textContent =
+            "Mode PRODUCTION : ajoute EBAY_*_POLICY_ID_PROD dans .env (npm run policies:prod).";
+        } else {
+          hint.classList.remove("hidden");
+          hint.className =
+            "px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100";
+          hint.textContent =
+            "Mode PRODUCTION — les publications partent sur ton vrai compte eBay.";
+        }
+      } else if (!d.policies) {
         hint.classList.remove("hidden");
+        hint.className =
+          "px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100";
         hint.textContent =
-          "Pour Publier eBay : ajoute EBAY_FULFILLMENT/PAYMENT/RETURN_POLICY_ID dans .env (ex. 6240367000 / 6240368000 / 6240369000) + token Sandbox valide.";
-      } else if (!setup.data?.refreshToken && !setup.data?.userToken) {
-        hint.classList.remove("hidden");
-        hint.textContent =
-          "Pas de token durable : lance npm run oauth pour EBAY_REFRESH_TOKEN (~18 mois), ou colle temporairement EBAY_USER_TOKEN (~2h).";
+          "Mode Sandbox. Pour Publier : policies Sandbox dans .env. Pour le réel : EBAY_ENV=production.";
       } else {
-        hint.classList.add("hidden");
+        hint.classList.remove("hidden");
+        hint.className =
+          "px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100";
+        hint.textContent =
+          "Mode Sandbox (testuser) — pas visible sur ton vrai compte eBay. EBAY_ENV=production pour le réel.";
       }
     }
   } catch (_) {}
+  window.__ebxPublishEnv = ebayEnv;
   document.getElementById("listings-body").innerHTML = rows.length
     ? rows
-        .map(
-          (item) => `
+        .map((item) => {
+          const published = item.ebay_listing_id
+            ? `<div class="text-[11px] mt-1 ${
+                item.publish_env === "production" ? "text-emerald-600" : "text-amber-600"
+              }">
+                ${item.publish_env === "production" ? "Prod" : "Sandbox"}:
+                <a class="underline" target="_blank" rel="noopener"
+                   href="${
+                     item.publish_env === "production"
+                       ? "https://www.ebay.com/itm/"
+                       : "https://www.sandbox.ebay.com/itm/"
+                   }${encodeURIComponent(item.ebay_listing_id)}">${escapeHtml(
+                     item.ebay_listing_id
+                   )}</a>
+              </div>`
+            : `<div class="text-[11px] text-zinc-300 mt-1">Non publié</div>`;
+          return `
       <tr class="border-b border-zinc-50">
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
-        <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}</td>
+        <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}${published}</td>
         <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
         <td class="p-3 text-right space-x-2 whitespace-nowrap">
           <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Voir</button>
-          <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">Publier eBay</button>
+          <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">${
+            item.ebay_listing_id ? "Republier" : "Publier eBay"
+          }</button>
           <button onclick="deleteListing(${item.id})" class="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg">Suppr.</button>
         </td>
-      </tr>`
-        )
+      </tr>`;
+        })
         .join("")
     : `<tr><td colspan="4" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
 }
@@ -557,7 +592,12 @@ function closeModal() {
 }
 
 async function publishListing(id, btn) {
-  if (!confirm("Publier ce listing sur eBay Sandbox ?")) return;
+  const envMode = window.__ebxPublishEnv || "sandbox";
+  const warn =
+    envMode === "production"
+      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?"
+      : "Publier sur eBay SANDBOX (compte test) ?";
+  if (!confirm(warn)) return;
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "...";
@@ -565,8 +605,14 @@ async function publishListing(id, btn) {
     const res = await fetch(API + "/api/publish-to-ebay/" + id, { method: "POST" });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-    btn.textContent = "Publié";
-    alert("Publié ! Listing ID: " + (json.data.listingId || "N/A"));
+    const lid = json.data.listingId || "N/A";
+    const penv = json.data.env || envMode;
+    const link =
+      penv === "production"
+        ? `https://www.ebay.com/itm/${lid}`
+        : `https://www.sandbox.ebay.com/itm/${lid}`;
+    alert(`Publié (${penv}) !\nListing ID: ${lid}\n\nOuvre : ${link}`);
+    loadListings();
   } catch (err) {
     btn.textContent = original;
     btn.disabled = false;

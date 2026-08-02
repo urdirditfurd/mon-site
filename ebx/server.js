@@ -67,12 +67,31 @@ const listingCols = db.prepare("PRAGMA table_info(listings)").all().map((c) => c
 if (!listingCols.includes("source_url")) {
   db.exec("ALTER TABLE listings ADD COLUMN source_url TEXT DEFAULT ''");
 }
+if (!listingCols.includes("ebay_listing_id")) {
+  db.exec("ALTER TABLE listings ADD COLUMN ebay_listing_id TEXT DEFAULT ''");
+}
+if (!listingCols.includes("ebay_offer_id")) {
+  db.exec("ALTER TABLE listings ADD COLUMN ebay_offer_id TEXT DEFAULT ''");
+}
+if (!listingCols.includes("publish_env")) {
+  db.exec("ALTER TABLE listings ADD COLUMN publish_env TEXT DEFAULT ''");
+}
+if (!listingCols.includes("published_at")) {
+  db.exec("ALTER TABLE listings ADD COLUMN published_at DATETIME");
+}
 
 const getRecentListings = db.prepare(
-  "SELECT id, seo_title, suggested_price, keywords, source_url, created_at FROM listings ORDER BY created_at DESC LIMIT 50"
+  `SELECT id, seo_title, suggested_price, keywords, source_url, created_at,
+          ebay_listing_id, ebay_offer_id, publish_env, published_at
+   FROM listings ORDER BY created_at DESC LIMIT 50`
 );
 const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
 const deleteListingById = db.prepare("DELETE FROM listings WHERE id = ?");
+const updateListingPublish = db.prepare(
+  `UPDATE listings
+   SET ebay_listing_id = ?, ebay_offer_id = ?, publish_env = ?, published_at = CURRENT_TIMESTAMP
+   WHERE id = ?`
+);
 const insertListingStmt = db.prepare(
   "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
 );
@@ -131,16 +150,23 @@ function envPresent(v) {
 }
 
 app.get("/api/setup", async (_req, res) => {
+  const { isProduction } = require("./ebay-api");
   const setup = {
     prodKeys: envPresent(process.env.EBAY_PROD_CLIENT_ID) && envPresent(process.env.EBAY_PROD_CLIENT_SECRET),
     sandboxKeys: envPresent(process.env.EBAY_CLIENT_ID) && envPresent(process.env.EBAY_CLIENT_SECRET),
     refreshToken: envPresent(process.env.EBAY_REFRESH_TOKEN),
+    refreshTokenProd: envPresent(process.env.EBAY_REFRESH_TOKEN_PROD),
     userToken: envPresent(process.env.EBAY_USER_TOKEN),
     ruName: envPresent(process.env.EBAY_RU_NAME),
+    ebayEnv: isProduction() ? "production" : "sandbox",
     policies:
       envPresent(process.env.EBAY_FULFILLMENT_POLICY_ID) &&
       envPresent(process.env.EBAY_PAYMENT_POLICY_ID) &&
       envPresent(process.env.EBAY_RETURN_POLICY_ID),
+    policiesProd:
+      envPresent(process.env.EBAY_FULFILLMENT_POLICY_ID_PROD) &&
+      envPresent(process.env.EBAY_PAYMENT_POLICY_ID_PROD) &&
+      envPresent(process.env.EBAY_RETURN_POLICY_ID_PROD),
     llmUrl: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1",
     browse: { ok: false, api: null, error: null, sample: null },
     llm: { ok: false },
@@ -833,6 +859,14 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
     const result = await publishToEbay(listing, listing.id);
+    if (result?.listingId) {
+      updateListingPublish.run(
+        String(result.listingId),
+        String(result.offerId || ""),
+        String(result.env || ""),
+        listing.id
+      );
+    }
     return res.json({ success: true, data: result });
   } catch (err) {
     console.error("[EBX] Erreur eBay :", err.message);
@@ -841,7 +875,9 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const { isProduction } = require("./ebay-api");
   console.log(`⚡ EBX Server running on http://localhost:${PORT}`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
+  console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
 });
