@@ -24,8 +24,9 @@ function isProduction() {
 }
 
 function ebayRefreshToken() {
+  // En production : uniquement le refresh Prod (jamais le token Sandbox).
   if (isProduction()) {
-    return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD || process.env.EBAY_REFRESH_TOKEN);
+    return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
   }
   return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
 }
@@ -786,9 +787,67 @@ async function publishToEbay(listing, listingDbId) {
   return { sku, offerId, listingId, status: "published", categoryId, env: isProduction() ? "production" : "sandbox" };
 }
 
+/**
+ * Identifie le compte vendeur lié au token OAuth courant (Trading GetUser).
+ * Utile pour vérifier Sandbox testuser vs compte réel.
+ */
+async function getSellerIdentity() {
+  loadEbayEnv();
+  const token = await getAccessToken();
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+</GetUserRequest>`;
+
+  const tradingUrl = new URL(ebayTradingUrl());
+  const responseText = await new Promise((resolve, reject) => {
+    const payload = Buffer.from(xml, "utf8");
+    const req = https.request(
+      {
+        protocol: tradingUrl.protocol,
+        hostname: tradingUrl.hostname,
+        port: 443,
+        path: tradingUrl.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml",
+          "Content-Length": payload.length,
+          "X-EBAY-API-IAF-TOKEN": token,
+          "X-EBAY-API-CALL-NAME": "GetUser",
+          "X-EBAY-API-SITEID": ebaySiteId(),
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "1399",
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      }
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+
+  const ack = (responseText.match(/<Ack>([^<]+)<\/Ack>/i) || [])[1] || "";
+  const userId = (responseText.match(/<UserID>([^<]+)<\/UserID>/i) || [])[1] || "";
+  const email = (responseText.match(/<Email>([^<]+)<\/Email>/i) || [])[1] || "";
+  if (!/Success|Warning/i.test(ack) || !userId) {
+    const shortErr = (responseText.match(/<ShortMessage>([^<]+)<\/ShortMessage>/i) || [])[1] || "GetUser failed";
+    throw new Error(shortErr);
+  }
+
+  return {
+    userId,
+    email: email.includes("@") ? email : "",
+    env: isProduction() ? "production" : "sandbox",
+  };
+}
+
 module.exports = {
   publishToEbay,
   getAccessToken,
+  getSellerIdentity,
   describeAuthState,
   isProduction,
   ebayApiBase,

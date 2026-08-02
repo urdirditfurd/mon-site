@@ -484,34 +484,33 @@ async function loadListings() {
   let ebayEnv = "sandbox";
   try {
     const setup = await (await fetch(API + "/api/setup")).json();
-    ebayEnv = setup.data?.ebayEnv || setup.ebayEnv || "sandbox";
+    const d = setup.data || setup;
+    ebayEnv = d.ebayEnv || "sandbox";
     const hint = document.getElementById("listings-publish-hint");
     if (hint) {
-      const d = setup.data || setup;
+      const seller = d.seller?.userId ? ` Compte OAuth : ${d.seller.userId}.` : d.seller?.error ? ` (OAuth: ${d.seller.error})` : "";
       if (ebayEnv === "production") {
-        if (!d.policiesProd) {
+        if (!d.policiesProd || !d.refreshTokenProd) {
           hint.classList.remove("hidden");
+          hint.className =
+            "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100";
           hint.textContent =
-            "Mode PRODUCTION : ajoute EBAY_*_POLICY_ID_PROD dans .env (npm run policies:prod).";
+            "Mode PRODUCTION incomplet : il faut EBAY_REFRESH_TOKEN_PROD + policies *_PROD (npm run oauth:prod puis policies:prod)." +
+            seller;
         } else {
           hint.classList.remove("hidden");
           hint.className =
             "px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100";
           hint.textContent =
-            "Mode PRODUCTION — les publications partent sur ton vrai compte eBay.";
+            "Mode PRODUCTION — publications sur ton vrai compte eBay." + seller;
         }
-      } else if (!d.policies) {
-        hint.classList.remove("hidden");
-        hint.className =
-          "px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100";
-        hint.textContent =
-          "Mode Sandbox. Pour Publier : policies Sandbox dans .env. Pour le réel : EBAY_ENV=production.";
       } else {
         hint.classList.remove("hidden");
         hint.className =
-          "px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100";
+          "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100 font-medium";
         hint.textContent =
-          "Mode Sandbox (testuser) — pas visible sur ton vrai compte eBay. EBAY_ENV=production pour le réel.";
+          "Mode SANDBOX — les annonces vont sur le compte TEST (testuser), PAS sur ton vrai eBay. Pour le réel : EBAY_ENV=production dans .env, redémarre le serveur." +
+          seller;
       }
     }
   } catch (_) {}
@@ -595,8 +594,8 @@ async function publishListing(id, btn) {
   const envMode = window.__ebxPublishEnv || "sandbox";
   const warn =
     envMode === "production"
-      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?"
-      : "Publier sur eBay SANDBOX (compte test) ?";
+      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?\n\nL'annonce apparaîtra dans Vendre → Annonces actives de CE compte OAuth."
+      : "ATTENTION : mode SANDBOX\n\nL'annonce ira sur le compte TEST (testuser),\nPAS sur ton vrai compte eBay.\n\nPour le réel : mets EBAY_ENV=production dans .env puis redémarre.\n\nContinuer en Sandbox ?";
   if (!confirm(warn)) return;
   const original = btn.textContent;
   btn.disabled = true;
@@ -607,11 +606,16 @@ async function publishListing(id, btn) {
     if (!json.success) throw new Error(json.error);
     const lid = json.data.listingId || "N/A";
     const penv = json.data.env || envMode;
+    const seller = json.data.sellerUserId ? `\nCompte vendeur : ${json.data.sellerUserId}` : "";
     const link =
       penv === "production"
         ? `https://www.ebay.com/itm/${lid}`
         : `https://www.sandbox.ebay.com/itm/${lid}`;
-    alert(`Publié (${penv}) !\nListing ID: ${lid}\n\nOuvre : ${link}`);
+    const note =
+      penv === "production"
+        ? "Visible sur ton vrai eBay (Active listings)."
+        : "Visible UNIQUEMENT sur sandbox.ebay.com (compte test) — pas sur ebay.com réel.";
+    alert(`Publié (${penv}) !${seller}\nListing ID: ${lid}\n\n${note}\n\nOuvre : ${link}`);
     loadListings();
   } catch (err) {
     btn.textContent = original;
@@ -1049,11 +1053,26 @@ async function loadSetupStatus() {
     const json = await res.json();
     const d = json.data || {};
     const rows = [
+      [
+        "Mode publication",
+        d.ebayEnv === "production",
+        d.ebayEnv === "production"
+          ? "PRODUCTION (compte réel)"
+          : "SANDBOX (testuser — invisible sur ton vrai eBay)",
+      ],
+      [
+        "Compte vendeur OAuth",
+        d.seller?.ok,
+        d.seller?.ok
+          ? d.seller.userId + (d.seller.email ? ` (${d.seller.email})` : "")
+          : d.seller?.error || "npm run oauth / oauth:prod",
+      ],
       ["Browse API Production (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "Ajoute EBAY_PROD_* dans .env"],
-      ["Clés Sandbox (publish)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
-      ["Refresh token eBay", d.refreshToken, d.refreshToken ? "OK (~18 mois)" : "npm run oauth"],
-      ["User token eBay (~2h)", d.userToken, d.userToken ? "OK" : "optionnel si refresh"],
-      ["Business policies", d.policies, d.policies ? "OK" : "node create-policies.js"],
+      ["Clés Sandbox (publish test)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
+      ["Refresh token Sandbox", d.refreshToken, d.refreshToken ? "OK (~18 mois)" : "npm run oauth"],
+      ["Refresh token Production", d.refreshTokenProd, d.refreshTokenProd ? "OK" : "npm run oauth:prod"],
+      ["Policies Sandbox", d.policies, d.policies ? "OK" : "npm run policies"],
+      ["Policies Production", d.policiesProd, d.policiesProd ? "OK" : "npm run policies:prod"],
       ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis pour scraper"],
     ];
     box.innerHTML = rows

@@ -150,7 +150,7 @@ function envPresent(v) {
 }
 
 app.get("/api/setup", async (_req, res) => {
-  const { isProduction } = require("./ebay-api");
+  const { isProduction, getSellerIdentity } = require("./ebay-api");
   const setup = {
     prodKeys: envPresent(process.env.EBAY_PROD_CLIENT_ID) && envPresent(process.env.EBAY_PROD_CLIENT_SECRET),
     sandboxKeys: envPresent(process.env.EBAY_CLIENT_ID) && envPresent(process.env.EBAY_CLIENT_SECRET),
@@ -170,7 +170,20 @@ app.get("/api/setup", async (_req, res) => {
     llmUrl: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1",
     browse: { ok: false, api: null, error: null, sample: null },
     llm: { ok: false },
+    seller: { ok: false, userId: null, email: null, error: null },
   };
+
+  try {
+    const seller = await getSellerIdentity();
+    setup.seller = {
+      ok: true,
+      userId: seller.userId,
+      email: seller.email || null,
+      error: null,
+    };
+  } catch (err) {
+    setup.seller = { ok: false, userId: null, email: null, error: err.message };
+  }
 
   try {
     const { getAppToken, browseSearch } = require("./ebay-browse");
@@ -858,16 +871,34 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    const { isProduction, getSellerIdentity } = require("./ebay-api");
+    let sellerUserId = null;
+    try {
+      const seller = await getSellerIdentity();
+      sellerUserId = seller.userId;
+      console.log(
+        `[EBX] Publish pour compte ${seller.userId} (${isProduction() ? "PRODUCTION" : "sandbox"})`
+      );
+    } catch (err) {
+      console.warn("[EBX] GetUser avant publish:", err.message);
+    }
     const result = await publishToEbay(listing, listing.id);
     if (result?.listingId) {
       updateListingPublish.run(
         String(result.listingId),
         String(result.offerId || ""),
-        String(result.env || ""),
+        String(result.env || (isProduction() ? "production" : "sandbox")),
         listing.id
       );
+      const saved = getListingById.get(listing.id);
+      console.log(
+        `[EBX] Listing #${listing.id} mémorisé → ebay_listing_id=${saved?.ebay_listing_id} env=${saved?.publish_env}`
+      );
     }
-    return res.json({ success: true, data: result });
+    return res.json({
+      success: true,
+      data: { ...result, sellerUserId },
+    });
   } catch (err) {
     console.error("[EBX] Erreur eBay :", err.message);
     return res.status(500).json({ success: false, error: err.message });
