@@ -43,23 +43,94 @@ function currencyForMarketplace(market) {
   }
 }
 
-function shippingForMarketplace(market) {
+function shippingAttemptsForMarketplace(market) {
   const currency = currencyForMarketplace(market);
   if (market === "EBAY_US") {
-    return {
-      shippingCarrierCode: "USPS",
-      shippingServiceCode: "USPSPriority",
-      shippingCost: { value: "5.99", currency: "USD" },
-      additionalShippingCost: { value: "2.00", currency: "USD" },
-    };
+    return [
+      {
+        label: "USPSGroundAdvantage",
+        shippingCarrierCode: "USPS",
+        shippingServiceCode: "USPSGroundAdvantage",
+        shippingCost: { value: "5.99", currency: "USD" },
+        additionalShippingCost: { value: "2.00", currency: "USD" },
+        freeShipping: false,
+      },
+      {
+        label: "USPSPriority",
+        shippingCarrierCode: "USPS",
+        shippingServiceCode: "USPSPriority",
+        shippingCost: { value: "7.99", currency: "USD" },
+        additionalShippingCost: { value: "2.00", currency: "USD" },
+        freeShipping: false,
+      },
+      {
+        label: "USPSFirstClass",
+        shippingCarrierCode: "USPS",
+        shippingServiceCode: "USPSFirstClass",
+        shippingCost: { value: "4.99", currency: "USD" },
+        additionalShippingCost: { value: "1.50", currency: "USD" },
+        freeShipping: false,
+      },
+      {
+        label: "ShippingMethodStandard free",
+        shippingCarrierCode: "Other",
+        shippingServiceCode: "ShippingMethodStandard",
+        shippingCost: { value: "0.0", currency: "USD" },
+        additionalShippingCost: { value: "0.0", currency: "USD" },
+        freeShipping: true,
+      },
+      {
+        label: "Other domestic",
+        shippingCarrierCode: "Other",
+        shippingServiceCode: "Other",
+        shippingCost: { value: "5.99", currency: "USD" },
+        additionalShippingCost: { value: "2.00", currency: "USD" },
+        freeShipping: false,
+      },
+    ];
   }
-  // Europe — service générique souvent accepté
-  return {
-    shippingCarrierCode: "Other",
-    shippingServiceCode: "Other",
-    shippingCost: { value: "4.90", currency },
-    additionalShippingCost: { value: "2.00", currency },
-  };
+  if (market === "EBAY_FR") {
+    return [
+      {
+        label: "FR_Colissimo",
+        shippingCarrierCode: "La Poste",
+        shippingServiceCode: "FR_Colissimo",
+        shippingCost: { value: "4.90", currency: "EUR" },
+        additionalShippingCost: { value: "2.00", currency: "EUR" },
+        freeShipping: false,
+      },
+      {
+        label: "FR_Chronoposte",
+        shippingCarrierCode: "Chronopost",
+        shippingServiceCode: "FR_Chronoposte",
+        shippingCost: { value: "9.90", currency: "EUR" },
+        additionalShippingCost: { value: "3.00", currency: "EUR" },
+        freeShipping: false,
+      },
+      {
+        label: "Other FR",
+        shippingCarrierCode: "Other",
+        shippingServiceCode: "Other",
+        shippingCost: { value: "4.90", currency },
+        additionalShippingCost: { value: "2.00", currency },
+        freeShipping: false,
+      },
+    ];
+  }
+  return [
+    {
+      label: "Other",
+      shippingCarrierCode: "Other",
+      shippingServiceCode: "Other",
+      shippingCost: { value: "4.90", currency },
+      additionalShippingCost: { value: "2.00", currency },
+      freeShipping: false,
+    },
+  ];
+}
+
+function shippingForMarketplace(market) {
+  return shippingAttemptsForMarketplace(market)[0];
 }
 
 function localeForMarketplace() {
@@ -68,6 +139,20 @@ function localeForMarketplace() {
   if (m === "EBAY_GB") return "en-GB";
   if (m === "EBAY_DE") return "de-DE";
   return "en-US";
+}
+
+function shipToCountry(market) {
+  switch (market) {
+    case "EBAY_FR":
+      return "FR";
+    case "EBAY_GB":
+      return "GB";
+    case "EBAY_DE":
+      return "DE";
+    case "EBAY_US":
+    default:
+      return "US";
+  }
 }
 
 async function ebayFetch(method, pathName, body, token) {
@@ -126,91 +211,86 @@ async function optIn(token) {
   console.log(`  ⚠️ Opt-in status ${status}:`, JSON.stringify(data));
 }
 
+function buildFulfillmentBody(market, ship, nameSuffix) {
+  const country = shipToCountry(market);
+  return {
+    name: `EBX Shipping ${ship.label || ship.shippingServiceCode} ${nameSuffix}`.slice(0, 60),
+    marketplaceId: market,
+    categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+    handlingTime: { value: 1, unit: "DAY" },
+    shipToLocations: {
+      regionIncluded: [{ regionName: country, regionType: "COUNTRY" }],
+    },
+    shippingOptions: [
+      {
+        optionType: "DOMESTIC",
+        costType: "FLAT_RATE",
+        shippingServices: [
+          {
+            sortOrder: 1,
+            shippingCarrierCode: ship.shippingCarrierCode,
+            shippingServiceCode: ship.shippingServiceCode,
+            shippingCost: ship.shippingCost,
+            additionalShippingCost: ship.additionalShippingCost,
+            freeShipping: Boolean(ship.freeShipping),
+            shipToLocations: {
+              regionIncluded: [{ regionName: country, regionType: "COUNTRY" }],
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function policyHasShipping(policy) {
+  const opts = policy?.shippingOptions || [];
+  return opts.some((o) => (o.shippingServices || []).length > 0);
+}
+
 async function createFulfillmentPolicy(token) {
   console.log("→ Création Fulfillment (Shipping) Policy...");
   const market = marketplace();
   const currency = currencyForMarketplace(market);
-  const ship = shippingForMarketplace(market);
   if (process.env.EBAY_CURRENCY && process.env.EBAY_CURRENCY !== currency) {
     console.log(
       `  ⚠️  EBAY_CURRENCY=${process.env.EBAY_CURRENCY} ignoré — marketplace ${market} exige ${currency}`
     );
   }
 
-  const attempts = [
-    {
-      name: "EBX Shipping",
-      marketplaceId: market,
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      handlingTime: { value: 1, unit: "DAY" },
-      shippingOptions: [
-        {
-          optionType: "DOMESTIC",
-          costType: "FLAT_RATE",
-          shippingServices: [
-            {
-              sortOrder: 1,
-              shippingCarrierCode: ship.shippingCarrierCode,
-              shippingServiceCode: ship.shippingServiceCode,
-              shippingCost: ship.shippingCost,
-              additionalShippingCost: ship.additionalShippingCost,
-              freeShipping: false,
-            },
-          ],
-        },
-      ],
-    },
-    // Fallback US : service standard générique
-    market === "EBAY_US"
-      ? {
-          name: "EBX Shipping Standard",
-          marketplaceId: "EBAY_US",
-          categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-          handlingTime: { value: 1, unit: "DAY" },
-          shippingOptions: [
-            {
-              optionType: "DOMESTIC",
-              costType: "FLAT_RATE",
-              shippingServices: [
-                {
-                  sortOrder: 1,
-                  shippingCarrierCode: "USPS",
-                  shippingServiceCode: "USPSGround",
-                  shippingCost: { value: "0.0", currency: "USD" },
-                  additionalShippingCost: { value: "0.0", currency: "USD" },
-                  freeShipping: true,
-                },
-              ],
-            },
-          ],
-        }
-      : null,
-  ].filter(Boolean);
-
+  const stamp = Date.now().toString().slice(-6);
+  const ships = shippingAttemptsForMarketplace(market);
   let lastErr = null;
-  for (const body of attempts) {
+
+  for (const ship of ships) {
+    const body = buildFulfillmentBody(market, ship, stamp);
     const { status, data } = await ebayFetch("POST", "/sell/account/v1/fulfillment_policy", body, token);
     if (status === 201 || status === 200) {
-      console.log("  ✅ Fulfillment Policy ID:", data.fulfillmentPolicyId);
+      console.log(`  ✅ Fulfillment Policy ID: ${data.fulfillmentPolicyId} (${ship.label})`);
       return data.fulfillmentPolicyId;
     }
     lastErr = data;
-    console.log(`  ⚠️ Tentative "${body.name}" → HTTP ${status}`);
+    const msg = data?.errors?.[0]?.message || JSON.stringify(data).slice(0, 160);
+    console.log(`  ⚠️ Tentative "${ship.label}" → HTTP ${status}: ${msg}`);
   }
 
-  console.log("  ⚠️ Create failed, listing existing...");
+  console.log("  ⚠️ Create failed, recherche d'une policy existante AVEC shipping...");
   const list = await ebayFetch(
     "GET",
     `/sell/account/v1/fulfillment_policy?marketplace_id=${market}`,
     null,
     token
   );
-  const existing = list.data?.fulfillmentPolicies?.[0];
-  if (existing) {
-    console.log("  ✅ Existing Fulfillment Policy ID:", existing.fulfillmentPolicyId);
-    return existing.fulfillmentPolicyId;
+  const policies = list.data?.fulfillmentPolicies || [];
+  const withShip = policies.find(policyHasShipping);
+  if (withShip) {
+    console.log("  ✅ Existing Fulfillment Policy ID:", withShip.fulfillmentPolicyId);
+    return withShip.fulfillmentPolicyId;
   }
-  console.error("  ❌", JSON.stringify(lastErr));
+  console.error("  ❌ Aucune fulfillment policy valide. Dernière erreur:", JSON.stringify(lastErr));
+  console.error(
+    "  → Si ton compte est en France, mets EBAY_MARKETPLACE_ID=EBAY_FR et EBAY_CURRENCY=EUR puis relance."
+  );
   return null;
 }
 
@@ -335,6 +415,14 @@ async function main() {
   }
 
   await optIn(token);
+
+  if (prod) {
+    console.log(
+      "ℹ️  Nouveau compte vendeur = nouvelles policies obligatoires.\n" +
+        "   Remplace les anciens EBAY_*_POLICY_ID_PROD dans .env par ceux affichés ci-dessous.\n"
+    );
+  }
+
   const fulfillmentId = await createFulfillmentPolicy(token);
   const paymentId = await createPaymentPolicy(token);
   const returnId = await createReturnPolicy(token);
