@@ -129,40 +129,76 @@ async function optIn(token) {
 async function createFulfillmentPolicy(token) {
   console.log("→ Création Fulfillment (Shipping) Policy...");
   const market = marketplace();
-  const currency = process.env.EBAY_CURRENCY || (market === "EBAY_US" ? "USD" : "EUR");
-  const body = {
-    name: "EBX Shipping",
-    marketplaceId: market,
-    categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-    handlingTime: { value: 1, unit: "DAY" },
-    shippingOptions: [
-      {
-        optionType: "DOMESTIC",
-        costType: "FLAT_RATE",
-        shippingServices: [
-          {
-            sortOrder: 1,
-            shippingCarrierCode: market === "EBAY_US" ? "USPS" : "LaPosteColissimo",
-            shippingServiceCode: market === "EBAY_US" ? "USPSPriority" : "FR_Colissimo",
-            shippingCost: { value: market === "EBAY_US" ? "5.99" : "4.90", currency },
-            additionalShippingCost: { value: "2.00", currency },
-            freeShipping: false,
-            buyerResponsibleForShipping: false,
-            buyerResponsibleForPickup: false,
-          },
-        ],
-      },
-    ],
-    shipToLocations: { regionIncluded: [{ regionName: "Worldwide" }] },
-  };
-
-  const { status, data } = await ebayFetch("POST", "/sell/account/v1/fulfillment_policy", body, token);
-  if (status === 201 || status === 200) {
-    console.log("  ✅ Fulfillment Policy ID:", data.fulfillmentPolicyId);
-    return data.fulfillmentPolicyId;
+  const currency = currencyForMarketplace(market);
+  const ship = shippingForMarketplace(market);
+  if (process.env.EBAY_CURRENCY && process.env.EBAY_CURRENCY !== currency) {
+    console.log(
+      `  ⚠️  EBAY_CURRENCY=${process.env.EBAY_CURRENCY} ignoré — marketplace ${market} exige ${currency}`
+    );
   }
 
-  console.log(`  ⚠️ Create failed (${status}), listing existing...`);
+  const attempts = [
+    {
+      name: "EBX Shipping",
+      marketplaceId: market,
+      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+      handlingTime: { value: 1, unit: "DAY" },
+      shippingOptions: [
+        {
+          optionType: "DOMESTIC",
+          costType: "FLAT_RATE",
+          shippingServices: [
+            {
+              sortOrder: 1,
+              shippingCarrierCode: ship.shippingCarrierCode,
+              shippingServiceCode: ship.shippingServiceCode,
+              shippingCost: ship.shippingCost,
+              additionalShippingCost: ship.additionalShippingCost,
+              freeShipping: false,
+            },
+          ],
+        },
+      ],
+    },
+    // Fallback US : service standard générique
+    market === "EBAY_US"
+      ? {
+          name: "EBX Shipping Standard",
+          marketplaceId: "EBAY_US",
+          categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+          handlingTime: { value: 1, unit: "DAY" },
+          shippingOptions: [
+            {
+              optionType: "DOMESTIC",
+              costType: "FLAT_RATE",
+              shippingServices: [
+                {
+                  sortOrder: 1,
+                  shippingCarrierCode: "USPS",
+                  shippingServiceCode: "USPSGround",
+                  shippingCost: { value: "0.0", currency: "USD" },
+                  additionalShippingCost: { value: "0.0", currency: "USD" },
+                  freeShipping: true,
+                },
+              ],
+            },
+          ],
+        }
+      : null,
+  ].filter(Boolean);
+
+  let lastErr = null;
+  for (const body of attempts) {
+    const { status, data } = await ebayFetch("POST", "/sell/account/v1/fulfillment_policy", body, token);
+    if (status === 201 || status === 200) {
+      console.log("  ✅ Fulfillment Policy ID:", data.fulfillmentPolicyId);
+      return data.fulfillmentPolicyId;
+    }
+    lastErr = data;
+    console.log(`  ⚠️ Tentative "${body.name}" → HTTP ${status}`);
+  }
+
+  console.log("  ⚠️ Create failed, listing existing...");
   const list = await ebayFetch(
     "GET",
     `/sell/account/v1/fulfillment_policy?marketplace_id=${market}`,
@@ -174,7 +210,7 @@ async function createFulfillmentPolicy(token) {
     console.log("  ✅ Existing Fulfillment Policy ID:", existing.fulfillmentPolicyId);
     return existing.fulfillmentPolicyId;
   }
-  console.error("  ❌", JSON.stringify(data));
+  console.error("  ❌", JSON.stringify(lastErr));
   return null;
 }
 
