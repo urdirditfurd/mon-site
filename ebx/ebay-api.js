@@ -19,7 +19,14 @@ function env(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
 }
 
+function isProduction() {
+  return env("EBAY_ENV", "sandbox").toLowerCase() === "production";
+}
+
 function ebayRefreshToken() {
+  if (isProduction()) {
+    return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD || process.env.EBAY_REFRESH_TOKEN);
+  }
   return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
 }
 
@@ -28,33 +35,56 @@ function ebayUserToken() {
 }
 
 function ebayClientId() {
-  return env("EBAY_CLIENT_ID");
+  if (isProduction()) {
+    return cleanEnvToken(process.env.EBAY_PROD_CLIENT_ID || process.env.EBAY_CLIENT_ID);
+  }
+  return cleanEnvToken(process.env.EBAY_CLIENT_ID);
 }
 
 function ebayClientSecret() {
-  return env("EBAY_CLIENT_SECRET");
+  if (isProduction()) {
+    return cleanEnvToken(process.env.EBAY_PROD_CLIENT_SECRET || process.env.EBAY_CLIENT_SECRET);
+  }
+  return cleanEnvToken(process.env.EBAY_CLIENT_SECRET);
 }
 
 function ebayApiBase() {
-  // EBAY_ENV=production → API réelle (ne pas activer tant que refresh/policies prod pas prêts)
-  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
+  if (isProduction()) {
     return env("EBAY_API_BASE", "https://api.ebay.com");
   }
   return env("EBAY_API_BASE", "https://api.sandbox.ebay.com");
 }
 
 function ebayAuthUrl() {
-  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
+  if (isProduction()) {
     return env("EBAY_AUTH_URL", "https://api.ebay.com/identity/v1/oauth2/token");
   }
   return env("EBAY_AUTH_URL", "https://api.sandbox.ebay.com/identity/v1/oauth2/token");
 }
 
 function ebayTradingUrl() {
-  if (env("EBAY_ENV", "sandbox").toLowerCase() === "production") {
-    return "https://api.ebay.com/ws/api.dll";
+  return isProduction() ? "https://api.ebay.com/ws/api.dll" : "https://api.sandbox.ebay.com/ws/api.dll";
+}
+
+function ebayFulfillmentPolicyId() {
+  if (isProduction()) {
+    return env("EBAY_FULFILLMENT_POLICY_ID_PROD") || env("EBAY_FULFILLMENT_POLICY_ID");
   }
-  return "https://api.sandbox.ebay.com/ws/api.dll";
+  return env("EBAY_FULFILLMENT_POLICY_ID");
+}
+
+function ebayPaymentPolicyId() {
+  if (isProduction()) {
+    return env("EBAY_PAYMENT_POLICY_ID_PROD") || env("EBAY_PAYMENT_POLICY_ID");
+  }
+  return env("EBAY_PAYMENT_POLICY_ID");
+}
+
+function ebayReturnPolicyId() {
+  if (isProduction()) {
+    return env("EBAY_RETURN_POLICY_ID_PROD") || env("EBAY_RETURN_POLICY_ID");
+  }
+  return env("EBAY_RETURN_POLICY_ID");
 }
 
 function ebaySiteId() {
@@ -81,6 +111,7 @@ let tokenExpiry = 0;
 
 function describeAuthState() {
   return {
+    env: isProduction() ? "production" : "sandbox",
     hasClientId: Boolean(ebayClientId()),
     hasClientSecret: Boolean(ebayClientSecret()),
     refreshLen: ebayRefreshToken().length,
@@ -666,9 +697,9 @@ async function createOffer(token, sku, listing, categoryId) {
     categoryId,
     merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY || "default",
     listingPolicies: {
-      fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID || "",
-      paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID || "",
-      returnPolicyId: process.env.EBAY_RETURN_POLICY_ID || "",
+      fulfillmentPolicyId: ebayFulfillmentPolicyId(),
+      paymentPolicyId: ebayPaymentPolicyId(),
+      returnPolicyId: ebayReturnPolicyId(),
     },
   };
 
@@ -708,13 +739,13 @@ async function publishOffer(token, offerId) {
 async function publishToEbay(listing, listingDbId) {
   loadEbayEnv();
   const missing = [];
-  if (!process.env.EBAY_FULFILLMENT_POLICY_ID) missing.push("EBAY_FULFILLMENT_POLICY_ID");
-  if (!process.env.EBAY_PAYMENT_POLICY_ID) missing.push("EBAY_PAYMENT_POLICY_ID");
-  if (!process.env.EBAY_RETURN_POLICY_ID) missing.push("EBAY_RETURN_POLICY_ID");
+  if (!ebayFulfillmentPolicyId()) missing.push(isProduction() ? "EBAY_FULFILLMENT_POLICY_ID_PROD" : "EBAY_FULFILLMENT_POLICY_ID");
+  if (!ebayPaymentPolicyId()) missing.push(isProduction() ? "EBAY_PAYMENT_POLICY_ID_PROD" : "EBAY_PAYMENT_POLICY_ID");
+  if (!ebayReturnPolicyId()) missing.push(isProduction() ? "EBAY_RETURN_POLICY_ID_PROD" : "EBAY_RETURN_POLICY_ID");
   if (missing.length) {
     throw new Error(
       `Policies manquantes dans .env : ${missing.join(", ")}. ` +
-        `Ajoute les IDs (ex. 6240367000 / 6240368000 / 6240369000) ou lance npm run policies.`
+        `Lance npm run policies${isProduction() ? ":prod" : ""} ou ajoute les IDs.`
     );
   }
 
@@ -725,7 +756,7 @@ async function publishToEbay(listing, listingDbId) {
   const aspects = await buildAspectsForCategory(token, categoryId, title);
 
   console.log(
-    `[EBX] Publish SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")} category=${categoryId}`
+    `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")} category=${categoryId}`
   );
 
   await ensureInventoryLocation(token);
@@ -733,7 +764,13 @@ async function publishToEbay(listing, listingDbId) {
   const { offerId } = await createOffer(token, sku, listing, categoryId);
   const { listingId } = await publishOffer(token, offerId);
 
-  return { sku, offerId, listingId, status: "published", categoryId };
+  return { sku, offerId, listingId, status: "published", categoryId, env: isProduction() ? "production" : "sandbox" };
 }
 
-module.exports = { publishToEbay, getAccessToken, describeAuthState };
+module.exports = {
+  publishToEbay,
+  getAccessToken,
+  describeAuthState,
+  isProduction,
+  ebayApiBase,
+};

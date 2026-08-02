@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "policies": "node create-policies.js",
+    "policies:prod": "node create-policies.js --prod",
     "oauth": "node get-refresh-token.js",
     "oauth:prod": "node get-refresh-token.js --prod",
     "env-check": "node env-check.js",
