@@ -22,6 +22,8 @@ const {
   scrapeAmazonSearch,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  injectProductImagesIntoHtml,
+  countRealImagesInHtml,
   isRealProductImage,
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
@@ -82,7 +84,12 @@ if (!listingCols.includes("published_at")) {
 
 const getRecentListings = db.prepare(
   `SELECT id, seo_title, suggested_price, keywords, source_url, created_at,
-          ebay_listing_id, ebay_offer_id, publish_env, published_at
+          ebay_listing_id, ebay_offer_id, publish_env, published_at,
+          CASE
+            WHEN html_description LIKE '%<img%'
+             AND html_description NOT LIKE '%picsum.photos%'
+            THEN 1 ELSE 0
+          END AS has_images
    FROM listings ORDER BY created_at DESC LIMIT 50`
 );
 const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
@@ -726,10 +733,14 @@ app.post("/api/generate-listing", async (req, res) => {
         const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 3000));
         const ai = await Promise.race([aiPromise, timeout]);
         if (ai?.html_description && !ai._parse_error) {
+          const aiHtml = injectProductImagesIntoHtml(
+            ai.html_description,
+            scraped?.images || listing.images || []
+          );
           listing = {
             ...listing,
             seo_title: ai.seo_title || listing.seo_title,
-            html_description: ai.html_description,
+            html_description: aiHtml,
             suggested_price: ai.suggested_price || listing.suggested_price,
             ai_enriched: true,
           };
@@ -841,6 +852,57 @@ app.post("/api/listings/dedupe", (_req, res) => {
   }
 });
 
+const updateListingHtml = db.prepare("UPDATE listings SET html_description = ? WHERE id = ?");
+
+/**
+ * Si le HTML n'a plus d'images (scrub picsum / IA), re-scrape source_url et réinjecte.
+ */
+async function ensureListingImages(listing) {
+  if (countRealImagesInHtml(listing.html_description) > 0) {
+    return listing;
+  }
+
+  const sourceUrl = String(listing.source_url || "").trim();
+  if (!sourceUrl) {
+    throw new Error(
+      "Aucune image produit dans le listing HTML et pas de source_url. " +
+        "Régénère via Description Builder (URL Amazon/eBay) ou Auto-Snipe, puis republie."
+    );
+  }
+
+  console.log(`[EBX] Listing #${listing.id} sans image — re-scrape ${sourceUrl.slice(0, 70)}…`);
+  const scraped = await scrapeProduct(sourceUrl);
+  const images = (scraped.images || []).filter(isRealProductImage);
+  if (!images.length) {
+    throw new Error(
+      "Impossible de récupérer des images depuis la source. " +
+        "Ouvre Description Builder avec une URL produit qui a des photos, sauvegarde, puis publie."
+    );
+  }
+
+  const html = injectProductImagesIntoHtml(listing.html_description, images);
+  if (countRealImagesInHtml(html) === 0) {
+    // Fallback : reconstruit un HTML propre avec images
+    const rebuilt = buildHtmlFromProduct(
+      {
+        title: listing.seo_title || scraped.title,
+        images,
+        bullets: scraped.bullets || [],
+        description: scraped.description || listing.seo_title,
+        price: listing.suggested_price,
+        source: scraped.source || "repair",
+      },
+      "#667eea"
+    );
+    updateListingHtml.run(rebuilt, listing.id);
+    return { ...listing, html_description: rebuilt };
+  }
+
+  updateListingHtml.run(html, listing.id);
+  console.log(`[EBX] Listing #${listing.id} : ${images.length} image(s) réinjectée(s)`);
+  return { ...listing, html_description: html };
+}
+
 /** Remplace les images picsum (aléatoires) dans le HTML des listings existants. */
 app.post("/api/listings/scrub-images", (_req, res) => {
   try {
@@ -867,10 +929,24 @@ app.post("/api/listings/scrub-images", (_req, res) => {
   }
 });
 
-app.post("/api/publish-to-ebay/:id", async (req, res) => {
+/** Répare les images d'un listing (re-scrape source_url). */
+app.post("/api/listings/:id/repair-images", async (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    const updated = await ensureListingImages(listing);
+    const n = countRealImagesInHtml(updated.html_description);
+    return res.json({ success: true, images: n, id: listing.id });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/publish-to-ebay/:id", async (req, res) => {
+  try {
+    let listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    listing = await ensureListingImages(listing);
     const { isProduction, getSellerIdentity } = require("./ebay-api");
     let sellerUserId = null;
     try {

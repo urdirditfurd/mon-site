@@ -875,6 +875,52 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** Compte les <img> avec URL produit réelle (hors placeholders). */
+function countRealImagesInHtml(html) {
+  const urls = [];
+  const re = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    if (isRealProductImage(m[1])) urls.push(m[1]);
+  }
+  return urls.length;
+}
+
+/**
+ * Injecte des images produit en tête du HTML si aucune <img> réelle.
+ * Évite les listings IA / scrub picsum sans galerie → erreur publish eBay.
+ */
+function injectProductImagesIntoHtml(html, images = []) {
+  const srcs = (images || []).filter(isRealProductImage).slice(0, 6);
+  if (!srcs.length) return String(html || "");
+  if (countRealImagesInHtml(html) > 0) return String(html || "");
+
+  const gallery = `
+  <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;margin:16px 0;">
+    <div><img src="${escapeHtml(srcs[0])}" alt="Produit" style="width:100%;border-radius:14px;max-height:280px;object-fit:cover;" /></div>
+    <div>${srcs
+      .slice(1, 3)
+      .map(
+        (src) =>
+          `<img src="${escapeHtml(src)}" alt="" style="width:100%;border-radius:12px;margin-bottom:8px;max-height:130px;object-fit:cover;" />`
+      )
+      .join("\n")}</div>
+  </div>`;
+
+  const raw = String(html || "");
+  // Remplace le placeholder « Image produit à ajouter » si présent
+  if (/Image produit à ajouter/i.test(raw)) {
+    return raw.replace(
+      /<div[^>]*>[\s\S]*?Image produit à ajouter[\s\S]*?<\/div>/i,
+      gallery
+    );
+  }
+  if (/<div/i.test(raw)) {
+    return raw.replace(/<div/i, `${gallery}<div`);
+  }
+  return gallery + raw;
+}
+
 module.exports = {
   scrapeProduct,
   scrapeEbaySearch,
@@ -883,6 +929,8 @@ module.exports = {
   scrapeAmazonSearch,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  injectProductImagesIntoHtml,
+  countRealImagesInHtml,
   detectSource,
   isRealProductImage,
 };

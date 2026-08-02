@@ -533,10 +533,14 @@ async function loadListings() {
                    )}</a>
               </div>`
             : `<div class="text-[11px] text-zinc-300 mt-1">Non publié</div>`;
+          const imgWarn =
+            !item.has_images && !item.ebay_listing_id
+              ? `<div class="text-[11px] text-rose-500 mt-1">Sans image — republier tentera de récupérer depuis la source</div>`
+              : "";
           return `
       <tr class="border-b border-zinc-50">
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
-        <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}${published}</td>
+        <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}${published}${imgWarn}</td>
         <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
         <td class="p-3 text-right space-x-2 whitespace-nowrap">
           <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Voir</button>
