@@ -14,7 +14,14 @@ if (process.argv.includes("--prod") || process.argv.includes("prod")) {
   process.env.EBAY_ENV = "production";
 }
 
-const { getAccessToken, describeAuthState, isProduction, ebayApiBase } = require("./ebay-api");
+const { getAccessToken, describeAuthState, isProduction, ebayApiBase, ebayAuthUrl } = require("./ebay-api");
+
+function cleanPresent(name) {
+  const v = String(process.env[name] || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  return Boolean(v);
+}
 
 function marketplace() {
   return process.env.EBAY_MARKETPLACE_ID || (isProduction() ? "EBAY_FR" : "EBAY_US");
@@ -230,15 +237,13 @@ async function main() {
   console.log("— Auth .env —");
   console.log(`  ENV              : ${auth.env}`);
   console.log(`  API              : ${ebayApiBase()}`);
-  console.log(`  AUTH             : ${require("./ebay-api").ebayAuthUrl ? "—" : "—"}`);
-  try {
-    const { ebayAuthUrl: authUrlFn } = require("./ebay-api");
-  } catch (_) {}
+  console.log(`  AUTH             : ${ebayAuthUrl()}`);
   console.log(`  CLIENT_ID/SECRET : ${auth.hasClientId && auth.hasClientSecret ? "OK" : "MANQUANT"}`);
   console.log(`  REFRESH_TOKEN    : ${auth.refreshLen} car. ${auth.refreshLen >= 40 ? "✅" : "❌"}`);
-  if (prod && auth.refreshLen > 0 && !process.env.EBAY_REFRESH_TOKEN_PROD) {
-    console.log("  ⚠️  EBAY_REFRESH_TOKEN_PROD absent — utilise peut‑être le refresh Sandbox par erreur");
+  if (prod && !cleanPresent("EBAY_REFRESH_TOKEN_PROD")) {
+    console.log("  ⚠️  EBAY_REFRESH_TOKEN_PROD manquant — ajoute-le (ne pas réutiliser le refresh Sandbox)");
   }
+  console.log("");
 
   let token;
   try {
