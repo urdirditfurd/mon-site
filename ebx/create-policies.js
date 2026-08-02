@@ -24,7 +24,42 @@ function cleanPresent(name) {
 }
 
 function marketplace() {
-  return process.env.EBAY_MARKETPLACE_ID || (isProduction() ? "EBAY_FR" : "EBAY_US");
+  return process.env.EBAY_MARKETPLACE_ID || (isProduction() ? "EBAY_US" : "EBAY_US");
+}
+
+function currencyForMarketplace(market) {
+  switch (market) {
+    case "EBAY_US":
+      return "USD";
+    case "EBAY_GB":
+      return "GBP";
+    case "EBAY_FR":
+    case "EBAY_DE":
+    case "EBAY_IT":
+    case "EBAY_ES":
+      return "EUR";
+    default:
+      return "USD";
+  }
+}
+
+function shippingForMarketplace(market) {
+  const currency = currencyForMarketplace(market);
+  if (market === "EBAY_US") {
+    return {
+      shippingCarrierCode: "USPS",
+      shippingServiceCode: "USPSPriority",
+      shippingCost: { value: "5.99", currency: "USD" },
+      additionalShippingCost: { value: "2.00", currency: "USD" },
+    };
+  }
+  // Europe — service générique souvent accepté
+  return {
+    shippingCarrierCode: "Other",
+    shippingServiceCode: "Other",
+    shippingCost: { value: "4.90", currency },
+    additionalShippingCost: { value: "2.00", currency },
+  };
 }
 
 function localeForMarketplace() {
