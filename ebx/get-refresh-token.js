@@ -218,11 +218,67 @@ Puis : npm run env-check → node server.js
           Accept: "application/json",
         },
       });
-      if (probe.ok) console.log("✅ Privilege API OK — scopes vendeur corrects\n");
-      else console.log(`⚠️  Privilege API ${probe.status} — vérifie les scopes Sell sur l'app.\n`);
+      if (probe.ok) console.log("✅ Privilege API OK — scopes vendeur corrects");
+      else console.log(`⚠️  Privilege API ${probe.status} — vérifie les scopes Sell sur l'app.`);
     } catch (e) {
       console.log("⚠️  Impossible de tester privilege:", e.message);
     }
+
+    // Affiche le pseudo lié — évite la confusion « même token » (tous commencent par v^1.1#)
+    try {
+      const https = require("https");
+      const tradingHost = isProd ? "api.ebay.com" : "api.sandbox.ebay.com";
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+</GetUserRequest>`;
+      const userId = await new Promise((resolve, reject) => {
+        const payload = Buffer.from(xml, "utf8");
+        const req = https.request(
+          {
+            hostname: tradingHost,
+            path: "/ws/api.dll",
+            method: "POST",
+            headers: {
+              "Content-Type": "text/xml",
+              "Content-Length": payload.length,
+              "X-EBAY-API-IAF-TOKEN": data.access_token,
+              "X-EBAY-API-CALL-NAME": "GetUser",
+              "X-EBAY-API-SITEID": "0",
+              "X-EBAY-API-COMPATIBILITY-LEVEL": "1399",
+            },
+          },
+          (res) => {
+            const chunks = [];
+            res.on("data", (c) => chunks.push(c));
+            res.on("end", () => {
+              const text = Buffer.concat(chunks).toString("utf8");
+              const id = (text.match(/<UserID>([^<]+)<\/UserID>/i) || [])[1] || "";
+              resolve(id);
+            });
+          }
+        );
+        req.on("error", reject);
+        req.write(payload);
+        req.end();
+      });
+      if (userId) {
+        console.log(`\n👤 Compte eBay lié à CE token : ${userId}`);
+        console.log("   → Vérifie que c'est bien ton NOUVEAU pseudo (pas l'ancien).");
+      } else {
+        console.log("\n⚠️  Impossible de lire le UserID — vérifie dans EBX Paramètres après restart.");
+      }
+    } catch (e) {
+      console.log("⚠️  GetUser:", e.message);
+    }
+
+    const rt = data.refresh_token;
+    console.log(
+      `\n🔎 Empreinte token (tous commencent par v^1.1# — compare la FIN) :\n` +
+        `   début… ${rt.slice(0, 24)}…\n` +
+        `   …fin   ${rt.slice(-32)}\n` +
+        `   longueur ${rt.length} car.\n`
+    );
   }
 }
 
