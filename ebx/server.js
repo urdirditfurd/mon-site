@@ -1359,7 +1359,29 @@ app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
       const amount = Number(o.pricingSummary?.total?.value || line?.total?.value || 0);
       const qty = Number(line?.quantity || 1);
       const ship = formatShipAddress(o);
-      const match = findSupplierForTitle(title);
+      // SKU EBX-{listingId}-… → retrouver le listing source
+      let match = { source_url: "", supplier: "eBay→fournisseur" };
+      const sku = String(line?.sku || "");
+      const skuHit = sku.match(/^EBX-(\d+)/i);
+      if (skuHit) {
+        const listing = getListingById.get(Number(skuHit[1]));
+        if (listing?.source_url) {
+          const src = listing.source_url;
+          match = {
+            source_url: src,
+            supplier: /amazon/i.test(src)
+              ? "Amazon"
+              : /cdiscount/i.test(src)
+                ? "Cdiscount"
+                : /aliexpress/i.test(src)
+                  ? "AliExpress"
+                  : "Fournisseur",
+            listingId: listing.id,
+          };
+        }
+      }
+      if (!match.source_url) match = findSupplierForTitle(title);
+
       const exists = getOrderByRef.get(ref);
       if (!exists) {
         insertOrder.run(

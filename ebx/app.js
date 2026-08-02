@@ -530,8 +530,9 @@ async function openSupplierOrder(id) {
     alert(
       "Fournisseur ouvert." +
         (json.data.shipText
-          ? "\nAdresse acheteur copiée dans le presse-papiers — colle-la à la livraison."
-          : "\nPas d'adresse : refais Sync ventes eBay.")
+          ? "\nAdresse acheteur copiée — colle-la à la livraison chez le fournisseur, puis paie."
+          : "\nPas d'adresse : clique d'abord « Sync ventes eBay ».") +
+        (json.data.checklist ? "\n\n" + json.data.checklist.join("\n") : "")
     );
     loadOrders();
   } catch (err) {
@@ -685,8 +686,9 @@ async function syncEbayOrders() {
     const res = await fetch(API + "/api/auto-orders/sync-ebay", { method: "POST" });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-    alert(`Sync eBay: ${json.fetched} commande(s) lues, ${json.created} nouvelle(s).`);
+    alert(`Sync eBay: ${json.fetched} lue(s), ${json.created} nouvelle(s), ${json.updated || 0} maj.`);
     loadOrders();
+    if (document.getElementById("page-dashboard")?.classList.contains("active")) loadDashboard();
   } catch (err) {
     alert("Sync ventes: " + err.message);
   }
@@ -1319,7 +1321,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 
