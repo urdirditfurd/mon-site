@@ -161,8 +161,8 @@
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Outils</p>
         <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper <span class="ml-auto badge-pro">Pro</span></a>
-        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span class="ml-auto badge-new">New</span></a>
         <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Mes Listings</a>
+        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span class="ml-auto badge-new">New</span></a>
         <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Title Builder</a>
         <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Description Builder</a>
         <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">SAV <span class="ml-auto badge-new">New</span></a>
@@ -172,19 +172,25 @@
         <a href="#" data-page="settings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Paramètres</a>
       </div>
     </nav>
-    <div class="p-4 border-t border-white/5 flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-[#6d7ddf]/30 text-[#e6e6fa] flex items-center justify-center text-sm font-bold">E</div>
-      <div><p class="text-sm font-medium text-lunar-200">EBX User</p><p class="text-xs text-slate-500">Business · illimité</p></div>
+    <div class="p-3 border-t border-white/5 space-y-3">
+      <button type="button" onclick="alert('EBX Clone — Dropshipping eBay : sniper, listings, auto-order semi-auto, SAV.')" class="w-full text-sm font-semibold py-2.5 rounded-xl bg-[#6d7ddf] text-white">Explication EBX</button>
+      <div class="flex items-center gap-3 px-1">
+        <div class="w-8 h-8 rounded-full bg-[#6d7ddf]/30 text-[#e6e6fa] flex items-center justify-center text-sm font-bold">E</div>
+        <div><p class="text-sm font-medium text-lunar-200">Mon compte</p><p class="text-xs text-slate-500">Plan Business</p></div>
+      </div>
     </div>
   </aside>
 
   <main class="flex-1 overflow-auto">
-    <header class="sticky top-0 z-10 bg-[#f3f3fc]/90 backdrop-blur border-b border-[#d4d4f0] px-8 py-4 flex items-center justify-between">
+    <header class="sticky top-0 z-10 bg-[#f3f3fc]/90 backdrop-blur border-b border-[#d4d4f0] px-8 py-4 flex items-center justify-between gap-4">
       <div>
         <h2 id="page-title" class="text-lg font-semibold">Dashboard</h2>
         <p id="page-subtitle" class="text-sm text-zinc-400">Vue d'ensemble de votre activité</p>
       </div>
-      <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
+      <div class="flex items-center gap-2 flex-wrap justify-end">
+        <span id="bot-status" class="text-xs bg-[#6d7ddf]/15 text-[#4452a8] px-2.5 py-1 rounded-full font-semibold">Bot …</span>
+        <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
+      </div>
     </header>
 
     <div class="p-8">
@@ -293,10 +299,11 @@
 
       <!-- SNIPER -->
       <section id="page-sniper" class="page space-y-4">
-        <div class="flex gap-2 mb-2" id="sniper-tabs">
-          <button data-stab="auto" class="sniper-tab active px-4 py-2 rounded-xl text-sm font-medium">Auto-Snipe</button>
+        <div class="flex gap-2 mb-2 flex-wrap" id="sniper-tabs">
+          <button data-stab="auto" class="sniper-tab active px-4 py-2 rounded-xl text-sm font-medium">Sniping</button>
           <button data-stab="bulking" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Bulking</button>
           <button data-stab="sub" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Substitution</button>
+          <button data-stab="manual" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Import Manuel</button>
         </div>
 
         <div id="sniper-auto" class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-5">
@@ -364,37 +371,98 @@
           <button onclick="runSubstitution()" id="sub-btn" class="btn-primary">Substituer</button>
           <div id="sub-result" class="hidden text-sm bg-zinc-50 rounded-xl p-4"></div>
         </div>
+
+        <div id="sniper-manual" class="hidden space-y-4">
+          <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <h3 class="text-xl font-bold">Import Manuel</h3>
+              <div class="flex bg-zinc-100 rounded-lg p-1 text-sm">
+                <button type="button" id="manual-mode-unique" class="px-3 py-1.5 rounded-md bg-[#6d7ddf] text-white font-medium">Unique</button>
+                <button type="button" id="manual-mode-multi" class="px-3 py-1.5 rounded-md text-zinc-500">Multi</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-3 items-end">
+              <div class="flex-1 min-w-[220px]">
+                <input id="manual-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="Collez un lien Amazon, AliExpress ou Cdiscount..." />
+              </div>
+              <div>
+                <label class="text-[10px] text-zinc-400 block mb-1">Commencer à</label>
+                <input id="manual-schedule" type="time" class="px-3 py-2 rounded-xl border text-sm" />
+              </div>
+            </div>
+            <button onclick="runManualImport()" id="manual-btn" class="btn-primary w-full">Importer</button>
+          </div>
+          <div id="manual-progress" class="hidden bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+            <div class="flex flex-wrap justify-between gap-2 text-xs font-medium" id="manual-steps">
+              <div class="flex items-center gap-2" data-step="scan"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">1</span> Scan produit</div>
+              <div class="flex items-center gap-2" data-step="extract"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">2</span> Extraction</div>
+              <div class="flex items-center gap-2" data-step="ai"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">3</span> Optimisation IA</div>
+              <div class="flex items-center gap-2" data-step="publish"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">4</span> Publication</div>
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><span id="manual-status-label" class="font-semibold">En cours…</span><span id="manual-pct" class="text-zinc-400">0%</span></div>
+              <div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div id="manual-bar" class="h-full bg-[#6d7ddf] rounded-full transition-all" style="width:0%"></div></div>
+            </div>
+            <ul id="manual-checklist" class="text-sm space-y-1.5"></ul>
+            <div id="manual-ready" class="hidden rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-800 px-4 py-3 text-sm font-medium"></div>
+            <div class="flex gap-2">
+              <button onclick="publishManualListing()" id="manual-publish-btn" class="btn-primary hidden">Publier sur eBay</button>
+              <button onclick="navigate('listings')" class="text-sm px-3 py-2 border rounded-xl">Voir Mes Listings</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- AUTO ORDER -->
       <section id="page-auto-order" class="page space-y-4">
-        <div class="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 class="font-semibold text-base">Fournisseurs & mode auto</h3>
-              <p class="text-xs text-zinc-400 mt-1">Active les sources + le traitement file d'attente (ouvre fournisseur + copie adresse). Le paiement reste manuel — pas d'API Ali/Amazon fiable.</p>
-            </div>
-            <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Traiter file d'attente</button>
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-5">
+          <div>
+            <h3 class="font-semibold text-lg">Auto-Order</h3>
+            <p class="text-sm text-zinc-400">Comme EBX : le bot prépare les commandes fournisseurs dès qu’une vente eBay arrive.</p>
           </div>
-          <div id="supplier-toggles" class="grid sm:grid-cols-3 gap-3"></div>
+          <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
+            <span><strong>Mode Auto-Order</strong><br><span class="text-xs text-zinc-400">Laisser le bot commander automatiquement (file + adresse + ouverture fournisseur)</span></span>
+            <input id="ao-mode" type="checkbox" class="toggle" onchange="saveAutoOrderSettings()" />
+          </label>
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-zinc-500">Max commandes / jour</label>
+              <input id="ao-max" type="number" min="1" max="200" value="50" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()" />
+            </div>
+            <div>
+              <label class="text-xs text-zinc-500">Mode AliExpress</label>
+              <select id="ao-ali-mode" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()">
+                <option value="chrome_extension">Extension Chrome</option>
+                <option value="manual">Manuel assisté</option>
+              </select>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur commande</span><input id="ao-notify-ok" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur erreur</span><input id="ao-notify-err" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Traiter auto après Sync eBay</span><input id="ao-autosync" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+          </div>
+          <p class="text-[11px] text-zinc-400">Paiement Ali/Amazon : pas d’API publique fiable. Le bot ouvre le checkout + copie l’adresse acheteur (Extension Chrome pour Ali). Tu valides le paiement.</p>
         </div>
-        <div class="bg-white rounded-2xl border border-zinc-200 p-5 text-sm space-y-2">
-          <h3 class="font-semibold text-base">Boucle dropshipping (post-vente)</h3>
-          <ol class="list-decimal pl-5 text-zinc-600 space-y-1 text-xs leading-relaxed">
-            <li><strong>Sync ventes eBay</strong> — récupère commandes + adresse acheteur (API officielle).</li>
-            <li><strong>Traiter file / Ouvrir fournisseur</strong> — re-sourcing live + copie adresse.</li>
-            <li><strong>Tu colles l'adresse</strong> chez le fournisseur et tu paies.</li>
-            <li><strong>Avancer statut</strong> — pending → ordered → shipped → delivered.</li>
-          </ol>
+
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
+          <h3 class="font-semibold">Fournisseurs</h3>
+          <div id="supplier-cards" class="grid sm:grid-cols-3 gap-3"></div>
         </div>
+
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div class="p-5 border-b flex justify-between items-center">
-            <div><h3 class="font-semibold">Auto-Order</h3><p class="text-sm text-zinc-400">Sync ventes eBay → adresse acheteur → ouvrir fournisseur → avancer</p></div>
-            <div class="flex gap-2">
+          <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
+            <div>
+              <h3 class="font-semibold">File de commandes</h3>
+              <p class="text-sm text-zinc-400">Sync eBay → bot prépare → tu paies chez le fournisseur</p>
+            </div>
+            <div class="flex gap-2 flex-wrap">
               <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes eBay</button>
+              <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Lancer le bot (file)</button>
               <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
             </div>
           </div>
+          <div id="ao-bot-log" class="hidden px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100"></div>
           <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">ID</th><th class="p-3">Produit + adresse</th><th class="p-3">Fournisseur</th><th class="p-3">Montant</th><th class="p-3">Statut</th><th class="p-3">Actions</th></tr></thead><tbody id="orders-body"></tbody></table>
         </div>
       </section>

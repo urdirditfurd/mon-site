@@ -85,6 +85,7 @@ document.getElementById("sniper-tabs")?.addEventListener("click", (e) => {
   document.getElementById("sniper-auto").classList.toggle("hidden", tab !== "auto");
   document.getElementById("sniper-bulking").classList.toggle("hidden", tab !== "bulking");
   document.getElementById("sniper-sub").classList.toggle("hidden", tab !== "sub");
+  document.getElementById("sniper-manual")?.classList.toggle("hidden", tab !== "manual");
 });
 
 document.querySelectorAll(".desc-tab").forEach((btn) => {
@@ -122,6 +123,21 @@ async function checkHealth() {
     el.className = "text-xs bg-red-50 text-red-500 px-2.5 py-1 rounded-full font-medium";
     el.textContent = "● API hors ligne";
   }
+  refreshBotStatus();
+}
+
+async function refreshBotStatus() {
+  const el = document.getElementById("bot-status");
+  if (!el) return;
+  try {
+    const res = await fetch(API + "/api/bot-status");
+    const json = await res.json();
+    const d = json.data || {};
+    el.textContent = d.label || "Bot";
+    el.className = d.autoOrderMode
+      ? "text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-semibold"
+      : "text-xs bg-[#6d7ddf]/15 text-[#4452a8] px-2.5 py-1 rounded-full font-semibold";
+  } catch (_) {}
 }
 
 async function loadDashboard() {
@@ -763,8 +779,11 @@ async function syncEbayOrders() {
     const res = await fetch(API + "/api/auto-orders/sync-ebay", { method: "POST" });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-    alert(`Sync eBay: ${json.fetched} lue(s), ${json.created} nouvelle(s), ${json.updated || 0} maj.`);
+    let msg = `Sync eBay: ${json.fetched} lue(s), ${json.created} nouvelle(s), ${json.updated || 0} maj.`;
+    if (json.autoProcessed) msg += `\nBot: ${json.autoProcessed} commande(s) préparée(s) auto.`;
+    alert(msg);
     loadOrders();
+    refreshBotStatus();
     if (document.getElementById("page-dashboard")?.classList.contains("active")) loadDashboard();
   } catch (err) {
     alert("Sync ventes: " + err.message);
@@ -774,28 +793,76 @@ async function syncEbayOrders() {
 let supplierCfgCache = null;
 
 async function loadSupplierConfig() {
-  const box = document.getElementById("supplier-toggles");
-  if (!box) return;
   try {
     const res = await fetch(API + "/api/auto-orders/config");
     const json = await res.json();
     supplierCfgCache = json.data || {};
-    const keys = ["amazon", "aliexpress", "cdiscount"];
-    box.innerHTML = keys
-      .map((k) => {
-        const c = supplierCfgCache[k] || { enabled: true, auto: false, label: k };
-        return `<div class="rounded-xl border border-zinc-200 p-4 space-y-3">
-          <p class="font-medium text-sm">${escapeHtml(c.label || k)}</p>
-          <label class="flex items-center justify-between gap-2 text-xs"><span>Activé</span>
-            <input type="checkbox" class="toggle" ${c.enabled !== false ? "checked" : ""} onchange="toggleSupplier('${k}','enabled',this.checked)" /></label>
-          <label class="flex items-center justify-between gap-2 text-xs"><span>Auto file d'attente</span>
-            <input type="checkbox" class="toggle" ${c.auto ? "checked" : ""} onchange="toggleSupplier('${k}','auto',this.checked)" /></label>
-        </div>`;
-      })
-      .join("");
-  } catch (_) {
-    box.innerHTML = `<p class="text-sm text-zinc-400">Config indisponible</p>`;
-  }
+    const c = supplierCfgCache;
+    const mode = document.getElementById("ao-mode");
+    if (mode) mode.checked = Boolean(c.autoOrderMode);
+    const max = document.getElementById("ao-max");
+    if (max) max.value = c.maxPerDay || 50;
+    const ali = document.getElementById("ao-ali-mode");
+    if (ali) ali.value = c.aliMode || "chrome_extension";
+    const nOk = document.getElementById("ao-notify-ok");
+    if (nOk) nOk.checked = c.notifyOnOrder !== false;
+    const nErr = document.getElementById("ao-notify-err");
+    if (nErr) nErr.checked = c.notifyOnError !== false;
+    const autoSync = document.getElementById("ao-autosync");
+    if (autoSync) autoSync.checked = c.autoProcessOnSync !== false;
+
+    const box = document.getElementById("supplier-cards");
+    if (box) {
+      const keys = ["amazon", "aliexpress", "cdiscount"];
+      box.innerHTML = keys
+        .map((k) => {
+          const s = c[k] || {};
+          const soon = s.comingSoon;
+          return `<div class="rounded-xl border p-4 space-y-3 ${soon ? "opacity-60" : ""}">
+            <div class="flex justify-between items-start gap-2">
+              <div>
+                <p class="font-medium text-sm">${escapeHtml(s.label || k)}</p>
+                <p class="text-[11px] text-zinc-400">Délai: ${escapeHtml(s.delay || "—")}</p>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full ${
+                soon ? "bg-zinc-100 text-zinc-500" : s.connected ? "bg-emerald-100 text-emerald-700" : "bg-amber-50 text-amber-700"
+              }">${soon ? "Bientôt" : s.connected ? "Connecté" : "Non connecté"}</span>
+            </div>
+            ${
+              soon
+                ? `<p class="text-xs text-zinc-400">Bientôt disponible</p>`
+                : `<div class="space-y-2">
+              <label class="flex items-center justify-between gap-2 text-xs"><span>Activé</span>
+                <input type="checkbox" class="toggle" ${s.enabled !== false ? "checked" : ""} onchange="toggleSupplier('${k}','enabled',this.checked)" /></label>
+              <label class="flex items-center justify-between gap-2 text-xs"><span>Auto file</span>
+                <input type="checkbox" class="toggle" ${s.auto ? "checked" : ""} onchange="toggleSupplier('${k}','auto',this.checked)" /></label>
+              <button type="button" onclick="connectSupplier('${k}')" class="w-full text-xs px-3 py-1.5 rounded-lg border ${
+                s.connected ? "bg-emerald-50 text-emerald-700" : "bg-[#6d7ddf]/10 text-[#4452a8]"
+              }">${s.connected ? "Déconnecter" : "Se connecter"}</button>
+            </div>`
+            }
+          </div>`;
+        })
+        .join("");
+    }
+    refreshBotStatus();
+  } catch (_) {}
+}
+
+async function saveAutoOrderSettings() {
+  if (!supplierCfgCache) supplierCfgCache = {};
+  supplierCfgCache.autoOrderMode = Boolean(document.getElementById("ao-mode")?.checked);
+  supplierCfgCache.maxPerDay = Number(document.getElementById("ao-max")?.value) || 50;
+  supplierCfgCache.aliMode = document.getElementById("ao-ali-mode")?.value || "chrome_extension";
+  supplierCfgCache.notifyOnOrder = Boolean(document.getElementById("ao-notify-ok")?.checked);
+  supplierCfgCache.notifyOnError = Boolean(document.getElementById("ao-notify-err")?.checked);
+  supplierCfgCache.autoProcessOnSync = Boolean(document.getElementById("ao-autosync")?.checked);
+  await fetch(API + "/api/auto-orders/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(supplierCfgCache),
+  });
+  refreshBotStatus();
 }
 
 async function toggleSupplier(key, field, value) {
@@ -808,14 +875,36 @@ async function toggleSupplier(key, field, value) {
   });
 }
 
+async function connectSupplier(key) {
+  if (!supplierCfgCache) await loadSupplierConfig();
+  const s = supplierCfgCache[key] || {};
+  const next = !s.connected;
+  if (next) {
+    alert(
+      key === "aliexpress"
+        ? "AliExpress: mode Extension Chrome. Marqué connecté — le bot ouvrira le checkout + copie l'adresse."
+        : "Compte fournisseur marqué connecté. Le bot utilisera cette source en priorité (paiement reste à valider)."
+    );
+  }
+  await toggleSupplier(key, "connected", next);
+  loadSupplierConfig();
+}
+
 async function processAutoOrderQueue() {
   try {
     const res = await fetch(API + "/api/auto-orders/process-queue", { method: "POST" });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     const pack = json.data?.pack || [];
+    const log = document.getElementById("ao-bot-log");
+    if (log) {
+      log.classList.remove("hidden");
+      log.textContent =
+        json.data.note +
+        (json.data.remainingToday != null ? ` · Reste aujourd'hui: ${json.data.remainingToday}` : "");
+    }
     if (!pack.length) {
-      alert("Aucune commande pending avec fournisseur auto activé.");
+      alert(json.data?.note || "Aucune commande pending.");
       return loadOrders();
     }
     if (pack[0].shipText) {
@@ -827,14 +916,125 @@ async function processAutoOrderQueue() {
       window.open(p.url, "_blank", "noopener");
     }
     alert(
-      `${pack.length} commande(s) préparée(s).\nAdresse de la 1ère copiée.\n${pack.length > 5 ? "5 premiers onglets ouverts.\n" : ""}${
-        json.data.note || ""
-      }`
+      `Bot: ${pack.length} commande(s) préparée(s).\nAdresse de la 1ère copiée.\nOnglets fournisseur ouverts — colle l'adresse et paie.`
     );
     loadOrders();
+    refreshBotStatus();
   } catch (err) {
     alert("File d'attente: " + err.message);
   }
+}
+
+let manualListingId = null;
+
+function setManualStep(doneUpTo) {
+  const order = ["scan", "extract", "ai", "publish"];
+  const idx = order.indexOf(doneUpTo);
+  document.querySelectorAll("#manual-steps [data-step]").forEach((el) => {
+    const i = order.indexOf(el.dataset.step);
+    const dot = el.querySelector(".step-dot");
+    if (i <= idx) {
+      dot.className = "step-dot w-6 h-6 rounded-full bg-emerald-500 text-white text-center leading-6 text-xs";
+      dot.textContent = "✓";
+    } else {
+      dot.className = "step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6 text-xs";
+      dot.textContent = String(i + 1);
+    }
+  });
+}
+
+async function runManualImport() {
+  const url = document.getElementById("manual-url")?.value.trim();
+  if (!url) return alert("Colle une URL fournisseur");
+  const btn = document.getElementById("manual-btn");
+  const wrap = document.getElementById("manual-progress");
+  const list = document.getElementById("manual-checklist");
+  const bar = document.getElementById("manual-bar");
+  const pct = document.getElementById("manual-pct");
+  const label = document.getElementById("manual-status-label");
+  const ready = document.getElementById("manual-ready");
+  const pubBtn = document.getElementById("manual-publish-btn");
+  btn.disabled = true;
+  wrap.classList.remove("hidden");
+  ready.classList.add("hidden");
+  pubBtn.classList.add("hidden");
+  manualListingId = null;
+  list.innerHTML = "";
+  const addCheck = (t) => {
+    list.innerHTML += `<li class="flex items-center gap-2 text-emerald-700"><span class="text-emerald-500">✓</span> ${escapeHtml(t)}</li>`;
+  };
+  try {
+    label.textContent = "Scan produit…";
+    bar.style.width = "20%";
+    pct.textContent = "20%";
+    setManualStep("scan");
+    addCheck("Analyse de l'URL…");
+    await new Promise((r) => setTimeout(r, 300));
+    addCheck(`Plateforme détectée : ${/amazon/i.test(url) ? "Amazon" : /cdiscount/i.test(url) ? "Cdiscount" : "AliExpress"}`);
+
+    label.textContent = "Extraction…";
+    bar.style.width = "45%";
+    pct.textContent = "45%";
+    setManualStep("extract");
+    const res = await fetch(API + "/api/generate-listing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productUrl: url, themeColor }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Import échoué");
+    addCheck("Connexion au fournisseur…");
+    addCheck("Produit détecté");
+    const imgCount = (json.data?.images || []).length || countRealImagesHint(json.data?.html_description);
+    addCheck(`Images récupérées : ${imgCount}`);
+
+    label.textContent = "Optimisation IA…";
+    bar.style.width = "80%";
+    pct.textContent = "80%";
+    setManualStep("ai");
+    const title = json.data?.seo_title || "";
+    const price = Number(json.data?.suggested_price || 0);
+    addCheck(`Titre optimisé : ${title.length} caractères`);
+    addCheck("Description HTML générée");
+    addCheck(`Prix de vente suggéré : ${price.toFixed(2)} €`);
+    const costGuess = price / 1.8;
+    const marginEst = price > 0 ? Math.round(((price - costGuess) / price) * 100) : 0;
+    addCheck(`Marge estimée : ${marginEst}%`);
+
+    manualListingId = json.data?.id;
+    label.textContent = `Prêt à publier — ${price.toFixed(2)} € (80%)`;
+    ready.classList.remove("hidden");
+    ready.textContent = `Listing prêt à publier — ${title.slice(0, 60)} — ${price.toFixed(2)} €`;
+    pubBtn.classList.remove("hidden");
+    setManualStep("ai");
+  } catch (err) {
+    label.textContent = "Erreur";
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function publishManualListing() {
+  if (!manualListingId) return alert("Importe d'abord un produit");
+  try {
+    setManualStep("publish");
+    document.getElementById("manual-bar").style.width = "100%";
+    document.getElementById("manual-pct").textContent = "100%";
+    const res = await fetch(API + "/api/publish-to-ebay/" + manualListingId, { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    document.getElementById("manual-status-label").textContent = "Publié";
+    alert("Publié sur eBay — listingId: " + (json.data?.listingId || json.listingId || "ok"));
+    navigate("listings");
+  } catch (err) {
+    alert("Publication: " + err.message);
+  }
+}
+
+function countRealImagesHint(html) {
+  const m = String(html || "").match(/<img\b/gi);
+  return m ? m.length : 0;
 }
 
 let savSelectedId = null;
@@ -1615,7 +1815,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

@@ -248,18 +248,37 @@ const updateSavStatus = db.prepare(
 );
 
 const DEFAULT_SUPPLIER_CFG = {
-  amazon: { enabled: true, auto: true, label: "Amazon France" },
-  aliexpress: { enabled: true, auto: true, label: "AliExpress" },
-  cdiscount: { enabled: true, auto: false, label: "Cdiscount" },
-  autoProcessOnSync: false,
+  amazon: { enabled: true, auto: true, label: "Amazon France", connected: false, delay: "1-2 jours" },
+  aliexpress: { enabled: true, auto: true, label: "AliExpress", connected: false, delay: "7-15 jours" },
+  cdiscount: { enabled: true, auto: false, label: "Cdiscount", connected: false, delay: "Bientôt", comingSoon: true },
+  autoOrderMode: false,
+  autoProcessOnSync: true,
+  maxPerDay: 50,
+  aliMode: "chrome_extension",
+  notifyOnOrder: true,
+  notifyOnError: true,
+  processedToday: 0,
+  processedDay: "",
 };
 
 function getSupplierConfig() {
   try {
     const row = getSetting.get("supplier_auto_order");
-    if (row?.value) return { ...DEFAULT_SUPPLIER_CFG, ...JSON.parse(row.value) };
+    if (row?.value) {
+      const parsed = JSON.parse(row.value);
+      const merged = { ...DEFAULT_SUPPLIER_CFG, ...parsed };
+      for (const key of ["amazon", "aliexpress", "cdiscount"]) {
+        merged[key] = { ...DEFAULT_SUPPLIER_CFG[key], ...(parsed[key] || {}) };
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (merged.processedDay !== today) {
+        merged.processedToday = 0;
+        merged.processedDay = today;
+      }
+      return merged;
+    }
   } catch (_) {}
-  return { ...DEFAULT_SUPPLIER_CFG };
+  return { ...DEFAULT_SUPPLIER_CFG, processedDay: new Date().toISOString().slice(0, 10) };
 }
 
 function saveSupplierConfig(cfg) {
@@ -741,6 +760,31 @@ app.get("/api/auto-orders/config", (_req, res) => {
   res.json({ success: true, data: getSupplierConfig() });
 });
 
+app.get("/api/bot-status", (_req, res) => {
+  try {
+    const cfg = getSupplierConfig();
+    const pending = getOrders.all().filter((o) => o.status === "pending").length;
+    const listings = getRecentListings.all().length;
+    const published = getRecentListings.all().filter((l) => l.ebay_listing_id).length;
+    res.json({
+      success: true,
+      data: {
+        autoOrderMode: Boolean(cfg.autoOrderMode),
+        processedToday: cfg.processedToday || 0,
+        maxPerDay: cfg.maxPerDay || 50,
+        pending,
+        listings,
+        published,
+        label: cfg.autoOrderMode
+          ? `Bot actif ${cfg.processedToday || 0}/${cfg.maxPerDay || 50}`
+          : `Bot off · ${pending} en attente`,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post("/api/auto-orders/config", (req, res) => {
   try {
     const body = req.body || {};
@@ -751,11 +795,19 @@ app.post("/api/auto-orders/config", (req, res) => {
           ...cfg[key],
           enabled: body[key].enabled !== false,
           auto: Boolean(body[key].auto),
+          connected: Boolean(body[key].connected),
           label: cfg[key].label,
+          delay: cfg[key].delay,
+          comingSoon: cfg[key].comingSoon,
         };
       }
     }
     if (typeof body.autoProcessOnSync === "boolean") cfg.autoProcessOnSync = body.autoProcessOnSync;
+    if (typeof body.autoOrderMode === "boolean") cfg.autoOrderMode = body.autoOrderMode;
+    if (body.maxPerDay != null) cfg.maxPerDay = Math.max(1, Math.min(200, Number(body.maxPerDay) || 50));
+    if (body.aliMode) cfg.aliMode = String(body.aliMode);
+    if (typeof body.notifyOnOrder === "boolean") cfg.notifyOnOrder = body.notifyOnOrder;
+    if (typeof body.notifyOnError === "boolean") cfg.notifyOnError = body.notifyOnError;
     saveSupplierConfig(cfg);
     res.json({ success: true, data: cfg });
   } catch (err) {
@@ -763,13 +815,28 @@ app.post("/api/auto-orders/config", (req, res) => {
   }
 });
 
-/** Prépare le pack « auto » : URLs + adresses pour toutes les pending (fournisseurs activés). */
+/** Prépare le pack « auto » : URLs + adresses pour pending (quota journalier + mode bot). */
 app.post("/api/auto-orders/process-queue", async (_req, res) => {
   try {
     const cfg = getSupplierConfig();
+    const maxLeft = Math.max(0, (cfg.maxPerDay || 50) - (cfg.processedToday || 0));
+    if (maxLeft <= 0) {
+      return res.json({
+        success: true,
+        data: {
+          processed: 0,
+          pack: [],
+          skippedQuota: true,
+          note: `Quota journalier atteint (${cfg.maxPerDay}/jour). Augmente Max commandes/jour ou attends demain.`,
+        },
+      });
+    }
     const rows = getOrders.all().filter((o) => o.status === "pending");
     const pack = [];
+    const botLog = [];
     for (const row of rows) {
+      if (pack.length >= maxLeft) break;
+      botLog.push({ step: "detect", ok: true, detail: `Vente détectée ${row.order_ref}` });
       let url = row.source_url;
       let supplier = row.supplier;
       if (!url) {
@@ -781,12 +848,13 @@ app.post("/api/auto-orders/process-queue", async (_req, res) => {
         try {
           const q = String(row.product || "").split(/\s+/).slice(0, 6).join(" ");
           const cmp = await findCheapestSupplier(q, {
-            sources: ["amazon", "aliexpress", "cdiscount"].filter((s) => cfg[s]?.enabled !== false),
+            sources: ["amazon", "aliexpress", "cdiscount"].filter((s) => cfg[s]?.enabled !== false && !cfg[s]?.comingSoon),
             limit: 2,
           });
           if (cmp.best?.url) {
             url = cmp.best.url;
             supplier = String(cmp.best.source || "Fournisseur").split("+")[0];
+            botLog.push({ step: "source", ok: true, detail: `Meilleur fournisseur ${supplier}` });
           }
         } catch (_) {}
       }
@@ -796,11 +864,25 @@ app.post("/api/auto-orders/process-queue", async (_req, res) => {
         supplier = supplier || "AliExpress";
       }
       const key = supplierKeyFromName(supplier + " " + url);
+      if (cfg[key]?.comingSoon) continue;
       if (cfg[key] && cfg[key].enabled === false) continue;
-      if (cfg[key] && cfg[key].auto === false) continue;
+      if (cfg.autoOrderMode && cfg[key] && cfg[key].auto === false) continue;
 
       updateOrderSource.run(url, supplier || row.supplier || "Fournisseur", row.order_ref);
       updateOrderStatus.run("ordered", row.order_ref);
+      const steps = [
+        { id: "sync", label: "Adresse acheteur récupérée", ok: Boolean(row.notes) },
+        { id: "source", label: `Fournisseur: ${supplier}`, ok: true },
+        { id: "open", label: "Page fournisseur préparée", ok: true },
+        {
+          id: "pay",
+          label:
+            key === "aliexpress" && cfg.aliMode === "chrome_extension"
+              ? "Checkout AliExpress via Extension Chrome (manuel assisté)"
+              : "Paiement fournisseur (manuel — colle adresse + paie)",
+          ok: false,
+        },
+      ];
       pack.push({
         id: row.order_ref,
         product: row.product,
@@ -808,15 +890,25 @@ app.post("/api/auto-orders/process-queue", async (_req, res) => {
         supplier,
         shipText: row.notes || "",
         amount: row.amount,
+        steps,
+        aliMode: cfg.aliMode,
       });
+      botLog.push({ step: "queue", ok: true, detail: `${row.order_ref} → ordered` });
     }
+    cfg.processedToday = (cfg.processedToday || 0) + pack.length;
+    cfg.processedDay = new Date().toISOString().slice(0, 10);
+    saveSupplierConfig(cfg);
     res.json({
       success: true,
       data: {
         processed: pack.length,
         pack,
-        note:
-          "Paiement fournisseur reste manuel (pas d'API Ali/Amazon fiable). Ouvre chaque lien, colle l'adresse, paie, puis Avancer → shipped.",
+        botLog,
+        autoOrderMode: cfg.autoOrderMode,
+        remainingToday: Math.max(0, cfg.maxPerDay - cfg.processedToday),
+        note: cfg.autoOrderMode
+          ? "Mode Auto-Order: file préparée (adresse + URL). Paiement fournisseur = étape manuelle/extension — pas d'API Ali/Amazon."
+          : "File préparée. Ouvre chaque lien, colle l'adresse, paie, puis Avancer → shipped.",
       },
     });
   } catch (err) {
@@ -1927,7 +2019,48 @@ app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
         updated += 1;
       }
     }
-    res.json({ success: true, fetched: orders.length, created, updated });
+    const cfg = getSupplierConfig();
+    let autoPack = null;
+    if (created > 0 && (cfg.autoOrderMode || cfg.autoProcessOnSync)) {
+      try {
+        // Relance logique file (réutilise même endpoint en interne)
+        const rows = getOrders.all().filter((o) => o.status === "pending");
+        const maxLeft = Math.max(0, (cfg.maxPerDay || 50) - (cfg.processedToday || 0));
+        autoPack = { processed: 0, ids: [] };
+        for (const row of rows.slice(0, maxLeft)) {
+          const key = supplierKeyFromName(row.supplier + " " + (row.source_url || ""));
+          if (cfg[key]?.enabled === false || cfg[key]?.comingSoon) continue;
+          if (cfg.autoOrderMode && cfg[key]?.auto === false) continue;
+          let url = row.source_url;
+          let supplier = row.supplier;
+          if (!url) {
+            const found = findSupplierForTitle(row.product);
+            url = found.source_url;
+            supplier = found.supplier || supplier;
+          }
+          if (!url) {
+            const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 5).join(" "));
+            url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
+            supplier = "AliExpress";
+          }
+          updateOrderSource.run(url, supplier || "Fournisseur", row.order_ref);
+          updateOrderStatus.run("ordered", row.order_ref);
+          autoPack.ids.push(row.order_ref);
+          autoPack.processed += 1;
+        }
+        cfg.processedToday = (cfg.processedToday || 0) + autoPack.processed;
+        cfg.processedDay = new Date().toISOString().slice(0, 10);
+        saveSupplierConfig(cfg);
+      } catch (_) {}
+    }
+    res.json({
+      success: true,
+      fetched: orders.length,
+      created,
+      updated,
+      autoProcessed: autoPack?.processed || 0,
+      autoOrderMode: cfg.autoOrderMode,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
