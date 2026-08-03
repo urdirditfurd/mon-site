@@ -144,7 +144,11 @@ async function loadDashboard() {
 
   const trendBox = document.getElementById("dash-trending");
   const trendMeta = document.getElementById("dash-trending-meta");
-  if (trendMeta) trendMeta.textContent = d.trendingLive ? "Live Browse API" : "Seed / fallback";
+  if (trendMeta) {
+    trendMeta.innerHTML = d.trendingLive
+      ? `<span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span><span class="text-green-600 font-medium">Live</span></span>`
+      : "Seed / fallback";
+  }
   if (trendBox) {
     const items = d.trending || [];
     trendBox.innerHTML = items.length
@@ -382,7 +386,7 @@ function renderCompetitor(d) {
     <div class="bg-white rounded-2xl border p-5 flex flex-wrap items-center gap-4">
       <div class="flex-1">
         <div class="flex items-center gap-2"><span class="text-xl">🇫🇷</span><h3 class="text-xl font-bold">${escapeHtml(d.seller)}</h3>
-          ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">estimé</span>' : '<span class="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">live</span>'}
+                ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">estimé</span>' : '<span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Live</span>'}
           ${d.source || d.api ? `<span class="text-[10px] text-zinc-400">${escapeHtml(d.source || d.api || "")}</span>` : ""}
         </div>
         <p class="text-sm text-zinc-400 mt-1">${escapeHtml(location)}</p>
@@ -390,7 +394,7 @@ function renderCompetitor(d) {
       <a href="${ebayUrl}" target="_blank" class="px-4 py-2 border rounded-xl text-sm font-medium">Voir sur eBay</a>
     </div>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <div class="bg-brand-600 text-white rounded-2xl p-5 col-span-2 lg:col-span-1">
+      <div class="bg-emerald-600 text-white rounded-2xl p-5 col-span-2 lg:col-span-1">
         <div class="flex gap-1 mb-2 text-[10px] font-medium">
           <button data-cp="day" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Jour</button>
           <button data-cp="week" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Semaine</button>
@@ -413,11 +417,11 @@ function renderCompetitor(d) {
         <div class="flex gap-1 text-xs" id="best-period">
           <button data-bp="day" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Jour</button>
           <button data-bp="week" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Semaine</button>
-          <button data-bp="month" class="bp-pill px-2 py-1 rounded-full bg-brand-600 text-white">Mois</button>
+          <button data-bp="month" class="bp-pill px-2 py-1 rounded-full bg-emerald-600 text-white">Mois</button>
         </div>
       </div>
       <div id="comp-bestsellers" class="divide-y"></div>
-      <div class="p-3 text-center border-t"><button id="comp-more" class="text-sm text-brand-600 font-medium">Voir plus</button></div>
+      <div class="p-3 text-center border-t"><button id="comp-more" class="text-sm text-emerald-600 font-medium">Voir plus</button></div>
     </div>`;
 
   box.querySelectorAll(".cp-pill").forEach((btn) => {
@@ -450,7 +454,7 @@ function renderCompetitor(d) {
           ? `<img src="${escapeHtml(b.image)}" class="w-12 h-12 rounded-lg object-cover bg-zinc-100" alt="" />`
           : `<div class="w-12 h-12 rounded-lg bg-zinc-100"></div>`;
         return `<a href="${escapeHtml(b.url || "#")}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50">
-          <span class="w-6 font-bold text-brand-600">${i + 1}</span>
+          <span class="w-6 font-bold text-emerald-600">${i + 1}</span>
           ${img}
           <div class="flex-1 min-w-0"><p class="text-sm font-medium truncate">${escapeHtml(b.title)}</p></div>
           <div class="text-right"><p class="text-sm text-emerald-600">${sold} vendus</p><p class="text-sm font-semibold">${price.toFixed(2)} €</p></div>
@@ -465,7 +469,7 @@ function renderCompetitor(d) {
       box.querySelectorAll(".bp-pill").forEach((b) => {
         b.className = "bp-pill px-2 py-1 rounded-full bg-zinc-100";
       });
-      btn.className = "bp-pill px-2 py-1 rounded-full bg-brand-600 text-white";
+      btn.className = "bp-pill px-2 py-1 rounded-full bg-emerald-600 text-white";
       renderBest(btn.dataset.bp);
     });
   });
@@ -473,7 +477,7 @@ function renderCompetitor(d) {
   document.getElementById("comp-more")?.addEventListener("click", () => {
     showAll = !showAll;
     document.getElementById("comp-more").textContent = showAll ? "Voir moins" : "Voir plus";
-    const active = box.querySelector(".bp-pill.bg-brand-600")?.dataset.bp || "month";
+    const active = box.querySelector(".bp-pill.bg-emerald-600")?.dataset.bp || "month";
     renderBest(active);
   });
 }
