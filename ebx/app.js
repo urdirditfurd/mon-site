@@ -295,10 +295,10 @@ function renderDashCalendar() {
     else cls += " hover:bg-lunar-100";
     const tip = ev ? ` title="${escapeHtml(ev.name)} — ${escapeHtml(ev.tip || "")}"` : "";
     const icon = ev
-      ? `<span class="text-[11px] leading-none ${ev.isStart ? "" : "opacity-60"}">${ev.icon || "•"}</span>`
-      : `<span class="text-[11px] leading-none opacity-0">·</span>`;
+      ? `<span class="text-sm leading-none ${ev.isStart ? "" : "opacity-50"}" aria-hidden="true">${ev.icon || "•"}</span>`
+      : `<span class="text-sm leading-none opacity-0" aria-hidden="true">·</span>`;
     html += `<button type="button" data-cal-day="${day}" class="${cls}"${tip}>
-      <span class="leading-none">${day}</span>
+      <span class="leading-none text-[11px]">${day}</span>
       ${icon}
     </button>`;
   }

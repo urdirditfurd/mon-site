@@ -226,7 +226,7 @@ function getEventCalendar(now = new Date()) {
     { name: "Fête des mères", month: 5, day: 25, durationDays: 1, niche: "Beauté & Maison", tip: "Soins, déco, bijoux", icon: "💐" },
     { name: "Fête des pères", month: 6, day: 15, durationDays: 1, niche: "High-Tech / Outils", tip: "Gadgets, outils, tech", icon: "🛠️" },
     { name: "Soldes d'été", month: 6, day: 24, durationDays: 28, niche: "Mode & Sport", tip: "Été outdoor, plage, sport", icon: "☀️" },
-    { name: "Assomption", month: 8, day: 15, durationDays: 1, niche: "Voyage / Maison", tip: "Bagages, plage, déco été", icon: "✝️" },
+    { name: "Assomption", month: 8, day: 15, durationDays: 1, niche: "Voyage / Maison", tip: "Bagages, plage, déco été", icon: "⭐" },
     { name: "Rentrée scolaire", month: 9, day: 1, durationDays: 14, niche: "Bureau / High-Tech", tip: "Fournitures, sacs, laptop stands", icon: "📚" },
     { name: "Automne", month: 9, day: 22, durationDays: 1, niche: "Mode / Maison", tip: "Pulls, déco automne, bougies", icon: "🍂" },
     { name: "Halloween", month: 10, day: 31, durationDays: 1, niche: "Déguisements / Déco", tip: "Costumes, LED, déco", icon: "🎃" },
