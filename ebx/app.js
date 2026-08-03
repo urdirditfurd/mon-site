@@ -143,6 +143,7 @@ async function refreshBotStatus() {
 let dashCalendarEvents = [];
 let calViewYear = new Date().getFullYear();
 let calViewMonth = new Date().getMonth(); // 0-based
+let calSelectedEvent = null;
 let marketTickTimer = null;
 
 function formatEuro(n, decimals = 0) {
@@ -173,6 +174,7 @@ function bindDashboardCalendarControls() {
         calViewMonth = 11;
         calViewYear -= 1;
       }
+      calSelectedEvent = null;
       renderDashCalendar();
     });
   }
@@ -184,6 +186,7 @@ function bindDashboardCalendarControls() {
         calViewMonth = 0;
         calViewYear += 1;
       }
+      calSelectedEvent = null;
       renderDashCalendar();
     });
   }
@@ -193,15 +196,66 @@ function bindDashboardCalendarControls() {
       const now = new Date();
       calViewYear = now.getFullYear();
       calViewMonth = now.getMonth();
+      calSelectedEvent = null;
       renderDashCalendar();
     });
   }
 }
 
+/** Map jour du mois → événement (utilise month/day locaux, pas ISO UTC). */
+function eventsForViewMonth() {
+  const byDay = {};
+  for (const e of dashCalendarEvents) {
+    const year = e.year || Number(String(e.date || "").slice(0, 4)) || calViewYear;
+    if (year !== calViewYear) continue;
+    const startMonth = Number(e.month);
+    const startDay = Number(e.day);
+    if (!startMonth || !startDay) continue;
+    const duration = Math.max(1, Number(e.durationDays) || 1);
+    for (let i = 0; i < duration; i++) {
+      const d = new Date(year, startMonth - 1, startDay + i);
+      if (d.getFullYear() !== calViewYear || d.getMonth() !== calViewMonth) continue;
+      const day = d.getDate();
+      // Garder l'événement principal sur le 1er jour ; les suivants restent marqués
+      if (!byDay[day] || i === 0) byDay[day] = { ...e, isStart: i === 0 };
+    }
+  }
+  return byDay;
+}
+
+function renderCalCountdown(ev) {
+  const countdown = document.getElementById("dash-cal-countdown");
+  if (!countdown) return;
+  if (!ev) {
+    countdown.innerHTML = `<span class="text-zinc-500">Navigue dans le mois — les icônes marquent Assomption, Automne, Halloween…</span>`;
+    return;
+  }
+  const days = ev.daysUntil;
+  let when;
+  if (ev.phase === "live") when = `En cours · ${escapeHtml(ev.name)}`;
+  else if (typeof days === "number" && days > 0) when = `Il reste ${days} jour${days > 1 ? "s" : ""} avant ${escapeHtml(ev.name)}`;
+  else if (typeof days === "number" && days === 0) when = `C'est aujourd'hui · ${escapeHtml(ev.name)}`;
+  else if (typeof days === "number" && days < 0) when = `${escapeHtml(ev.name)} · passé il y a ${Math.abs(days)} j`;
+  else when = escapeHtml(ev.name);
+  const dateLabel = ev.date
+    ? new Date(ev.year || calViewYear, (ev.month || 1) - 1, ev.day || 1).toLocaleDateString("fr-FR", {
+        day: "numeric",
+        month: "long",
+      })
+    : "";
+  countdown.innerHTML = `<div class="flex items-start gap-2">
+    <span class="text-lg leading-none">${ev.icon || "📅"}</span>
+    <div>
+      <p class="font-semibold">${when}</p>
+      <p class="text-[11px] text-emerald-700/80 mt-0.5">${escapeHtml(dateLabel)}${dateLabel && ev.niche ? " · " : ""}${escapeHtml(ev.niche || "")}</p>
+      <p class="text-[11px] text-emerald-800/70 mt-0.5">${escapeHtml(ev.tip || "")}</p>
+    </div>
+  </div>`;
+}
+
 function renderDashCalendar() {
   const grid = document.getElementById("dash-cal-grid");
   const label = document.getElementById("cal-month-label");
-  const countdown = document.getElementById("dash-cal-countdown");
   if (!grid || !label) return;
 
   const monthNames = [
@@ -222,52 +276,54 @@ function renderDashCalendar() {
 
   const now = new Date();
   const first = new Date(calViewYear, calViewMonth, 1);
-  // Monday-first: JS getDay() Sun=0 → shift
-  let startPad = (first.getDay() + 6) % 7;
+  const startPad = (first.getDay() + 6) % 7;
   const daysInMonth = new Date(calViewYear, calViewMonth + 1, 0).getDate();
-
-  const eventByDay = {};
-  for (const e of dashCalendarEvents) {
-    if (!e.date) continue;
-    const d = new Date(e.date + "T12:00:00");
-    if (d.getFullYear() === calViewYear && d.getMonth() === calViewMonth) {
-      eventByDay[d.getDate()] = e;
-    }
-  }
+  const eventByDay = eventsForViewMonth();
 
   let html = "";
-  for (let i = 0; i < startPad; i++) html += `<span class="h-8"></span>`;
+  for (let i = 0; i < startPad; i++) html += `<span class="h-10"></span>`;
   for (let day = 1; day <= daysInMonth; day++) {
     const isToday =
       day === now.getDate() && calViewMonth === now.getMonth() && calViewYear === now.getFullYear();
     const ev = eventByDay[day];
     let cls =
-      "h-8 rounded-lg text-xs flex items-center justify-center relative font-medium text-zinc-700";
+      "h-10 rounded-lg text-[11px] flex flex-col items-center justify-center relative font-medium text-zinc-700 cursor-default";
+    if (ev) cls += " cursor-pointer";
     if (isToday) cls += " ring-2 ring-emerald-500 bg-emerald-50 text-emerald-800 font-bold";
-    else if (ev) cls += " bg-[#6d7ddf]/15 text-[#4452a8] font-semibold";
+    else if (ev && ev.isStart) cls += " bg-[#6d7ddf]/20 text-[#4452a8] font-semibold";
+    else if (ev) cls += " bg-[#6d7ddf]/10 text-[#4452a8]";
     else cls += " hover:bg-lunar-100";
-    const tip = ev ? ` title="${escapeHtml(ev.name)}"` : "";
-    html += `<span class="${cls}"${tip}>${day}${
-      ev ? `<span class="absolute -bottom-0.5 text-[8px]">${ev.icon || "•"}</span>` : ""
-    }</span>`;
+    const tip = ev ? ` title="${escapeHtml(ev.name)} — ${escapeHtml(ev.tip || "")}"` : "";
+    const icon = ev
+      ? `<span class="text-[11px] leading-none ${ev.isStart ? "" : "opacity-60"}">${ev.icon || "•"}</span>`
+      : `<span class="text-[11px] leading-none opacity-0">·</span>`;
+    html += `<button type="button" data-cal-day="${day}" class="${cls}"${tip}>
+      <span class="leading-none">${day}</span>
+      ${icon}
+    </button>`;
   }
   grid.innerHTML = html;
 
-  if (countdown) {
-    const upcoming = dashCalendarEvents.find((e) => e.phase === "live" || e.phase === "prep" || e.phase === "upcoming");
-    if (upcoming) {
-      const days = Math.max(0, upcoming.daysUntil ?? 0);
-      const when =
-        upcoming.phase === "live"
-          ? `En cours · ${escapeHtml(upcoming.name)}`
-          : `Il reste ${days} jour${days > 1 ? "s" : ""} avant ${escapeHtml(upcoming.name)}`;
-      countdown.innerHTML = `<span class="mr-1">${upcoming.icon || "📅"}</span> ${when}<p class="text-[11px] text-emerald-700/80 mt-0.5">${escapeHtml(
-        upcoming.tip || upcoming.niche || ""
-      )}</p>`;
-    } else {
-      countdown.textContent = "Aucun événement à venir";
-    }
-  }
+  grid.querySelectorAll("[data-cal-day]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const d = Number(btn.dataset.calDay);
+      const ev = eventByDay[d];
+      if (!ev) return;
+      calSelectedEvent = ev;
+      renderCalCountdown(ev);
+    });
+  });
+
+  // Footer : événement sélectionné, sinon prochain à venir, sinon 1er du mois affiché
+  const monthEvents = Object.values(eventByDay).filter((e) => e.isStart);
+  const upcoming = dashCalendarEvents.find((e) => e.phase === "live" || e.phase === "prep" || e.phase === "upcoming");
+  const focus =
+    calSelectedEvent ||
+    monthEvents.find((e) => e.phase === "live" || e.phase === "prep" || e.phase === "upcoming") ||
+    upcoming ||
+    monthEvents[0] ||
+    null;
+  renderCalCountdown(focus);
 }
 
 async function loadDashboard() {

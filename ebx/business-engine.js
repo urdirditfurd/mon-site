@@ -211,45 +211,50 @@ function buildPilotageFeed({
 
 /**
  * Calendrier événementiel FR (style EBX) — dates relatives à l'année courante.
- * Sert à anticiper les niches / listings avant le pic.
+ * Dates en calendrier local (pas d'ISO UTC) pour coller au mois affiché.
  */
 function getEventCalendar(now = new Date()) {
   const y = now.getFullYear();
+  const pad = (n) => String(n).padStart(2, "0");
   const events = [
     { name: "Soldes d'hiver", month: 1, day: 8, durationDays: 28, niche: "Mode & Accessoires", tip: "Lister coques, textiles, soldes early", icon: "❄️" },
     { name: "Saint-Valentin", month: 2, day: 14, durationDays: 1, niche: "Cadeaux / Déco", tip: "Bijoux fantaisie, déco romantique", icon: "💝" },
-    { name: "Printemps", month: 3, day: 20, durationDays: 1, niche: "Jardin / Déco", tip: "Plantes, déco outdoor, DIY", icon: "🌸" },
-    { name: "Journée de la femme", month: 3, day: 8, durationDays: 1, niche: "Beauté & Mode", tip: "Maquillage, soins, accessoires femme", icon: "💐" },
     { name: "Fête des grand-mères", month: 3, day: 1, durationDays: 1, niche: "Cadeaux", tip: "Cadeaux pratiques, maison", icon: "🎁" },
+    { name: "Journée de la femme", month: 3, day: 8, durationDays: 1, niche: "Beauté & Mode", tip: "Maquillage, soins, accessoires femme", icon: "💐" },
+    { name: "Printemps", month: 3, day: 20, durationDays: 1, niche: "Jardin / Déco", tip: "Plantes, déco outdoor, DIY", icon: "🌸" },
     { name: "Pâques", month: 4, day: 5, durationDays: 7, niche: "Maison / Enfants", tip: "Déco, jouets, paniers", icon: "🥚" },
     { name: "Fête des mères", month: 5, day: 25, durationDays: 1, niche: "Beauté & Maison", tip: "Soins, déco, bijoux", icon: "💐" },
     { name: "Fête des pères", month: 6, day: 15, durationDays: 1, niche: "High-Tech / Outils", tip: "Gadgets, outils, tech", icon: "🛠️" },
     { name: "Soldes d'été", month: 6, day: 24, durationDays: 28, niche: "Mode & Sport", tip: "Été outdoor, plage, sport", icon: "☀️" },
     { name: "Assomption", month: 8, day: 15, durationDays: 1, niche: "Voyage / Maison", tip: "Bagages, plage, déco été", icon: "✝️" },
     { name: "Rentrée scolaire", month: 9, day: 1, durationDays: 14, niche: "Bureau / High-Tech", tip: "Fournitures, sacs, laptop stands", icon: "📚" },
+    { name: "Automne", month: 9, day: 22, durationDays: 1, niche: "Mode / Maison", tip: "Pulls, déco automne, bougies", icon: "🍂" },
     { name: "Halloween", month: 10, day: 31, durationDays: 1, niche: "Déguisements / Déco", tip: "Costumes, LED, déco", icon: "🎃" },
     { name: "Black Friday", month: 11, day: 27, durationDays: 4, niche: "High-Tech", tip: "Électronique, volume max", icon: "🖤" },
     { name: "Cyber Monday", month: 12, day: 1, durationDays: 1, niche: "High-Tech", tip: "Accessoires tech", icon: "💻" },
     { name: "Noël", month: 12, day: 25, durationDays: 1, niche: "Cadeaux", tip: "Lister dès novembre, stock tampon", icon: "🎄" },
   ];
 
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
   return events
     .map((e) => {
       const start = new Date(y, e.month - 1, e.day);
-      const end = new Date(start);
-      end.setDate(end.getDate() + (e.durationDays || 1) - 1);
-      const prep = new Date(start);
-      prep.setDate(prep.getDate() - 21);
+      const end = new Date(y, e.month - 1, e.day + (e.durationDays || 1) - 1);
+      const prep = new Date(y, e.month - 1, e.day - 21);
       const msDay = 86400000;
-      const daysUntil = Math.ceil((start - now) / msDay);
+      const daysUntil = Math.round((start - today) / msDay);
       let phase = "upcoming";
-      if (now >= start && now <= end) phase = "live";
-      else if (now >= prep && now < start) phase = "prep";
-      else if (now > end) phase = "passed";
+      if (today >= start && today <= end) phase = "live";
+      else if (today >= prep && today < start) phase = "prep";
+      else if (today > end) phase = "passed";
       return {
         ...e,
-        date: start.toISOString().slice(0, 10),
-        endDate: end.toISOString().slice(0, 10),
+        year: y,
+        date: `${y}-${pad(e.month)}-${pad(e.day)}`,
+        endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
+        endMonth: end.getMonth() + 1,
+        endDay: end.getDate(),
         daysUntil,
         phase,
         label:
@@ -262,8 +267,7 @@ function getEventCalendar(now = new Date()) {
                 : `Dans ${daysUntil} j`,
       };
     })
-    .filter((e) => e.phase !== "passed" || e.daysUntil > -14)
-    .sort((a, b) => a.daysUntil - b.daysUntil);
+    .sort((a, b) => a.month - b.month || a.day - b.day);
 }
 
 /** Niches tendances FR — mix seed + signal classements. */

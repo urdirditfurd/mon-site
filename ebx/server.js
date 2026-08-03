@@ -492,7 +492,7 @@ app.get("/api/dashboard", async (_req, res) => {
           ca: Number(((Number(t.price) || 0) * (Number(t.sold) || 0)).toFixed(0)),
         })),
         trendingLive: rankingsLive,
-        calendar: calendar.slice(0, 12),
+        calendar: calendar,
         niches: niches.slice(0, 6),
         topSellers,
         marketPulse,
