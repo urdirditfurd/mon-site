@@ -29,6 +29,8 @@ const {
   buildPilotageFeed,
   getEventCalendar,
   getTrendingNiches,
+  getTopSellers,
+  getMarketPulse,
   shouldEscalateSav,
   draftSavReplyTemplate,
 } = require("./business-engine");
@@ -448,6 +450,8 @@ app.get("/api/dashboard", async (_req, res) => {
     }
     const calendar = getEventCalendar();
     const niches = getTrendingNiches(trending);
+    const topSellers = getTopSellers("FR");
+    const marketPulse = getMarketPulse(trending);
     const savOpen = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived").length;
     if (savOpen > 0) {
       pilotage.unshift({
@@ -483,10 +487,16 @@ app.get("/api/dashboard", async (_req, res) => {
         sellerUserId: seller?.userId || null,
         pilotage,
         plan: "Business",
-        trending: trending.slice(0, 10),
+        trending: trending.slice(0, 10).map((t) => ({
+          ...t,
+          ca: Number(((Number(t.price) || 0) * (Number(t.sold) || 0)).toFixed(0)),
+        })),
         trendingLive: rankingsLive,
-        calendar: calendar.slice(0, 8),
+        calendar: calendar.slice(0, 12),
         niches: niches.slice(0, 6),
+        topSellers,
+        marketPulse,
+        greetName: seller?.userId || "vendeur",
         savOpen,
       },
     });

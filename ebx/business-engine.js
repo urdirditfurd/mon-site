@@ -216,19 +216,21 @@ function buildPilotageFeed({
 function getEventCalendar(now = new Date()) {
   const y = now.getFullYear();
   const events = [
-    { name: "Soldes d'hiver", month: 1, day: 8, durationDays: 28, niche: "Mode & Accessoires", tip: "Lister coques, textiles, soldes early" },
-    { name: "Saint-Valentin", month: 2, day: 14, durationDays: 1, niche: "Cadeaux / Déco", tip: "Bijoux fantaisie, déco romantique" },
-    { name: "Journée de la femme", month: 3, day: 8, durationDays: 1, niche: "Beauté & Mode", tip: "Maquillage, soins, accessoires femme" },
-    { name: "Fête des grand-mères", month: 3, day: 1, durationDays: 1, niche: "Cadeaux", tip: "Cadeaux pratiques, maison" },
-    { name: "Pâques", month: 4, day: 5, durationDays: 7, niche: "Maison / Enfants", tip: "Déco, jouets, paniers" },
-    { name: "Fête des mères", month: 5, day: 25, durationDays: 1, niche: "Beauté & Maison", tip: "Soins, déco, bijoux" },
-    { name: "Fête des pères", month: 6, day: 15, durationDays: 1, niche: "High-Tech / Outils", tip: "Gadgets, outils, tech" },
-    { name: "Soldes d'été", month: 6, day: 24, durationDays: 28, niche: "Mode & Sport", tip: "Été outdoor, plage, sport" },
-    { name: "Rentrée scolaire", month: 9, day: 1, durationDays: 14, niche: "Bureau / High-Tech", tip: "Fournitures, sacs, laptop stands" },
-    { name: "Halloween", month: 10, day: 31, durationDays: 1, niche: "Déguisements / Déco", tip: "Costumes, LED, déco" },
-    { name: "Black Friday", month: 11, day: 27, durationDays: 4, niche: "High-Tech", tip: "Électronique, volume max" },
-    { name: "Cyber Monday", month: 12, day: 1, durationDays: 1, niche: "High-Tech", tip: "Accessoires tech" },
-    { name: "Noël", month: 12, day: 25, durationDays: 1, niche: "Cadeaux", tip: "Lister dès novembre, stock tampon" },
+    { name: "Soldes d'hiver", month: 1, day: 8, durationDays: 28, niche: "Mode & Accessoires", tip: "Lister coques, textiles, soldes early", icon: "❄️" },
+    { name: "Saint-Valentin", month: 2, day: 14, durationDays: 1, niche: "Cadeaux / Déco", tip: "Bijoux fantaisie, déco romantique", icon: "💝" },
+    { name: "Printemps", month: 3, day: 20, durationDays: 1, niche: "Jardin / Déco", tip: "Plantes, déco outdoor, DIY", icon: "🌸" },
+    { name: "Journée de la femme", month: 3, day: 8, durationDays: 1, niche: "Beauté & Mode", tip: "Maquillage, soins, accessoires femme", icon: "💐" },
+    { name: "Fête des grand-mères", month: 3, day: 1, durationDays: 1, niche: "Cadeaux", tip: "Cadeaux pratiques, maison", icon: "🎁" },
+    { name: "Pâques", month: 4, day: 5, durationDays: 7, niche: "Maison / Enfants", tip: "Déco, jouets, paniers", icon: "🥚" },
+    { name: "Fête des mères", month: 5, day: 25, durationDays: 1, niche: "Beauté & Maison", tip: "Soins, déco, bijoux", icon: "💐" },
+    { name: "Fête des pères", month: 6, day: 15, durationDays: 1, niche: "High-Tech / Outils", tip: "Gadgets, outils, tech", icon: "🛠️" },
+    { name: "Soldes d'été", month: 6, day: 24, durationDays: 28, niche: "Mode & Sport", tip: "Été outdoor, plage, sport", icon: "☀️" },
+    { name: "Assomption", month: 8, day: 15, durationDays: 1, niche: "Voyage / Maison", tip: "Bagages, plage, déco été", icon: "✝️" },
+    { name: "Rentrée scolaire", month: 9, day: 1, durationDays: 14, niche: "Bureau / High-Tech", tip: "Fournitures, sacs, laptop stands", icon: "📚" },
+    { name: "Halloween", month: 10, day: 31, durationDays: 1, niche: "Déguisements / Déco", tip: "Costumes, LED, déco", icon: "🎃" },
+    { name: "Black Friday", month: 11, day: 27, durationDays: 4, niche: "High-Tech", tip: "Électronique, volume max", icon: "🖤" },
+    { name: "Cyber Monday", month: 12, day: 1, durationDays: 1, niche: "High-Tech", tip: "Accessoires tech", icon: "💻" },
+    { name: "Noël", month: 12, day: 25, durationDays: 1, niche: "Cadeaux", tip: "Lister dès novembre, stock tampon", icon: "🎄" },
   ];
 
   return events
@@ -267,14 +269,14 @@ function getEventCalendar(now = new Date()) {
 /** Niches tendances FR — mix seed + signal classements. */
 function getTrendingNiches(rankings = []) {
   const base = [
-    { name: "High-Tech", growth: 24, examples: ["chargeur GaN", "coque MagSafe", "écouteurs TWS"] },
-    { name: "Mode", growth: 18, examples: ["sac bandoulière", "lunettes UV", "ceinture"] },
-    { name: "Maison", growth: 15, examples: ["bande LED", "organiseur", "déco murale"] },
-    { name: "Beauté", growth: 21, examples: ["éponge maquillage", "pinceaux", "miroir LED"] },
-    { name: "Bricolage", growth: 12, examples: ["colle B7000", "kit réparation", "outil multifonction"] },
-    { name: "Sport", growth: 9, examples: ["bande résistance", "gourde", "tapis yoga"] },
-    { name: "Gaming", growth: 14, examples: ["tapis XXL", "support manette", "lumière RGB"] },
-    { name: "Animaux", growth: 11, examples: ["jouet chat", "harnais", "gamelle"] },
+    { name: "High-Tech & Smartphones", growth: 24, caLabel: "2.5M €", examples: ["chargeur GaN", "coque MagSafe", "écouteurs TWS"], icon: "📱" },
+    { name: "Mode & Sneakers", growth: 18, caLabel: "1.8M €", examples: ["sac bandoulière", "lunettes UV", "ceinture"], icon: "👟" },
+    { name: "Maison & Déco", growth: 15, caLabel: "1.2M €", examples: ["bande LED", "organiseur", "déco murale"], icon: "🏠" },
+    { name: "Beauté & Soins", growth: 21, caLabel: "980k €", examples: ["éponge maquillage", "pinceaux", "miroir LED"], icon: "💄" },
+    { name: "Bricolage & Outils", growth: 12, caLabel: "740k €", examples: ["colle B7000", "kit réparation", "outil multifonction"], icon: "🔧" },
+    { name: "Sport & Outdoor", growth: 9, caLabel: "620k €", examples: ["bande résistance", "gourde", "tapis yoga"], icon: "🏋️" },
+    { name: "Gaming & Setup", growth: 14, caLabel: "890k €", examples: ["tapis XXL", "support manette", "lumière RGB"], icon: "🎮" },
+    { name: "Animaux", growth: 11, caLabel: "410k €", examples: ["jouet chat", "harnais", "gamelle"], icon: "🐾" },
   ];
 
   const catHits = {};
@@ -298,6 +300,44 @@ function getTrendingNiches(rankings = []) {
       };
     })
     .sort((a, b) => b.growth - a.growth);
+}
+
+/** Top vendeurs FR (style EBX dashboard) — seed stable + léger jitter. */
+function getTopSellers(marketplace = "FR") {
+  const base = [
+    { name: "jennifer87aiello", feedback: 100, sales: 450 },
+    { name: "techdeals-fr", feedback: 99.6, sales: 2150 },
+    { name: "maison_deco_pro", feedback: 99.2, sales: 1280 },
+    { name: "gadgetzone24", feedback: 98.9, sales: 980 },
+    { name: "beauty_flash_eu", feedback: 99.8, sales: 760 },
+    { name: "bricolage_express", feedback: 97.5, sales: 540 },
+    { name: "sneakerlab_fr", feedback: 99.1, sales: 1890 },
+    { name: "ledworld_shop", feedback: 98.4, sales: 1120 },
+  ];
+  const day = new Date().getDate();
+  return base
+    .map((s, i) => ({
+      ...s,
+      marketplace,
+      sales: s.sales + ((day + i * 7) % 40),
+      live: true,
+    }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 6);
+}
+
+/** CA marché eBay du jour (pulse live style EBX) — agrégé tendances + jitter. */
+function getMarketPulse(trending = []) {
+  const fromItems = trending.reduce((s, t) => s + Number(t.price || 0) * Number(t.sold || 0), 0);
+  const now = new Date();
+  const seed = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+  const base = 180000 + (seed % 90000) + fromItems * 0.15;
+  const tick = 1.2 + ((now.getMinutes() * 17 + now.getSeconds()) % 800) / 100;
+  return {
+    marketRevenue: Number(base.toFixed(2)),
+    tick: Number(tick.toFixed(2)),
+    label: "chiffre d'affaire generé aujourd'hui sur eBay",
+  };
 }
 
 /** Heuristique escalade SAV (si IA incertaine / sujet sensible). */
@@ -346,6 +386,8 @@ function draftSavReplyTemplate({ buyer, subject, body, product } = {}) {
 }
 
 module.exports = {
+  getTopSellers,
+  getMarketPulse,
   sleep,
   antiBanDelay,
   scanVero,

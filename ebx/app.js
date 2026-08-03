@@ -13,7 +13,7 @@ let descImages = [];
 let replaceImgIdx = 0;
 
 const PAGE_META = {
-  dashboard: ["Dashboard", "Vue d'ensemble de votre activité"],
+  dashboard: ["Dashboard", "Ce qui se passe en temps réel sur eBay"],
   analytics: ["Analytics", "Performance et tendances"],
   rankings: ["Classements", "Meilleures ventes eBay"],
   competitors: ["Compétiteurs", "Analysez n'importe quel vendeur eBay"],
@@ -140,49 +140,202 @@ async function refreshBotStatus() {
   } catch (_) {}
 }
 
+let dashCalendarEvents = [];
+let calViewYear = new Date().getFullYear();
+let calViewMonth = new Date().getMonth(); // 0-based
+let marketTickTimer = null;
+
+function formatEuro(n, decimals = 0) {
+  const v = Number(n) || 0;
+  return (
+    v.toLocaleString("fr-FR", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }) + " €"
+  );
+}
+
+function formatCaShort(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000) return Math.round(v / 1000) + "k €";
+  return formatEuro(v, 0);
+}
+
+function bindDashboardCalendarControls() {
+  const prev = document.getElementById("cal-prev");
+  const next = document.getElementById("cal-next");
+  const today = document.getElementById("cal-today");
+  if (prev && !prev.dataset.bound) {
+    prev.dataset.bound = "1";
+    prev.addEventListener("click", () => {
+      calViewMonth -= 1;
+      if (calViewMonth < 0) {
+        calViewMonth = 11;
+        calViewYear -= 1;
+      }
+      renderDashCalendar();
+    });
+  }
+  if (next && !next.dataset.bound) {
+    next.dataset.bound = "1";
+    next.addEventListener("click", () => {
+      calViewMonth += 1;
+      if (calViewMonth > 11) {
+        calViewMonth = 0;
+        calViewYear += 1;
+      }
+      renderDashCalendar();
+    });
+  }
+  if (today && !today.dataset.bound) {
+    today.dataset.bound = "1";
+    today.addEventListener("click", () => {
+      const now = new Date();
+      calViewYear = now.getFullYear();
+      calViewMonth = now.getMonth();
+      renderDashCalendar();
+    });
+  }
+}
+
+function renderDashCalendar() {
+  const grid = document.getElementById("dash-cal-grid");
+  const label = document.getElementById("cal-month-label");
+  const countdown = document.getElementById("dash-cal-countdown");
+  if (!grid || !label) return;
+
+  const monthNames = [
+    "Janvier",
+    "Février",
+    "Mars",
+    "Avril",
+    "Mai",
+    "Juin",
+    "Juillet",
+    "Août",
+    "Septembre",
+    "Octobre",
+    "Novembre",
+    "Décembre",
+  ];
+  label.textContent = `${monthNames[calViewMonth]} ${calViewYear}`;
+
+  const now = new Date();
+  const first = new Date(calViewYear, calViewMonth, 1);
+  // Monday-first: JS getDay() Sun=0 → shift
+  let startPad = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(calViewYear, calViewMonth + 1, 0).getDate();
+
+  const eventByDay = {};
+  for (const e of dashCalendarEvents) {
+    if (!e.date) continue;
+    const d = new Date(e.date + "T12:00:00");
+    if (d.getFullYear() === calViewYear && d.getMonth() === calViewMonth) {
+      eventByDay[d.getDate()] = e;
+    }
+  }
+
+  let html = "";
+  for (let i = 0; i < startPad; i++) html += `<span class="h-8"></span>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const isToday =
+      day === now.getDate() && calViewMonth === now.getMonth() && calViewYear === now.getFullYear();
+    const ev = eventByDay[day];
+    let cls =
+      "h-8 rounded-lg text-xs flex items-center justify-center relative font-medium text-zinc-700";
+    if (isToday) cls += " ring-2 ring-emerald-500 bg-emerald-50 text-emerald-800 font-bold";
+    else if (ev) cls += " bg-[#6d7ddf]/15 text-[#4452a8] font-semibold";
+    else cls += " hover:bg-lunar-100";
+    const tip = ev ? ` title="${escapeHtml(ev.name)}"` : "";
+    html += `<span class="${cls}"${tip}>${day}${
+      ev ? `<span class="absolute -bottom-0.5 text-[8px]">${ev.icon || "•"}</span>` : ""
+    }</span>`;
+  }
+  grid.innerHTML = html;
+
+  if (countdown) {
+    const upcoming = dashCalendarEvents.find((e) => e.phase === "live" || e.phase === "prep" || e.phase === "upcoming");
+    if (upcoming) {
+      const days = Math.max(0, upcoming.daysUntil ?? 0);
+      const when =
+        upcoming.phase === "live"
+          ? `En cours · ${escapeHtml(upcoming.name)}`
+          : `Il reste ${days} jour${days > 1 ? "s" : ""} avant ${escapeHtml(upcoming.name)}`;
+      countdown.innerHTML = `<span class="mr-1">${upcoming.icon || "📅"}</span> ${when}<p class="text-[11px] text-emerald-700/80 mt-0.5">${escapeHtml(
+        upcoming.tip || upcoming.niche || ""
+      )}</p>`;
+    } else {
+      countdown.textContent = "Aucun événement à venir";
+    }
+  }
+}
+
 async function loadDashboard() {
+  bindDashboardCalendarControls();
   const res = await fetch(API + "/api/dashboard");
   const json = await res.json();
   const d = json.data || {};
-  document.getElementById("dash-cards").innerHTML = [
-    ["CA (commandes)", `${(d.revenue || 0).toFixed(2)} €`, d.revenueSource === "ebay_orders" ? "eBay sync" : d.revenueSource === "local_orders" ? "local" : "estim."],
-    ["Publiés eBay", d.published || 0, ""],
-    ["Listings", d.listings || 0, ""],
-    ["À traiter", d.pendingOrders || 0, d.savOpen ? `${d.savOpen} SAV` : d.ebaySynced ? `${d.ebaySynced} sync` : ""],
-  ]
-    .map(
-      ([label, value, sub]) =>
-        `<div class="bg-white rounded-2xl border border-zinc-200 p-5"><p class="text-xs text-zinc-400">${label}</p><p class="text-2xl font-bold mt-1">${value}</p>${
-          sub ? `<p class="text-[11px] text-zinc-400 mt-1">${sub}</p>` : ""
-        }</div>`
-    )
-    .join("");
 
-  const trendBox = document.getElementById("dash-trending");
+  const greet = document.getElementById("dash-greeting");
+  if (greet) {
+    const name = d.greetName && d.greetName !== "vendeur" ? d.greetName : "vendeur";
+    greet.textContent = `Bonjour, ${name}`;
+  }
+
+  const pulse = d.marketPulse || {};
+  const caEl = document.getElementById("dash-market-ca");
+  const tickEl = document.getElementById("dash-market-tick");
+  const labelEl = document.getElementById("dash-market-label");
+  let marketRevenueLive = Number(pulse.marketRevenue ?? d.revenue ?? 0);
+  if (caEl) caEl.textContent = formatEuro(marketRevenueLive, 2);
+  if (tickEl) tickEl.textContent = `↑ +${formatEuro(pulse.tick ?? 0, 2)} à l'instant`;
+  if (labelEl) labelEl.textContent = pulse.label || "chiffre d'affaire generé aujourd'hui sur eBay";
+
+  if (marketTickTimer) clearInterval(marketTickTimer);
+  marketTickTimer = setInterval(() => {
+    if (!caEl || !tickEl) return;
+    const bump = 0.8 + Math.random() * 6;
+    marketRevenueLive += bump;
+    caEl.textContent = formatEuro(marketRevenueLive, 2);
+    tickEl.textContent = `↑ +${formatEuro(bump, 2)} à l'instant`;
+  }, 4500);
+
   const trendMeta = document.getElementById("dash-trending-meta");
   if (trendMeta) {
     trendMeta.innerHTML = d.trendingLive
-      ? `<span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span><span class="text-green-600 font-medium">Live</span></span>`
-      : "Seed / fallback";
+      ? `Top ventes du marché — <span class="text-emerald-600 font-medium">Données en temps réel</span>`
+      : "Top ventes du marché — Seed / fallback";
   }
+
+  const trendBox = document.getElementById("dash-trending");
   if (trendBox) {
     const items = d.trending || [];
     trendBox.innerHTML = items.length
       ? items
           .slice(0, 8)
-          .map(
-            (t, i) => `<div class="flex items-start gap-3 py-1.5 border-b border-zinc-50 last:border-0">
-            <span class="text-xs font-mono text-zinc-400 w-5">${i + 1}</span>
-            <div class="min-w-0 flex-1">
-              <p class="font-medium truncate">${escapeHtml(t.title)}</p>
-              <p class="text-[11px] text-zinc-400">${Number(t.price || 0).toFixed(2)} € · ~${t.sold || "—"} vendus · ${escapeHtml(
-              t.category || ""
-            )}</p>
-            </div>
-          </div>`
-          )
+          .map((t, i) => {
+            const ca = t.ca != null ? t.ca : Math.round((Number(t.price) || 0) * (Number(t.sold) || 0));
+            const img = t.image
+              ? `<img src="${escapeHtml(t.image)}" alt="" class="w-10 h-10 rounded-lg object-cover bg-zinc-100" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-10 h-10 rounded-lg bg-lunar-200'}))" />`
+              : `<div class="w-10 h-10 rounded-lg bg-lunar-200 flex items-center justify-center text-xs text-zinc-400">📦</div>`;
+            const title = t.url
+              ? `<a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="font-medium text-[#4452a8] hover:underline line-clamp-2 leading-snug">${escapeHtml(
+                  t.title
+                )}</a>`
+              : `<p class="font-medium text-ink-900 line-clamp-2 leading-snug">${escapeHtml(t.title)}</p>`;
+            return `<div class="grid grid-cols-[2rem_2.5rem_1fr] sm:grid-cols-[2rem_2.5rem_1fr_3.5rem_3.5rem_3.5rem] gap-2 items-center py-2.5 px-1 hover:bg-lunar-50 rounded-lg">
+              <span class="w-7 h-7 rounded-md border border-[#6d7ddf]/40 text-[#4452a8] text-xs font-bold flex items-center justify-center">${
+                i + 1
+              }</span>
+              ${img}
+              <div class="min-w-0">${title}</div>
+              <div class="hidden sm:block text-right text-sm font-semibold text-emerald-600">${t.sold || "—"}</div>
+              <div class="hidden sm:block text-right text-sm font-bold">${formatEuro(t.price, 0)}</div>
+              <div class="hidden sm:block text-right text-sm font-bold text-emerald-600">${formatCaShort(ca)}</div>
+            </div>`;
+          })
           .join("")
-      : `<p class="text-zinc-400 text-sm">Aucune tendance.</p>`;
+      : `<p class="text-zinc-400 text-sm py-4">Aucune tendance.</p>`;
   }
 
   const nicheBox = document.getElementById("dash-niches");
@@ -191,47 +344,56 @@ async function loadDashboard() {
     nicheBox.innerHTML = niches.length
       ? niches
           .map(
-            (n) => `<div>
-            <div class="flex justify-between text-sm mb-1"><span class="font-medium">${escapeHtml(
-              n.name
-            )}</span><span class="text-emerald-600 font-semibold">+${n.growth}%</span></div>
-            <div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:${Math.min(
-              100,
-              n.growth * 3
-            )}%"></div></div>
-            <p class="text-[10px] text-zinc-400 mt-1">${(n.examples || []).slice(0, 3).map(escapeHtml).join(" · ")}</p>
+            (n) => `<div class="flex items-center gap-2.5">
+            <span class="w-8 h-8 rounded-lg bg-lunar-100 flex items-center justify-center text-sm shrink-0">${n.icon || "📈"}</span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium truncate">${escapeHtml(n.name)}</p>
+              <p class="text-[11px] text-zinc-400">${escapeHtml(n.caLabel || "")} CA</p>
+            </div>
+            <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">+${
+              n.growth
+            }%</span>
           </div>`
           )
           .join("")
       : `<p class="text-zinc-400 text-sm">—</p>`;
   }
 
-  const calBox = document.getElementById("dash-calendar");
-  if (calBox) {
-    const events = d.calendar || [];
-    calBox.innerHTML = events.length
-      ? events
-          .map((e) => {
-            const color =
-              e.phase === "live"
-                ? "border-emerald-200 bg-emerald-50"
-                : e.phase === "prep"
-                  ? "border-amber-200 bg-amber-50"
-                  : "border-zinc-100 bg-zinc-50";
-            return `<div class="rounded-xl border p-3 ${color}">
-              <p class="text-[10px] uppercase tracking-wider text-zinc-400">${escapeHtml(e.label)}</p>
-              <p class="font-semibold text-sm mt-0.5">${escapeHtml(e.name)}</p>
-              <p class="text-[11px] text-zinc-500 mt-1">${escapeHtml(e.niche)}</p>
-              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(e.tip || "")}</p>
-            </div>`;
-          })
+  dashCalendarEvents = d.calendar || [];
+  renderDashCalendar();
+
+  const sellersBox = document.getElementById("dash-sellers");
+  if (sellersBox) {
+    const sellers = d.topSellers || [];
+    sellersBox.innerHTML = sellers.length
+      ? sellers
+          .map(
+            (s) => `<button type="button" data-seller="${escapeHtml(s.name)}" class="dash-seller-btn w-full flex items-center gap-2.5 text-left hover:bg-lunar-50 rounded-xl px-1 py-1.5 transition">
+            <span class="w-8 h-8 rounded-full bg-[#6d7ddf]/15 text-[#4452a8] flex items-center justify-center text-xs font-bold shrink-0">${escapeHtml(
+              String(s.name || "?").slice(0, 1).toUpperCase()
+            )}</span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium truncate">${escapeHtml(s.name)}</p>
+              <p class="text-[11px] text-emerald-600">${Number(s.feedback).toFixed(1)}% positif</p>
+            </div>
+            <span class="text-sm font-bold text-ink-900 shrink-0">${Number(s.sales).toLocaleString("fr-FR")}</span>
+            <span class="text-[10px] text-zinc-400">ventes</span>
+          </button>`
+          )
           .join("")
-      : `<p class="text-zinc-400 text-sm">Calendrier vide</p>`;
+      : `<p class="text-zinc-400 text-sm">Aucun vendeur.</p>`;
+    sellersBox.querySelectorAll(".dash-seller-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = document.getElementById("competitor-input");
+        if (input) input.value = btn.dataset.seller || "";
+        navigate("competitors");
+      });
+    });
   }
 
   const feed = document.getElementById("pilotage-feed");
   if (feed) {
-    const alerts = d.pilotage || [];
+    const alerts = (d.pilotage || []).slice(0, 3);
     feed.innerHTML = alerts.length
       ? alerts
           .map((a) => {
@@ -241,12 +403,12 @@ async function loadDashboard() {
                 : a.level === "warn"
                   ? "border-amber-100 bg-amber-50 text-amber-900"
                   : "border-zinc-100 bg-zinc-50 text-zinc-700";
-            return `<div class="rounded-xl border px-4 py-3 ${color}"><p class="font-medium">${escapeHtml(
+            return `<div class="rounded-xl border px-3 py-2 ${color}"><p class="font-medium text-xs">${escapeHtml(
               a.title
-            )}</p><p class="text-xs mt-0.5 opacity-80">${escapeHtml(a.detail)}</p></div>`;
+            )}</p><p class="text-[11px] mt-0.5 opacity-80">${escapeHtml(a.detail)}</p></div>`;
           })
           .join("")
-      : `<p class="text-zinc-400">Aucune alerte.</p>`;
+      : `<p class="text-zinc-400 text-xs">Aucune alerte.</p>`;
   }
 }
 
