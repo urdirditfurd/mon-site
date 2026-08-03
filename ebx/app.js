@@ -277,8 +277,8 @@ async function loadRankings() {
   const factor = periodFactor(rankingsPeriod);
   const src = document.getElementById("rankings-source");
   if (src) {
-    src.textContent = json.live
-      ? `Données live (${json.source || "eBay"})`
+    src.innerHTML = json.live
+      ? `<span class="inline-flex items-center gap-1.5"><span class="text-[10px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span> ${escapeHtml(json.source || "eBay")}</span>`
       : "Fallback local (ajoutez EBAY_PROD_CLIENT_ID pour le live)";
   }
   const list = document.getElementById("rankings-list");
@@ -552,8 +552,8 @@ async function loadOrders() {
   const colors = {
     pending: "bg-amber-50 text-amber-700",
     ordered: "bg-blue-50 text-blue-700",
-    shipped: "bg-indigo-50 text-indigo-700",
-    delivered: "bg-green-50 text-green-700",
+    shipped: "bg-green-50 text-green-700",
+    delivered: "bg-green-100 text-green-800",
   };
   document.getElementById("orders-body").innerHTML = (json.data || [])
     .map((o) => {
