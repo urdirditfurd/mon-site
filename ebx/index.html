@@ -10,25 +10,32 @@
       theme: {
         extend: {
           colors: {
-            /* Bleu nuit + jaune lune */
+            /* PMS 2727 + beige lunaire */
             brand: {
-              50: '#fffbeb',
-              100: '#fef3c7',
-              200: '#fde68a',
-              300: '#f6e7a1',
-              400: '#ecd978',
-              500: '#e0c65c',
-              600: '#c9a227',
-              700: '#a17c12',
-              800: '#7a5e14',
-              900: '#5c4712'
+              50: '#eef5fd',
+              100: '#d9e9fb',
+              200: '#bcd8f7',
+              300: '#8ebef1',
+              400: '#5a9ce8',
+              500: '#307fe2',
+              600: '#1f66c7',
+              700: '#1a51a1',
+              800: '#1a4584',
+              900: '#1b3b6d'
             },
             ink: {
-              950: '#05080f',
-              900: '#0a1020',
-              800: '#121a2b',
-              700: '#1a2740',
-              600: '#243352'
+              950: '#06101f',
+              900: '#0a1a3a',
+              800: '#0f2752',
+              700: '#16356b',
+              600: '#1f4788'
+            },
+            lunar: {
+              50: '#faf9f6',
+              100: '#f3f0e9',
+              200: '#e6e1d4',
+              300: '#d9d2c0',
+              400: '#c4baa3'
             }
           }
         }
@@ -38,37 +45,37 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     :root {
-      --ebx-night: #0a1020;
-      --ebx-night-2: #121a2b;
-      --ebx-moon: #ecd978;
-      --ebx-moon-soft: #f6e7a1;
-      --ebx-moon-dim: rgba(236, 217, 120, 0.14);
+      --ebx-pms: #307fe2;
+      --ebx-pms-deep: #1a51a1;
+      --ebx-beige: #e6e1d4;
+      --ebx-beige-soft: #f3f0e9;
+      --ebx-pms-dim: rgba(48, 127, 226, 0.16);
       --ebx-green: #22c55e;
-      --ebx-ca-from: #121a2b;
-      --ebx-ca-to: #1a2740;
-      --ebx-cal-from: #0a1020;
-      --ebx-cal-to: #243352;
+      --ebx-ca-from: #1a51a1;
+      --ebx-ca-to: #307fe2;
+      --ebx-cal-from: #0a1a3a;
+      --ebx-cal-to: #307fe2;
     }
-    body { font-family: 'DM Sans', system-ui, sans-serif; background: #f3f5f9; }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--ebx-beige); }
     .page { display: none; }
     .page.active { display: block; }
-    .nav-link { color: #94a3b8; }
-    .nav-link:hover { background: rgba(255,255,255,0.04); color: #e2e8f0; }
+    .nav-link { color: #a8b8d0; }
+    .nav-link:hover { background: rgba(255,255,255,0.05); color: #e6e1d4; }
     .nav-link.active {
-      background: var(--ebx-moon-dim);
-      color: var(--ebx-moon-soft);
-      box-shadow: inset 3px 0 0 var(--ebx-moon);
+      background: var(--ebx-pms-dim);
+      color: #ffffff;
+      box-shadow: inset 3px 0 0 var(--ebx-pms);
     }
     .badge-new {
-      background: var(--ebx-moon-dim);
-      color: var(--ebx-moon-soft);
+      background: var(--ebx-pms-dim);
+      color: #bcd8f7;
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 999px;
     }
     .badge-pro {
-      background: rgba(236, 217, 120, 0.22);
-      color: #f6e7a1;
+      background: rgba(230, 225, 212, 0.16);
+      color: #e6e1d4;
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 999px;
@@ -78,61 +85,61 @@
     .console .warn { color: #fbbf24; }
     .console .err { color: #f87171; }
     .console .info { color: #94a3b8; }
-    .keyword-row:hover { background: #fffbeb; }
-    .period-pill.active { background: #0a1020; color: #ecd978; }
-    .sniper-tab.active { background: #0a1020; color: #ecd978; }
+    .keyword-row:hover { background: #eef5fd; }
+    .period-pill.active { background: #307fe2; color: #fff; }
+    .sniper-tab.active { background: #307fe2; color: #fff; }
     .rank-1 { color: #eab308; }
     .rank-2 { color: #94a3b8; }
     .rank-3 { color: #b45309; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin .8s linear infinite; }
-    .toggle { appearance: none; width: 44px; height: 24px; background: #e4e4e7; border-radius: 999px; position: relative; cursor: pointer; transition: .2s; }
+    .toggle { appearance: none; width: 44px; height: 24px; background: #d9d2c0; border-radius: 999px; position: relative; cursor: pointer; transition: .2s; }
     .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-    .toggle:checked { background: #c9a227; }
+    .toggle:checked { background: #307fe2; }
     .toggle:checked::after { left: 22px; }
-    .theme-dot.active { outline: 2px solid #ecd978; outline-offset: 2px; }
-    .desc-tab.active { background: #0a1020; color: #ecd978; }
+    .theme-dot.active { outline: 2px solid #307fe2; outline-offset: 2px; }
+    .desc-tab.active { background: #0a1a3a; color: #e6e1d4; }
     .btn-primary {
-      background: linear-gradient(135deg, #f6e7a1, #e0c65c) !important;
-      color: #0a1020 !important;
+      background: linear-gradient(135deg, #5a9ce8, #307fe2) !important;
+      color: #fff !important;
       border: none;
       cursor: pointer;
       font-weight: 700;
       border-radius: 0.75rem;
       padding: 0.625rem 1.25rem;
       font-size: 0.875rem;
-      box-shadow: 0 8px 20px rgba(201, 162, 39, 0.28);
+      box-shadow: 0 8px 20px rgba(48, 127, 226, 0.28);
     }
-    .btn-primary:hover { filter: brightness(1.04); }
+    .btn-primary:hover { filter: brightness(1.05); }
     .btn-primary:disabled { opacity: 0.6; cursor: wait; filter: none; }
     .card-soft {
-      background: #fff;
-      border: 1px solid #e6ebf2;
+      background: #fffefb;
+      border: 1px solid #d9d2c0;
       border-radius: 1rem;
-      box-shadow: 0 1px 2px rgba(10, 16, 32, 0.04);
+      box-shadow: 0 1px 2px rgba(10, 26, 58, 0.04);
     }
     .ca-gradient {
       background: linear-gradient(135deg, var(--ebx-ca-from), var(--ebx-ca-to));
-      color: #f6e7a1;
+      color: #fff;
       border-radius: 1rem;
-      box-shadow: 0 12px 28px rgba(10, 16, 32, 0.28);
+      box-shadow: 0 12px 28px rgba(48, 127, 226, 0.28);
     }
     .cal-header {
       background: linear-gradient(135deg, var(--ebx-cal-from), var(--ebx-cal-to));
-      color: #f6e7a1;
+      color: #fff;
     }
     .action-blue {
-      background: linear-gradient(135deg, #eef2ff, #e8edf7);
-      border: 1px solid #d7dee9;
+      background: linear-gradient(135deg, #eef5fd, #d9e9fb);
+      border: 1px solid #bcd8f7;
     }
     .action-violet {
-      background: linear-gradient(135deg, #fff8e1, #fef3c7);
-      border: 1px solid #f6e7a1;
+      background: linear-gradient(135deg, #f3f0e9, #e6e1d4);
+      border: 1px solid #d9d2c0;
     }
-    .logo-mark { color: var(--ebx-moon); letter-spacing: -0.02em; }
+    .logo-mark { color: #307fe2; letter-spacing: -0.02em; }
   </style>
 </head>
-<body class="bg-[#f3f5f9] text-zinc-800 min-h-screen flex">
+<body class="bg-lunar-200 text-zinc-800 min-h-screen flex">
   <aside class="w-64 bg-ink-900 text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-white/5">
     <div class="p-5 border-b border-white/5">
       <h1 class="text-2xl font-bold logo-mark tracking-tight">EBX</h1>
@@ -164,8 +171,8 @@
       </div>
     </nav>
     <div class="p-4 border-t border-white/5 flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-[#ecd978]/20 text-[#f6e7a1] flex items-center justify-center text-sm font-bold">E</div>
-      <div><p class="text-sm font-medium text-slate-100">EBX User</p><p class="text-xs text-slate-500">Business · illimité</p></div>
+      <div class="w-8 h-8 rounded-full bg-[#307fe2]/25 text-[#bcd8f7] flex items-center justify-center text-sm font-bold">E</div>
+      <div><p class="text-sm font-medium text-lunar-200">EBX User</p><p class="text-xs text-slate-500">Business · illimité</p></div>
     </div>
   </aside>
 
@@ -472,10 +479,10 @@
           <input id="desc-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="URL du produit *" value="https://www.amazon.fr/dp/B09V3KXJPB" />
           <div class="flex flex-wrap gap-3 items-center">
             <span class="text-xs text-zinc-500">Thème :</span>
-            <button onclick="setTheme('#0a1020', this)" class="theme-dot active w-7 h-7 rounded-full bg-[#0a1020]" data-theme="#0a1020" title="Bleu nuit"></button>
-            <button onclick="setTheme('#ecd978', this)" class="theme-dot w-7 h-7 rounded-full bg-[#ecd978]" data-theme="#ecd978" title="Jaune lune"></button>
-            <button onclick="setTheme('#1a2740', this)" class="theme-dot w-7 h-7 rounded-full bg-[#1a2740]" data-theme="#1a2740"></button>
-            <button onclick="setTheme('#10b981', this)" class="theme-dot w-7 h-7 rounded-full bg-emerald-500" data-theme="#10b981"></button>
+            <button onclick="setTheme('#307fe2', this)" class="theme-dot active w-7 h-7 rounded-full bg-[#307fe2]" data-theme="#307fe2" title="PMS 2727"></button>
+            <button onclick="setTheme('#e6e1d4', this)" class="theme-dot w-7 h-7 rounded-full bg-[#e6e1d4] border" data-theme="#e6e1d4" title="Beige lunaire"></button>
+            <button onclick="setTheme('#0a1a3a', this)" class="theme-dot w-7 h-7 rounded-full bg-[#0a1a3a]" data-theme="#0a1a3a"></button>
+            <button onclick="setTheme('#1a51a1', this)" class="theme-dot w-7 h-7 rounded-full bg-[#1a51a1]" data-theme="#1a51a1"></button>
             <button onclick="setTheme('#ef4444', this)" class="theme-dot w-7 h-7 rounded-full bg-red-500" data-theme="#ef4444"></button>
             <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary ml-auto">Générer la description</button>
           </div>
@@ -495,10 +502,10 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-zinc-400">Couleur :</span>
-              <button onclick="setTheme('#0a1020', this)" class="theme-dot w-6 h-6 rounded-full bg-[#0a1020]" data-theme="#0a1020"></button>
-              <button onclick="setTheme('#ecd978', this)" class="theme-dot w-6 h-6 rounded-full bg-[#ecd978]" data-theme="#ecd978"></button>
-              <button onclick="setTheme('#1a2740', this)" class="theme-dot w-6 h-6 rounded-full bg-[#1a2740]" data-theme="#1a2740"></button>
-              <button onclick="setTheme('#10b981', this)" class="theme-dot w-6 h-6 rounded-full bg-emerald-500" data-theme="#10b981"></button>
+              <button onclick="setTheme('#307fe2', this)" class="theme-dot w-6 h-6 rounded-full bg-[#307fe2]" data-theme="#307fe2"></button>
+              <button onclick="setTheme('#e6e1d4', this)" class="theme-dot w-6 h-6 rounded-full bg-[#e6e1d4] border" data-theme="#e6e1d4"></button>
+              <button onclick="setTheme('#0a1a3a', this)" class="theme-dot w-6 h-6 rounded-full bg-[#0a1a3a]" data-theme="#0a1a3a"></button>
+              <button onclick="setTheme('#1a51a1', this)" class="theme-dot w-6 h-6 rounded-full bg-[#1a51a1]" data-theme="#1a51a1"></button>
               <button onclick="setTheme('#ef4444', this)" class="theme-dot w-6 h-6 rounded-full bg-red-500" data-theme="#ef4444"></button>
               <span id="desc-theme-status" class="text-[11px] text-zinc-400 ml-2"></span>
             </div>
