@@ -22,6 +22,7 @@ const PAGE_META = {
   listings: ["Mes Listings", "Historique des générations"],
   "title-builder": ["Title Builder", "Construisez un titre SEO eBay"],
   description: ["Description Builder", "Générez une description HTML en 1 clic"],
+  sav: ["SAV", "Messages eBay — brouillons IA & escalade"],
   settings: ["Paramètres", "Configuration locale EBX"],
 };
 
@@ -46,8 +47,12 @@ function navigate(page) {
   if (page === "analytics") loadAnalytics();
   if (page === "rankings") loadRankings();
   if (page === "competitors") loadCompetitorHistory();
-  if (page === "auto-order") loadOrders();
+  if (page === "auto-order") {
+    loadSupplierConfig();
+    loadOrders();
+  }
   if (page === "listings") loadListings();
+  if (page === "sav") loadSav();
   if (page === "settings") loadSettings();
 }
 
@@ -127,7 +132,7 @@ async function loadDashboard() {
     ["CA (commandes)", `${(d.revenue || 0).toFixed(2)} €`, d.revenueSource === "ebay_orders" ? "eBay sync" : d.revenueSource === "local_orders" ? "local" : "estim."],
     ["Publiés eBay", d.published || 0, ""],
     ["Listings", d.listings || 0, ""],
-    ["À traiter", d.pendingOrders || 0, d.ebaySynced ? `${d.ebaySynced} sync` : ""],
+    ["À traiter", d.pendingOrders || 0, d.savOpen ? `${d.savOpen} SAV` : d.ebaySynced ? `${d.ebaySynced} sync` : ""],
   ]
     .map(
       ([label, value, sub]) =>
@@ -136,6 +141,74 @@ async function loadDashboard() {
         }</div>`
     )
     .join("");
+
+  const trendBox = document.getElementById("dash-trending");
+  const trendMeta = document.getElementById("dash-trending-meta");
+  if (trendMeta) trendMeta.textContent = d.trendingLive ? "Live Browse API" : "Seed / fallback";
+  if (trendBox) {
+    const items = d.trending || [];
+    trendBox.innerHTML = items.length
+      ? items
+          .slice(0, 8)
+          .map(
+            (t, i) => `<div class="flex items-start gap-3 py-1.5 border-b border-zinc-50 last:border-0">
+            <span class="text-xs font-mono text-zinc-400 w-5">${i + 1}</span>
+            <div class="min-w-0 flex-1">
+              <p class="font-medium truncate">${escapeHtml(t.title)}</p>
+              <p class="text-[11px] text-zinc-400">${Number(t.price || 0).toFixed(2)} € · ~${t.sold || "—"} vendus · ${escapeHtml(
+              t.category || ""
+            )}</p>
+            </div>
+          </div>`
+          )
+          .join("")
+      : `<p class="text-zinc-400 text-sm">Aucune tendance.</p>`;
+  }
+
+  const nicheBox = document.getElementById("dash-niches");
+  if (nicheBox) {
+    const niches = d.niches || [];
+    nicheBox.innerHTML = niches.length
+      ? niches
+          .map(
+            (n) => `<div>
+            <div class="flex justify-between text-sm mb-1"><span class="font-medium">${escapeHtml(
+              n.name
+            )}</span><span class="text-emerald-600 font-semibold">+${n.growth}%</span></div>
+            <div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:${Math.min(
+              100,
+              n.growth * 3
+            )}%"></div></div>
+            <p class="text-[10px] text-zinc-400 mt-1">${(n.examples || []).slice(0, 3).map(escapeHtml).join(" · ")}</p>
+          </div>`
+          )
+          .join("")
+      : `<p class="text-zinc-400 text-sm">—</p>`;
+  }
+
+  const calBox = document.getElementById("dash-calendar");
+  if (calBox) {
+    const events = d.calendar || [];
+    calBox.innerHTML = events.length
+      ? events
+          .map((e) => {
+            const color =
+              e.phase === "live"
+                ? "border-emerald-200 bg-emerald-50"
+                : e.phase === "prep"
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-zinc-100 bg-zinc-50";
+            return `<div class="rounded-xl border p-3 ${color}">
+              <p class="text-[10px] uppercase tracking-wider text-zinc-400">${escapeHtml(e.label)}</p>
+              <p class="font-semibold text-sm mt-0.5">${escapeHtml(e.name)}</p>
+              <p class="text-[11px] text-zinc-500 mt-1">${escapeHtml(e.niche)}</p>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(e.tip || "")}</p>
+            </div>`;
+          })
+          .join("")
+      : `<p class="text-zinc-400 text-sm">Calendrier vide</p>`;
+  }
+
   const feed = document.getElementById("pilotage-feed");
   if (feed) {
     const alerts = d.pilotage || [];
@@ -691,6 +764,223 @@ async function syncEbayOrders() {
     if (document.getElementById("page-dashboard")?.classList.contains("active")) loadDashboard();
   } catch (err) {
     alert("Sync ventes: " + err.message);
+  }
+}
+
+let supplierCfgCache = null;
+
+async function loadSupplierConfig() {
+  const box = document.getElementById("supplier-toggles");
+  if (!box) return;
+  try {
+    const res = await fetch(API + "/api/auto-orders/config");
+    const json = await res.json();
+    supplierCfgCache = json.data || {};
+    const keys = ["amazon", "aliexpress", "cdiscount"];
+    box.innerHTML = keys
+      .map((k) => {
+        const c = supplierCfgCache[k] || { enabled: true, auto: false, label: k };
+        return `<div class="rounded-xl border border-zinc-200 p-4 space-y-3">
+          <p class="font-medium text-sm">${escapeHtml(c.label || k)}</p>
+          <label class="flex items-center justify-between gap-2 text-xs"><span>Activé</span>
+            <input type="checkbox" class="toggle" ${c.enabled !== false ? "checked" : ""} onchange="toggleSupplier('${k}','enabled',this.checked)" /></label>
+          <label class="flex items-center justify-between gap-2 text-xs"><span>Auto file d'attente</span>
+            <input type="checkbox" class="toggle" ${c.auto ? "checked" : ""} onchange="toggleSupplier('${k}','auto',this.checked)" /></label>
+        </div>`;
+      })
+      .join("");
+  } catch (_) {
+    box.innerHTML = `<p class="text-sm text-zinc-400">Config indisponible</p>`;
+  }
+}
+
+async function toggleSupplier(key, field, value) {
+  if (!supplierCfgCache) supplierCfgCache = {};
+  supplierCfgCache[key] = { ...(supplierCfgCache[key] || {}), [field]: value };
+  await fetch(API + "/api/auto-orders/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(supplierCfgCache),
+  });
+}
+
+async function processAutoOrderQueue() {
+  try {
+    const res = await fetch(API + "/api/auto-orders/process-queue", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const pack = json.data?.pack || [];
+    if (!pack.length) {
+      alert("Aucune commande pending avec fournisseur auto activé.");
+      return loadOrders();
+    }
+    if (pack[0].shipText) {
+      try {
+        await navigator.clipboard.writeText(pack[0].shipText);
+      } catch (_) {}
+    }
+    for (const p of pack.slice(0, 5)) {
+      window.open(p.url, "_blank", "noopener");
+    }
+    alert(
+      `${pack.length} commande(s) préparée(s).\nAdresse de la 1ère copiée.\n${pack.length > 5 ? "5 premiers onglets ouverts.\n" : ""}${
+        json.data.note || ""
+      }`
+    );
+    loadOrders();
+  } catch (err) {
+    alert("File d'attente: " + err.message);
+  }
+}
+
+let savSelectedId = null;
+let savCache = [];
+
+async function loadSav() {
+  try {
+    const res = await fetch(API + "/api/sav");
+    const json = await res.json();
+    savCache = json.data || [];
+    const list = document.getElementById("sav-list");
+    if (!list) return;
+    list.innerHTML = savCache.length
+      ? savCache
+          .map((m) => {
+            const badge =
+              m.status === "escalated"
+                ? "bg-amber-100 text-amber-800"
+                : m.status === "sent"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : m.status === "draft"
+                    ? "bg-brand-100 text-brand-800"
+                    : "bg-zinc-100 text-zinc-600";
+            return `<button type="button" data-sav-id="${m.id}" onclick="selectSav(${m.id})" class="w-full text-left px-4 py-3 hover:bg-brand-50 ${
+              savSelectedId === m.id ? "bg-brand-50" : ""
+            }">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-sm font-medium truncate">${escapeHtml(m.subject || "(sans sujet)")}</p>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${badge}">${escapeHtml(m.status)}</span>
+              </div>
+              <p class="text-[11px] text-zinc-400 mt-0.5 truncate">${escapeHtml(m.sender)} · ${escapeHtml(
+              m.item_title || ""
+            )}</p>
+            </button>`;
+          })
+          .join("")
+      : `<p class="p-6 text-sm text-zinc-300 text-center">Aucun message — Sync ou Brouillons auto.</p>`;
+    if (savSelectedId && savCache.some((x) => x.id === savSelectedId)) {
+      selectSav(savSelectedId);
+    }
+  } catch (err) {
+    alert("SAV: " + err.message);
+  }
+}
+
+function selectSav(id) {
+  savSelectedId = id;
+  const m = savCache.find((x) => x.id === id);
+  const empty = document.getElementById("sav-detail-empty");
+  const detail = document.getElementById("sav-detail");
+  const list = document.getElementById("sav-list");
+  if (list) {
+    list.querySelectorAll("button[data-sav-id]").forEach((btn) => {
+      btn.classList.toggle("bg-brand-50", Number(btn.dataset.savId) === id);
+    });
+  }
+  if (!m) {
+    empty?.classList.remove("hidden");
+    detail?.classList.add("hidden");
+    return;
+  }
+  empty?.classList.add("hidden");
+  detail?.classList.remove("hidden");
+  document.getElementById("sav-subject").textContent = m.subject || "(sans sujet)";
+  document.getElementById("sav-status-badge").textContent = m.status;
+  document.getElementById("sav-meta").textContent = `${m.sender || ""} · ${m.item_title || ""} · #${m.message_id || m.id}`;
+  document.getElementById("sav-body").textContent = m.body || "";
+  document.getElementById("sav-draft").value = m.draft || "";
+  const note = document.getElementById("sav-escalate-note");
+  if (m.escalate) {
+    note.classList.remove("hidden");
+    note.textContent = "Escalade: " + (m.escalate_reason || "relire avant envoi");
+  } else {
+    note.classList.add("hidden");
+  }
+}
+
+async function syncSavMessages() {
+  try {
+    const res = await fetch(API + "/api/sav/sync", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    alert(
+      (json.live ? "Sync live: " : "Démo/fallback: ") +
+        `${json.fetched || 0} lu(s), ${json.created || 0} nouveau(x).\n` +
+        (json.note || "")
+    );
+    await loadSav();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function autoDraftAllSav() {
+  try {
+    const res = await fetch(API + "/api/sav/auto-draft-all", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    alert(`${json.drafted} brouillon(s) généré(s).`);
+    await loadSav();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function draftSavSelected() {
+  if (!savSelectedId) return alert("Sélectionne un message");
+  try {
+    const res = await fetch(API + "/api/sav/" + savSelectedId + "/draft", { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    document.getElementById("sav-draft").value = json.data.draft || "";
+    await loadSav();
+    selectSav(savSelectedId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function escalateSavSelected() {
+  if (!savSelectedId) return;
+  try {
+    await fetch(API + "/api/sav/" + savSelectedId + "/escalate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Escalade manuelle" }),
+    });
+    await loadSav();
+    selectSav(savSelectedId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function sendSavSelected(force) {
+  if (!savSelectedId) return;
+  const draft = document.getElementById("sav-draft").value;
+  try {
+    const res = await fetch(API + "/api/sav/" + savSelectedId + "/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft, force: Boolean(force) }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    alert(json.data.live ? "Envoyé sur eBay." : "Marqué envoyé (démo).");
+    await loadSav();
+    selectSav(savSelectedId);
+  } catch (err) {
+    alert(err.message);
   }
 }
 

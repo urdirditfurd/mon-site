@@ -80,6 +80,7 @@
         <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Mes Listings</a>
         <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Title Builder</a>
         <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Description Builder</a>
+        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">SAV <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
       </div>
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Compte</p>
@@ -105,6 +106,36 @@
       <!-- DASHBOARD -->
       <section id="page-dashboard" class="page active space-y-6">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="dash-cards"></div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="font-semibold">Produits tendances eBay FR</h3>
+                <p class="text-xs text-zinc-400" id="dash-trending-meta">Top produits</p>
+              </div>
+              <button onclick="navigate('rankings')" class="text-xs text-brand-600">Classements →</button>
+            </div>
+            <div id="dash-trending" class="space-y-2 text-sm"></div>
+          </div>
+          <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="font-semibold">Niches tendances</h3>
+                <p class="text-xs text-zinc-400">Croissance relative des catégories</p>
+              </div>
+            </div>
+            <div id="dash-niches" class="space-y-3"></div>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-semibold">Calendrier des tendances</h3>
+              <p class="text-xs text-zinc-400">Événements à anticiper pour lister avant le pic</p>
+            </div>
+          </div>
+          <div id="dash-calendar" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3"></div>
+        </div>
         <div class="bg-white rounded-2xl border border-zinc-200 p-6">
           <h3 class="font-semibold mb-2">Pilotage</h3>
           <p class="text-sm text-zinc-400 mb-4">Moins d'actions, plus de contrôle — alertes système</p>
@@ -116,6 +147,7 @@
             <button onclick="navigate('sniper')" class="btn-primary">Lancer Auto-Snipe</button>
             <button onclick="navigate('description')" class="px-4 py-2 bg-zinc-900 text-white rounded-xl text-sm font-medium">Description Builder</button>
             <button onclick="navigate('competitors')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">Analyser un concurrent</button>
+            <button onclick="navigate('sav')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">SAV messages</button>
             <button onclick="navigate('title-builder')" class="px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium">Title Builder</button>
           </div>
         </div>
@@ -251,15 +283,24 @@
 
       <!-- AUTO ORDER -->
       <section id="page-auto-order" class="page space-y-4">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-base">Fournisseurs & mode auto</h3>
+              <p class="text-xs text-zinc-400 mt-1">Active les sources + le traitement file d'attente (ouvre fournisseur + copie adresse). Le paiement reste manuel — pas d'API Ali/Amazon fiable.</p>
+            </div>
+            <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Traiter file d'attente</button>
+          </div>
+          <div id="supplier-toggles" class="grid sm:grid-cols-3 gap-3"></div>
+        </div>
         <div class="bg-white rounded-2xl border border-zinc-200 p-5 text-sm space-y-2">
           <h3 class="font-semibold text-base">Boucle dropshipping (post-vente)</h3>
           <ol class="list-decimal pl-5 text-zinc-600 space-y-1 text-xs leading-relaxed">
             <li><strong>Sync ventes eBay</strong> — récupère commandes + adresse acheteur (API officielle).</li>
-            <li><strong>Ouvrir fournisseur</strong> — ouvre Amazon/Ali/Cdiscount (lien du listing ou re-sourcing live) et copie l’adresse.</li>
-            <li><strong>Tu colles l’adresse</strong> chez le fournisseur et tu paies (étape manuelle fiable).</li>
+            <li><strong>Traiter file / Ouvrir fournisseur</strong> — re-sourcing live + copie adresse.</li>
+            <li><strong>Tu colles l'adresse</strong> chez le fournisseur et tu paies.</li>
             <li><strong>Avancer statut</strong> — pending → ordered → shipped → delivered.</li>
           </ol>
-          <p class="text-[11px] text-zinc-400">EBX ne peut pas payer automatiquement chez Ali/Amazon de façon fiable et conforme : pas d’API « acheter pour le client ». L’alternative semi-auto ci-dessous est le standard des outils dropshipping sérieux.</p>
         </div>
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
           <div class="p-5 border-b flex justify-between items-center">
@@ -393,6 +434,54 @@
           </div>
           <div id="desc-html-wrap" class="hidden bg-zinc-900 min-h-[420px]">
             <pre id="desc-html" class="p-4 text-green-400 text-xs overflow-auto whitespace-pre-wrap h-[420px]">// Collez une URL puis générez...</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- SAV -->
+      <section id="page-sav" class="page space-y-4">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-5 space-y-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-lg">SAV — messages eBay</h3>
+              <p class="text-sm text-zinc-400">Inbox + brouillons IA + escalade humaine (comme EBX ~80% auto)</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="syncSavMessages()" class="text-sm px-3 py-1.5 border rounded-lg">Sync messages</button>
+              <button onclick="autoDraftAllSav()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Brouillons auto</button>
+              <button onclick="loadSav()" class="text-sm px-3 py-1.5 border rounded-lg">Rafraîchir</button>
+            </div>
+          </div>
+          <p class="text-[11px] text-zinc-400">Sync utilise Trading GetMemberMessages. Sans scopes OAuth → démo locale. Escalade si litige / remboursement / menace.</p>
+        </div>
+        <div class="grid lg:grid-cols-5 gap-4">
+          <div class="lg:col-span-2 bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+            <div class="p-3 border-b text-xs font-medium text-zinc-400 uppercase tracking-wider">Inbox</div>
+            <div id="sav-list" class="divide-y divide-zinc-50 max-h-[560px] overflow-auto"></div>
+          </div>
+          <div class="lg:col-span-3 bg-white rounded-2xl border border-zinc-200 p-5 space-y-4 min-h-[320px]">
+            <div id="sav-detail-empty" class="text-sm text-zinc-400 py-16 text-center">Sélectionne un message</div>
+            <div id="sav-detail" class="hidden space-y-4">
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 id="sav-subject" class="font-semibold"></h3>
+                  <span id="sav-status-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100"></span>
+                </div>
+                <p id="sav-meta" class="text-xs text-zinc-400 mt-1"></p>
+              </div>
+              <div class="bg-zinc-50 rounded-xl p-4 text-sm whitespace-pre-wrap" id="sav-body"></div>
+              <div>
+                <label class="text-xs text-zinc-500">Brouillon de réponse</label>
+                <textarea id="sav-draft" class="w-full mt-1 h-36 px-3 py-2 rounded-xl border text-sm"></textarea>
+                <p id="sav-escalate-note" class="text-xs text-amber-700 mt-1 hidden"></p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button onclick="draftSavSelected()" class="btn-primary text-sm">Générer brouillon IA</button>
+                <button onclick="escalateSavSelected()" class="text-sm px-3 py-2 border rounded-xl">Escalader</button>
+                <button onclick="sendSavSelected(false)" class="text-sm px-3 py-2 bg-zinc-900 text-white rounded-xl">Envoyer</button>
+                <button onclick="sendSavSelected(true)" class="text-sm px-3 py-2 border border-amber-300 text-amber-800 rounded-xl">Forcer envoi</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>

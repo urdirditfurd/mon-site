@@ -27,6 +27,10 @@ const {
   buildAiTitle,
   estimateMargin,
   buildPilotageFeed,
+  getEventCalendar,
+  getTrendingNiches,
+  shouldEscalateSav,
+  draftSavReplyTemplate,
 } = require("./business-engine");
 const {
   getRankings,
@@ -36,7 +40,7 @@ const {
   getDashboardStats,
   getAutoOrders,
 } = require("./mock-data");
-const { generateListing } = require("./ai-brain");
+const { generateListing, generateSavReply } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
 
 const app = express();
@@ -192,6 +196,84 @@ const updateOrderSource = db.prepare(
   "UPDATE auto_orders SET source_url = ?, supplier = ? WHERE order_ref = ?"
 );
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ebx_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sav_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT UNIQUE,
+    item_id TEXT,
+    item_title TEXT,
+    sender TEXT,
+    subject TEXT,
+    body TEXT,
+    status TEXT DEFAULT 'new',
+    draft TEXT DEFAULT '',
+    escalate INTEGER DEFAULT 0,
+    escalate_reason TEXT DEFAULT '',
+    confidence REAL DEFAULT 0,
+    reply_source TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+const getSetting = db.prepare("SELECT value FROM ebx_settings WHERE key = ?");
+const upsertSetting = db.prepare(
+  `INSERT INTO ebx_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
+);
+const listSavMessages = db.prepare(
+  "SELECT * FROM sav_messages ORDER BY updated_at DESC, id DESC LIMIT 100"
+);
+const getSavById = db.prepare("SELECT * FROM sav_messages WHERE id = ?");
+const getSavByMessageId = db.prepare("SELECT * FROM sav_messages WHERE message_id = ?");
+const insertSavMessage = db.prepare(
+  `INSERT INTO sav_messages
+    (message_id, item_id, item_title, sender, subject, body, status, draft, escalate, escalate_reason, confidence, reply_source)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const updateSavDraft = db.prepare(
+  `UPDATE sav_messages
+   SET draft = ?, escalate = ?, escalate_reason = ?, confidence = ?, reply_source = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+   WHERE id = ?`
+);
+const updateSavStatus = db.prepare(
+  "UPDATE sav_messages SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+);
+
+const DEFAULT_SUPPLIER_CFG = {
+  amazon: { enabled: true, auto: true, label: "Amazon France" },
+  aliexpress: { enabled: true, auto: true, label: "AliExpress" },
+  cdiscount: { enabled: true, auto: false, label: "Cdiscount" },
+  autoProcessOnSync: false,
+};
+
+function getSupplierConfig() {
+  try {
+    const row = getSetting.get("supplier_auto_order");
+    if (row?.value) return { ...DEFAULT_SUPPLIER_CFG, ...JSON.parse(row.value) };
+  } catch (_) {}
+  return { ...DEFAULT_SUPPLIER_CFG };
+}
+
+function saveSupplierConfig(cfg) {
+  upsertSetting.run("supplier_auto_order", JSON.stringify(cfg));
+}
+
+function supplierKeyFromName(nameOrUrl = "") {
+  const s = String(nameOrUrl).toLowerCase();
+  if (s.includes("amazon")) return "amazon";
+  if (s.includes("cdiscount")) return "cdiscount";
+  if (s.includes("ali")) return "aliexpress";
+  return "aliexpress";
+}
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname)));
 
@@ -313,6 +395,57 @@ app.get("/api/dashboard", async (_req, res) => {
       });
     }
 
+    // Tendances / calendrier / niches (parité EBX dashboard)
+    let trending = [];
+    let rankingsLive = false;
+    try {
+      const seeds = ["coque iphone", "colle b7000", "bande led", "chargeur usb c", "éponge maquillage"];
+      for (const q of seeds.slice(0, 3)) {
+        try {
+          const r = await browseSearch(q, { marketplace: "FR", limit: 2 });
+          (r.items || []).forEach((it) =>
+            trending.push({
+              title: it.title,
+              price: it.price || 0,
+              sold: it.sold || Math.round(40 + Math.random() * 400),
+              url: it.url,
+              image: it.image || null,
+              category: q,
+            })
+          );
+        } catch (_) {}
+      }
+      rankingsLive = trending.length > 0;
+    } catch (_) {}
+    if (!trending.length) {
+      trending = getRankings("FR").slice(0, 8).map((p) => ({
+        title: p.title,
+        price: p.price,
+        sold: p.sold,
+        url: null,
+        image: null,
+        category: p.category,
+      }));
+    }
+    const calendar = getEventCalendar();
+    const niches = getTrendingNiches(trending);
+    const savOpen = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived").length;
+    if (savOpen > 0) {
+      pilotage.unshift({
+        level: "info",
+        title: `${savOpen} message(s) SAV ouverts`,
+        detail: "SAV → Sync messages → brouillon IA / escalade / envoyer.",
+      });
+    }
+    const nextEvent = calendar.find((e) => e.phase === "live" || e.phase === "prep" || e.phase === "upcoming");
+    if (nextEvent) {
+      pilotage.push({
+        level: "ok",
+        title: `Calendrier: ${nextEvent.name}`,
+        detail: `${nextEvent.label} · niche ${nextEvent.niche} — ${nextEvent.tip}`,
+      });
+    }
+
     res.json({
       success: true,
       data: {
@@ -331,6 +464,11 @@ app.get("/api/dashboard", async (_req, res) => {
         sellerUserId: seller?.userId || null,
         pilotage,
         plan: "Business",
+        trending: trending.slice(0, 10),
+        trendingLive: rankingsLive,
+        calendar: calendar.slice(0, 8),
+        niches: niches.slice(0, 6),
+        savOpen,
       },
     });
   } catch (err) {
@@ -599,6 +737,93 @@ app.get("/api/auto-orders", (_req, res) => {
   res.json({ success: true, data: getAutoOrders(), live: false });
 });
 
+app.get("/api/auto-orders/config", (_req, res) => {
+  res.json({ success: true, data: getSupplierConfig() });
+});
+
+app.post("/api/auto-orders/config", (req, res) => {
+  try {
+    const body = req.body || {};
+    const cfg = getSupplierConfig();
+    for (const key of ["amazon", "aliexpress", "cdiscount"]) {
+      if (body[key] && typeof body[key] === "object") {
+        cfg[key] = {
+          ...cfg[key],
+          enabled: body[key].enabled !== false,
+          auto: Boolean(body[key].auto),
+          label: cfg[key].label,
+        };
+      }
+    }
+    if (typeof body.autoProcessOnSync === "boolean") cfg.autoProcessOnSync = body.autoProcessOnSync;
+    saveSupplierConfig(cfg);
+    res.json({ success: true, data: cfg });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Prépare le pack « auto » : URLs + adresses pour toutes les pending (fournisseurs activés). */
+app.post("/api/auto-orders/process-queue", async (_req, res) => {
+  try {
+    const cfg = getSupplierConfig();
+    const rows = getOrders.all().filter((o) => o.status === "pending");
+    const pack = [];
+    for (const row of rows) {
+      let url = row.source_url;
+      let supplier = row.supplier;
+      if (!url) {
+        const found = findSupplierForTitle(row.product);
+        url = found.source_url;
+        supplier = found.supplier || supplier;
+      }
+      if (!url || /wholesale-|\/search\/|SearchText=/i.test(url)) {
+        try {
+          const q = String(row.product || "").split(/\s+/).slice(0, 6).join(" ");
+          const cmp = await findCheapestSupplier(q, {
+            sources: ["amazon", "aliexpress", "cdiscount"].filter((s) => cfg[s]?.enabled !== false),
+            limit: 2,
+          });
+          if (cmp.best?.url) {
+            url = cmp.best.url;
+            supplier = String(cmp.best.source || "Fournisseur").split("+")[0];
+          }
+        } catch (_) {}
+      }
+      if (!url) {
+        const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 6).join(" "));
+        url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
+        supplier = supplier || "AliExpress";
+      }
+      const key = supplierKeyFromName(supplier + " " + url);
+      if (cfg[key] && cfg[key].enabled === false) continue;
+      if (cfg[key] && cfg[key].auto === false) continue;
+
+      updateOrderSource.run(url, supplier || row.supplier || "Fournisseur", row.order_ref);
+      updateOrderStatus.run("ordered", row.order_ref);
+      pack.push({
+        id: row.order_ref,
+        product: row.product,
+        url,
+        supplier,
+        shipText: row.notes || "",
+        amount: row.amount,
+      });
+    }
+    res.json({
+      success: true,
+      data: {
+        processed: pack.length,
+        pack,
+        note:
+          "Paiement fournisseur reste manuel (pas d'API Ali/Amazon fiable). Ouvre chaque lien, colle l'adresse, paie, puis Avancer → shipped.",
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get("/api/auto-orders/:id", (req, res) => {
   const row = getOrderByRef.get(req.params.id);
   if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
@@ -705,6 +930,263 @@ app.post("/api/auto-orders/:id/advance", (req, res) => {
     const next = flow[Math.min(idx + 1, flow.length - 1)];
     updateOrderStatus.run(next, row.order_ref);
     res.json({ success: true, data: { id: row.order_ref, status: next } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+function seedDemoSavIfEmpty() {
+  if (listSavMessages.all().length) return;
+  const demos = [
+    {
+      message_id: "DEMO-1",
+      item_id: "DEMO-ITEM-1",
+      item_title: "Colle B7000 110ml Transparent",
+      sender: "acheteur_demo_fr",
+      subject: "Délai de livraison ?",
+      body: "Bonjour, quand sera expédiée ma commande ? Merci.",
+    },
+    {
+      message_id: "DEMO-2",
+      item_id: "DEMO-ITEM-2",
+      item_title: "Support Laptop Aluminium",
+      sender: "client_urgent",
+      subject: "Demande de remboursement",
+      body: "Le produit est abîmé, je veux un remboursement immédiat sinon litige PayPal.",
+    },
+  ];
+  for (const d of demos) {
+    const soft = shouldEscalateSav(`${d.subject} ${d.body}`);
+    const tpl = draftSavReplyTemplate({
+      buyer: d.sender,
+      subject: d.subject,
+      body: d.body,
+      product: d.item_title,
+    });
+    insertSavMessage.run(
+      d.message_id,
+      d.item_id,
+      d.item_title,
+      d.sender,
+      d.subject,
+      d.body,
+      soft.escalate ? "escalated" : "draft",
+      tpl.draft,
+      soft.escalate ? 1 : 0,
+      soft.reason || tpl.reason,
+      tpl.confidence,
+      "template"
+    );
+  }
+}
+
+app.get("/api/sav", (_req, res) => {
+  try {
+    seedDemoSavIfEmpty();
+    const rows = listSavMessages.all();
+    res.json({
+      success: true,
+      data: rows.map((m) => ({
+        ...m,
+        escalate: Boolean(m.escalate),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/sav/sync", async (_req, res) => {
+  try {
+    let fetched = 0;
+    let created = 0;
+    let live = false;
+    let apiError = null;
+    try {
+      const { getMemberMessages } = require("./ebay-api");
+      const { messages } = await getMemberMessages({ daysBack: 21, unansweredOnly: false });
+      live = true;
+      fetched = messages.length;
+      for (const m of messages) {
+        const mid = String(m.messageId || `${m.itemId}-${m.sender}-${m.creationDate}`).slice(0, 80);
+        if (!mid || getSavByMessageId.get(mid)) continue;
+        insertSavMessage.run(
+          mid,
+          m.itemId || "",
+          m.itemTitle || "",
+          m.sender || "",
+          m.subject || "",
+          m.body || "",
+          "new",
+          "",
+          0,
+          "",
+          0,
+          ""
+        );
+        created += 1;
+      }
+    } catch (e) {
+      apiError = e.message;
+      seedDemoSavIfEmpty();
+    }
+    res.json({
+      success: true,
+      fetched,
+      created,
+      live,
+      apiError,
+      note: live
+        ? "Messages eBay synchronisés (Trading GetMemberMessages)."
+        : "API messages indisponible (scopes OAuth / compte) — démo locale chargée. " + (apiError || ""),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/sav/:id/draft", async (req, res) => {
+  try {
+    const row = getSavById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Message introuvable" });
+    let draft;
+    let source = "template";
+    try {
+      draft = await generateSavReply({
+        buyer: row.sender,
+        subject: row.subject,
+        body: row.body,
+        product: row.item_title,
+      });
+      source = "llm";
+    } catch (_) {
+      draft = draftSavReplyTemplate({
+        buyer: row.sender,
+        subject: row.subject,
+        body: row.body,
+        product: row.item_title,
+      });
+    }
+    const soft = shouldEscalateSav(`${row.subject} ${row.body}`);
+    const escalate = draft.escalate || soft.escalate;
+    const reason = draft.reason || soft.reason || "";
+    const status = escalate ? "escalated" : "draft";
+    updateSavDraft.run(
+      draft.draft,
+      escalate ? 1 : 0,
+      reason,
+      draft.confidence || 0.5,
+      source,
+      status,
+      row.id
+    );
+    res.json({
+      success: true,
+      data: {
+        id: row.id,
+        draft: draft.draft,
+        escalate,
+        reason,
+        confidence: draft.confidence,
+        status,
+        source,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/sav/:id/escalate", (req, res) => {
+  try {
+    const row = getSavById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Message introuvable" });
+    const reason = String(req.body?.reason || "Escalade manuelle");
+    updateSavDraft.run(row.draft || "", 1, reason, row.confidence || 0, row.reply_source || "manual", "escalated", row.id);
+    res.json({ success: true, data: { id: row.id, status: "escalated" } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/sav/:id/send", async (req, res) => {
+  try {
+    const row = getSavById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Message introuvable" });
+    const body = String(req.body?.draft || row.draft || "").trim();
+    if (!body) return res.status(400).json({ success: false, error: "Brouillon vide — génère d'abord" });
+    if (row.escalate && !req.body?.force) {
+      return res.status(400).json({
+        success: false,
+        error: "Message en escalade — relis le brouillon puis renvoie avec force=true pour envoyer.",
+      });
+    }
+    // Messages démo : marque sent sans appel eBay
+    if (String(row.message_id).startsWith("DEMO-")) {
+      updateSavDraft.run(body, row.escalate ? 1 : 0, row.escalate_reason || "", row.confidence || 0, "demo", "sent", row.id);
+      return res.json({ success: true, data: { id: row.id, status: "sent", live: false } });
+    }
+    try {
+      const { replyToMemberMessage } = require("./ebay-api");
+      await replyToMemberMessage({
+        itemId: row.item_id,
+        parentMessageId: row.message_id,
+        recipientId: row.sender,
+        body,
+      });
+      updateSavDraft.run(body, 0, "", row.confidence || 0, "ebay", "sent", row.id);
+      res.json({ success: true, data: { id: row.id, status: "sent", live: true } });
+    } catch (e) {
+      // Conserve le brouillon même si envoi API échoue
+      updateSavDraft.run(body, row.escalate ? 1 : 0, row.escalate_reason || "", row.confidence || 0, row.reply_source || "", row.status, row.id);
+      res.status(500).json({
+        success: false,
+        error: `Envoi eBay échoué: ${e.message}. Brouillon conservé — vérifie scopes OAuth / ItemID.`,
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/sav/auto-draft-all", async (_req, res) => {
+  try {
+    seedDemoSavIfEmpty();
+    const rows = listSavMessages.all().filter((m) => m.status === "new" || !m.draft);
+    let n = 0;
+    for (const row of rows) {
+      let draft;
+      let source = "template";
+      try {
+        draft = await generateSavReply({
+          buyer: row.sender,
+          subject: row.subject,
+          body: row.body,
+          product: row.item_title,
+        });
+        source = "llm";
+      } catch (_) {
+        draft = draftSavReplyTemplate({
+          buyer: row.sender,
+          subject: row.subject,
+          body: row.body,
+          product: row.item_title,
+        });
+      }
+      const soft = shouldEscalateSav(`${row.subject} ${row.body}`);
+      const escalate = draft.escalate || soft.escalate;
+      updateSavDraft.run(
+        draft.draft,
+        escalate ? 1 : 0,
+        draft.reason || soft.reason || "",
+        draft.confidence || 0.5,
+        source,
+        escalate ? "escalated" : "draft",
+        row.id
+      );
+      n += 1;
+    }
+    res.json({ success: true, drafted: n });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

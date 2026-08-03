@@ -966,6 +966,140 @@ async function getRecentOrders({ limit = 20 } = {}) {
   return { orders: data?.orders || [], env: isProduction() ? "production" : "sandbox" };
 }
 
+/** Appel Trading API XML (IAF OAuth). */
+async function tradingApiCall(callName, xmlBody) {
+  loadEbayEnv();
+  const token = await getAccessToken();
+  const tradingUrl = new URL(ebayTradingUrl());
+  const payload = Buffer.from(xmlBody, "utf8");
+  const responseText = await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: tradingUrl.protocol,
+        hostname: tradingUrl.hostname,
+        port: 443,
+        path: tradingUrl.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml",
+          "Content-Length": payload.length,
+          "X-EBAY-API-IAF-TOKEN": token,
+          "X-EBAY-API-CALL-NAME": callName,
+          "X-EBAY-API-SITEID": ebaySiteId(),
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "1399",
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      }
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+  const ack = (responseText.match(/<Ack>([^<]+)<\/Ack>/i) || [])[1] || "";
+  if (!/Success|Warning/i.test(ack)) {
+    const shortErr =
+      (responseText.match(/<ShortMessage>([^<]+)<\/ShortMessage>/i) || [])[1] ||
+      (responseText.match(/<LongMessage>([^<]+)<\/LongMessage>/i) || [])[1] ||
+      `${callName} failed`;
+    const err = new Error(shortErr);
+    err.raw = responseText.slice(0, 500);
+    throw err;
+  }
+  return responseText;
+}
+
+function xmlUnescape(s) {
+  return String(s || "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function extractXmlBlocks(xml, tag) {
+  const re = new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, "gi");
+  return xml.match(re) || [];
+}
+
+function xmlField(block, tag) {
+  const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return m ? xmlUnescape(m[1].trim()) : "";
+}
+
+/**
+ * Messages acheteurs (Trading GetMemberMessages).
+ * Fallback possible côté serveur si scopes OAuth insuffisants.
+ */
+async function getMemberMessages({ daysBack = 14, unansweredOnly = false } = {}) {
+  const end = new Date();
+  const start = new Date(Date.now() - Math.max(1, daysBack) * 86400000);
+  const statusXml = unansweredOnly ? "<MessageStatus>Unanswered</MessageStatus>" : "";
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMemberMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+  <MailMessageType>All</MailMessageType>
+  ${statusXml}
+  <StartCreationTime>${start.toISOString()}</StartCreationTime>
+  <EndCreationTime>${end.toISOString()}</EndCreationTime>
+  <Pagination>
+    <EntriesPerPage>50</EntriesPerPage>
+    <PageNumber>1</PageNumber>
+  </Pagination>
+</GetMemberMessagesRequest>`;
+
+  const responseText = await tradingApiCall("GetMemberMessages", xml);
+  const blocks = extractXmlBlocks(responseText, "MemberMessageExchange");
+  const messages = blocks.map((b) => {
+    const msg = extractXmlBlocks(b, "Question")[0] || b;
+    return {
+      messageId: xmlField(msg, "MessageID") || xmlField(b, "MessageID"),
+      itemId: xmlField(b, "ItemID") || xmlField(msg, "ItemID"),
+      itemTitle: xmlField(b, "Title") || xmlField(msg, "ItemTitle"),
+      sender: xmlField(msg, "SenderID") || xmlField(b, "SenderID"),
+      recipient: xmlField(msg, "RecipientID") || "",
+      subject: xmlField(msg, "Subject") || xmlField(b, "Subject"),
+      body: xmlField(msg, "Body") || xmlField(b, "Body"),
+      creationDate: xmlField(msg, "CreationDate") || xmlField(b, "CreationDate"),
+      messageStatus: xmlField(b, "MessageStatus") || xmlField(msg, "MessageStatus"),
+      answered: /Answered/i.test(xmlField(b, "MessageStatus") || ""),
+    };
+  }).filter((m) => m.messageId || m.body);
+
+  return {
+    messages,
+    count: messages.length,
+    env: isProduction() ? "production" : "sandbox",
+  };
+}
+
+/** Réponse à un message membre (AddMemberMessageRTQ). */
+async function replyToMemberMessage({ itemId, parentMessageId, recipientId, body } = {}) {
+  if (!itemId || !parentMessageId || !recipientId || !body) {
+    throw new Error("itemId, parentMessageId, recipientId et body requis");
+  }
+  const safeBody = String(body)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<AddMemberMessageRTQRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+  <ItemID>${String(itemId)}</ItemID>
+  <MemberMessage>
+    <Body>${safeBody}</Body>
+    <ParentMessageID>${String(parentMessageId)}</ParentMessageID>
+    <RecipientID>${String(recipientId)}</RecipientID>
+  </MemberMessage>
+</AddMemberMessageRTQRequest>`;
+  await tradingApiCall("AddMemberMessageRTQ", xml);
+  return { ok: true, parentMessageId, itemId };
+}
+
 async function updateOfferPriceQuantity(offerId, { price, quantity } = {}) {
   loadEbayEnv();
   const token = await getAccessToken();
@@ -1004,6 +1138,8 @@ module.exports = {
   getAccessToken,
   getSellerIdentity,
   getRecentOrders,
+  getMemberMessages,
+  replyToMemberMessage,
   updateOfferPriceQuantity,
   endEbayOffer,
   clearTokenCache,

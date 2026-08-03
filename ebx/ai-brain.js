@@ -100,4 +100,49 @@ Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
   return cleanAndParseJSON(rawContent);
 }
 
-module.exports = { generateListing, cleanAndParseJSON };
+/**
+ * Brouillon de réponse SAV (LLM local si dispo, sinon null → fallback template).
+ */
+async function generateSavReply({ buyer, subject, body, product } = {}) {
+  const userPrompt = `Tu es un agent SAV eBay professionnel (vendeur FR).
+Rédige UNE réponse courte (max 120 mots), polie, en français, sans promettre de remboursement automatique.
+Escalade humaine si litige / remboursement agressif / menace / jamais reçu.
+
+Message acheteur:
+- Acheteur: ${buyer || "client"}
+- Produit: ${product || "n/a"}
+- Sujet: ${subject || "n/a"}
+- Corps: ${String(body || "").slice(0, 800)}
+
+Réponds UNIQUEMENT en JSON:
+{"draft":"texte","escalate":false,"reason":"","confidence":0.0}`;
+
+  const completion = await client.chat.completions.create({
+    model: "local-model",
+    messages: [
+      {
+        role: "system",
+        content:
+          "Tu réponds UNIQUEMENT avec un JSON valide {draft, escalate, reason, confidence}. Pas de markdown.",
+      },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.4,
+    max_tokens: 512,
+  });
+
+  const rawContent = completion.choices[0].message.content;
+  const parsed = cleanAndParseJSON(rawContent);
+  if (parsed._parse_error || !parsed.draft) {
+    throw new Error("SAV LLM parse fail");
+  }
+  return {
+    draft: String(parsed.draft).trim(),
+    escalate: Boolean(parsed.escalate),
+    reason: String(parsed.reason || ""),
+    confidence: Number(parsed.confidence) || 0.5,
+    source: "llm",
+  };
+}
+
+module.exports = { generateListing, cleanAndParseJSON, generateSavReply };
