@@ -10,32 +10,32 @@
       theme: {
         extend: {
           colors: {
-            /* PMS 2727 + beige lunaire */
+            /* #6D7DDF + #E6E6FA */
             brand: {
-              50: '#eef5fd',
-              100: '#d9e9fb',
-              200: '#bcd8f7',
-              300: '#8ebef1',
-              400: '#5a9ce8',
-              500: '#307fe2',
-              600: '#1f66c7',
-              700: '#1a51a1',
-              800: '#1a4584',
-              900: '#1b3b6d'
+              50: '#f3f4fc',
+              100: '#e6e6fa',
+              200: '#d0d5f5',
+              300: '#b0b8ed',
+              400: '#8e9be5',
+              500: '#6d7ddf',
+              600: '#5565c9',
+              700: '#4452a8',
+              800: '#3a4588',
+              900: '#333c6e'
             },
             ink: {
-              950: '#06101f',
-              900: '#0a1a3a',
-              800: '#0f2752',
-              700: '#16356b',
-              600: '#1f4788'
+              950: '#1a1f3d',
+              900: '#242b52',
+              800: '#2f3a7a',
+              700: '#3d4a9e',
+              600: '#5565c9'
             },
             lunar: {
-              50: '#faf9f6',
-              100: '#f3f0e9',
-              200: '#e6e1d4',
-              300: '#d9d2c0',
-              400: '#c4baa3'
+              50: '#fafaff',
+              100: '#f3f3fc',
+              200: '#e6e6fa',
+              300: '#d4d4f0',
+              400: '#bcbce0'
             }
           }
         }
@@ -45,37 +45,37 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     :root {
-      --ebx-pms: #307fe2;
-      --ebx-pms-deep: #1a51a1;
-      --ebx-beige: #e6e1d4;
-      --ebx-beige-soft: #f3f0e9;
-      --ebx-pms-dim: rgba(48, 127, 226, 0.16);
+      --ebx-accent: #6d7ddf;
+      --ebx-accent-deep: #4452a8;
+      --ebx-lavender: #e6e6fa;
+      --ebx-lavender-soft: #f3f3fc;
+      --ebx-accent-dim: rgba(109, 125, 223, 0.18);
       --ebx-green: #22c55e;
-      --ebx-ca-from: #1a51a1;
-      --ebx-ca-to: #307fe2;
-      --ebx-cal-from: #0a1a3a;
-      --ebx-cal-to: #307fe2;
+      --ebx-ca-from: #4452a8;
+      --ebx-ca-to: #6d7ddf;
+      --ebx-cal-from: #242b52;
+      --ebx-cal-to: #6d7ddf;
     }
-    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--ebx-beige); }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--ebx-lavender); }
     .page { display: none; }
     .page.active { display: block; }
-    .nav-link { color: #a8b8d0; }
-    .nav-link:hover { background: rgba(255,255,255,0.05); color: #e6e1d4; }
+    .nav-link { color: #b0b8ed; }
+    .nav-link:hover { background: rgba(255,255,255,0.06); color: #e6e6fa; }
     .nav-link.active {
-      background: var(--ebx-pms-dim);
+      background: var(--ebx-accent-dim);
       color: #ffffff;
-      box-shadow: inset 3px 0 0 var(--ebx-pms);
+      box-shadow: inset 3px 0 0 var(--ebx-accent);
     }
     .badge-new {
-      background: var(--ebx-pms-dim);
-      color: #bcd8f7;
+      background: var(--ebx-accent-dim);
+      color: #d0d5f5;
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 999px;
     }
     .badge-pro {
-      background: rgba(230, 225, 212, 0.16);
-      color: #e6e1d4;
+      background: rgba(230, 230, 250, 0.14);
+      color: #e6e6fa;
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 999px;
@@ -85,22 +85,22 @@
     .console .warn { color: #fbbf24; }
     .console .err { color: #f87171; }
     .console .info { color: #94a3b8; }
-    .keyword-row:hover { background: #eef5fd; }
-    .period-pill.active { background: #307fe2; color: #fff; }
-    .sniper-tab.active { background: #307fe2; color: #fff; }
+    .keyword-row:hover { background: #f3f3fc; }
+    .period-pill.active { background: #6d7ddf; color: #fff; }
+    .sniper-tab.active { background: #6d7ddf; color: #fff; }
     .rank-1 { color: #eab308; }
     .rank-2 { color: #94a3b8; }
     .rank-3 { color: #b45309; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin .8s linear infinite; }
-    .toggle { appearance: none; width: 44px; height: 24px; background: #d9d2c0; border-radius: 999px; position: relative; cursor: pointer; transition: .2s; }
+    .toggle { appearance: none; width: 44px; height: 24px; background: #d4d4f0; border-radius: 999px; position: relative; cursor: pointer; transition: .2s; }
     .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-    .toggle:checked { background: #307fe2; }
+    .toggle:checked { background: #6d7ddf; }
     .toggle:checked::after { left: 22px; }
-    .theme-dot.active { outline: 2px solid #307fe2; outline-offset: 2px; }
-    .desc-tab.active { background: #0a1a3a; color: #e6e1d4; }
+    .theme-dot.active { outline: 2px solid #6d7ddf; outline-offset: 2px; }
+    .desc-tab.active { background: #242b52; color: #e6e6fa; }
     .btn-primary {
-      background: linear-gradient(135deg, #5a9ce8, #307fe2) !important;
+      background: linear-gradient(135deg, #8e9be5, #6d7ddf) !important;
       color: #fff !important;
       border: none;
       cursor: pointer;
@@ -108,35 +108,35 @@
       border-radius: 0.75rem;
       padding: 0.625rem 1.25rem;
       font-size: 0.875rem;
-      box-shadow: 0 8px 20px rgba(48, 127, 226, 0.28);
+      box-shadow: 0 8px 20px rgba(109, 125, 223, 0.3);
     }
     .btn-primary:hover { filter: brightness(1.05); }
     .btn-primary:disabled { opacity: 0.6; cursor: wait; filter: none; }
     .card-soft {
-      background: #fffefb;
-      border: 1px solid #d9d2c0;
+      background: #fff;
+      border: 1px solid #d4d4f0;
       border-radius: 1rem;
-      box-shadow: 0 1px 2px rgba(10, 26, 58, 0.04);
+      box-shadow: 0 1px 2px rgba(36, 43, 82, 0.05);
     }
     .ca-gradient {
       background: linear-gradient(135deg, var(--ebx-ca-from), var(--ebx-ca-to));
       color: #fff;
       border-radius: 1rem;
-      box-shadow: 0 12px 28px rgba(48, 127, 226, 0.28);
+      box-shadow: 0 12px 28px rgba(109, 125, 223, 0.28);
     }
     .cal-header {
       background: linear-gradient(135deg, var(--ebx-cal-from), var(--ebx-cal-to));
       color: #fff;
     }
     .action-blue {
-      background: linear-gradient(135deg, #eef5fd, #d9e9fb);
-      border: 1px solid #bcd8f7;
+      background: linear-gradient(135deg, #f3f3fc, #e6e6fa);
+      border: 1px solid #d0d5f5;
     }
     .action-violet {
-      background: linear-gradient(135deg, #f3f0e9, #e6e1d4);
-      border: 1px solid #d9d2c0;
+      background: linear-gradient(135deg, #e6e6fa, #d0d5f5);
+      border: 1px solid #b0b8ed;
     }
-    .logo-mark { color: #307fe2; letter-spacing: -0.02em; }
+    .logo-mark { color: #6d7ddf; letter-spacing: -0.02em; }
   </style>
 </head>
 <body class="bg-lunar-200 text-zinc-800 min-h-screen flex">
@@ -171,13 +171,13 @@
       </div>
     </nav>
     <div class="p-4 border-t border-white/5 flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-[#307fe2]/25 text-[#bcd8f7] flex items-center justify-center text-sm font-bold">E</div>
+      <div class="w-8 h-8 rounded-full bg-[#6d7ddf]/30 text-[#e6e6fa] flex items-center justify-center text-sm font-bold">E</div>
       <div><p class="text-sm font-medium text-lunar-200">EBX User</p><p class="text-xs text-slate-500">Business · illimité</p></div>
     </div>
   </aside>
 
   <main class="flex-1 overflow-auto">
-    <header class="sticky top-0 z-10 bg-[#f3f0e9]/90 backdrop-blur border-b border-[#d9d2c0] px-8 py-4 flex items-center justify-between">
+    <header class="sticky top-0 z-10 bg-[#f3f3fc]/90 backdrop-blur border-b border-[#d4d4f0] px-8 py-4 flex items-center justify-between">
       <div>
         <h2 id="page-title" class="text-lg font-semibold">Dashboard</h2>
         <p id="page-subtitle" class="text-sm text-zinc-400">Vue d'ensemble de votre activité</p>
@@ -479,10 +479,10 @@
           <input id="desc-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="URL du produit *" value="https://www.amazon.fr/dp/B09V3KXJPB" />
           <div class="flex flex-wrap gap-3 items-center">
             <span class="text-xs text-zinc-500">Thème :</span>
-            <button onclick="setTheme('#307fe2', this)" class="theme-dot active w-7 h-7 rounded-full bg-[#307fe2]" data-theme="#307fe2" title="PMS 2727"></button>
-            <button onclick="setTheme('#e6e1d4', this)" class="theme-dot w-7 h-7 rounded-full bg-[#e6e1d4] border" data-theme="#e6e1d4" title="Beige lunaire"></button>
-            <button onclick="setTheme('#0a1a3a', this)" class="theme-dot w-7 h-7 rounded-full bg-[#0a1a3a]" data-theme="#0a1a3a"></button>
-            <button onclick="setTheme('#1a51a1', this)" class="theme-dot w-7 h-7 rounded-full bg-[#1a51a1]" data-theme="#1a51a1"></button>
+            <button onclick="setTheme('#6d7ddf', this)" class="theme-dot active w-7 h-7 rounded-full bg-[#6d7ddf]" data-theme="#6d7ddf" title="#6D7DDF"></button>
+            <button onclick="setTheme('#e6e6fa', this)" class="theme-dot w-7 h-7 rounded-full bg-[#e6e6fa] border" data-theme="#e6e6fa" title="#E6E6FA"></button>
+            <button onclick="setTheme('#242b52', this)" class="theme-dot w-7 h-7 rounded-full bg-[#242b52]" data-theme="#242b52"></button>
+            <button onclick="setTheme('#4452a8', this)" class="theme-dot w-7 h-7 rounded-full bg-[#4452a8]" data-theme="#4452a8"></button>
             <button onclick="setTheme('#ef4444', this)" class="theme-dot w-7 h-7 rounded-full bg-red-500" data-theme="#ef4444"></button>
             <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary ml-auto">Générer la description</button>
           </div>
@@ -502,10 +502,10 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-zinc-400">Couleur :</span>
-              <button onclick="setTheme('#307fe2', this)" class="theme-dot w-6 h-6 rounded-full bg-[#307fe2]" data-theme="#307fe2"></button>
-              <button onclick="setTheme('#e6e1d4', this)" class="theme-dot w-6 h-6 rounded-full bg-[#e6e1d4] border" data-theme="#e6e1d4"></button>
-              <button onclick="setTheme('#0a1a3a', this)" class="theme-dot w-6 h-6 rounded-full bg-[#0a1a3a]" data-theme="#0a1a3a"></button>
-              <button onclick="setTheme('#1a51a1', this)" class="theme-dot w-6 h-6 rounded-full bg-[#1a51a1]" data-theme="#1a51a1"></button>
+              <button onclick="setTheme('#6d7ddf', this)" class="theme-dot w-6 h-6 rounded-full bg-[#6d7ddf]" data-theme="#6d7ddf"></button>
+              <button onclick="setTheme('#e6e6fa', this)" class="theme-dot w-6 h-6 rounded-full bg-[#e6e6fa] border" data-theme="#e6e6fa"></button>
+              <button onclick="setTheme('#242b52', this)" class="theme-dot w-6 h-6 rounded-full bg-[#242b52]" data-theme="#242b52"></button>
+              <button onclick="setTheme('#4452a8', this)" class="theme-dot w-6 h-6 rounded-full bg-[#4452a8]" data-theme="#4452a8"></button>
               <button onclick="setTheme('#ef4444', this)" class="theme-dot w-6 h-6 rounded-full bg-red-500" data-theme="#ef4444"></button>
               <span id="desc-theme-status" class="text-[11px] text-zinc-400 ml-2"></span>
             </div>

@@ -1,5 +1,5 @@
 const API = window.location.origin;
-let themeColor = "#307fe2";
+let themeColor = "#6d7ddf";
 let titleData = null;
 let titleTab = "keywords";
 let selectedKeywords = [];
@@ -1369,7 +1369,7 @@ function bindPreviewImages(preview) {
     img.style.transition = "outline .15s";
     img.title = "Cliquer pour changer l'image";
     img.onmouseenter = () => {
-      img.style.outline = "2px solid #307fe2";
+      img.style.outline = "2px solid #6d7ddf";
     };
     img.onmouseleave = () => {
       img.style.outline = "2px solid transparent";
