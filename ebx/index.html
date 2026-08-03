@@ -10,7 +10,26 @@
       theme: {
         extend: {
           colors: {
-            brand: { 50:'#f5f3ff',100:'#ede9fe',200:'#ddd6fe',300:'#c4b5fd',400:'#a78bfa',500:'#8b5cf6',600:'#7c3aed',700:'#6d28d9' }
+            /* Bleu nuit + jaune lune */
+            brand: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              200: '#fde68a',
+              300: '#f6e7a1',
+              400: '#ecd978',
+              500: '#e0c65c',
+              600: '#c9a227',
+              700: '#a17c12',
+              800: '#7a5e14',
+              900: '#5c4712'
+            },
+            ink: {
+              950: '#05080f',
+              900: '#0a1020',
+              800: '#121a2b',
+              700: '#1a2740',
+              600: '#243352'
+            }
           }
         }
       }
@@ -18,18 +37,50 @@
   </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'DM Sans', system-ui, sans-serif; }
+    :root {
+      --ebx-night: #0a1020;
+      --ebx-night-2: #121a2b;
+      --ebx-moon: #ecd978;
+      --ebx-moon-soft: #f6e7a1;
+      --ebx-moon-dim: rgba(236, 217, 120, 0.14);
+      --ebx-green: #22c55e;
+      --ebx-ca-from: #121a2b;
+      --ebx-ca-to: #1a2740;
+      --ebx-cal-from: #0a1020;
+      --ebx-cal-to: #243352;
+    }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: #f3f5f9; }
     .page { display: none; }
     .page.active { display: block; }
-    .nav-link.active { background: #f5f3ff; color: #6d28d9; }
+    .nav-link { color: #94a3b8; }
+    .nav-link:hover { background: rgba(255,255,255,0.04); color: #e2e8f0; }
+    .nav-link.active {
+      background: var(--ebx-moon-dim);
+      color: var(--ebx-moon-soft);
+      box-shadow: inset 3px 0 0 var(--ebx-moon);
+    }
+    .badge-new {
+      background: var(--ebx-moon-dim);
+      color: var(--ebx-moon-soft);
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .badge-pro {
+      background: rgba(236, 217, 120, 0.22);
+      color: #f6e7a1;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
     .console { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.55; }
     .console .ok { color: #4ade80; }
     .console .warn { color: #fbbf24; }
     .console .err { color: #f87171; }
     .console .info { color: #94a3b8; }
-    .keyword-row:hover { background: #f5f3ff; }
-    .period-pill.active { background: #7c3aed; color: #fff; }
-    .sniper-tab.active { background: #7c3aed; color: #fff; }
+    .keyword-row:hover { background: #fffbeb; }
+    .period-pill.active { background: #0a1020; color: #ecd978; }
+    .sniper-tab.active { background: #0a1020; color: #ecd978; }
     .rank-1 { color: #eab308; }
     .rank-2 { color: #94a3b8; }
     .rank-3 { color: #b45309; }
@@ -37,59 +88,84 @@
     .spinner { animation: spin .8s linear infinite; }
     .toggle { appearance: none; width: 44px; height: 24px; background: #e4e4e7; border-radius: 999px; position: relative; cursor: pointer; transition: .2s; }
     .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-    .toggle:checked { background: #7c3aed; }
+    .toggle:checked { background: #c9a227; }
     .toggle:checked::after { left: 22px; }
-    .theme-dot.active { outline: 2px solid #7c3aed; outline-offset: 2px; }
-    .desc-tab.active { background: #18181b; color: #fff; }
-    /* CTA toujours visibles même si Tailwind CDN rate la couleur brand */
+    .theme-dot.active { outline: 2px solid #ecd978; outline-offset: 2px; }
+    .desc-tab.active { background: #0a1020; color: #ecd978; }
     .btn-primary {
-      background: #7c3aed !important;
-      color: #fff !important;
+      background: linear-gradient(135deg, #f6e7a1, #e0c65c) !important;
+      color: #0a1020 !important;
       border: none;
       cursor: pointer;
-      font-weight: 600;
+      font-weight: 700;
       border-radius: 0.75rem;
       padding: 0.625rem 1.25rem;
       font-size: 0.875rem;
+      box-shadow: 0 8px 20px rgba(201, 162, 39, 0.28);
     }
-    .btn-primary:hover { background: #6d28d9 !important; }
-    .btn-primary:disabled { opacity: 0.6; cursor: wait; }
+    .btn-primary:hover { filter: brightness(1.04); }
+    .btn-primary:disabled { opacity: 0.6; cursor: wait; filter: none; }
+    .card-soft {
+      background: #fff;
+      border: 1px solid #e6ebf2;
+      border-radius: 1rem;
+      box-shadow: 0 1px 2px rgba(10, 16, 32, 0.04);
+    }
+    .ca-gradient {
+      background: linear-gradient(135deg, var(--ebx-ca-from), var(--ebx-ca-to));
+      color: #f6e7a1;
+      border-radius: 1rem;
+      box-shadow: 0 12px 28px rgba(10, 16, 32, 0.28);
+    }
+    .cal-header {
+      background: linear-gradient(135deg, var(--ebx-cal-from), var(--ebx-cal-to));
+      color: #f6e7a1;
+    }
+    .action-blue {
+      background: linear-gradient(135deg, #eef2ff, #e8edf7);
+      border: 1px solid #d7dee9;
+    }
+    .action-violet {
+      background: linear-gradient(135deg, #fff8e1, #fef3c7);
+      border: 1px solid #f6e7a1;
+    }
+    .logo-mark { color: var(--ebx-moon); letter-spacing: -0.02em; }
   </style>
 </head>
-<body class="bg-zinc-50 text-zinc-800 min-h-screen flex">
-  <aside class="w-64 bg-white border-r border-zinc-200 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
-    <div class="p-5 border-b border-zinc-100">
-      <h1 class="text-2xl font-bold text-brand-600">⚡ EBX</h1>
-      <p class="text-xs text-zinc-400">Dropshipping Automation</p>
+<body class="bg-[#f3f5f9] text-zinc-800 min-h-screen flex">
+  <aside class="w-64 bg-ink-900 text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-white/5">
+    <div class="p-5 border-b border-white/5">
+      <h1 class="text-2xl font-bold logo-mark tracking-tight">EBX</h1>
+      <p class="text-xs text-slate-500 mt-0.5">Dropshipping Automation</p>
     </div>
     <nav class="flex-1 p-3 space-y-4 text-sm">
       <div>
-        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Principal</p>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Principal</p>
         <a href="#" data-page="dashboard" class="nav-link active flex items-center gap-2 px-3 py-2 rounded-lg font-medium">Dashboard</a>
-        <a href="#" data-page="analytics" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Analytics</a>
-        <a href="#" data-page="rankings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Classements <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
+        <a href="#" data-page="analytics" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Analytics</a>
+        <a href="#" data-page="rankings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Classements <span class="ml-auto badge-new">New</span></a>
       </div>
       <div>
-        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Recherche</p>
-        <a href="#" data-page="competitors" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Compétiteurs</a>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Recherche</p>
+        <a href="#" data-page="competitors" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Compétiteurs</a>
       </div>
       <div>
-        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Outils</p>
-        <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Product Sniper <span class="ml-auto text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded">Pro</span></a>
-        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Auto-Order <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
-        <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Mes Listings</a>
-        <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Title Builder</a>
-        <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Description Builder</a>
-        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">SAV <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 rounded">New</span></a>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Outils</p>
+        <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper <span class="ml-auto badge-pro">Pro</span></a>
+        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span class="ml-auto badge-new">New</span></a>
+        <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Mes Listings</a>
+        <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Title Builder</a>
+        <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Description Builder</a>
+        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">SAV <span class="ml-auto badge-new">New</span></a>
       </div>
       <div>
-        <p class="px-3 text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Compte</p>
-        <a href="#" data-page="settings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-500 hover:bg-brand-50">Paramètres</a>
+        <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Compte</p>
+        <a href="#" data-page="settings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Paramètres</a>
       </div>
     </nav>
-    <div class="p-4 border-t border-zinc-100 flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-bold">E</div>
-      <div><p class="text-sm font-medium">EBX User</p><p class="text-xs text-zinc-400">Business · illimité</p></div>
+    <div class="p-4 border-t border-white/5 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-[#ecd978]/20 text-[#f6e7a1] flex items-center justify-center text-sm font-bold">E</div>
+      <div><p class="text-sm font-medium text-slate-100">EBX User</p><p class="text-xs text-slate-500">Business · illimité</p></div>
     </div>
   </aside>
 
