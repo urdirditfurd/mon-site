@@ -190,13 +190,31 @@ function parseAliExpress($, baseUrl) {
     if (u && /\.(jpg|jpeg|png|webp)/i.test(u) && u.length > 40) images.add(u.split("?")[0]);
   });
 
+  const bullets = [];
+  $("li, .product-property-item, [class*='specification'] span, [class*='Attribute']").each((_, el) => {
+    const t = sanitizeReadableText(cleanText($(el).text()), { maxLen: 180 });
+    if (t && t.length > 12 && t.length < 180 && !bullets.includes(t)) bullets.push(t);
+  });
+  const metaDesc = sanitizeReadableText(cleanText($("meta[name='description']").attr("content") || ""), {
+    maxLen: 700,
+  });
+  if (metaDesc) {
+    metaDesc.split(/[.;|]/).forEach((part) => {
+      const p = part.trim();
+      if (p.length > 20 && p.length < 160 && bullets.length < 8) bullets.push(p);
+    });
+  }
+
   return {
     source: "aliexpress",
     title: title || "Produit AliExpress",
     price,
     currency: "EUR",
-    bullets: [],
-    description: cleanText($("meta[name='description']").attr("content") || "").slice(0, 600),
+    bullets: bullets.slice(0, 8),
+    description:
+      metaDesc ||
+      (bullets[0] ? bullets.slice(0, 3).join(". ") : "") ||
+      "Accessoire LED / électronique — modèle neuf, prêt à l'emploi.",
     images: uniqueProductImages([...images], { limit: 8 }),
     url: baseUrl,
   };
@@ -1241,10 +1259,6 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
 
 function buildHtmlFromProduct(product, themeColor = "#667eea") {
   const imgs = (product.images || []).filter(isRealProductImage).slice(0, 6);
-  const bullets = (product.bullets || []).slice(0, 6);
-  const bulletHtml = bullets.length
-    ? bullets.map((b) => `<li style="margin:0 0 6px;">${escapeHtml(b)}</li>`).join("\n")
-    : `<li>Qualité premium sélectionnée</li><li>Livraison soignée</li><li>Satisfaction client</li>`;
 
   const placeholder = `<div style="background:#f4f4f5;border-radius:14px;padding:48px 16px;text-align:center;color:#71717a;font-size:13px;">Image produit à ajouter</div>`;
   const mainImg = imgs[0]
@@ -1263,6 +1277,15 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     sanitizeReadableText(product.description) ||
     sanitizeReadableText((product.bullets || []).slice(0, 2).join(" ")) ||
     "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+  const descFull =
+    sanitizeReadableText(product.description, { maxLen: 1200 }) ||
+    whyText;
+  const bulletItems = (product.bullets || []).filter(Boolean).slice(0, 8);
+  const bulletHtml = bulletItems.length
+    ? bulletItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
+    : `<li style="margin:0 0 6px;">✔ Produit neuf, prêt à l'emploi</li>
+       <li style="margin:0 0 6px;">✔ Qualité sélectionnée pour eBay</li>
+       <li style="margin:0 0 6px;">✔ Expédition soignée</li>`;
 
   return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:16px;padding:26px 20px;text-align:center;color:#fff;margin-bottom:18px;">
@@ -1273,6 +1296,11 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     </div>
     <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(product.title)}</h1>
     <p style="font-size:13px;opacity:.9;margin:0;">Découvrez le Produit${priceLabel ? " — " + priceLabel : ""}</p>
+  </div>
+
+  <div style="background:#fafafe;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #eee;">
+    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">Description du produit</h2>
+    <p style="font-size:13px;line-height:1.75;color:#444;margin:0;white-space:pre-wrap;">${escapeHtml(descFull)}</p>
   </div>
 
   <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;margin-bottom:18px;">
@@ -1287,7 +1315,6 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
       <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">🛡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Garantie</p></div>
       <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">⚡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Expédition</p></div>
     </div>
-    <p style="font-size:13px;line-height:1.7;color:#555;margin:12px 0 0;">${escapeHtml(whyText)}</p>
   </div>
 
   <div style="margin-bottom:16px;">
@@ -1299,7 +1326,8 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     <div style="background:${themeColor};color:#fff;padding:10px 16px;font-size:13px;font-weight:600;">Caractéristiques Techniques</div>
     <div style="padding:12px 16px;font-size:12px;color:#555;line-height:1.9;">
       <div><strong>État :</strong> Neuf</div>
-      <div><strong>Source :</strong> ${escapeHtml(product.source || "marketplace")}</div>
+      <div><strong>Marque :</strong> Sans marque / générique</div>
+      <div><strong>EAN :</strong> Ne s'applique pas</div>
       ${priceLabel ? `<div><strong>Réf. prix :</strong> ${priceLabel}</div>` : ""}
     </div>
   </div>

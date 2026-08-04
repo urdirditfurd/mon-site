@@ -1269,6 +1269,26 @@ async function runManualImport() {
       seoEl.oninput = () => {
         if (lenEl) lenEl.textContent = String(seoEl.value.length);
       };
+      // Suggestions variations LED vs générique
+      const v1 = document.getElementById("manual-var-v1");
+      const v2 = document.getElementById("manual-var-v2");
+      const aspect = document.getElementById("manual-var-aspect");
+      const t = `${title} ${orig}`.toLowerCase();
+      if (v1 && v2) {
+        if (/led|bande|strip|n[eé]on|chaud|froid|kelvin/i.test(t)) {
+          if (aspect) aspect.value = "Couleur";
+          v1.value = "Blanc chaud";
+          v2.value = "Blanc froid";
+        } else if (/coque|case|silicone/i.test(t)) {
+          if (aspect) aspect.value = "Couleur";
+          v1.value = "Noir";
+          v2.value = "Transparent";
+        } else if (/cable|câble|usb|hdmi/i.test(t)) {
+          if (aspect) aspect.value = "Longueur";
+          v1.value = "1 m";
+          v2.value = "2 m";
+        }
+      }
     }
     if (lenEl) lenEl.textContent = String(title.length);
     if (thumbs) {
@@ -1310,14 +1330,33 @@ async function publishManualListing() {
         body: JSON.stringify({ seo_title: seoEl.value.trim() }),
       });
     }
+    const varEnabled = document.getElementById("manual-var-enabled")?.checked !== false;
+    const aspect = document.getElementById("manual-var-aspect")?.value.trim() || "Couleur";
+    const v1 = document.getElementById("manual-var-v1")?.value.trim() || "Blanc chaud";
+    const v2 = document.getElementById("manual-var-v2")?.value.trim() || "Blanc froid";
     setManualStep("publish");
     document.getElementById("manual-bar").style.width = "100%";
     document.getElementById("manual-pct").textContent = "100%";
-    const res = await fetch(API + "/api/publish-to-ebay/" + manualListingId, { method: "POST" });
+    const res = await fetch(API + "/api/publish-to-ebay/" + manualListingId, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        variations: {
+          enabled: varEnabled,
+          aspect,
+          values: [v1, v2].filter(Boolean),
+        },
+      }),
+    });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     document.getElementById("manual-status-label").textContent = "Publié";
-    alert("Publié sur eBay — listingId: " + (json.data?.listingId || json.listingId || "ok"));
+    const vars = (json.data?.variations?.values || []).join(" / ");
+    alert(
+      "Publié sur eBay — listingId: " +
+        (json.data?.listingId || "ok") +
+        (vars ? `\nVariations: ${vars}` : "")
+    );
     navigate("listings");
   } catch (err) {
     alert("Publication: " + err.message);

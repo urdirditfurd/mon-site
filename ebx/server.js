@@ -53,6 +53,16 @@ const {
 const { generateListing, generateSavReply } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
 
+function defaultVariantValuesForTitle(title = "") {
+  const t = String(title || "").toLowerCase();
+  if (/led|bande|strip|n[eé]on|lumineuse|blanc chaud|froid|kelvin|cct/i.test(t)) {
+    return ["Blanc chaud", "Blanc froid"];
+  }
+  if (/coque|case|housse|silicone/i.test(t)) return ["Noir", "Transparent"];
+  if (/cable|câble|usb|hdmi/i.test(t)) return ["1 m", "2 m"];
+  return ["Option A", "Option B"];
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -1802,7 +1812,11 @@ app.patch("/api/listings/:id", (req, res) => {
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
     const { seo_title, html_description } = req.body || {};
     if (seo_title != null) {
-      const title = rewriteEbayTitle(String(seo_title).slice(0, 80));
+      const title = String(seo_title)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80);
+      if (!title) return res.status(400).json({ success: false, error: "Titre vide" });
       updateListingTitle.run(title, listing.id);
       listing.seo_title = title;
     }
@@ -1947,7 +1961,12 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       console.warn("[EBX] GetUser avant publish:", err.message);
     }
     await antiBanDelay({ testMode: false, label: "publish" });
-    const result = await publishToEbay(listing, listing.id);
+    const variations = req.body?.variations || {
+      enabled: true,
+      aspect: "Couleur",
+      values: defaultVariantValuesForTitle(listing.seo_title),
+    };
+    const result = await publishToEbay(listing, listing.id, { variations });
     if (result?.listingId) {
       updateListingPublish.run(
         String(result.listingId),

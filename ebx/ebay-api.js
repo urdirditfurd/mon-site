@@ -508,22 +508,24 @@ async function hostImagesForGallery(token, sourceUrls) {
   return hosted;
 }
 
-async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
+async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, options = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`;
   const title = sanitizeEbayTitle(listing.seo_title);
-  const sourceImages = extractImageUrls(listing.html_description).slice(0, 8);
-  if (!sourceImages.length) {
-    throw new Error(
-      "Aucune image produit dans le listing HTML. Rouvre Description Builder / Auto-Snipe avec une vraie image avant de publier."
-    );
-  }
-
-  console.log(`[EBX] Hébergement galerie EPS (${sourceImages.length} image(s))…`);
-  const imageUrls = await hostImagesForGallery(token, sourceImages);
+  let imageUrls = options.imageUrls || [];
   if (!imageUrls.length) {
-    throw new Error(
-      "Impossible d'héberger les images sur eBay (Gallery). Vérifie que les images source sont accessibles."
-    );
+    const sourceImages = extractImageUrls(listing.html_description).slice(0, 8);
+    if (!sourceImages.length) {
+      throw new Error(
+        "Aucune image produit dans le listing HTML. Réimporte le produit avec de vraies images avant de publier."
+      );
+    }
+    console.log(`[EBX] Hébergement galerie EPS (${sourceImages.length} image(s))…`);
+    imageUrls = await hostImagesForGallery(token, sourceImages);
+    if (!imageUrls.length) {
+      throw new Error(
+        "Impossible d'héberger les images sur eBay (Gallery). Vérifie que les images source sont accessibles."
+      );
+    }
   }
 
   // product.description Inventory API : max 4000 car. (erreur 25718)
@@ -541,9 +543,14 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
     .replace(/\s+/g, " ")
     .trim();
   const shortDesc = (plain || title).slice(0, 4000);
-  const mergedAspects = sanitizeAspects({ Brand: ["Unbranded"], ...aspects });
+  const mergedAspects = sanitizeAspects({
+    Brand: ["Unbranded"],
+    EAN: ["Does not apply"],
+    MPN: ["Does not apply"],
+    ...aspects,
+  });
+  const ean = options.ean || ["Does not apply"];
 
-  // Tentative 1 : payload complet — tentatives suivantes : simplifié (anti 25001)
   const attempts = [
     {
       label: "full",
@@ -551,10 +558,12 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
         availability: { shipToLocationAvailability: { quantity: 10 } },
         condition: "NEW",
         product: {
-          title,
+          title: options.variantLabel ? `${title} — ${options.variantLabel}`.slice(0, 80) : title,
           description: shortDesc,
           aspects: mergedAspects,
           imageUrls,
+          ean,
+          upc: ["Does not apply"],
         },
       },
     },
@@ -565,20 +574,15 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
         condition: "NEW",
         product: {
           title,
-          aspects: { Brand: mergedAspects.Brand || ["Unbranded"] },
+          aspects: {
+            Brand: mergedAspects.Brand || ["Unbranded"],
+            EAN: ["Does not apply"],
+            ...(aspects && Object.keys(aspects).length
+              ? Object.fromEntries(Object.entries(aspects).slice(0, 3))
+              : {}),
+          },
           imageUrls: imageUrls.slice(0, 1),
-        },
-      },
-    },
-    {
-      label: "minimal-retry",
-      body: {
-        availability: { shipToLocationAvailability: { quantity: 5 } },
-        condition: "NEW",
-        product: {
-          title: title.slice(0, 60),
-          aspects: { Brand: ["Unbranded"] },
-          imageUrls: imageUrls.slice(0, 1),
+          ean: ["Does not apply"],
         },
       },
     },
@@ -608,20 +612,11 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}) {
 
     lastErr = `Inventory API error (${res.status}) [locale=${res.locale}]: ${res.text}`;
     console.warn(`[EBX] Inventory ${label} fail: ${res.text.slice(0, 240)}`);
-
-    if (!isInventoryTransientError(res.status, res.text) && label === "full") {
-      // Erreur métier claire → pas la peine de retenter le même payload
-      continue;
-    }
-    if (!isInventoryTransientError(res.status, res.text) && i === attempts.length - 1) {
-      break;
-    }
   }
 
   throw new Error(
     lastErr +
-      "\n→ Erreur 25001 eBay (souvent temporaire). Réessaie dans 1–2 min. " +
-      "Sinon vérifie Paramètres → Compte vendeur, et que le compte peut vendre sur EBAY_US."
+      "\n→ Erreur Inventory eBay. Réessaie dans 1–2 min. Vérifie Marque/EAN/catégorie."
   );
 }
 
@@ -759,7 +754,16 @@ function guessAspectValue(aspectName, title, allowedValues) {
     for (const b of brands) {
       if (new RegExp(`\\b${b}\\b`, "i").test(t)) return pickAllowed(b);
     }
-    return pickAllowed("Unbranded", "Does not apply", "Generic");
+    return pickAllowed("Unbranded", "Generic", "Does not apply", "Sans marque");
+  }
+  if (/^ean$|gtin|upc|isbn|epid/.test(name)) {
+    return pickAllowed("Does not apply", "Ne s'applique pas", "Non applicable");
+  }
+  if (/^mpn$|manufacturer part|num[eé]ro de pi[eè]ce/.test(name)) {
+    return pickAllowed("Does not apply", "Ne s'applique pas");
+  }
+  if (/type de produit|product type|type$/.test(name) && /led|bande|strip/i.test(t)) {
+    return pickAllowed("LED Strip", "Light Strip", "Éclairage", allowedValues?.[0]);
   }
   if (/storage|capacity|capacite/.test(name)) {
     const m = t.match(/\b(32|64|128|256|512)\s*GB\b/i) || t.match(/\b(1|2)\s*TB\b/i);
@@ -795,16 +799,32 @@ function guessAspectValue(aspectName, title, allowedValues) {
 async function buildAspectsForCategory(token, categoryId, title) {
   const required = await fetchRequiredAspectNames(token, categoryId);
   const aspects = {};
+  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
 
-  // Toujours utiles
-  aspects.Brand = [guessAspectValue("Brand", title, ["Apple", "Samsung", "Unbranded"])];
+  // Toujours renseigner Marque + identifiants (eBay les demande souvent)
+  aspects.Brand = [
+    guessAspectValue("Brand", title, isFr ? ["Unbranded", "Sans marque", "Generic"] : ["Unbranded", "Generic"]),
+  ];
+  aspects.EAN = ["Does not apply"];
+  aspects.MPN = ["Does not apply"];
 
   for (const asp of required) {
-    const value = guessAspectValue(asp.name, title, asp.values);
-    aspects[asp.name] = [value];
+    const key = asp.name;
+    if (/^brand$|marque/i.test(key)) {
+      aspects[key] = aspects.Brand;
+      continue;
+    }
+    if (/ean|gtin|upc|isbn/i.test(key)) {
+      aspects[key] = ["Does not apply"];
+      continue;
+    }
+    if (/^mpn$/i.test(key)) {
+      aspects[key] = ["Does not apply"];
+      continue;
+    }
+    aspects[key] = [guessAspectValue(asp.name, title, asp.values)];
   }
 
-  // Filet de sécurité connu pour tablettes / iPad
   if (/ipad|tablet|tab\b/i.test(title) && !aspects["Internet Connectivity"]) {
     aspects["Internet Connectivity"] = [/cellular|5g|4g/i.test(title) ? "Wi-Fi + Cellular" : "Wi-Fi"];
   }
@@ -813,11 +833,53 @@ async function buildAspectsForCategory(token, categoryId, title) {
   return aspects;
 }
 
+function defaultVariantValues(title = "") {
+  const t = String(title || "").toLowerCase();
+  if (/led|bande|strip|n[eé]on|lumineuse|blanc chaud|froid|kelvin|cct/i.test(t)) {
+    return ["Blanc chaud", "Blanc froid"];
+  }
+  if (/coque|case|housse|silicone/i.test(t)) return ["Noir", "Transparent"];
+  if (/cable|câble|usb|hdmi/i.test(t)) return ["1 m", "2 m"];
+  return ["Option A", "Option B"];
+}
+
+function normalizeVariations(input, title) {
+  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
+  const aspect = String(input?.aspect || (isFr ? "Couleur" : "Color")).trim() || (isFr ? "Couleur" : "Color");
+  let values = (input?.values || []).map((v) => String(v).trim()).filter(Boolean);
+  if (values.length < 2) values = defaultVariantValues(title);
+  // eBay exige au moins 2 variantes distinctes
+  const uniq = [...new Set(values)].slice(0, 6);
+  while (uniq.length < 2) uniq.push(`Variante ${uniq.length + 1}`);
+  return { aspect, values: uniq, enabled: input?.enabled !== false };
+}
+
+async function createOrReplaceInventoryItemGroup(token, groupKey, payload) {
+  const url = `${ebayApiBase()}/sell/inventory/v1/inventory_item_group/${encodeURIComponent(groupKey)}`;
+  const res = await ebayHttpsRequest("PUT", url, { token, body: payload, contentLanguage: true });
+  if (res.status !== 204 && res.status !== 200 && res.status !== 201) {
+    throw new Error(`Inventory item group error (${res.status}): ${res.text.slice(0, 400)}`);
+  }
+  return groupKey;
+}
+
+async function publishByInventoryItemGroup(token, groupKey) {
+  const url = `${ebayApiBase()}/sell/inventory/v1/offer/publish_by_inventory_item_group`;
+  const body = {
+    inventoryItemGroupKey: groupKey,
+    marketplaceId: env("EBAY_MARKETPLACE_ID", "EBAY_US"),
+  };
+  const res = await ebayHttpsRequest("POST", url, { token, body, contentLanguage: true });
+  const data = res.json();
+  if (!res.ok) {
+    throw new Error(`Publish group error (${res.status}): ${JSON.stringify(data)}`);
+  }
+  return { listingId: data.listingId, status: "published" };
+}
+
 async function createOffer(token, sku, listing, categoryId, merchantLocationKey) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
-
   const listingHtml = String(listing.html_description || listing.seo_title || "EBX Product").slice(0, 490000);
-
   const body = {
     sku,
     marketplaceId: process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
@@ -831,48 +893,25 @@ async function createOffer(token, sku, listing, categoryId, merchantLocationKey)
       },
     },
     categoryId,
-    merchantLocationKey: merchantLocationKey || env("EBAY_MERCHANT_LOCATION_KEY") || (process.env.EBAY_MARKETPLACE_ID === "EBAY_FR" ? "ebx_fr_wh" : "ebx_us_wh"),
+    merchantLocationKey:
+      merchantLocationKey ||
+      env("EBAY_MERCHANT_LOCATION_KEY") ||
+      (process.env.EBAY_MARKETPLACE_ID === "EBAY_FR" ? "ebx_fr_wh" : "ebx_us_wh"),
     listingPolicies: {
       fulfillmentPolicyId: ebayFulfillmentPolicyId(),
       paymentPolicyId: ebayPaymentPolicyId(),
       returnPolicyId: ebayReturnPolicyId(),
     },
   };
-
-  const res = await ebayHttpsRequest("POST", url, {
-    token,
-    body,
-    contentLanguage: true,
-  });
-
+  const res = await ebayHttpsRequest("POST", url, { token, body, contentLanguage: true });
   const data = res.json();
-
   if (!res.ok) {
     throw new Error(`Offer API error (${res.status}) [locale=${res.locale}]: ${JSON.stringify(data)}`);
   }
-
   return { offerId: data.offerId, status: "offer_created" };
 }
 
-async function publishOffer(token, offerId) {
-  const url = `${ebayApiBase()}/sell/inventory/v1/offer/${offerId}/publish`;
-
-  const res = await ebayHttpsRequest("POST", url, {
-    token,
-    body: {},
-    contentLanguage: true,
-  });
-
-  const data = res.json();
-
-  if (!res.ok) {
-    throw new Error(`Publish error (${res.status}) [locale=${res.locale}]: ${JSON.stringify(data)}`);
-  }
-
-  return { listingId: data.listingId, status: "published" };
-}
-
-async function publishToEbay(listing, listingDbId) {
+async function publishToEbay(listing, listingDbId, options = {}) {
   loadEbayEnv();
   const missing = [];
   if (!ebayFulfillmentPolicyId()) missing.push(isProduction() ? "EBAY_FULFILLMENT_POLICY_ID_PROD" : "EBAY_FULFILLMENT_POLICY_ID");
@@ -886,21 +925,76 @@ async function publishToEbay(listing, listingDbId) {
   }
 
   const token = await getAccessToken();
-  const sku = `EBX-${listingDbId}-${Date.now()}`;
   const title = listing.seo_title || "EBX Product";
   const categoryId = await resolveCategoryId(token, title);
-  const aspects = await buildAspectsForCategory(token, categoryId, title);
+  const baseAspects = await buildAspectsForCategory(token, categoryId, title);
+  const locationKey = await ensureInventoryLocation(token);
+  const variations = normalizeVariations(options.variations, title);
 
   console.log(
-    `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) SKU=${sku} locale=${ebayMarketplaceLocale()} market=${env("EBAY_MARKETPLACE_ID", "EBAY_US")} category=${categoryId}`
+    `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) locale=${ebayMarketplaceLocale()} market=${env(
+      "EBAY_MARKETPLACE_ID",
+      "EBAY_US"
+    )} category=${categoryId} variations=${variations.values.join("|")}`
   );
 
-  const locationKey = await ensureInventoryLocation(token);
-  await createOrReplaceInventoryItem(token, sku, listing, aspects);
-  const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
-  const { listingId } = await publishOffer(token, offerId);
+  // Toujours publier en variations (≥2) — sinon eBay refuse d'ajouter des variantes après coup
+  const stamp = Date.now();
+  const groupKey = `EBX-G-${listingDbId}-${stamp}`;
+  const skus = [];
+  let firstOfferId = null;
+  let hostedImages = [];
 
-  return { sku, offerId, listingId, status: "published", categoryId, env: isProduction() ? "production" : "sandbox" };
+  for (let i = 0; i < variations.values.length; i++) {
+    const value = variations.values[i];
+    const sku = `EBX-${listingDbId}-V${i + 1}-${stamp}`;
+    const aspects = sanitizeAspects({
+      ...baseAspects,
+      [variations.aspect]: [value],
+      Brand: baseAspects.Brand || ["Unbranded"],
+      EAN: ["Does not apply"],
+      MPN: ["Does not apply"],
+    });
+    const inv = await createOrReplaceInventoryItem(token, sku, listing, aspects, {
+      ean: ["Does not apply"],
+      variantLabel: value,
+      imageUrls: hostedImages.length ? hostedImages : undefined,
+    });
+    if (inv.imageUrls?.length) hostedImages = inv.imageUrls;
+    skus.push(sku);
+    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
+    if (!firstOfferId) firstOfferId = offerId;
+  }
+
+  const groupBody = {
+    inventoryItemGroupKey: groupKey,
+    variantSKUs: skus,
+    title: sanitizeEbayTitle(title),
+    description: String(listing.html_description || title).slice(0, 490000),
+    imageUrls: hostedImages.slice(0, 8),
+    variesBy: {
+      specifications: [
+        {
+          name: variations.aspect,
+          values: variations.values,
+        },
+      ],
+    },
+  };
+  await createOrReplaceInventoryItemGroup(token, groupKey, groupBody);
+  const { listingId } = await publishByInventoryItemGroup(token, groupKey);
+
+  return {
+    sku: skus[0],
+    skus,
+    groupKey,
+    offerId: firstOfferId,
+    listingId,
+    status: "published",
+    categoryId,
+    variations,
+    env: isProduction() ? "production" : "sandbox",
+  };
 }
 
 /**
