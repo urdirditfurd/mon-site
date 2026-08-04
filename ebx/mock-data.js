@@ -97,6 +97,7 @@ function analyzeCompetitor(sellerName) {
     price: +(8 + rand() * 35).toFixed(2),
     sold: Math.floor(50 + rand() * 600 - i * 40),
     url: `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(title)}`,
+    image: null, // enrichi côté server via product-images
   }));
 
   return {

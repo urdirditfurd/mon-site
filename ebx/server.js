@@ -22,6 +22,11 @@ const {
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
 const {
+  enrichItemsImages,
+  withProductImage,
+  nicheVisual,
+} = require("./product-images");
+const {
   antiBanDelay,
   scanVero,
   scoreSeoTitle,
@@ -426,31 +431,39 @@ app.get("/api/dashboard", async (_req, res) => {
         try {
           const r = await browseSearch(q, { marketplace: "FR", limit: 2 });
           (r.items || []).forEach((it) =>
-            trending.push({
-              title: it.title,
-              price: it.price || 0,
-              sold: it.sold || Math.round(40 + Math.random() * 400),
-              url: it.url,
-              image: it.image || null,
-              category: q,
-            })
+            trending.push(
+              withProductImage({
+                title: it.title,
+                price: it.price || 0,
+                sold: it.sold || Math.round(40 + Math.random() * 400),
+                url: it.url,
+                image: it.image || null,
+                category: q,
+              })
+            )
           );
         } catch (_) {}
       }
       rankingsLive = trending.length > 0;
     } catch (_) {}
     if (!trending.length) {
-      trending = getRankings("FR").slice(0, 8).map((p) => ({
-        title: p.title,
-        price: p.price,
-        sold: p.sold,
-        url: null,
-        image: null,
-        category: p.category,
-      }));
+      trending = getRankings("FR").slice(0, 8).map((p) =>
+        withProductImage({
+          title: p.title,
+          price: p.price,
+          sold: p.sold,
+          url: null,
+          image: p.image || null,
+          category: p.category,
+        })
+      );
     }
+    trending = enrichItemsImages(trending);
     const calendar = getEventCalendar();
-    const niches = getTrendingNiches(trending);
+    const niches = getTrendingNiches(trending).map((n) => {
+      const v = nicheVisual(n.name);
+      return { ...n, icon: n.icon || v.icon, image: v.image, color: v.color };
+    });
     const topSellers = getTopSellers("FR");
     const marketPulse = getMarketPulse(trending);
     const savOpen = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived").length;
@@ -567,18 +580,20 @@ app.get("/api/rankings", async (req, res) => {
       } catch (_) {}
     }
     if (all.length) {
-      const data = all.slice(0, 12).map((p, i) => ({
-        rank: i + 1,
-        title: p.title,
-        category: p.seed || "eBay",
-        price: p.price || 0,
-        sold: p.sold || Math.round(20 + Math.random() * 200),
-        marketplace,
-        trend: i % 3 === 0 ? "up" : i % 3 === 1 ? "stable" : "down",
-        url: p.url,
-        image: p.image || null,
-        live: true,
-      }));
+      const data = enrichItemsImages(
+        all.slice(0, 12).map((p, i) => ({
+          rank: i + 1,
+          title: p.title,
+          category: p.seed || "eBay",
+          price: p.price || 0,
+          sold: p.sold || Math.round(20 + Math.random() * 200),
+          marketplace,
+          trend: i % 3 === 0 ? "up" : i % 3 === 1 ? "stable" : "down",
+          url: p.url,
+          image: p.image || null,
+          live: true,
+        }))
+      );
       return res.json({ success: true, data, live: true, source: "ebay-browse-api" });
     }
   } catch (err) {
@@ -586,15 +601,18 @@ app.get("/api/rankings", async (req, res) => {
   }
   try {
     const live = await scrapeRankings({ marketplace });
-    if (live.length) return res.json({ success: true, data: live, live: true, source: "scrape" });
+    if (live.length)
+      return res.json({ success: true, data: enrichItemsImages(live), live: true, source: "scrape" });
   } catch (err) {
     console.warn("[EBX] rankings scrape fail:", err.message);
   }
-  const mock = getRankings(marketplace).map((p) => ({
-    ...p,
-    image: null,
-    url: `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(p.title)}`,
-  }));
+  const mock = enrichItemsImages(
+    getRankings(marketplace).map((p) => ({
+      ...p,
+      image: null,
+      url: `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(p.title)}`,
+    }))
+  );
   res.json({ success: true, data: mock, live: false, source: "mock" });
 });
 
@@ -698,6 +716,9 @@ app.post("/api/competitors", async (req, res) => {
     }
 
     data._pipeline = attempts.join("→");
+    if (Array.isArray(data.bestsellers)) {
+      data.bestsellers = enrichItemsImages(data.bestsellers);
+    }
     insertCompetitor.run(seller, JSON.stringify(data));
     res.json({ success: true, data });
   } catch (err) {
@@ -718,6 +739,9 @@ app.get("/api/competitors/history/:id", (req, res) => {
     const row = getCompetitorById.get(req.params.id);
     if (!row) return res.status(404).json({ success: false, error: "Introuvable" });
     const data = JSON.parse(row.payload || "{}");
+    if (Array.isArray(data.bestsellers)) {
+      data.bestsellers = enrichItemsImages(data.bestsellers);
+    }
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -787,8 +811,10 @@ app.get("/api/bot-status", (_req, res) => {
         listings,
         published,
         label: cfg.autoOrderMode
-          ? `Bot actif ${cfg.processedToday || 0}/${cfg.maxPerDay || 50}`
-          : `Bot off · ${pending} en attente`,
+          ? `Bot Auto-Order actif ${cfg.processedToday || 0}/${cfg.maxPerDay || 50}`
+          : pending > 0
+            ? `Auto-Order off · ${pending} commande(s) en attente`
+            : "Auto-Order off",
       },
     });
   } catch (err) {

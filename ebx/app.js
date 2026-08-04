@@ -133,10 +133,14 @@ async function refreshBotStatus() {
     const res = await fetch(API + "/api/bot-status");
     const json = await res.json();
     const d = json.data || {};
-    el.textContent = d.label || "Bot";
+    el.textContent = d.label || "Auto-Order";
+    el.title = d.autoOrderMode
+      ? "Bot Auto-Order activé — traite la file de commandes"
+      : "Bot Auto-Order désactivé — active-le dans Auto-Order. « En attente » = commandes pending.";
     el.className = d.autoOrderMode
-      ? "text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-semibold"
-      : "text-xs bg-[#6d7ddf]/15 text-[#4452a8] px-2.5 py-1 rounded-full font-semibold";
+      ? "text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-semibold cursor-pointer"
+      : "text-xs bg-[#6d7ddf]/15 text-[#4452a8] px-2.5 py-1 rounded-full font-semibold cursor-pointer";
+    el.onclick = () => navigate("auto-order");
   } catch (_) {}
 }
 
@@ -160,6 +164,17 @@ function formatCaShort(n) {
   const v = Number(n) || 0;
   if (v >= 1000) return Math.round(v / 1000) + "k €";
   return formatEuro(v, 0);
+}
+
+function productThumbHtml(image, title, sizeClass = "w-12 h-12") {
+  const src = image || "";
+  const letter = escapeHtml(String(title || "?").slice(0, 1).toUpperCase());
+  const fallback = `<div class="${sizeClass} rounded-lg bg-lunar-200 flex items-center justify-center text-sm font-bold text-[#4452a8]">${letter}</div>`;
+  if (!src) return fallback;
+  // referrerpolicy: eBay/Amazon bloquent souvent le hotlink sinon (carrés gris)
+  return `<img src="${escapeHtml(
+    src
+  )}" alt="" loading="lazy" referrerpolicy="no-referrer" class="${sizeClass} rounded-lg object-cover bg-zinc-100" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${sizeClass} rounded-lg bg-lunar-200 flex items-center justify-center text-sm font-bold text-[#4452a8]',textContent:'${letter}'}))" />`;
 }
 
 function bindDashboardCalendarControls() {
@@ -388,9 +403,7 @@ async function loadDashboard() {
           .slice(0, 8)
           .map((t, i) => {
             const ca = t.ca != null ? t.ca : Math.round((Number(t.price) || 0) * (Number(t.sold) || 0));
-            const img = t.image
-              ? `<img src="${escapeHtml(t.image)}" alt="" class="w-10 h-10 rounded-lg object-cover bg-zinc-100" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-10 h-10 rounded-lg bg-lunar-200'}))" />`
-              : `<div class="w-10 h-10 rounded-lg bg-lunar-200 flex items-center justify-center text-xs text-zinc-400">📦</div>`;
+            const img = productThumbHtml(t.image, t.title, "w-10 h-10");
             const title = t.url
               ? `<a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="font-medium text-[#4452a8] hover:underline line-clamp-2 leading-snug">${escapeHtml(
                   t.title
@@ -416,9 +429,14 @@ async function loadDashboard() {
     const niches = d.niches || [];
     nicheBox.innerHTML = niches.length
       ? niches
-          .map(
-            (n) => `<div class="flex items-center gap-2.5">
-            <span class="w-8 h-8 rounded-lg bg-lunar-100 flex items-center justify-center text-sm shrink-0">${n.icon || "📈"}</span>
+          .map((n) => {
+            const thumb = n.image
+              ? `<img src="${escapeHtml(n.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-9 h-9 rounded-lg object-cover" onerror="this.style.display='none'" />`
+              : "";
+            return `<div class="flex items-center gap-2.5">
+            <span class="w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0 overflow-hidden" style="background:${escapeHtml(
+              n.color || "#e6e6fa"
+            )}">${thumb || n.icon || "📈"}</span>
             <div class="min-w-0 flex-1">
               <p class="text-sm font-medium truncate">${escapeHtml(n.name)}</p>
               <p class="text-[11px] text-zinc-400">${escapeHtml(n.caLabel || "")} CA</p>
@@ -426,8 +444,8 @@ async function loadDashboard() {
             <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">+${
               n.growth
             }%</span>
-          </div>`
-          )
+          </div>`;
+          })
           .join("")
       : `<p class="text-zinc-400 text-sm">—</p>`;
   }
@@ -539,9 +557,7 @@ async function loadRankings() {
       const sold = Math.max(1, Math.round((p.sold || 10) * factor));
       const price = Number(p.price || 0);
       const oldPrice = price > 0 ? (price * 1.35).toFixed(2) : null;
-      const img = p.image
-        ? `<img src="${escapeHtml(p.image)}" class="w-14 h-14 rounded-lg object-cover bg-zinc-100" alt="" />`
-        : `<div class="w-14 h-14 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-300 text-xs">—</div>`;
+      const img = productThumbHtml(p.image, p.title, "w-14 h-14");
       const rankClass = rank <= 3 ? `rank-${rank}` : "text-zinc-400";
       const href = p.url || "#";
       return `<a href="${escapeHtml(href)}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50 transition">
@@ -701,9 +717,7 @@ function renderCompetitor(d) {
       .map((b, i) => {
         const sold = Math.max(1, Math.round((b.sold || 5) * f));
         const price = Number(b.price || 0);
-        const img = b.image
-          ? `<img src="${escapeHtml(b.image)}" class="w-12 h-12 rounded-lg object-cover bg-zinc-100" alt="" />`
-          : `<div class="w-12 h-12 rounded-lg bg-zinc-100"></div>`;
+        const img = productThumbHtml(b.image, b.title, "w-12 h-12");
         return `<a href="${escapeHtml(b.url || "#")}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50">
           <span class="w-6 font-bold text-emerald-600">${i + 1}</span>
           ${img}
