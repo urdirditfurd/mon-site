@@ -326,8 +326,11 @@ function isInventoryTransientError(status, text) {
 }
 
 async function ensureInventoryLocation(token) {
-  // Évite la clé "default" parfois corrompue / réservée en Prod
-  const key = env("EBAY_MERCHANT_LOCATION_KEY", "ebx_us_wh");
+  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const isFr = market === "EBAY_FR";
+  // Évite la clé "default" ; FR ≠ US (sinon shipping policy FR vs entrepôt US = erreurs)
+  const key =
+    env("EBAY_MERCHANT_LOCATION_KEY") || (isFr ? "ebx_fr_wh" : "ebx_us_wh");
   const getUrl = `${ebayApiBase()}/sell/inventory/v1/location/${encodeURIComponent(key)}`;
 
   const existing = await ebayHttpsRequest("GET", getUrl, { token });
@@ -337,20 +340,35 @@ async function ensureInventoryLocation(token) {
   }
 
   const createUrl = `${ebayApiBase()}/sell/inventory/v1/location/${encodeURIComponent(key)}`;
-  const body = {
-    name: "EBX Warehouse US",
-    merchantLocationStatus: "ENABLED",
-    location: {
-      address: {
-        addressLine1: "2121 41st Ave",
-        city: "San Francisco",
-        stateOrProvince: "CA",
-        postalCode: "94116",
-        country: "US",
-      },
-    },
-    locationTypes: ["WAREHOUSE"],
-  };
+  const body = isFr
+    ? {
+        name: "EBX Entrepot FR",
+        merchantLocationStatus: "ENABLED",
+        location: {
+          address: {
+            addressLine1: "10 Rue de Rivoli",
+            city: "Paris",
+            stateOrProvince: "IDF",
+            postalCode: "75001",
+            country: "FR",
+          },
+        },
+        locationTypes: ["WAREHOUSE"],
+      }
+    : {
+        name: "EBX Warehouse US",
+        merchantLocationStatus: "ENABLED",
+        location: {
+          address: {
+            addressLine1: "2121 41st Ave",
+            city: "San Francisco",
+            stateOrProvince: "CA",
+            postalCode: "94116",
+            country: "US",
+          },
+        },
+        locationTypes: ["WAREHOUSE"],
+      };
 
   // Location API : pas de Content-Language (évite des 500 parasites)
   const res = await ebayHttpsRequest("POST", createUrl, {
@@ -813,7 +831,7 @@ async function createOffer(token, sku, listing, categoryId, merchantLocationKey)
       },
     },
     categoryId,
-    merchantLocationKey: merchantLocationKey || env("EBAY_MERCHANT_LOCATION_KEY", "ebx_us_wh"),
+    merchantLocationKey: merchantLocationKey || env("EBAY_MERCHANT_LOCATION_KEY") || (process.env.EBAY_MARKETPLACE_ID === "EBAY_FR" ? "ebx_fr_wh" : "ebx_us_wh"),
     listingPolicies: {
       fulfillmentPolicyId: ebayFulfillmentPolicyId(),
       paymentPolicyId: ebayPaymentPolicyId(),

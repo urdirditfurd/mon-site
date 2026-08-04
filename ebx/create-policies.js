@@ -92,27 +92,51 @@ function shippingAttemptsForMarketplace(market) {
   if (market === "EBAY_FR") {
     return [
       {
-        label: "FR_Colissimo",
-        shippingCarrierCode: "La Poste",
-        shippingServiceCode: "FR_Colissimo",
+        label: "FR_ColiposteColissimo",
+        shippingCarrierCode: "Colissimo",
+        shippingServiceCode: "FR_ColiposteColissimo",
         shippingCost: { value: "4.90", currency: "EUR" },
         additionalShippingCost: { value: "2.00", currency: "EUR" },
         freeShipping: false,
       },
       {
-        label: "FR_Chronoposte",
+        label: "FR_ColiposteColissimoRecommended",
+        shippingCarrierCode: "Colissimo",
+        shippingServiceCode: "FR_ColiposteColissimoRecommended",
+        shippingCost: { value: "5.90", currency: "EUR" },
+        additionalShippingCost: { value: "2.00", currency: "EUR" },
+        freeShipping: false,
+      },
+      {
+        label: "FR_ColiposteColissimo free",
+        shippingCarrierCode: "Colissimo",
+        shippingServiceCode: "FR_ColiposteColissimo",
+        shippingCost: { value: "0.0", currency: "EUR" },
+        additionalShippingCost: { value: "0.0", currency: "EUR" },
+        freeShipping: true,
+      },
+      {
+        label: "FR_PostOfficeLetterFollowed",
+        shippingCarrierCode: "La Poste",
+        shippingServiceCode: "FR_PostOfficeLetterFollowed",
+        shippingCost: { value: "3.50", currency: "EUR" },
+        additionalShippingCost: { value: "1.00", currency: "EUR" },
+        freeShipping: false,
+      },
+      {
+        label: "FR_ChronopostChrono13",
         shippingCarrierCode: "Chronopost",
-        shippingServiceCode: "FR_Chronoposte",
-        shippingCost: { value: "9.90", currency: "EUR" },
+        shippingServiceCode: "FR_ChronopostChrono13",
+        shippingCost: { value: "12.90", currency: "EUR" },
         additionalShippingCost: { value: "3.00", currency: "EUR" },
         freeShipping: false,
       },
       {
-        label: "Other FR",
-        shippingCarrierCode: "Other",
-        shippingServiceCode: "Other",
-        shippingCost: { value: "4.90", currency },
-        additionalShippingCost: { value: "2.00", currency },
+        label: "FR_ColiposteColissimo no-carrier",
+        shippingCarrierCode: null,
+        shippingServiceCode: "FR_ColiposteColissimo",
+        shippingCost: { value: "4.90", currency: "EUR" },
+        additionalShippingCost: { value: "2.00", currency: "EUR" },
         freeShipping: false,
       },
     ];
@@ -213,31 +237,30 @@ async function optIn(token) {
 
 function buildFulfillmentBody(market, ship, nameSuffix) {
   const country = shipToCountry(market);
+  const service = {
+    sortOrder: 1,
+    shippingServiceCode: ship.shippingServiceCode,
+    shippingCost: ship.shippingCost,
+    additionalShippingCost: ship.additionalShippingCost,
+    freeShipping: Boolean(ship.freeShipping),
+    buyerResponsibleForShipping: false,
+  };
+  if (ship.shippingCarrierCode) {
+    service.shippingCarrierCode = ship.shippingCarrierCode;
+  }
   return {
     name: `EBX Shipping ${ship.label || ship.shippingServiceCode} ${nameSuffix}`.slice(0, 60),
     marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-    handlingTime: { value: 1, unit: "DAY" },
-    shipToLocations: {
-      regionIncluded: [{ regionName: country, regionType: "COUNTRY" }],
-    },
+    handlingTime: { value: 2, unit: "DAY" },
+    localPickup: false,
+    freightShipping: false,
+    globalShipping: false,
     shippingOptions: [
       {
         optionType: "DOMESTIC",
         costType: "FLAT_RATE",
-        shippingServices: [
-          {
-            sortOrder: 1,
-            shippingCarrierCode: ship.shippingCarrierCode,
-            shippingServiceCode: ship.shippingServiceCode,
-            shippingCost: ship.shippingCost,
-            additionalShippingCost: ship.additionalShippingCost,
-            freeShipping: Boolean(ship.freeShipping),
-            shipToLocations: {
-              regionIncluded: [{ regionName: country, regionType: "COUNTRY" }],
-            },
-          },
-        ],
+        shippingServices: [service],
       },
     ],
   };
@@ -282,6 +305,13 @@ async function createFulfillmentPolicy(token) {
     token
   );
   const policies = list.data?.fulfillmentPolicies || [];
+  if (policies.length) {
+    console.log(`  ℹ️  ${policies.length} fulfillment policy(ies) déjà sur le compte ${market}:`);
+    for (const p of policies) {
+      const shipOk = policyHasShipping(p) ? "shipping OK" : "sans shipping";
+      console.log(`     - ${p.fulfillmentPolicyId} | ${p.name || "?"} | ${shipOk}`);
+    }
+  }
   const withShip = policies.find(policyHasShipping);
   if (withShip) {
     console.log("  ✅ Existing Fulfillment Policy ID:", withShip.fulfillmentPolicyId);
@@ -289,7 +319,10 @@ async function createFulfillmentPolicy(token) {
   }
   console.error("  ❌ Aucune fulfillment policy valide. Dernière erreur:", JSON.stringify(lastErr));
   console.error(
-    "  → Si ton compte est en France, mets EBAY_MARKETPLACE_ID=EBAY_FR et EBAY_CURRENCY=EUR puis relance."
+    "  → Solution manuelle : eBay → Paramètres vendeur → Politiques → Livraison → crée une policy France (Colissimo),"
+  );
+  console.error(
+    "    puis récupère l'ID via ce script (liste ci-dessus) ou dans l'URL / l'API, et mets EBAY_FULFILLMENT_POLICY_ID_PROD=..."
   );
   return null;
 }
