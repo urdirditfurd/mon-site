@@ -467,6 +467,22 @@
             </div>
             <ul id="manual-checklist" class="text-sm space-y-1.5"></ul>
             <div id="manual-ready" class="hidden rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-800 px-4 py-3 text-sm font-medium"></div>
+            <div id="manual-review" class="hidden space-y-3 border-t border-zinc-100 pt-4">
+              <p class="text-xs text-zinc-500">Mode discret — titre réécrit (pas le titre Ali/Amazon). Tu peux encore l’éditer avant publication.</p>
+              <div>
+                <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Titre fournisseur (original)</label>
+                <p id="manual-orig-title" class="text-xs text-zinc-400 line-through mt-0.5"></p>
+              </div>
+              <div>
+                <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Titre eBay optimisé</label>
+                <input id="manual-seo-title" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm font-medium" maxlength="80" />
+                <p class="text-[10px] text-zinc-400 mt-1"><span id="manual-title-len">0</span>/80</p>
+              </div>
+              <div>
+                <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Aperçu images (ordre modifié pour plus de discrétion)</label>
+                <div id="manual-thumbs" class="flex gap-2 flex-wrap mt-2"></div>
+              </div>
+            </div>
             <div class="flex gap-2">
               <button onclick="publishManualListing()" id="manual-publish-btn" class="btn-primary hidden">Publier sur eBay</button>
               <button onclick="navigate('listings')" class="text-sm px-3 py-2 border rounded-xl">Voir Mes Listings</button>

@@ -31,6 +31,8 @@ const {
   scanVero,
   scoreSeoTitle,
   buildAiTitle,
+  prepareDiscreetListing,
+  rewriteEbayTitle,
   estimateMargin,
   buildPilotageFeed,
   getEventCalendar,
@@ -1625,14 +1627,11 @@ app.post("/api/generate-listing", async (req, res) => {
       try {
         scraped = await scrapeProduct(productUrl);
         scraped.images = (scraped.images || []).filter(isRealProductImage);
+        const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8 });
         listing = {
-          product_name: scraped.title,
-          seo_title: `${scraped.title}`.slice(0, 80),
-          suggested_price: scraped.price ? Number((scraped.price * 1.8).toFixed(2)) : 29.99,
-          html_description: buildHtmlFromProduct(scraped, themeColor || "#667eea"),
-          images: scraped.images,
+          ...discreet,
+          html_description: buildHtmlFromProduct(discreet.product, themeColor || "#667eea"),
           source: scraped.source,
-          product: scraped,
           live: true,
         };
       } catch (scrapeErr) {
@@ -1640,8 +1639,12 @@ app.post("/api/generate-listing", async (req, res) => {
         listing = buildDescriptionFromUrl(productUrl, themeColor || "#667eea");
         listing.live = false;
         listing.scrape_error = scrapeErr.message;
+        listing.original_title = listing.product_name || listing.seo_title;
+        listing.seo_title = rewriteEbayTitle(listing.seo_title || listing.product_name || "Produit");
+        listing.title_rewritten = true;
         listing.product = {
-          title: listing.product_name || listing.seo_title,
+          title: listing.seo_title,
+          originalTitle: listing.original_title,
           images: listing.images || [],
           bullets: [],
           description: "",
@@ -1649,27 +1652,31 @@ app.post("/api/generate-listing", async (req, res) => {
           source: "fallback",
           url: productUrl,
         };
+        listing.html_description = buildHtmlFromProduct(listing.product, themeColor || "#667eea");
       }
 
-      // Enrichissement LLM optionnel
+      // Enrichissement LLM optionnel (titre encore plus unique si LLM dispo)
       try {
         const aiPromise = generateListing(
-          listing.product_name || listing.seo_title,
-          `url:${productUrl}, bullets:${(scraped?.bullets || []).join(" | ")}, theme:${themeColor || "#667eea"}`
+          listing.original_title || listing.product_name || listing.seo_title,
+          `IMPORTANT: réécris un titre eBay FR DIFFÉRENT du titre fournisseur. url:${productUrl}, bullets:${(scraped?.bullets || []).join(" | ")}, theme:${themeColor || "#667eea"}`
         );
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 3000));
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 8000));
         const ai = await Promise.race([aiPromise, timeout]);
-        if (ai?.html_description && !ai._parse_error) {
-          const aiHtml = injectProductImagesIntoHtml(
-            ai.html_description,
-            scraped?.images || listing.images || []
-          );
+        if (ai && !ai._parse_error) {
+          const aiTitle = rewriteEbayTitle(ai.seo_title || listing.seo_title);
+          const imgs = listing.images || scraped?.images || [];
+          const aiHtml = ai.html_description
+            ? injectProductImagesIntoHtml(ai.html_description, imgs)
+            : listing.html_description;
           listing = {
             ...listing,
-            seo_title: ai.seo_title || listing.seo_title,
+            seo_title: aiTitle,
             html_description: aiHtml,
             suggested_price: ai.suggested_price || listing.suggested_price,
             ai_enriched: true,
+            title_rewritten: true,
+            product: { ...(listing.product || {}), title: aiTitle, images: imgs },
           };
         }
       } catch (llmErr) {
@@ -1787,6 +1794,27 @@ app.post("/api/listings/dedupe", (_req, res) => {
 });
 
 const updateListingHtml = db.prepare("UPDATE listings SET html_description = ? WHERE id = ?");
+const updateListingTitle = db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?");
+
+app.patch("/api/listings/:id", (req, res) => {
+  try {
+    const listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    const { seo_title, html_description } = req.body || {};
+    if (seo_title != null) {
+      const title = rewriteEbayTitle(String(seo_title).slice(0, 80));
+      updateListingTitle.run(title, listing.id);
+      listing.seo_title = title;
+    }
+    if (html_description != null) {
+      updateListingHtml.run(String(html_description), listing.id);
+      listing.html_description = html_description;
+    }
+    return res.json({ success: true, data: getListingById.get(listing.id) });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 /**
  * Si le HTML n'a plus d'images (scrub picsum / IA), re-scrape source_url et réinjecte.

@@ -1242,8 +1242,14 @@ async function runManualImport() {
     pct.textContent = "80%";
     setManualStep("ai");
     const title = json.data?.seo_title || "";
+    const orig = json.data?.original_title || json.data?.product_name || "";
     const price = Number(json.data?.suggested_price || 0);
-    addCheck(`Titre optimisé : ${title.length} caractères`);
+    addCheck(
+      json.data?.title_rewritten
+        ? "Titre réécrit (discret) — différent du fournisseur"
+        : "Titre optimisé"
+    );
+    addCheck(`Titre eBay : ${title.length} caractères`);
     addCheck("Description HTML générée");
     addCheck(`Prix de vente suggéré : ${price.toFixed(2)} €`);
     const costGuess = price / 1.8;
@@ -1251,9 +1257,38 @@ async function runManualImport() {
     addCheck(`Marge estimée : ${marginEst}%`);
 
     manualListingId = json.data?.id;
+    const review = document.getElementById("manual-review");
+    const origEl = document.getElementById("manual-orig-title");
+    const seoEl = document.getElementById("manual-seo-title");
+    const lenEl = document.getElementById("manual-title-len");
+    const thumbs = document.getElementById("manual-thumbs");
+    if (review) review.classList.remove("hidden");
+    if (origEl) origEl.textContent = orig || "—";
+    if (seoEl) {
+      seoEl.value = title;
+      seoEl.oninput = () => {
+        if (lenEl) lenEl.textContent = String(seoEl.value.length);
+      };
+    }
+    if (lenEl) lenEl.textContent = String(title.length);
+    if (thumbs) {
+      const imgs = json.data?.images || json.data?.product?.images || [];
+      thumbs.innerHTML = imgs.length
+        ? imgs
+            .slice(0, 6)
+            .map(
+              (src, i) =>
+                `<img src="${escapeHtml(src)}" alt="" referrerpolicy="no-referrer" class="w-14 h-14 rounded-lg object-cover border ${
+                  i === 0 ? "border-[#6d7ddf] ring-2 ring-[#6d7ddf]/30" : "border-zinc-200"
+                }" title="${i === 0 ? "Image principale" : "Galerie"}" />`
+            )
+            .join("")
+        : `<span class="text-xs text-zinc-400">Pas d'image — vérifie l'URL</span>`;
+    }
+
     label.textContent = `Prêt à publier — ${price.toFixed(2)} € (80%)`;
     ready.classList.remove("hidden");
-    ready.textContent = `Listing prêt à publier — ${title.slice(0, 60)} — ${price.toFixed(2)} €`;
+    ready.textContent = `Listing discret prêt — titre réécrit — ${price.toFixed(2)} €`;
     pubBtn.classList.remove("hidden");
     setManualStep("ai");
   } catch (err) {
@@ -1267,6 +1302,14 @@ async function runManualImport() {
 async function publishManualListing() {
   if (!manualListingId) return alert("Importe d'abord un produit");
   try {
+    const seoEl = document.getElementById("manual-seo-title");
+    if (seoEl?.value.trim()) {
+      await fetch(API + "/api/listings/" + manualListingId, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seo_title: seoEl.value.trim() }),
+      });
+    }
     setManualStep("publish");
     document.getElementById("manual-bar").style.width = "100%";
     document.getElementById("manual-pct").textContent = "100%";

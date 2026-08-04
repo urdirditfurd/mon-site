@@ -113,20 +113,117 @@ function scoreSeoTitle(title, keywords = []) {
 }
 
 function buildAiTitle(productName, keywords = []) {
-  const base = String(productName || "Produit")
+  return rewriteEbayTitle(productName, keywords);
+}
+
+/**
+ * Titre eBay « discret » : ne copie pas le titre fournisseur mot pour mot.
+ * Réordonne les mots-clés, retire bruit Ali/Amazon, ajoute hooks FR.
+ */
+function rewriteEbayTitle(productName, keywords = []) {
+  let raw = String(productName || "Produit")
+    .replace(/[\u4e00-\u9fff]+/g, " ") // chinois
+    .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship)\b/gi, " ")
+    .replace(/\b[A-Z]{0,3}\d{5,}\b/g, " ") // codes SKU
+    .replace(/[|【】\[\]{}]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  const stop = new Set([
+    "for",
+    "with",
+    "and",
+    "the",
+    "new",
+    "hot",
+    "sale",
+    "free",
+    "shipping",
+    "pcs",
+    "pc",
+    "set",
+  ]);
+  const tokens = raw
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 1 && !stop.has(t.toLowerCase()))
+    .slice(0, 12);
+
   const extras = (keywords || [])
     .map((k) => String(k).trim())
     .filter(Boolean)
-    .filter((k) => !base.toLowerCase().includes(k.toLowerCase()))
-    .slice(0, 4);
-  let title = [base, ...extras].join(" ").replace(/\s+/g, " ").trim();
-  if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "");
-  if (!/\bneuf\b/i.test(title) && title.length < 75) {
-    title = `${title} Neuf`.slice(0, 80);
+    .filter((k) => !raw.toLowerCase().includes(k.toLowerCase()))
+    .slice(0, 3);
+
+  // Structure différente du titre source : type + usage + bénéfice
+  const hooks = ["Compatible", "Pratique", "Compact", "Universal", "Premium"];
+  const hook = hooks[tokens.join("").length % hooks.length];
+  const core = tokens.slice(0, 6).join(" ");
+  const tail = extras.length ? extras.join(" ") : "Livraison rapide";
+  let title = `${hook} ${core} ${tail} Neuf`.replace(/\s+/g, " ").trim();
+
+  // Si trop proche du titre brut, force un reorder
+  const sim = similarityRatio(raw.toLowerCase(), title.toLowerCase());
+  if (sim > 0.72 && tokens.length > 3) {
+    const rotated = [...tokens.slice(2), ...tokens.slice(0, 2)];
+    title = `${rotated.join(" ")} Qualité Pro Neuf`.replace(/\s+/g, " ").trim();
   }
-  return title;
+
+  if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "");
+  return title || "Produit Compatible Qualité Premium Neuf".slice(0, 80);
+}
+
+function similarityRatio(a, b) {
+  if (!a || !b) return 0;
+  const ta = new Set(a.split(/\s+/));
+  const tb = new Set(b.split(/\s+/));
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter += 1;
+  return inter / Math.max(ta.size, tb.size, 1);
+}
+
+/**
+ * Prépare un listing discret : titre réécrit + galerie réordonnée
+ * (évite de coller photo #1 + titre Ali à l'identique).
+ */
+function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
+  const bullets = scraped.bullets || [];
+  const kwFromBullets = bullets
+    .join(" ")
+    .split(/[\s,;/|]+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 8);
+  const originalTitle = scraped.title || "Produit";
+  const seoTitle = rewriteEbayTitle(originalTitle, kwFromBullets);
+  const images = discreetImageOrder(scraped.images || []);
+  const product = {
+    ...scraped,
+    title: seoTitle,
+    originalTitle,
+    images,
+    bullets,
+  };
+  const cost = Number(scraped.price) || 0;
+  return {
+    product_name: originalTitle,
+    original_title: originalTitle,
+    seo_title: seoTitle,
+    suggested_price: cost ? Number((cost * marginMult).toFixed(2)) : 29.99,
+    images,
+    source: scraped.source,
+    product,
+    discreet: true,
+    title_rewritten: seoTitle.toLowerCase() !== String(originalTitle).toLowerCase().slice(0, 80),
+  };
+}
+
+/** Place une autre vue en premier si la galerie a plusieurs images. */
+function discreetImageOrder(images = []) {
+  const list = [...(images || [])].filter(Boolean);
+  if (list.length < 2) return list;
+  // Hero = 2e image (souvent un autre angle), puis le reste, puis l'originale en fin
+  const [first, second, ...rest] = list;
+  return [second, ...rest, first];
 }
 
 function estimateMargin({ cost, sellPrice, ebayFeeRate = 0.13 } = {}) {
@@ -420,6 +517,9 @@ module.exports = {
   scanVero,
   scoreSeoTitle,
   buildAiTitle,
+  rewriteEbayTitle,
+  prepareDiscreetListing,
+  discreetImageOrder,
   estimateMargin,
   buildPilotageFeed,
   getEventCalendar,

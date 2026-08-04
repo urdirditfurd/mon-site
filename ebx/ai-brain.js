@@ -21,8 +21,14 @@ const client = new OpenAI({
   apiKey: "not-needed",
 });
 
-const SYSTEM_PROMPT = `Tu es un expert en optimisation de listings eBay et un validateur HTML strict.
+const SYSTEM_PROMPT = `Tu es un expert en optimisation de listings eBay FR (dropshipping discret).
 Tu dois répondre UNIQUEMENT avec un objet JSON valide, sans aucun texte avant ou après.
+
+Règles pour "seo_title" (CRITIQUE) :
+- NE COPIE PAS le titre fournisseur Amazon/AliExpress.
+- Réécris en français SEO, max 80 caractères, ordre des mots DIFFÉRENT.
+- Pas de nom de marketplace, pas de codes SKU, pas de caractères chinois.
+- Inclure 1 bénéfice (Compatible / Compact / Pratique / Neuf / Qualité).
 
 Règles absolues pour le champ "html_description" :
 - Utilise UNIQUEMENT du HTML5 de base et du CSS inline (style="...").
