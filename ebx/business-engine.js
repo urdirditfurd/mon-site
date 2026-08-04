@@ -330,17 +330,40 @@ function getTopSellers(marketplace = "FR") {
     .slice(0, 6);
 }
 
-/** CA marché eBay du jour (pulse live style EBX) — agrégé tendances + jitter. */
-function getMarketPulse(trending = []) {
-  const fromItems = trending.reduce((s, t) => s + Number(t.price || 0) * Number(t.sold || 0), 0);
-  const now = new Date();
-  const seed = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-  const base = 180000 + (seed % 90000) + fromItems * 0.15;
-  const tick = 1.2 + ((now.getMinutes() * 17 + now.getSeconds()) % 800) / 100;
+/**
+ * Estimation du CA marché eBay FR « aujourd'hui » (style ticker EBX).
+ *
+ * Important : eBay ne publie PAS de GMV temps réel via API publique.
+ * EBX affiche un ticker marketing (~150k–300k € / jour FR) — on reproduit
+ * une estimation cohérente (progression journée + échantillon tendances),
+ * pas le CA de TA boutique (celui-ci reste dans `revenue`).
+ */
+function getMarketPulse(trending = [], now = new Date()) {
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const secondsToday = Math.max(0, (now - startOfDay) / 1000);
+  const daySeed = now.getFullYear() * 372 + (now.getMonth() + 1) * 31 + now.getDate();
+  // Cible journalière FR simulée dans la même fourchette qu'EBX (~280k–400k fin de journée)
+  const dailyTarget = 280000 + (daySeed % 120000);
+  // Monte dans la journée (~25% dès le matin → ~100% le soir)
+  const progress = Math.min(0.98, 0.25 + 0.75 * (secondsToday / 86400));
+  const sampleBoost = (trending || []).reduce((s, t) => {
+    const price = Number(t.price) || 0;
+    const sold = Number(t.sold) || 0;
+    // Contribution faible des tops (évite d'exploser / d'effondrer le ticker)
+    return s + Math.min(8000, price * Math.min(sold, 200) * 0.002);
+  }, 0);
+  // Micro-variation minute pour que deux refreshs ne soient pas identiques
+  const jitter = ((now.getMinutes() * 37 + now.getSeconds()) % 2000) / 100;
+  const marketRevenue = Number((dailyTarget * progress + sampleBoost + jitter).toFixed(2));
+  // Tick « à l'instant » : quelques € à dizaines d'€ (comme EBX ~+40 €)
+  const tick = Number((8 + ((now.getSeconds() * 13 + now.getMilliseconds()) % 7000) / 100).toFixed(2));
   return {
-    marketRevenue: Number(base.toFixed(2)),
-    tick: Number(tick.toFixed(2)),
-    label: "chiffre d'affaire generé aujourd'hui sur eBay",
+    marketRevenue,
+    tick,
+    marketplace: "FR",
+    source: "estimate_fr",
+    label: "estimation CA marché eBay FR aujourd'hui",
+    note: "Pas une API eBay officielle — ticker estimé (parité UX EBX). Ton CA boutique est séparé.",
   };
 }
 

@@ -342,15 +342,32 @@ async function loadDashboard() {
   const caEl = document.getElementById("dash-market-ca");
   const tickEl = document.getElementById("dash-market-tick");
   const labelEl = document.getElementById("dash-market-label");
-  let marketRevenueLive = Number(pulse.marketRevenue ?? d.revenue ?? 0);
+  const shopEl = document.getElementById("dash-shop-ca");
+  // Jamais le CA boutique ici : 16 € chez toi = ton CA sync, pas le marché EBX (~200k)
+  let marketRevenueLive = Number(pulse.marketRevenue);
+  if (!Number.isFinite(marketRevenueLive) || marketRevenueLive < 1000) {
+    marketRevenueLive = 180000;
+  }
   if (caEl) caEl.textContent = formatEuro(marketRevenueLive, 2);
-  if (tickEl) tickEl.textContent = `↑ +${formatEuro(pulse.tick ?? 0, 2)} à l'instant`;
-  if (labelEl) labelEl.textContent = pulse.label || "chiffre d'affaire generé aujourd'hui sur eBay";
+  if (tickEl) tickEl.textContent = `↑ +${formatEuro(pulse.tick ?? 12, 2)} à l'instant`;
+  if (labelEl) {
+    labelEl.textContent = pulse.label || "estimation CA marché eBay FR aujourd'hui";
+  }
+  if (shopEl) {
+    const shop = Number(d.revenue) || 0;
+    const src =
+      d.revenueSource === "ebay_orders"
+        ? "eBay sync"
+        : d.revenueSource === "local_orders"
+          ? "local"
+          : "estim.";
+    shopEl.textContent = `Ton CA boutique : ${formatEuro(shop, 2)} (${src})`;
+  }
 
   if (marketTickTimer) clearInterval(marketTickTimer);
   marketTickTimer = setInterval(() => {
     if (!caEl || !tickEl) return;
-    const bump = 0.8 + Math.random() * 6;
+    const bump = 8 + Math.random() * 55;
     marketRevenueLive += bump;
     caEl.textContent = formatEuro(marketRevenueLive, 2);
     tickEl.textContent = `↑ +${formatEuro(bump, 2)} à l'instant`;

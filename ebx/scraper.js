@@ -37,6 +37,37 @@ function cleanText(t) {
     .trim();
 }
 
+/**
+ * Nettoie un texte produit scrapé (Amazon A+ injecte CSS/JS dans le DOM text).
+ * Garde uniquement du langage naturel lisible pour eBay / "Pourquoi ce produit".
+ */
+function sanitizeReadableText(raw, { maxLen = 700 } = {}) {
+  let t = String(raw || "");
+  if (!t) return "";
+  // Blocs CSS / selecteurs / JS fréquents sur Amazon A+
+  t = t.replace(/\/\*[\s\S]*?\*\//g, " ");
+  t = t.replace(/\{[^{}]*\}/g, " ");
+  t = t.replace(/function\s+\w*\s*\([^)]*\)\s*\{[\s\S]*?\}/g, " ");
+  t = t.replace(/\b(?:var|let|const|if|else|return|window|document)\b[^.;]{0,80}[;)]/gi, " ");
+  t = t.replace(/\.aplus-[\w.-]+/gi, " ");
+  t = t.replace(/\.container-[\w.-]+/gi, " ");
+  t = t.replace(/\.launchpad-[\w.-]+/gi, " ");
+  t = t.replace(/#[\w-]+\s+/g, " ");
+  t = t.replace(/\b(?:position|overflow|display|margin|padding|width|height|background|font-size|max-width)\s*:\s*[^;]+;?/gi, " ");
+  t = t.replace(/https?:\/\/\S+/gi, " ");
+  t = t.replace(/[{};<>]|={2,}/g, " ");
+  t = t.replace(/\s+/g, " ").trim();
+  // Si ça ressemble encore à du code / CSS, abandonner
+  const codeScore =
+    (t.match(/\b(?:aplus|function|shoppable|fixed-width|margin-left)\b/gi) || []).length +
+    (t.includes("{") || t.includes("}") ? 2 : 0);
+  if (codeScore >= 2 || t.length < 40) return "";
+  // Phrases trop techniques sans lettres accentuées/mots utiles
+  const letters = (t.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+  if (letters / Math.max(t.length, 1) < 0.55) return "";
+  return t.slice(0, maxLen);
+}
+
 /** Déduplique les images produit (Amazon renvoie souvent 8× la même en tailles différentes) */
 function uniqueProductImages(urls, { limit = 8 } = {}) {
   const seen = new Set();
@@ -119,9 +150,10 @@ function parseAmazon($, baseUrl) {
   });
 
   const description =
-    cleanText($("#productDescription p").text()) ||
-    cleanText($("#aplus_feature_div").text()).slice(0, 800) ||
-    bullets.slice(0, 3).join(" ");
+    sanitizeReadableText(cleanText($("#productDescription p").text())) ||
+    sanitizeReadableText(bullets.slice(0, 3).join(" ")) ||
+    sanitizeReadableText(cleanText($("#feature-bullets").text()).slice(0, 800)) ||
+    "";
 
   return {
     source: "amazon",
@@ -129,7 +161,10 @@ function parseAmazon($, baseUrl) {
     price,
     currency: "EUR",
     bullets: bullets.slice(0, 8),
-    description,
+    description:
+      description ||
+      (bullets[0] ? sanitizeReadableText(bullets.slice(0, 2).join(" ")) : "") ||
+      "Produit sélectionné pour sa qualité et son potentiel eBay.",
     images: uniqueProductImages([...images], { limit: 8 }),
     url: baseUrl,
   };
@@ -1224,6 +1259,10 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     .join("\n");
 
   const priceLabel = product.price ? `${Number(product.price).toFixed(2)} €` : "";
+  const whyText =
+    sanitizeReadableText(product.description) ||
+    sanitizeReadableText((product.bullets || []).slice(0, 2).join(" ")) ||
+    "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
 
   return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:16px;padding:26px 20px;text-align:center;color:#fff;margin-bottom:18px;">
@@ -1248,7 +1287,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
       <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">🛡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Garantie</p></div>
       <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">⚡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Expédition</p></div>
     </div>
-    <p style="font-size:13px;line-height:1.7;color:#555;margin:12px 0 0;">${escapeHtml(product.description || "Produit sélectionné pour sa qualité et son potentiel eBay.")}</p>
+    <p style="font-size:13px;line-height:1.7;color:#555;margin:12px 0 0;">${escapeHtml(whyText)}</p>
   </div>
 
   <div style="margin-bottom:16px;">
@@ -1333,6 +1372,38 @@ function injectProductImagesIntoHtml(html, images = []) {
   return gallery + raw;
 }
 
+/**
+ * Nettoie le paragraphe « Pourquoi Ce Produit ? » dans un HTML listing déjà stocké
+ * (CSS/JS Amazon A+ collé par erreur).
+ */
+function scrubWhySectionInHtml(html) {
+  const raw = String(html || "");
+  if (!raw) return raw;
+  const re =
+    /(<h2[^>]*>\s*Pourquoi Ce Produit\s*\?[^<]*<\/h2>[\s\S]*?<\/div>\s*)<p([^>]*)>([\s\S]*?)<\/p>/i;
+  const m = raw.match(re);
+  if (!m) {
+    // fallback : tout paragraphe qui contient du CSS aplus
+    return raw.replace(/<p([^>]*)>([\s\S]*?)<\/p>/gi, (full, attrs, body) => {
+      const plain = body.replace(/<[^>]+>/g, " ");
+      if (!/\.aplus-|function\s+\w+|margin-left|shoppable/i.test(plain)) return full;
+      const cleaned = sanitizeReadableText(plain);
+      const fallback =
+        cleaned ||
+        "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+      return `<p${attrs}>${escapeHtml(fallback)}</p>`;
+    });
+  }
+  const body = m[3].replace(/<[^>]+>/g, " ");
+  if (!/\.aplus-|function\s+\w+|\{|shoppable|margin-left/i.test(body) && sanitizeReadableText(body)) {
+    return raw; // déjà propre
+  }
+  const cleaned =
+    sanitizeReadableText(body) ||
+    "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+  return raw.replace(re, `$1<p$2>${escapeHtml(cleaned)}</p>`);
+}
+
 module.exports = {
   scrapeProduct,
   scrapeEbaySearch,
@@ -1348,4 +1419,6 @@ module.exports = {
   countRealImagesInHtml,
   detectSource,
   isRealProductImage,
+  sanitizeReadableText,
+  scrubWhySectionInHtml,
 };

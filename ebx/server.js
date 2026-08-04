@@ -18,6 +18,7 @@ const {
   injectProductImagesIntoHtml,
   countRealImagesInHtml,
   isRealProductImage,
+  scrubWhySectionInHtml,
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
 const {
@@ -1711,6 +1712,13 @@ app.get("/api/listings/:id", (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    const cleaned = scrubWhySectionInHtml(listing.html_description || "");
+    if (cleaned && cleaned !== listing.html_description) {
+      try {
+        updateListingHtml.run(cleaned, listing.id);
+      } catch (_) {}
+      listing.html_description = cleaned;
+    }
     return res.json({ success: true, data: listing });
   } catch (err) {
     return res.status(500).json({ success: false, error: "Erreur base de données." });
@@ -1802,6 +1810,23 @@ async function ensureListingImages(listing) {
   console.log(`[EBX] Listing #${listing.id} : ${images.length} image(s) réinjectée(s)`);
   return { ...listing, html_description: html };
 }
+
+app.post("/api/listings/scrub-why", (_req, res) => {
+  try {
+    const rows = db.prepare("SELECT id, html_description FROM listings").all();
+    let fixed = 0;
+    for (const row of rows) {
+      const cleaned = scrubWhySectionInHtml(row.html_description || "");
+      if (cleaned && cleaned !== row.html_description) {
+        updateListingHtml.run(cleaned, row.id);
+        fixed += 1;
+      }
+    }
+    return res.json({ success: true, fixed });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 /** Remplace les images picsum (aléatoires) dans le HTML des listings existants. */
 app.post("/api/listings/scrub-images", (_req, res) => {
