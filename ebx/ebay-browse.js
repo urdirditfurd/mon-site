@@ -56,6 +56,103 @@ function marketplaceId(code = "FR") {
   return code === "US" || code === "United States" ? "EBAY_US" : "EBAY_FR";
 }
 
+/** Prix courant + barré éventuel depuis un item Browse. */
+function extractBrowsePrices(it) {
+  const current = Number(it?.price?.value);
+  const original = Number(it?.marketingPrice?.originalPrice?.value);
+  const discountPct = Number(it?.marketingPrice?.discountPercentage);
+  let price = current > 0 ? current : null;
+  let wasPrice = null;
+  if (original > 0 && price > 0 && original > price) {
+    wasPrice = original;
+  } else if (original > 0 && (!(price > 0) || (discountPct > 0 && original < price))) {
+    // Cas rare : price.value = prix barré, original plus bas → garder le min
+    price = Math.min(original, price > 0 ? price : original);
+    wasPrice = Math.max(original, current > 0 ? current : original);
+    if (wasPrice <= price) wasPrice = null;
+  }
+  return { price, wasPrice: wasPrice > 0 ? wasPrice : null };
+}
+
+function extractSoldFromItem(it) {
+  const avail = it?.estimatedAvailabilities || [];
+  for (const a of avail) {
+    const n = Number(a?.estimatedSoldQuantity);
+    if (n > 0) return n;
+  }
+  const n = Number(it?.estimatedSoldQuantity);
+  return n > 0 ? n : 0;
+}
+
+function mapBrowseSummary(it) {
+  const { price, wasPrice } = extractBrowsePrices(it);
+  const sold = extractSoldFromItem(it) || estimateSold(it);
+  return {
+    title: it.title,
+    price,
+    wasPrice,
+    currency: it.price?.currency || "EUR",
+    url: it.itemWebUrl || it.itemHref,
+    image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
+    seller: it.seller?.username || "",
+    sold,
+    soldEstimated: !extractSoldFromItem(it),
+    condition: it.condition,
+    categories: (it.categories || []).map((c) => c.categoryName),
+    itemId: it.itemId,
+  };
+}
+
+/**
+ * Détail item Browse (prix + estimatedSoldQuantity plus fiables que le summary).
+ */
+async function browseItem(itemId, { marketplace = "FR", production = true } = {}) {
+  if (!itemId) throw new Error("itemId requis");
+  const base = production ? EBAY_BROWSE_BASE : EBAY_API_BASE;
+  const token = await getAppToken({ production });
+  const url = `${base}/buy/browse/v1/item/${encodeURIComponent(itemId)}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-EBAY-C-MARKETPLACE-ID": marketplaceId(marketplace),
+    },
+  });
+  if (!res.ok) throw new Error(`Browse item ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+/**
+ * Enrichit les summaries avec getItem (prix réel + ventes estimées eBay).
+ */
+async function enrichBrowseItems(items, { marketplace = "FR", limit = 12 } = {}) {
+  const list = (items || []).slice(0, limit);
+  const out = [];
+  for (const it of list) {
+    const row = { ...it };
+    if (!it.itemId) {
+      out.push(row);
+      continue;
+    }
+    try {
+      const detail = await browseItem(it.itemId, { marketplace, production: true });
+      const { price, wasPrice } = extractBrowsePrices(detail);
+      const sold = extractSoldFromItem(detail);
+      if (price > 0) row.price = price;
+      if (wasPrice > 0) row.wasPrice = wasPrice;
+      if (sold > 0) {
+        row.sold = sold;
+        row.soldEstimated = false;
+      }
+      if (detail?.itemWebUrl) row.url = detail.itemWebUrl;
+    } catch (e) {
+      console.warn(`[browse enrich] ${it.itemId}: ${e.message?.slice?.(0, 80) || e}`);
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Recherche d'annonces via Browse API
  */
@@ -88,18 +185,7 @@ async function browseSearch(query, { marketplace = "FR", limit = 20 } = {}) {
       }
 
       const data = await res.json();
-      const items = (data.itemSummaries || []).map((it) => ({
-        title: it.title,
-        price: it.price?.value ? Number(it.price.value) : null,
-        currency: it.price?.currency || "EUR",
-        url: it.itemWebUrl || it.itemHref,
-        image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
-        seller: it.seller?.username || "",
-        sold: Number(it.marketingPrice?.discountPercentage || 0) ? 0 : estimateSold(it),
-        condition: it.condition,
-        categories: (it.categories || []).map((c) => c.categoryName),
-        itemId: it.itemId,
-      }));
+      const items = (data.itemSummaries || []).map(mapBrowseSummary);
 
       return {
         query,
@@ -117,9 +203,9 @@ async function browseSearch(query, { marketplace = "FR", limit = 20 } = {}) {
 }
 
 function estimateSold(it) {
-  // Browse API ne donne pas toujours les ventes — heuristique à partir du ranking/epid
-  if (it.unitPrice) return 0;
-  return Math.max(0, Math.round((it.priorityListingAttributes?.length || 0) * 12));
+  // Browse summary ne donne pas toujours les ventes — 0 plutôt qu'un faux chiffre
+  if (it?.unitPrice) return 0;
+  return 0;
 }
 
 async function browseSellerItems(seller, { marketplace = "FR", limit = 30 } = {}) {
@@ -212,7 +298,7 @@ function normalizeSeller(summaries, seller, production) {
     bestsellers: items.slice(0, 8).map((i) => ({
       title: i.title,
       price: i.price,
-      sold: i.sold || Math.round(Math.random() * 40 + 5),
+      sold: i.sold || 0,
       url: i.url,
       image: i.image || null,
     })),
@@ -226,5 +312,7 @@ module.exports = {
   getAppToken,
   browseSearch,
   browseSellerItems,
+  browseItem,
+  enrichBrowseItems,
   marketplaceId,
 };

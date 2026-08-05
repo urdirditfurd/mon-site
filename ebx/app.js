@@ -721,9 +721,13 @@ async function loadRankings() {
   list.innerHTML = (json.data || [])
     .map((p, i) => {
       const rank = p.rank || i + 1;
-      const sold = Math.max(1, Math.round((p.sold || 10) * factor));
+      const rawSold = Number(p.sold) || 0;
+      const soldLabel =
+        rawSold > 0
+          ? `${Math.max(1, Math.round(rawSold * factor))} vendus${p.soldEstimated ? " (estim.)" : ""}`
+          : "Ventes n/a";
       const price = Number(p.price || 0);
-      const oldPrice = price > 0 ? (price * 1.35).toFixed(2) : null;
+      const was = Number(p.wasPrice) > price ? Number(p.wasPrice) : null;
       const img = productThumbHtml(p.image, p.title, "w-14 h-14");
       const rankClass = rank <= 3 ? `rank-${rank}` : "text-zinc-400";
       const href = p.url || "#";
@@ -735,9 +739,9 @@ async function loadRankings() {
           <p class="text-xs text-zinc-400 mt-0.5">${escapeHtml(p.category || "eBay")}</p>
         </div>
         <div class="text-right shrink-0">
-          <p class="text-sm text-emerald-600 font-medium">${sold} vendus</p>
-          <p class="text-sm font-semibold">${price.toFixed(2)} €</p>
-          ${oldPrice ? `<p class="text-xs text-zinc-400 line-through">${oldPrice} €</p>` : ""}
+          <p class="text-sm text-emerald-600 font-medium">${soldLabel}</p>
+          <p class="text-sm font-semibold">${price > 0 ? price.toFixed(2) + " €" : "—"}</p>
+          ${was ? `<p class="text-xs text-zinc-400 line-through">${was.toFixed(2)} €</p>` : ""}
         </div>
       </a>`;
     })

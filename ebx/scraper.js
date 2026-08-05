@@ -903,6 +903,17 @@ function parseCdiscount($, baseUrl) {
 function parsePrice(text) {
   if (text == null || text === "") return null;
   const raw = String(text);
+
+  // Fourchette eBay FR/EN : « 25,99 à 99,99 EUR » → prix affiché = minimum (à partir de)
+  const range = raw.match(
+    /(\d+[.,]\d{2})\s*(?:€|(?:\bEUR\b)|\$)?\s*(?:à|a|to|-|–|—)\s*(\d+[.,]\d{2})\s*(?:€|(?:\bEUR\b)|\$)?/i
+  );
+  if (range) {
+    const a = Number(range[1].replace(",", "."));
+    const b = Number(range[2].replace(",", "."));
+    if (a > 0 && b > 0 && a < 100000 && b < 100000) return Math.min(a, b);
+  }
+
   // Montants avec devise — \bEUR\b pour ne PAS matcher « largeur »
   const withCurrency =
     raw.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:€|(?:\bEUR\b)|\$|(?:\bUSD\b))/i) ||
@@ -920,6 +931,29 @@ function parsePrice(text) {
     if (n > 0 && n < 5000) return n;
   }
   return null;
+}
+
+/**
+ * Prix carte eBay : ignore livraison, fourchettes → min, barré/promo → prix bas.
+ */
+function parseEbayCardPrice(text) {
+  const raw = String(text || "");
+  if (!raw.trim()) return null;
+  const noShip = raw
+    .replace(/\+?\s*\d+[.,]\d{2}\s*(?:€|(?:\bEUR\b))?\s*(?:de\s+)?(?:livraison|shipping|postage|frais)/gi, " ")
+    .replace(/livraison\s*(?:gratuite|free)?/gi, " ");
+  const range = noShip.match(
+    /(\d+[.,]\d{2})\s*(?:€|(?:\bEUR\b))?[\s\S]{0,12}?(?:à|a|to|-|–|—)[\s\S]{0,12}?(\d+[.,]\d{2})/i
+  );
+  if (range) {
+    const a = Number(range[1].replace(",", "."));
+    const b = Number(range[2].replace(",", "."));
+    if (a > 0 && b > 0) return Math.min(a, b);
+  }
+  const all = extractAllPrices(noShip);
+  if (all.length >= 2) return Math.min(...all);
+  if (all.length === 1) return all[0];
+  return parsePrice(noShip);
 }
 
 /** Extrait tous les montants €/$ d'un texte. */
@@ -1529,21 +1563,22 @@ async function scrapeEbayViaJina(query, { marketplace = "FR", limit = 20 } = {})
   const items = [];
   const seen = new Set();
 
-  // Pattern riche: lien itm + prix EUR (+ vendus optionnel)
+  // Pattern riche: lien itm + bloc prix (+ vendus optionnel)
   const re =
-    /\[([^\]]{8,180}?)(?:\s*La page s'ouvre[^\]]*)?\]\((https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+[^)]*)\)[\s\S]{0,260}?(\d+[.,]\d{2})\s*EUR(?:[\s\S]{0,160}?(\d[\d\s.]*)\s*vendus?)?/gi;
+    /\[([^\]]{8,180}?)(?:\s*La page s'ouvre[^\]]*)?\]\((https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+[^)]*)\)([\s\S]{0,320}?)(?=\[|\n\n|$)/gi;
   let m;
   while ((m = re.exec(content)) && items.length < limit) {
     const title = cleanText(m[1]).replace(/La page s'ouvre.*$/i, "").trim();
-    const link = m[2].split("&itmprp")[0].split("?")[0] + (m[2].includes("?") ? "" : "");
     const cleanLink = m[2].match(/https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+/)?.[0] || m[2];
     if (/shop on ebay/i.test(title) || seen.has(cleanLink)) continue;
     seen.add(cleanLink);
+    const blob = m[3] || "";
+    const soldMatch = blob.match(/(\d[\d\s.]*)\s*vendus?/i);
     items.push({
       title,
-      price: parsePrice(m[3]),
+      price: parseEbayCardPrice(blob),
       url: cleanLink,
-      sold: m[4] ? Number(String(m[4]).replace(/\s|\./g, "")) : 0,
+      sold: soldMatch ? Number(String(soldMatch[1]).replace(/\s|\./g, "")) : 0,
       image: null,
       seller: "",
     });
@@ -1579,7 +1614,7 @@ async function scrapeEbaySearch(query, { marketplace = "FR", limit = 20 } = {}) 
       const root = $(el);
       const title = cleanText(root.find(".s-item__title").text()).replace(/^Nouvel objet\s*/i, "");
       if (!title || /shop on ebay/i.test(title)) return;
-      const price = parsePrice(root.find(".s-item__price").first().text());
+      const price = parseEbayCardPrice(root.find(".s-item__price").first().text());
       const link = absUrl(finalUrl, root.find("a.s-item__link").attr("href"));
       const soldText = cleanText(root.find(".s-item__hotness, .s-item__quantitySold, .s-item__dynamic").text());
       const soldMatch = soldText.match(/(\d[\d\s.]*)\s*(vendu|sold)/i);
@@ -1638,7 +1673,7 @@ async function scrapeEbaySeller(sellerName, { marketplace = "FR" } = {}) {
       const root = $(el);
       const title = cleanText(root.find(".s-item__title").text()).replace(/^Nouvel objet\s*/i, "");
       if (!title || /shop on ebay/i.test(title)) return;
-      const price = parsePrice(root.find(".s-item__price").first().text());
+      const price = parseEbayCardPrice(root.find(".s-item__price").first().text());
       const link = absUrl(finalUrl, root.find("a.s-item__link").attr("href"));
       const soldText = cleanText(root.find(".s-item__hotness, .s-item__quantitySold, .s-item__dynamic").text());
       const soldMatch = soldText.match(/(\d[\d\s.]*)\s*(vendu|sold)/i);
@@ -2917,6 +2952,7 @@ module.exports = {
   findCheapestSupplier,
   searchViaBingRss,
   parsePrice,
+  parseEbayCardPrice,
   resolvePriceViaSearch,
   sanitizeProductPrice,
   buildKeywordAnalysisFromItems,

@@ -540,7 +540,7 @@ app.get("/api/dashboard", async (_req, res) => {
               withProductImage({
                 title: it.title,
                 price: it.price || 0,
-                sold: it.sold || Math.round(40 + Math.random() * 400),
+                sold: Number(it.sold) > 0 ? Number(it.sold) : 0,
                 url: it.url,
                 image: it.image || null,
                 category: q,
@@ -677,10 +677,10 @@ function formatShipAddress(order) {
 app.get("/api/rankings", async (req, res) => {
   const marketplace = req.query.marketplace || "FR";
   const algo =
-    "Classement = niches populaires FR (coque, LED, chargeur…) via Browse API eBay, " +
-    "dédupliqué, trié par score (ventes estimées × prix). " +
-    "eBay Browse ne fournit pas toujours le sold count exact — on utilise les signaux listing + position de recherche.";
+    "Classement = niches populaires FR via Browse API eBay, prix/ventes enrichis via fiche item " +
+    "(estimatedSoldQuantity + price courant). Fourchettes « 25–99 € » → prix mini. Pas de sold inventé.";
   try {
+    const { enrichBrowseItems } = require("./ebay-browse");
     const seeds = ["coque iphone", "verre trempe", "colle b7000", "bande led", "chargeur usb c"];
     const all = [];
     for (const q of seeds) {
@@ -690,16 +690,37 @@ app.get("/api/rankings", async (req, res) => {
           all.push({
             ...it,
             seed: q,
-            sold: Number(it.sold) || Math.max(1, 30 - idx * 5),
+            sold: Number(it.sold) > 0 ? Number(it.sold) : 0,
+            soldEstimated: it.soldEstimated !== false && !(Number(it.sold) > 0),
             relevance: 3 - idx,
           })
         );
       } catch (_) {}
     }
     if (all.length) {
-      const scored = [...all].sort((a, b) => {
-        const sa = (Number(a.sold) || 0) * Math.max(1, Number(a.price) || 1) + (a.relevance || 0) * 10;
-        const sb = (Number(b.sold) || 0) * Math.max(1, Number(b.price) || 1) + (b.relevance || 0) * 10;
+      const seenPre = new Set();
+      const candidates = [];
+      for (const p of all) {
+        const key = String(p.itemId || p.title || "")
+          .slice(0, 48)
+          .toLowerCase();
+        if (seenPre.has(key)) continue;
+        seenPre.add(key);
+        candidates.push(p);
+        if (candidates.length >= 16) break;
+      }
+      let enriched = candidates;
+      try {
+        enriched = await enrichBrowseItems(candidates, { marketplace, limit: 12 });
+      } catch (e) {
+        console.warn("[EBX] rankings enrich:", e.message);
+      }
+
+      const scored = [...enriched].sort((a, b) => {
+        const sa =
+          (Number(a.sold) || 0) * Math.max(1, Number(a.price) || 1) + (a.relevance || 0) * 10;
+        const sb =
+          (Number(b.sold) || 0) * Math.max(1, Number(b.price) || 1) + (b.relevance || 0) * 10;
         return sb - sa;
       });
       const seen = new Set();
@@ -717,7 +738,9 @@ app.get("/api/rankings", async (req, res) => {
           title: p.title,
           category: p.seed || "eBay",
           price: p.price || 0,
+          wasPrice: p.wasPrice || null,
           sold: p.sold || 0,
+          soldEstimated: !!p.soldEstimated && !(p.sold > 0),
           marketplace,
           trend: i % 3 === 0 ? "up" : i % 3 === 1 ? "stable" : "down",
           url: p.url,
@@ -725,7 +748,13 @@ app.get("/api/rankings", async (req, res) => {
           live: true,
         }))
       );
-      return res.json({ success: true, data, live: true, source: "ebay-browse-api", algo });
+      return res.json({
+        success: true,
+        data,
+        live: true,
+        source: "eBay Browse + item detail",
+        algo,
+      });
     }
   } catch (err) {
     console.warn("[EBX] rankings browse fail:", err.message);
