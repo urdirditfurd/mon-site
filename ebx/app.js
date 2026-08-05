@@ -878,16 +878,16 @@ function renderSnipeSuppliers(ev) {
       let priceBadge;
       if (it.price != null && Number(it.price) > 0) {
         const conf = it.priceConfirmed
-          ? `<span class="text-[10px] text-emerald-600">confirmé</span>`
+          ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white">VÉRIFIÉ</span>`
           : it.priceUnconfirmed
-            ? `<span class="text-[10px] text-amber-600">estimé — vérifier</span>`
-            : "";
+            ? `<span class="text-[10px] text-amber-600 font-medium">non vérifié</span>`
+            : `<span class="text-[10px] text-zinc-400">indicatif</span>`;
         priceBadge = `<span class="font-bold text-emerald-800">${Number(it.price).toFixed(2)} €</span> ${conf}`;
       } else {
         priceBadge = `<span class="text-amber-600 font-medium">prix n/a</span>`;
       }
       const badge = it.best
-        ? `<span class="text-[10px] uppercase tracking-wide bg-emerald-600 text-white px-1.5 py-0.5 rounded">Moins cher</span>`
+        ? `<span class="text-[10px] uppercase tracking-wide bg-emerald-600 text-white px-1.5 py-0.5 rounded">Moins cher vérifié</span>`
         : `<span class="text-[10px] text-zinc-400">#${it.rank || ""}</span>`;
       const url = String(it.url || "").trim();
       const link = url
@@ -946,6 +946,7 @@ async function runSnipe() {
     ticket: document.getElementById("snipe-ticket").value,
     source: document.getElementById("snipe-source").value,
     autoList: document.getElementById("snipe-autolist").checked,
+    verifiedOnly: document.getElementById("snipe-verified")?.checked !== false,
     testMode: false,
   };
 

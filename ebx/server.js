@@ -1490,9 +1490,11 @@ app.post("/api/auto-snipe", async (req, res) => {
     autoList = true,
     source = "auto",
     query = "gadgets",
+    verifiedOnly = true,
   } = req.body || {};
   // Mode REEL uniquement (plus de Mode Test)
   const testMode = false;
+  const strictVerified = verifiedOnly !== false && verifiedOnly !== "false";
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1717,88 +1719,167 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
-        // Essaie plusieurs candidats — prix fiche, carte marketplace, ou résolution web
+        // ——— PASS VERIFICATION : scrape chaque fiche, ne garder que les prix réels ———
+        send({
+          type: "log",
+          message: `[VERIFY] Mode ${
+            strictVerified ? "STRICT (fiche produit uniquement)" : "souple (cartes marketplace autorisées)"
+          } — contrôle de ${Math.min(candidates.length, 8)} candidat(s)…`,
+        });
+        const verifiedDetails = new Map();
+        const verifiedList = [];
+        for (let vi = 0; vi < Math.min(candidates.length, 8); vi++) {
+          const cand = candidates[vi];
+          send({
+            type: "log",
+            message: `[VERIFY] ${vi + 1}/${Math.min(candidates.length, 8)} ${String(cand.source).split("+")[0]} — ${String(
+              cand.title || ""
+            ).slice(0, 40)}…`,
+          });
+          try {
+            const detail = await scrapeProduct(cand.url);
+            detail.images = (detail.images || []).filter(isRealProductImage);
+            let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
+            if (!(cost > 0) && !strictVerified) {
+              const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title).catch(() => null);
+              cost = sanitizeProductPrice(resolved, detail.title || cand.title);
+            }
+            if (
+              !(cost > 0) &&
+              !strictVerified &&
+              cand.price > 0 &&
+              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed)
+            ) {
+              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
+            }
+            if (!(cost > 0) || !(detail.title && String(detail.title).length > 8)) {
+              send({
+                type: "log",
+                message: `[VERIFY] ✗ rejeté — pas de prix fiche fiable${
+                  cand.price > 0 ? ` (indicatif ${Number(cand.price).toFixed(2)}€ ignoré)` : ""
+                }`,
+              });
+              continue;
+            }
+            detail.price = cost;
+            const row = {
+              ...cand,
+              title: detail.title,
+              price: cost,
+              priceConfirmed: true,
+              priceFromMarketplaceCard: false,
+              priceUnconfirmed: false,
+              url: cand.url,
+            };
+            verifiedList.push(row);
+            verifiedDetails.set(String(cand.url).split("?")[0].toLowerCase(), detail);
+            send({
+              type: "log",
+              message: `[VERIFY] ✓ ${Number(cost).toFixed(2)}€ — ${String(detail.title).slice(0, 45)}`,
+            });
+          } catch (e) {
+            send({ type: "log", message: `[VERIFY] ✗ ${e.message.slice(0, 80)}` });
+          }
+        }
+
+        verifiedList.sort((a, b) => a.price - b.price);
+        candidates = strictVerified ? verifiedList : verifiedList.length ? verifiedList : candidates;
+
+        send({
+          type: "suppliers",
+          query: searchQ,
+          compared: verifiedList.length,
+          verifiedOnly: strictVerified,
+          items: (strictVerified ? verifiedList : candidates).slice(0, 5).map((c, idx) => ({
+            rank: idx + 1,
+            source: String(c.source || "").split("+")[0],
+            title: String(c.title || "").slice(0, 90),
+            price: c.price != null && c.price > 0 ? Number(c.price) : null,
+            priceConfirmed: !!c.priceConfirmed || verifiedDetails.has(String(c.url).split("?")[0].toLowerCase()),
+            priceUnconfirmed: !c.priceConfirmed && !!c.priceUnconfirmed,
+            url: c.url,
+            best: idx === 0,
+          })),
+        });
+
+        if (!candidates.length || (strictVerified && !verifiedList.length)) {
+          skipped += 1;
+          send({
+            type: "log",
+            message: `[SKIP] Aucun fournisseur avec prix VÉRIFIÉ sur la fiche. Astuce: Source=Amazon, ou colle l'URL Ali dans Import Manuel.`,
+          });
+          errors += 1;
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
+        }
+
+        send({
+          type: "log",
+          message: `[VERIFY] ${verifiedList.length} offre(s) vérifiée(s) — moins cher: ${
+            verifiedList[0]
+              ? `${String(verifiedList[0].source).split("+")[0]} @ ${Number(verifiedList[0].price).toFixed(2)}€`
+              : "n/a"
+          }`,
+        });
+
+        // Import depuis candidats vérifiés (réutilise le scrape du pass VERIFY)
         let supplier = null;
         let detail = null;
         for (let ci = 0; ci < Math.min(candidates.length, 5); ci++) {
           const cand = candidates[ci];
-          const priceTag = cand.priceConfirmed
-            ? ""
-            : cand.priceFromMarketplaceCard
-              ? " (carte marketplace)"
-              : cand.priceUnconfirmed
-                ? " (hint)"
-                : "";
+          const cacheKey = String(cand.url || "").split("?")[0].toLowerCase();
           send({
             type: "log",
-            message: `[TRY] Candidat #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} ${
-              cand.price != null && cand.price > 0
-                ? `@ ${Number(cand.price).toFixed(2)}€${priceTag}`
-                : "(prix à confirmer sur la fiche)"
-            }`,
+            message: `[TRY] #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} @ ${
+              cand.price > 0 ? Number(cand.price).toFixed(2) + "€" : "?"
+            }${cand.priceConfirmed ? " [VÉRIFIÉ]" : ""}`,
           });
           try {
-            detail = await scrapeProduct(cand.url);
-            detail.images = (detail.images || []).filter(isRealProductImage);
+            detail = verifiedDetails.get(cacheKey) || null;
+            if (!detail) {
+              detail = await scrapeProduct(cand.url);
+              detail.images = (detail.images || []).filter(isRealProductImage);
+            }
             let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
             let costOrigin = "fiche";
 
-            if (!(cost > 0)) {
-              send({ type: "log", message: `[PRICE] Résolution web pour ${String(cand.source).split("+")[0]}…` });
+            if (!(cost > 0) && !strictVerified) {
               try {
                 const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title);
                 cost = sanitizeProductPrice(resolved, detail.title || cand.title);
-                if (cost > 0) {
-                  costOrigin = "web";
-                  send({
-                    type: "log",
-                    message: `[PRICE] Prix web résolu: ${cost.toFixed(2)}€`,
-                  });
-                }
+                if (cost > 0) costOrigin = "web";
               } catch (_) {}
             }
-
-            // Prix carte Amazon / Ali / Cdiscount (recherche marketplace) = utilisable
             if (
               !(cost > 0) &&
+              !strictVerified &&
               cand.price > 0 &&
-              (cand.priceFromMarketplaceCard || cand.priceConfirmed || !cand.priceUnconfirmed)
+              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed)
             ) {
               cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
-              if (cost > 0) {
-                costOrigin = "carte marketplace";
-                send({
-                  type: "log",
-                  message: `[PRICE] Prix carte marketplace accepté: ${cost.toFixed(2)}€ (fiche sans prix / anti-bot)`,
-                });
+              if (cost > 0) costOrigin = "carte marketplace";
+            }
+
+            // En mode strict : uniquement prix déjà confirmé sur fiche
+            if (strictVerified && !(cost > 0 && cand.priceConfirmed)) {
+              if (!(cost > 0)) {
+                send({ type: "log", message: `[WARN] Pas de prix fiche — essai suivant` });
+                detail = null;
+                continue;
               }
             }
 
             if (!(cost > 0)) {
-              send({
-                type: "log",
-                message: `[WARN] Prix introuvable${
-                  cand.priceUnconfirmed && cand.price > 0
-                    ? ` (hint Bing ${Number(cand.price).toFixed(2)}€ rejeté)`
-                    : ""
-                } — essai suivant`,
-              });
+              send({ type: "log", message: `[WARN] Prix introuvable — essai suivant` });
               detail = null;
               continue;
-            }
-
-            if (cand.price > 0 && costOrigin === "fiche" && Math.abs(cand.price - cost) / cost > 0.25) {
-              send({
-                type: "log",
-                message: `[PRICE] Indicatif ${Number(cand.price).toFixed(2)}€ ≠ fiche ${cost.toFixed(2)}€ → ${cost.toFixed(2)}€`,
-              });
             }
 
             if (!(detail.title && String(detail.title).length > 8) && cand.title) {
               detail.title = cand.title;
             }
             if (!(detail.title && String(detail.title).length > 8)) {
-              send({ type: "log", message: `[WARN] Titre produit manquant — essai suivant` });
+              send({ type: "log", message: `[WARN] Titre manquant — essai suivant` });
               detail = null;
               continue;
             }
@@ -1818,7 +1899,8 @@ app.post("/api/auto-snipe", async (req, res) => {
             send({
               type: "suppliers",
               query: searchQ,
-              compared: 1,
+              compared: verifiedList.length || 1,
+              verifiedOnly: strictVerified,
               items: [
                 {
                   rank: 1,
@@ -1837,8 +1919,7 @@ app.post("/api/auto-snipe", async (req, res) => {
                     source: String(c.source || "").split("+")[0],
                     title: String(c.title || "").slice(0, 90),
                     price: c.price != null && c.price > 0 ? Number(c.price) : null,
-                    priceConfirmed: !!(c.priceConfirmed || c.priceFromMarketplaceCard),
-                    priceUnconfirmed: !!c.priceUnconfirmed,
+                    priceConfirmed: !!c.priceConfirmed,
                     url: c.url,
                     best: false,
                   })),
@@ -1846,31 +1927,6 @@ app.post("/api/auto-snipe", async (req, res) => {
             });
             break;
           } catch (e) {
-            if (
-              cand.price > 0 &&
-              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed) &&
-              cand.title &&
-              String(cand.title).length > 12
-            ) {
-              const cost = sanitizeProductPrice(cand.price, cand.title);
-              if (cost > 0) {
-                detail = {
-                  title: cand.title,
-                  price: cost,
-                  images: cand.image ? [cand.image] : [],
-                  bullets: [],
-                  description: "",
-                  source: cand.source,
-                  url: cand.url,
-                };
-                supplier = { ...cand, price: cost, priceConfirmed: true, title: cand.title };
-                send({
-                  type: "log",
-                  message: `[IMPORT] Fallback carte marketplace — coût ${cost.toFixed(2)}€ (${String(e.message).slice(0, 60)})`,
-                });
-                break;
-              }
-            }
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
             detail = null;
           }

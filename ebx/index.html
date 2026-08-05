@@ -443,7 +443,7 @@
               <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
             </div>
             <div class="grid md:grid-cols-2 gap-3 mt-3">
-              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="auto">Auto (Amazon → Ali → Cdiscount)</option><option value="amazon">Amazon</option><option value="aliexpress">AliExpress</option><option value="cdiscount">Cdiscount</option></select></div>
+              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="amazon">Amazon (le + fiable pour prix vérifié)</option><option value="auto">Auto (Amazon → Ali → Cdiscount)</option><option value="aliexpress">AliExpress (souvent captcha)</option><option value="cdiscount">Cdiscount</option></select></div>
             </div>
           </div>
 
@@ -451,7 +451,13 @@
             <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Options</p>
             <div class="space-y-3">
               <label class="flex items-center justify-between gap-4 text-sm"><span>Listing automatique<br><span class="text-xs text-zinc-400">Lister directement sur eBay après import fournisseur</span></span><input id="snipe-autolist" type="checkbox" class="toggle" checked /></label>
+              <label class="flex items-center justify-between gap-4 text-sm"><span>Prix vérifié fiche uniquement<br><span class="text-xs text-zinc-400">Ignore Bing / cartes — seul un prix scrapé sur la page produit compte (recommandé)</span></span><input id="snipe-verified" type="checkbox" class="toggle" checked /></label>
             </div>
+            <p class="text-[11px] text-zinc-500 mt-3 leading-relaxed">
+              <strong class="text-zinc-700">Fiabilité :</strong> AliExpress bloque souvent le scrape (captcha) → préfère
+              <em>Source = Amazon</em> pour des prix vérifiés, ou colle l’URL Ali exacte dans
+              <em>Import Manuel</em>. EBX officiel utilise des connecteurs fournisseurs dédiés ; ce clone vérifie chaque fiche une par une.
+            </p>
           </div>
 
           <div class="grid grid-cols-4 gap-3 text-center text-sm">
@@ -464,8 +470,8 @@
           <div id="snipe-suppliers" class="hidden rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 space-y-3">
             <div class="flex items-center justify-between gap-2 flex-wrap">
               <div>
-                <p class="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Meilleurs fournisseurs</p>
-                <p id="snipe-suppliers-meta" class="text-xs text-zinc-500 mt-0.5">Classés du moins cher au plus cher</p>
+                <p class="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Fournisseurs vérifiés</p>
+                <p id="snipe-suppliers-meta" class="text-xs text-zinc-500 mt-0.5">Uniquement prix confirmés sur la fiche produit</p>
               </div>
               <div id="snipe-margin-box" class="hidden text-right text-xs">
                 <div class="font-semibold text-emerald-800" id="snipe-margin-line"></div>
@@ -1006,6 +1012,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-price-v4"></script>
+  <script src="app.js?v=snipe-verified-v1"></script>
 </body>
 </html>
