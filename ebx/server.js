@@ -119,10 +119,17 @@ if (!listingCols.includes("publish_env")) {
 if (!listingCols.includes("published_at")) {
   db.exec("ALTER TABLE listings ADD COLUMN published_at DATETIME");
 }
+if (!listingCols.includes("variations_active")) {
+  db.exec("ALTER TABLE listings ADD COLUMN variations_active INTEGER DEFAULT 0");
+}
+if (!listingCols.includes("variations_json")) {
+  db.exec("ALTER TABLE listings ADD COLUMN variations_json TEXT DEFAULT ''");
+}
 
 const getRecentListings = db.prepare(
   `SELECT id, seo_title, suggested_price, keywords, source_url, created_at,
           ebay_listing_id, ebay_offer_id, publish_env, published_at,
+          variations_active, variations_json,
           CASE
             WHEN html_description LIKE '%<img%'
              AND html_description NOT LIKE '%picsum.photos%'
@@ -134,9 +141,27 @@ const getListingById = db.prepare("SELECT * FROM listings WHERE id = ?");
 const deleteListingById = db.prepare("DELETE FROM listings WHERE id = ?");
 const updateListingPublish = db.prepare(
   `UPDATE listings
-   SET ebay_listing_id = ?, ebay_offer_id = ?, publish_env = ?, published_at = CURRENT_TIMESTAMP
+   SET ebay_listing_id = ?, ebay_offer_id = ?, publish_env = ?, published_at = CURRENT_TIMESTAMP,
+       variations_active = ?, variations_json = ?
    WHERE id = ?`
 );
+
+function rememberListingPublish(localId, pub = {}) {
+  const vars = pub.variations || null;
+  const active = vars && Array.isArray(vars.values) && vars.values.length >= 2 ? 1 : pub.listingId ? 1 : 0;
+  updateListingPublish.run(
+    String(pub.listingId || ""),
+    String(pub.offerId || ""),
+    String(pub.env || ""),
+    active,
+    vars ? JSON.stringify(vars) : "",
+    Number(localId)
+  );
+}
+
+function clearListingPublish(localId) {
+  updateListingPublish.run("", "", "", 0, "", Number(localId));
+}
 const insertListingStmt = db.prepare(
   "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
 );
@@ -590,6 +615,7 @@ app.get("/api/dashboard", async (_req, res) => {
           ca: Number(((Number(t.price) || 0) * (Number(t.sold) || 0)).toFixed(0)),
         })),
         trendingLive: rankingsLive,
+        trendingUpdatedAt: new Date().toISOString(),
         calendar: calendar,
         niches: niches.slice(0, 6),
         topSellers,
@@ -1658,12 +1684,7 @@ app.post("/api/auto-snipe", async (req, res) => {
             const listing = getListingById.get(Number(result.id));
             const pub = await publishToEbay(listing, listing.id);
             if (pub?.listingId) {
-              updateListingPublish.run(
-                String(pub.listingId),
-                String(pub.offerId || ""),
-                String(pub.env || ""),
-                listing.id
-              );
+              rememberListingPublish(listing.id, pub);
             }
             send({ type: "log", message: `[OK] Publié — listingId=${pub.listingId || "n/a"}` });
             listed += 1;
@@ -2085,15 +2106,10 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     };
     const result = await publishToEbay(listing, listing.id, { variations });
     if (result?.listingId) {
-      updateListingPublish.run(
-        String(result.listingId),
-        String(result.offerId || ""),
-        String(result.env || (isProduction() ? "production" : "sandbox")),
-        listing.id
-      );
+      rememberListingPublish(listing.id, result);
       const saved = getListingById.get(listing.id);
       console.log(
-        `[EBX] Listing #${listing.id} mémorisé → ebay_listing_id=${saved?.ebay_listing_id} env=${saved?.publish_env}`
+        `[EBX] Listing #${listing.id} mémorisé → ebay_listing_id=${saved?.ebay_listing_id} env=${saved?.publish_env} variations=${saved?.variations_active ? "OK" : "off"}`
       );
     }
     return res.json({
@@ -2175,7 +2191,7 @@ app.post("/api/listings/:id/end", async (req, res) => {
     }
     const { endEbayOffer } = require("./ebay-api");
     await endEbayOffer(listing.ebay_offer_id);
-    updateListingPublish.run("", "", "", listing.id);
+    clearListingPublish(listing.id);
     res.json({ success: true, data: { id: listing.id, status: "ended" } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
