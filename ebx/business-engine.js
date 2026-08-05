@@ -123,7 +123,8 @@ function buildAiTitle(productName, keywords = []) {
 function rewriteEbayTitle(productName, keywords = []) {
   let raw = String(productName || "Produit")
     .replace(/[\u4e00-\u9fff]+/g, " ") // chinois
-    .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship)\b/gi, " ")
+    .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/gi, " ")
+    .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship|ebay)\b/gi, " ")
     .replace(/\b[A-Z]{0,3}\d{5,}\b/g, " ") // codes SKU
     .replace(/[|【】\[\]{}]/g, " ")
     .replace(/\s+/g, " ")

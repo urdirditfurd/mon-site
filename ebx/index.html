@@ -139,13 +139,62 @@
       border: 1px solid #b0b8ed;
     }
     .logo-mark { color: #6d7ddf; letter-spacing: -0.02em; }
+    html.dark body,
+    body.dark-mode {
+      background: #12141f;
+      color: #e2e5f5;
+    }
+    html.dark .bg-white,
+    body.dark-mode .bg-white { background: #1a1d2e !important; }
+    html.dark main,
+    body.dark-mode main { background: #12141f; }
+    html.dark header,
+    body.dark-mode header {
+      background: rgba(26, 29, 46, 0.92) !important;
+      border-color: #2a2f45 !important;
+    }
+    html.dark .text-zinc-800,
+    body.dark-mode .text-zinc-800 { color: #e2e5f5; }
+    html.dark .text-zinc-400,
+    body.dark-mode .text-zinc-400 { color: #8b92b0; }
+    html.dark .border-zinc-200,
+    html.dark .border-\[\#d4d4f0\],
+    body.dark-mode .border-zinc-200,
+    body.dark-mode .border-\[\#d4d4f0\] { border-color: #2a2f45 !important; }
+    html.dark .bg-zinc-50,
+    html.dark .bg-zinc-100,
+    body.dark-mode .bg-zinc-50,
+    body.dark-mode .bg-zinc-100 { background: #22263a !important; }
+    html.dark .bg-lunar-50,
+    body.dark-mode .bg-lunar-50 { background: #1a1d2e !important; }
+    #theme-toggle {
+      width: 2rem; height: 2rem; border-radius: 0.5rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.08); color: #e6e6fa; font-size: 1rem;
+      border: 1px solid rgba(255,255,255,0.1); cursor: pointer;
+    }
+    #theme-toggle:hover { background: rgba(255,255,255,0.14); }
+    .color-swatch {
+      width: 1.75rem; height: 1.75rem; border-radius: 0.4rem; border: 2px solid transparent;
+      cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+    }
+    .color-swatch.active { border-color: #242b52; outline: 2px solid #6d7ddf; outline-offset: 1px; }
+    .account-plan-card {
+      background: #6d7ddf;
+      border-radius: 0.75rem;
+      padding: 0.75rem 0.85rem;
+      color: #fff;
+    }
   </style>
 </head>
 <body class="bg-lunar-200 text-zinc-800 min-h-screen flex">
   <aside class="w-64 bg-ink-900 text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-white/5">
-    <div class="p-5 border-b border-white/5">
-      <h1 class="text-2xl font-bold logo-mark tracking-tight">EBX</h1>
-      <p class="text-xs text-slate-500 mt-0.5">Dropshipping Automation</p>
+    <div class="p-5 border-b border-white/5 flex items-start justify-between gap-2">
+      <div>
+        <h1 class="text-2xl font-bold logo-mark tracking-tight">EBX</h1>
+        <p class="text-xs text-slate-500 mt-0.5">Dropshipping Automation</p>
+      </div>
+      <button type="button" id="theme-toggle" onclick="toggleDarkMode()" title="Thème clair / sombre" aria-label="Basculer le thème">🌙</button>
     </div>
     <nav class="flex-1 p-3 space-y-4 text-sm">
       <div>
@@ -172,11 +221,10 @@
         <a href="#" data-page="settings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Paramètres</a>
       </div>
     </nav>
-    <div class="p-3 border-t border-white/5 space-y-3">
-      <button type="button" onclick="alert('EBX Clone — Dropshipping eBay : sniper, listings, auto-order semi-auto, SAV.')" class="w-full text-sm font-semibold py-2.5 rounded-xl bg-[#6d7ddf] text-white">Explication EBX</button>
-      <div class="flex items-center gap-3 px-1">
-        <div class="w-8 h-8 rounded-full bg-[#6d7ddf]/30 text-[#e6e6fa] flex items-center justify-center text-sm font-bold">E</div>
-        <div><p class="text-sm font-medium text-lunar-200">Mon compte</p><p class="text-xs text-slate-500">Plan Business</p></div>
+    <div class="p-3 border-t border-white/5">
+      <div class="account-plan-card flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center text-sm font-bold">E</div>
+        <div><p class="text-sm font-medium text-white">Mon compte</p><p class="text-xs text-white/80">Plan Business</p></div>
       </div>
     </div>
   </aside>
@@ -331,6 +379,9 @@
             <button onclick="loadRankings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
           </div>
         </div>
+        <div class="bg-[#6d7ddf]/10 border border-[#6d7ddf]/25 rounded-2xl px-4 py-3 text-sm text-[#4452a8]" id="rankings-algo">
+          Algo : niches populaires (coque, LED, chargeur…) via Browse API eBay → dédupliquées → triées par score (ventes estimées × prix). Browse ne donne pas toujours le sold count exact.
+        </div>
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
           <div id="rankings-list" class="divide-y divide-zinc-50"></div>
         </div>
@@ -362,8 +413,8 @@
       <!-- SNIPER -->
       <section id="page-sniper" class="page space-y-4">
         <div class="flex gap-2 mb-2 flex-wrap" id="sniper-tabs">
-          <button data-stab="auto" class="sniper-tab active px-4 py-2 rounded-xl text-sm font-medium">Sniping</button>
-          <button data-stab="bulking" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Bulking</button>
+          <button data-stab="auto" class="sniper-tab active px-4 py-2 rounded-xl text-sm font-medium">Ciblage</button>
+          <button data-stab="bulking" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Import en masse</button>
           <button data-stab="sub" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Substitution</button>
           <button data-stab="manual" class="sniper-tab px-4 py-2 rounded-xl text-sm font-medium text-zinc-500 bg-zinc-100">Import Manuel</button>
         </div>
@@ -394,9 +445,7 @@
           <div>
             <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Options</p>
             <div class="space-y-3">
-              <label class="flex items-center justify-between gap-4 text-sm"><span>Listing automatique<br><span class="text-xs text-zinc-400">Lister directement sur eBay après import</span></span><input id="snipe-autolist" type="checkbox" class="toggle" checked /></label>
-              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode Test (délais courts)<br><span class="text-xs text-zinc-400">Pour démo — délais anti-ban réduits</span></span><input id="snipe-test" type="checkbox" class="toggle" checked /></label>
-              <label class="flex items-center justify-between gap-4 text-sm"><span>Mode REEL eBay<br><span class="text-xs text-zinc-400">Publie via le compte OAuth (Production/Sandbox)</span></span><input id="snipe-real" type="checkbox" class="toggle" /></label>
+              <label class="flex items-center justify-between gap-4 text-sm"><span>Listing automatique<br><span class="text-xs text-zinc-400">Lister directement sur eBay après import fournisseur</span></span><input id="snipe-autolist" type="checkbox" class="toggle" checked /></label>
             </div>
           </div>
 
@@ -411,7 +460,7 @@
 
         <div id="sniper-bulking" class="hidden bg-white rounded-2xl border p-6 space-y-4">
           <div>
-            <h3 class="text-xl font-bold">Bulking</h3>
+            <h3 class="text-xl font-bold">Import en masse</h3>
             <p class="text-sm text-zinc-400">Importez plusieurs URLs fournisseurs (une par ligne)</p>
           </div>
           <textarea id="bulk-urls" class="w-full h-40 px-4 py-3 rounded-xl border text-sm font-mono" placeholder="https://www.amazon.fr/dp/..."></textarea>
@@ -523,7 +572,7 @@
             <p class="text-sm text-zinc-400">Comme EBX : le bot prépare les commandes fournisseurs dès qu’une vente eBay arrive.</p>
           </div>
           <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
-            <span><strong>Mode Auto-Order</strong><br><span class="text-xs text-zinc-400">Laisser le bot commander automatiquement (file + adresse + ouverture fournisseur)</span></span>
+            <span><strong>Mode Auto-Order</strong><br><span class="text-xs text-zinc-400">Le bot prépare les commandes fournisseurs dès qu’une vraie vente eBay arrive</span></span>
             <input id="ao-mode" type="checkbox" class="toggle" onchange="saveAutoOrderSettings()" />
           </label>
           <div class="grid sm:grid-cols-2 gap-4">
@@ -555,12 +604,12 @@
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
           <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
             <div>
-              <h3 class="font-semibold">File de commandes</h3>
-              <p class="text-sm text-zinc-400">Sync eBay → bot prépare → tu paies chez le fournisseur</p>
+              <h3 class="font-semibold">Ventes eBay</h3>
+              <p class="text-sm text-zinc-400">Uniquement les commandes synchronisées depuis ton compte eBay</p>
             </div>
             <div class="flex gap-2 flex-wrap">
               <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes eBay</button>
-              <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Lancer le bot (file)</button>
+              <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Préparer commandes fournisseurs</button>
               <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
             </div>
           </div>
@@ -646,17 +695,20 @@
         <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
           <div>
             <h3 class="font-semibold text-lg">Générer ta description en 1 clic</h3>
-            <p class="text-sm text-zinc-400">Collez le lien du produit (Amazon, AliExpress, eBay, Cdiscount)</p>
+            <p class="text-sm text-zinc-400">Collez le lien du produit fournisseur (Amazon, AliExpress, Cdiscount)</p>
           </div>
           <input id="desc-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="URL du produit *" value="https://www.amazon.fr/dp/B09V3KXJPB" />
-          <div class="flex flex-wrap gap-3 items-center">
-            <span class="text-xs text-zinc-500">Thème :</span>
-            <button onclick="setTheme('#6d7ddf', this)" class="theme-dot active w-7 h-7 rounded-full bg-[#6d7ddf]" data-theme="#6d7ddf" title="#6D7DDF"></button>
-            <button onclick="setTheme('#e6e6fa', this)" class="theme-dot w-7 h-7 rounded-full bg-[#e6e6fa] border" data-theme="#e6e6fa" title="#E6E6FA"></button>
-            <button onclick="setTheme('#242b52', this)" class="theme-dot w-7 h-7 rounded-full bg-[#242b52]" data-theme="#242b52"></button>
-            <button onclick="setTheme('#4452a8', this)" class="theme-dot w-7 h-7 rounded-full bg-[#4452a8]" data-theme="#4452a8"></button>
-            <button onclick="setTheme('#ef4444', this)" class="theme-dot w-7 h-7 rounded-full bg-red-500" data-theme="#ef4444"></button>
-            <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary ml-auto">Générer la description</button>
+          <div class="space-y-2">
+            <div class="flex flex-wrap gap-3 items-center justify-between">
+              <span class="text-xs text-zinc-500 font-medium">Nuancier / palette</span>
+              <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary">Générer la description</button>
+            </div>
+            <div id="desc-color-palette" class="flex flex-wrap gap-2"></div>
+            <div class="flex items-center gap-2 text-xs text-zinc-400">
+              <label for="desc-color-picker">Couleur libre :</label>
+              <input type="color" id="desc-color-picker" value="#6d7ddf" class="w-8 h-8 rounded cursor-pointer border-0 bg-transparent" onchange="setTheme(this.value)" />
+              <span id="desc-theme-status" class="text-[11px]"></span>
+            </div>
           </div>
         </div>
 
@@ -672,14 +724,9 @@
               <button class="desc-tab active px-3 py-1.5 rounded-md text-sm" data-dtab="preview">Aperçu</button>
               <button class="desc-tab px-3 py-1.5 rounded-md text-sm text-zinc-500" data-dtab="html">HTML</button>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="text-xs text-zinc-400">Couleur :</span>
-              <button onclick="setTheme('#6d7ddf', this)" class="theme-dot w-6 h-6 rounded-full bg-[#6d7ddf]" data-theme="#6d7ddf"></button>
-              <button onclick="setTheme('#e6e6fa', this)" class="theme-dot w-6 h-6 rounded-full bg-[#e6e6fa] border" data-theme="#e6e6fa"></button>
-              <button onclick="setTheme('#242b52', this)" class="theme-dot w-6 h-6 rounded-full bg-[#242b52]" data-theme="#242b52"></button>
-              <button onclick="setTheme('#4452a8', this)" class="theme-dot w-6 h-6 rounded-full bg-[#4452a8]" data-theme="#4452a8"></button>
-              <button onclick="setTheme('#ef4444', this)" class="theme-dot w-6 h-6 rounded-full bg-red-500" data-theme="#ef4444"></button>
-              <span id="desc-theme-status" class="text-[11px] text-zinc-400 ml-2"></span>
+              <div id="desc-color-palette-mini" class="flex flex-wrap gap-1.5"></div>
             </div>
             <button onclick="copyHtml()" class="text-sm px-3 py-1.5 bg-zinc-900 text-white rounded-lg">Copier HTML</button>
           </div>
@@ -707,7 +754,7 @@
               <button onclick="loadSav()" class="text-sm px-3 py-1.5 border rounded-lg">Rafraîchir</button>
             </div>
           </div>
-          <p class="text-[11px] text-zinc-400">Sync utilise Trading GetMemberMessages. Sans scopes OAuth → démo locale. Escalade si litige / remboursement / menace.</p>
+          <p class="text-[11px] text-zinc-400">Sync utilise Trading GetMemberMessages. Tu peux supprimer les messages traités ou tests. La date eBay s’affiche pour mesurer le délai de réponse.</p>
         </div>
         <div class="grid lg:grid-cols-5 gap-4">
           <div class="lg:col-span-2 bg-white rounded-2xl border border-zinc-200 overflow-hidden">
@@ -723,6 +770,7 @@
                   <span id="sav-status-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100"></span>
                 </div>
                 <p id="sav-meta" class="text-xs text-zinc-400 mt-1"></p>
+                <p id="sav-received" class="text-xs text-[#4452a8] mt-1 font-medium"></p>
               </div>
               <div class="bg-zinc-50 rounded-xl p-4 text-sm whitespace-pre-wrap" id="sav-body"></div>
               <div>
@@ -735,6 +783,7 @@
                 <button onclick="escalateSavSelected()" class="text-sm px-3 py-2 border rounded-xl">Escalader</button>
                 <button onclick="sendSavSelected(false)" class="text-sm px-3 py-2 bg-zinc-900 text-white rounded-xl">Envoyer</button>
                 <button onclick="sendSavSelected(true)" class="text-sm px-3 py-2 border border-amber-300 text-amber-800 rounded-xl">Forcer envoi</button>
+                <button onclick="deleteSavSelected()" class="text-sm px-3 py-2 border border-red-200 text-red-600 rounded-xl ml-auto">Supprimer</button>
               </div>
             </div>
           </div>
@@ -743,27 +792,66 @@
 
       <!-- SETTINGS -->
       <section id="page-settings" class="page space-y-6">
-        <div class="bg-white rounded-2xl border p-6 space-y-5 max-w-2xl">
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <div class="flex items-center justify-between gap-3">
-            <h3 class="font-semibold text-lg">Paramètres & installation</h3>
-            <button onclick="loadSettings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Revérifier</button>
+            <h3 class="font-semibold text-lg">Profil</h3>
+            <button onclick="loadSettings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Actualiser</button>
           </div>
-          <p class="text-sm text-zinc-500">Fichier à éditer : <code class="bg-zinc-100 px-1.5 py-0.5 rounded text-xs">ebx/.env</code> (local uniquement)</p>
+          <div class="grid sm:grid-cols-2 gap-4 text-sm">
+            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Nom / compte eBay</p><p id="settings-profile-name" class="font-medium">—</p></div>
+            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Email</p><p id="settings-profile-email" class="font-medium">—</p></div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Compte connecté</h3>
+          <div class="grid sm:grid-cols-2 gap-4 text-sm">
+            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Environnement</p><p id="settings-env" class="font-medium">Production</p></div>
+            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Statut OAuth</p><p id="settings-oauth" class="font-medium">—</p></div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Thème</h3>
+          <p class="text-sm text-zinc-400">Mode clair / sombre — aussi via 🌙 / ☀️ en haut à gauche de la sidebar.</p>
+          <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
+            <span>Mode sombre</span>
+            <input id="settings-dark" type="checkbox" class="toggle" onchange="toggleDarkMode(this.checked)" />
+          </label>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Connectivité</h3>
+          <div id="settings-connectivity" class="grid sm:grid-cols-2 gap-3 text-sm"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Sécurité</h3>
+          <ul class="text-sm text-zinc-500 space-y-2 list-disc pl-5">
+            <li>Tokens OAuth stockés localement dans <code class="text-xs bg-zinc-100 px-1 rounded">ebx/.env</code> et la base SQLite.</li>
+            <li>Ne partage jamais ton refresh token. Rotation recommandée si exposé.</li>
+            <li>Publications uniquement via le compte eBay actif (multi-comptes ci-dessous).</li>
+          </ul>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl opacity-70">
+          <h3 class="font-semibold text-lg">Facturation</h3>
+          <p class="text-sm text-zinc-400">Bientôt — suivi plan Business / quotas (placeholder).</p>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">État technique</h3>
           <div id="setup-checklist" class="space-y-2"></div>
           <div class="grid sm:grid-cols-2 gap-4 text-sm">
             <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">LLM local</p><code id="settings-llm" class="text-xs">...</code></div>
             <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Mode API</p><span id="settings-mode">live+fallback</span></div>
           </div>
           <div id="setup-browse-sample" class="text-xs text-zinc-400 hidden"></div>
-          <p class="text-xs text-zinc-400">Tokens eBay avec <code>#</code> → guillemets doubles. Test CLI : <code>node check-setup.js</code></p>
-          <div class="p-4 rounded-xl border border-dashed border-zinc-200 text-sm space-y-1">
-            <p class="font-medium">LLM (optionnel, comme ebx.army IA)</p>
-            <p class="text-xs text-zinc-500">Installe <a class="text-brand-600 underline" href="https://lmstudio.ai/" target="_blank">LM Studio</a>, charge un modèle, démarre le serveur local sur le port 1234. Les descriptions seront enrichies automatiquement.</p>
-          </div>
         </div>
-        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-2xl">
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <h3 class="font-semibold text-lg">Comptes eBay (multi)</h3>
-          <p class="text-sm text-zinc-400">Ajoute plusieurs refresh tokens Prod — active celui qui publie.</p>
+          <p class="text-sm text-zinc-400">Ajoute plusieurs refresh tokens Prod — active celui qui publie. Marché FR / US / DE / GB.</p>
           <div class="grid gap-2 sm:grid-cols-2">
             <input id="acc-label" class="px-3 py-2 rounded-xl border text-sm" placeholder="Label (ex. Boutique FR)" />
             <select id="acc-market" class="px-3 py-2 rounded-xl border text-sm">

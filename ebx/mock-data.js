@@ -229,14 +229,15 @@ function escapeHtml(str) {
 }
 
 function getDashboardStats(listingCount = 0) {
+  // Zéro par défaut — les vrais CA / commandes viennent du sync eBay (auto_orders).
   return {
-    revenue: 2566.57,
-    orders: 48,
+    revenue: 0,
+    orders: 0,
     listings: listingCount,
-    conversion: 3.2,
-    margin: 22,
-    snipesToday: 3,
-    pendingOrders: 5,
+    conversion: 0,
+    margin: 0,
+    snipesToday: 0,
+    pendingOrders: 0,
   };
 }
 

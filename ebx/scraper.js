@@ -1273,14 +1273,19 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     .join("\n");
 
   const priceLabel = product.price ? `${Number(product.price).toFixed(2)} €` : "";
+  const displayTitle = stripSupplierProvenance(product.title);
   const whyText =
     sanitizeReadableText(product.description) ||
     sanitizeReadableText((product.bullets || []).slice(0, 2).join(" ")) ||
-    "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+    "Produit sélectionné pour sa qualité et sa demande eBay.";
   const descFull =
     sanitizeReadableText(product.description, { maxLen: 1200 }) ||
     whyText;
-  const bulletItems = (product.bullets || []).filter(Boolean).slice(0, 8);
+  const bulletItems = (product.bullets || [])
+    .filter(Boolean)
+    .map((b) => String(b).replace(/^\s*source\s*:\s*/i, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
   const bulletHtml = bulletItems.length
     ? bulletItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
     : `<li style="margin:0 0 6px;">✔ Produit neuf, prêt à l'emploi</li>
@@ -1294,7 +1299,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Neuf</span>
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Garanti</span>
     </div>
-    <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(product.title)}</h1>
+    <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(displayTitle)}</h1>
     <p style="font-size:13px;opacity:.9;margin:0;">Découvrez le Produit${priceLabel ? " — " + priceLabel : ""}</p>
   </div>
 
@@ -1418,7 +1423,7 @@ function scrubWhySectionInHtml(html) {
       const cleaned = sanitizeReadableText(plain);
       const fallback =
         cleaned ||
-        "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+        "Produit sélectionné pour sa qualité et sa demande eBay.";
       return `<p${attrs}>${escapeHtml(fallback)}</p>`;
     });
   }
@@ -1428,8 +1433,17 @@ function scrubWhySectionInHtml(html) {
   }
   const cleaned =
     sanitizeReadableText(body) ||
-    "Produit sélectionné pour sa qualité, sa demande eBay et son potentiel de marge.";
+    "Produit sélectionné pour sa qualité et sa demande eBay.";
   return raw.replace(re, `$1<p$2>${escapeHtml(cleaned)}</p>`);
+}
+
+/** Retire la provenance fournisseur du titre affiché (ex. « - AliExpress 15 »). */
+function stripSupplierProvenance(title) {
+  return String(title || "")
+    .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/i, "")
+    .replace(/\b(AliExpress|Amazon|Cdiscount|eBay)\s*\d*\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 module.exports = {
@@ -1449,4 +1463,5 @@ module.exports = {
   isRealProductImage,
   sanitizeReadableText,
   scrubWhySectionInHtml,
+  stripSupplierProvenance,
 };

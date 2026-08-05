@@ -19,6 +19,7 @@ const {
   countRealImagesInHtml,
   isRealProductImage,
   scrubWhySectionInHtml,
+  stripSupplierProvenance,
 } = require("./scraper");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
 const {
@@ -253,10 +254,14 @@ const listSavMessages = db.prepare(
 );
 const getSavById = db.prepare("SELECT * FROM sav_messages WHERE id = ?");
 const getSavByMessageId = db.prepare("SELECT * FROM sav_messages WHERE message_id = ?");
+const savCols = db.prepare("PRAGMA table_info(sav_messages)").all().map((c) => c.name);
+if (!savCols.includes("received_at")) {
+  db.exec("ALTER TABLE sav_messages ADD COLUMN received_at TEXT DEFAULT ''");
+}
 const insertSavMessage = db.prepare(
   `INSERT INTO sav_messages
-    (message_id, item_id, item_title, sender, subject, body, status, draft, escalate, escalate_reason, confidence, reply_source)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    (message_id, item_id, item_title, sender, subject, body, status, draft, escalate, escalate_reason, confidence, reply_source, received_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const updateSavDraft = db.prepare(
   `UPDATE sav_messages
@@ -266,11 +271,68 @@ const updateSavDraft = db.prepare(
 const updateSavStatus = db.prepare(
   "UPDATE sav_messages SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 );
+const deleteSavById = db.prepare("DELETE FROM sav_messages WHERE id = ?");
+
+/** URL fournisseur dropship valide (jamais eBay → eBay). */
+function isSupplierProductUrl(url) {
+  const u = String(url || "");
+  if (!u || /ebay\.(com|fr|de|co\.uk|it|es)\b/i.test(u)) return false;
+  if (/wholesale-|\/w\/wholesale|\/search\/|SearchText=|\/s\?k=/i.test(u)) return false;
+  return /amazon\.[a-z.]+\/.*(dp|gp\/product)|aliexpress\.com\/item\/|cdiscount\.com\/.+\.html/i.test(u);
+}
+
+/** Commande issue du sync eBay (pas un faux AO- sniper). */
+function isRealEbayOrderRef(ref) {
+  const r = String(ref || "");
+  if (!r || /^AO-/i.test(r) || /^DEMO/i.test(r)) return false;
+  return r.length >= 12 || /^\d{2}-\d+-\d+/.test(r);
+}
+
+function listingIsSupplierSourced(row) {
+  const url = String(row?.source_url || "");
+  if (!url || /ebay\.(com|fr|de|co\.uk|it|es)\b/i.test(url)) return false;
+  // Uniquement fiches produit Amazon / Ali / Cdiscount (pas pages recherche / wholesale)
+  return isSupplierProductUrl(url);
+}
+
+function purgeNonSupplierListings() {
+  const rows = getRecentListings.all();
+  let removed = 0;
+  for (const row of rows) {
+    if (!listingIsSupplierSourced(row)) {
+      deleteListingById.run(row.id);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function purgeFakeAutoOrders() {
+  const rows = getOrders.all();
+  let removed = 0;
+  const del = db.prepare("DELETE FROM auto_orders WHERE order_ref = ?");
+  for (const row of rows) {
+    if (!isRealEbayOrderRef(row.order_ref)) {
+      del.run(row.order_ref);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+// Nettoyage one-shot au démarrage (listings eBay importés + faux AO sniper + démos SAV)
+try {
+  purgeNonSupplierListings();
+  purgeFakeAutoOrders();
+  db.prepare("DELETE FROM sav_messages WHERE message_id LIKE 'DEMO-%'").run();
+} catch (e) {
+  console.warn("[EBX] purge démarrage:", e.message);
+}
 
 const DEFAULT_SUPPLIER_CFG = {
   amazon: { enabled: true, auto: true, label: "Amazon France", connected: false, delay: "1-2 jours" },
   aliexpress: { enabled: true, auto: true, label: "AliExpress", connected: false, delay: "7-15 jours" },
-  cdiscount: { enabled: true, auto: false, label: "Cdiscount", connected: false, delay: "Bientôt", comingSoon: true },
+  cdiscount: { enabled: true, auto: true, label: "Cdiscount", connected: false, delay: "1-3 jours", comingSoon: false },
   autoOrderMode: false,
   autoProcessOnSync: true,
   maxPerDay: 50,
@@ -290,6 +352,13 @@ function getSupplierConfig() {
       for (const key of ["amazon", "aliexpress", "cdiscount"]) {
         merged[key] = { ...DEFAULT_SUPPLIER_CFG[key], ...(parsed[key] || {}) };
       }
+      // Cdiscount désormais actif (ignore ancien comingSoon persisté)
+      merged.cdiscount = {
+        ...merged.cdiscount,
+        enabled: merged.cdiscount.enabled !== false,
+        comingSoon: false,
+        delay: merged.cdiscount.delay === "Bientôt" ? "1-3 jours" : merged.cdiscount.delay || "1-3 jours",
+      };
       const today = new Date().toISOString().slice(0, 10);
       if (merged.processedDay !== today) {
         merged.processedToday = 0;
@@ -415,16 +484,17 @@ app.get("/api/dashboard", async (_req, res) => {
     });
     const published = listings.filter((l) => l.ebay_listing_id).length;
 
-    // CA / commandes depuis auto_orders (sync eBay = données réelles)
-    const realRevenue = orders.reduce((s, o) => s + (Number(o.amount) || 0), 0);
-    const ebaySynced = orders.filter((o) => String(o.order_ref || "").length > 10).length;
-    const pendingOrders = orders.filter((o) => o.status === "pending").length;
-    const delivered = orders.filter((o) => o.status === "delivered").length;
-    const avgTicket = orders.length ? realRevenue / orders.length : 0;
+    // CA / commandes = UNIQUEMENT ventes eBay synchronisées (jamais les faux AO- du sniper)
+    const ebayOrders = orders.filter((o) => isRealEbayOrderRef(o.order_ref));
+    const realRevenue = ebayOrders.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+    const ebaySynced = ebayOrders.length;
+    const pendingOrders = ebayOrders.filter((o) => o.status === "pending").length;
+    const delivered = ebayOrders.filter((o) => o.status === "delivered").length;
+    const avgTicket = ebayOrders.length ? realRevenue / ebayOrders.length : 0;
     const estCost = realRevenue * 0.55;
     const estFees = realRevenue * 0.13;
     const estMarginPct =
-      realRevenue > 0 ? Number((((realRevenue - estCost - estFees) / realRevenue) * 100).toFixed(1)) : base.margin;
+      realRevenue > 0 ? Number((((realRevenue - estCost - estFees) / realRevenue) * 100).toFixed(1)) : 0;
 
     if (pendingOrders > 0) {
       pilotage.unshift({
@@ -500,14 +570,14 @@ app.get("/api/dashboard", async (_req, res) => {
       data: {
         ...base,
         revenue: Number(realRevenue.toFixed(2)),
-        revenueSource: ebaySynced ? "ebay_orders" : orders.length ? "local_orders" : "estimate",
+        revenueSource: ebaySynced ? "ebay_orders" : "none",
         margin: estMarginPct,
         avgTicket: Number(avgTicket.toFixed(2)),
-        listings: listings.length,
+        listings: listings.filter(listingIsSupplierSourced).length,
         published,
         pendingOrders,
         delivered,
-        orders: orders.length,
+        orders: ebayOrders.length,
         ebaySynced,
         ebayEnv,
         sellerUserId: seller?.userId || null,
@@ -582,23 +652,48 @@ function formatShipAddress(order) {
 
 app.get("/api/rankings", async (req, res) => {
   const marketplace = req.query.marketplace || "FR";
+  const algo =
+    "Classement = niches populaires FR (coque, LED, chargeur…) via Browse API eBay, " +
+    "dédupliqué, trié par score (ventes estimées × prix). " +
+    "eBay Browse ne fournit pas toujours le sold count exact — on utilise les signaux listing + position de recherche.";
   try {
     const seeds = ["coque iphone", "verre trempe", "colle b7000", "bande led", "chargeur usb c"];
     const all = [];
     for (const q of seeds) {
       try {
         const r = await browseSearch(q, { marketplace, limit: 3 });
-        r.items.forEach((it) => all.push({ ...it, seed: q }));
+        r.items.forEach((it, idx) =>
+          all.push({
+            ...it,
+            seed: q,
+            sold: Number(it.sold) || Math.max(1, 30 - idx * 5),
+            relevance: 3 - idx,
+          })
+        );
       } catch (_) {}
     }
     if (all.length) {
+      const scored = [...all].sort((a, b) => {
+        const sa = (Number(a.sold) || 0) * Math.max(1, Number(a.price) || 1) + (a.relevance || 0) * 10;
+        const sb = (Number(b.sold) || 0) * Math.max(1, Number(b.price) || 1) + (b.relevance || 0) * 10;
+        return sb - sa;
+      });
+      const seen = new Set();
+      const uniq = [];
+      for (const p of scored) {
+        const key = String(p.title || "").slice(0, 40).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniq.push(p);
+        if (uniq.length >= 12) break;
+      }
       const data = enrichItemsImages(
-        all.slice(0, 12).map((p, i) => ({
+        uniq.map((p, i) => ({
           rank: i + 1,
           title: p.title,
           category: p.seed || "eBay",
           price: p.price || 0,
-          sold: p.sold || Math.round(20 + Math.random() * 200),
+          sold: p.sold || 0,
           marketplace,
           trend: i % 3 === 0 ? "up" : i % 3 === 1 ? "stable" : "down",
           url: p.url,
@@ -606,7 +701,7 @@ app.get("/api/rankings", async (req, res) => {
           live: true,
         }))
       );
-      return res.json({ success: true, data, live: true, source: "ebay-browse-api" });
+      return res.json({ success: true, data, live: true, source: "ebay-browse-api", algo });
     }
   } catch (err) {
     console.warn("[EBX] rankings browse fail:", err.message);
@@ -614,7 +709,13 @@ app.get("/api/rankings", async (req, res) => {
   try {
     const live = await scrapeRankings({ marketplace });
     if (live.length)
-      return res.json({ success: true, data: enrichItemsImages(live), live: true, source: "scrape" });
+      return res.json({
+        success: true,
+        data: enrichItemsImages(live),
+        live: true,
+        source: "scrape",
+        algo,
+      });
   } catch (err) {
     console.warn("[EBX] rankings scrape fail:", err.message);
   }
@@ -625,7 +726,7 @@ app.get("/api/rankings", async (req, res) => {
       url: `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(p.title)}`,
     }))
   );
-  res.json({ success: true, data: mock, live: false, source: "mock" });
+  res.json({ success: true, data: mock, live: false, source: "mock", algo });
 });
 
 app.post("/api/title-builder", async (req, res) => {
@@ -771,36 +872,35 @@ app.delete("/api/competitors/history/:id", (req, res) => {
 
 app.get("/api/auto-orders", (_req, res) => {
   try {
-    const rows = getOrders.all();
-    if (rows.length) {
-      return res.json({
-        success: true,
-        data: rows.map((o) => {
-          let ship = null;
-          try {
-            ship = o.ship_json ? JSON.parse(o.ship_json) : null;
-          } catch (_) {}
-          return {
-            id: o.order_ref,
-            product: o.product,
-            buyer: o.buyer,
-            status: o.status,
-            supplier: o.supplier,
-            amount: o.amount,
-            source_url: o.source_url || "",
-            notes: o.notes || "",
-            qty: o.qty || 1,
-            shipText: o.notes || "",
-            ship,
-            created_at: o.created_at,
-            fromEbay: String(o.order_ref || "").length > 12,
-          };
-        }),
-        live: true,
-      });
-    }
-  } catch (_) {}
-  res.json({ success: true, data: getAutoOrders(), live: false });
+    const rows = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref));
+    return res.json({
+      success: true,
+      data: rows.map((o) => {
+        let ship = null;
+        try {
+          ship = o.ship_json ? JSON.parse(o.ship_json) : null;
+        } catch (_) {}
+        return {
+          id: o.order_ref,
+          product: o.product,
+          buyer: o.buyer,
+          status: o.status,
+          supplier: o.supplier,
+          amount: o.amount,
+          source_url: o.source_url || "",
+          notes: o.notes || "",
+          qty: o.qty || 1,
+          shipText: o.notes || "",
+          ship,
+          created_at: o.created_at,
+          fromEbay: true,
+        };
+      }),
+      live: true,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get("/api/auto-orders/config", (_req, res) => {
@@ -810,7 +910,7 @@ app.get("/api/auto-orders/config", (_req, res) => {
 app.get("/api/bot-status", (_req, res) => {
   try {
     const cfg = getSupplierConfig();
-    const pending = getOrders.all().filter((o) => o.status === "pending").length;
+    const pending = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending").length;
     const listings = getRecentListings.all().length;
     const published = getRecentListings.all().filter((l) => l.ebay_listing_id).length;
     res.json({
@@ -880,7 +980,7 @@ app.post("/api/auto-orders/process-queue", async (_req, res) => {
         },
       });
     }
-    const rows = getOrders.all().filter((o) => o.status === "pending");
+    const rows = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending");
     const pack = [];
     const botLog = [];
     for (const row of rows) {
@@ -1077,48 +1177,8 @@ app.post("/api/auto-orders/:id/advance", (req, res) => {
 });
 
 function seedDemoSavIfEmpty() {
-  if (listSavMessages.all().length) return;
-  const demos = [
-    {
-      message_id: "DEMO-1",
-      item_id: "DEMO-ITEM-1",
-      item_title: "Colle B7000 110ml Transparent",
-      sender: "acheteur_demo_fr",
-      subject: "Délai de livraison ?",
-      body: "Bonjour, quand sera expédiée ma commande ? Merci.",
-    },
-    {
-      message_id: "DEMO-2",
-      item_id: "DEMO-ITEM-2",
-      item_title: "Support Laptop Aluminium",
-      sender: "client_urgent",
-      subject: "Demande de remboursement",
-      body: "Le produit est abîmé, je veux un remboursement immédiat sinon litige PayPal.",
-    },
-  ];
-  for (const d of demos) {
-    const soft = shouldEscalateSav(`${d.subject} ${d.body}`);
-    const tpl = draftSavReplyTemplate({
-      buyer: d.sender,
-      subject: d.subject,
-      body: d.body,
-      product: d.item_title,
-    });
-    insertSavMessage.run(
-      d.message_id,
-      d.item_id,
-      d.item_title,
-      d.sender,
-      d.subject,
-      d.body,
-      soft.escalate ? "escalated" : "draft",
-      tpl.draft,
-      soft.escalate ? 1 : 0,
-      soft.reason || tpl.reason,
-      tpl.confidence,
-      "template"
-    );
-  }
+  // Plus de messages fictifs — inbox vide tant qu'il n'y a pas de sync eBay.
+  return;
 }
 
 app.get("/api/sav", (_req, res) => {
@@ -1163,7 +1223,8 @@ app.post("/api/sav/sync", async (_req, res) => {
           0,
           "",
           0,
-          ""
+          "",
+          m.creationDate || new Date().toISOString()
         );
         created += 1;
       }
@@ -1245,6 +1306,17 @@ app.post("/api/sav/:id/escalate", (req, res) => {
     const reason = String(req.body?.reason || "Escalade manuelle");
     updateSavDraft.run(row.draft || "", 1, reason, row.confidence || 0, row.reply_source || "manual", "escalated", row.id);
     res.json({ success: true, data: { id: row.id, status: "escalated" } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/sav/:id", (req, res) => {
+  try {
+    const row = getSavById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Message introuvable" });
+    deleteSavById.run(row.id);
+    res.json({ success: true, data: { id: row.id } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1339,11 +1411,12 @@ app.post("/api/auto-snipe", async (req, res) => {
     margin = 20,
     marketplace = "France",
     ticket = "all",
-    testMode = true,
     autoList = true,
     source = "auto",
     query = "gadgets",
   } = req.body || {};
+  // Mode REEL uniquement (plus de Mode Test)
+  const testMode = false;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1365,6 +1438,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   let listed = 0;
   let errors = 0;
   let veroBlocked = 0;
+  let skipped = 0;
 
   const ticketFilter = (price) => {
     if (ticket === "low") return price == null || price <= 30;
@@ -1372,37 +1446,50 @@ app.post("/api/auto-snipe", async (req, res) => {
     return true;
   };
 
+  const sourceList =
+    source === "amazon"
+      ? ["amazon"]
+      : source === "aliexpress"
+        ? ["aliexpress"]
+        : source === "cdiscount"
+          ? ["cdiscount"]
+          : ["amazon", "aliexpress", "cdiscount"];
+
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe BUSINESS — Mode ${testMode !== false ? "TEST (délais courts)" : "REEL (anti-ban humain)"}`,
+      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL (anti-ban humain)`,
     });
     send({
       type: "log",
       message: `[CONFIG] Market=${marketplace} (${marketCode}) | Marge=${margin}% | Ticket=${ticket} | Source=${source} | Qty=${max}`,
     });
-    const d0 = await antiBanDelay({ testMode: testMode !== false, label: "init" });
     send({
       type: "log",
-      message: `[PROTECT] Anti-ban ${testMode !== false ? "souple" : "humain"} ✓ (${d0.waitedMs}ms${d0.deferred ? ", hors horaires" : ""}) | VeRO scan ✓ | Sans quota abonnement ✓`,
+      message: `[RULE] Sources = Amazon / AliExpress / Cdiscount uniquement — jamais d'import d'annonces eBay`,
     });
-    await antiBanDelay({ testMode: testMode !== false, label: "scan" });
+    const d0 = await antiBanDelay({ testMode, label: "init" });
+    send({
+      type: "log",
+      message: `[PROTECT] Anti-ban humain ✓ (${d0.waitedMs}ms${d0.deferred ? ", hors horaires" : ""}) | VeRO scan ✓`,
+    });
+    await antiBanDelay({ testMode, label: "scan" });
 
-    // 1) Produits tendance eBay (comme dans la vidéo)
-    send({ type: "log", message: `[SCAN] Recherche tendances eBay pour "${query}"...` });
-    let targets = [];
+    // 1) Signal demande eBay (tendances) — mots-clés uniquement, pas le produit
+    send({ type: "log", message: `[SCAN] Signaux demande eBay pour "${query}"...` });
+    let demandHints = [];
     try {
       const r = await browseSearch(query, { marketplace: marketCode, limit: max + 4 });
-      targets = r.items.filter((i) => ticketFilter(i.price));
-      scanned = Math.max(targets.length * 12, targets.length);
-      send({ type: "log", message: `[SCAN] ${targets.length} annonces eBay (${r.api})` });
+      demandHints = r.items.filter((i) => ticketFilter(i.price));
+      scanned = Math.max(demandHints.length * 12, demandHints.length);
+      send({ type: "log", message: `[SCAN] ${demandHints.length} signaux eBay (${r.api}) — on sourcera hors eBay` });
     } catch (err) {
       send({ type: "log", message: `[WARN] Browse API: ${err.message}` });
       try {
         const ebay = await scrapeEbaySearch(query, { marketplace: marketCode, limit: max + 4 });
-        targets = ebay.items.filter((i) => ticketFilter(i.price));
-        scanned = targets.length * 8;
-        send({ type: "log", message: `[SCAN] ${targets.length} annonces via scrape eBay` });
+        demandHints = ebay.items.filter((i) => ticketFilter(i.price));
+        scanned = demandHints.length * 8;
+        send({ type: "log", message: `[SCAN] ${demandHints.length} signaux via scrape eBay` });
       } catch (err2) {
         send({ type: "log", message: `[WARN] eBay scrape: ${err2.message}` });
       }
@@ -1411,20 +1498,29 @@ app.post("/api/auto-snipe", async (req, res) => {
 
     for (let i = 0; i < max; i++) {
       try {
-        const target = targets[i] || {
-          title: `${query} — opportunité ${i + 1}`,
-          price: 19.9,
-          url: "",
-        };
-        // Sanitize prix absurdes (ex: B7000 mal parsé)
-        if (!target.price || target.price > 500 || target.price < 0.5) {
-          target.price = 19.9;
-        }
+        const hint = demandHints[i];
+        // Recherche fournisseur sur le mot-clé niche (pas le titre eBay collection)
+        const searchQ = String(query || "")
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 6)
+          .join(" ") || "gadget";
+        const hintKw = hint
+          ? String(hint.title)
+              .replace(/\b(collectionneur|livre|ebook|vintage|rare|lot)\b/gi, " ")
+              .split(/\s+/)
+              .filter((w) => w.length > 3)
+              .slice(0, 5)
+              .join(" ")
+          : "";
+        const supplierQuery = hintKw || searchQ;
+
         send({
           type: "log",
-          message: `[TARGET] eBay: "${String(target.title).slice(0, 70)}" @ ${(target.price || 0).toFixed?.(2) || target.price}€`,
+          message: `[TARGET] Recherche fournisseur: "${supplierQuery}"${hint ? ` (demande eBay: "${String(hint.title).slice(0, 40)}…")` : ""}`,
         });
-        const vero = scanVero(target.title);
+
+        const vero = scanVero(supplierQuery);
         if (vero.level === "block") {
           veroBlocked += 1;
           send({ type: "log", message: `[VERO] BLOQUÉ — ${vero.message}` });
@@ -1435,114 +1531,105 @@ app.post("/api/auto-snipe", async (req, res) => {
         if (!vero.ok) {
           send({ type: "log", message: `[VERO] Attention — ${vero.message}` });
         }
-        await antiBanDelay({ testMode: testMode !== false, label: "target" });
+        await antiBanDelay({ testMode, label: "target" });
 
-        // 2) Comparer fournisseurs Amazon / Ali / Cdiscount (prix réels si dispo)
         send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})...` });
         let supplier = null;
-        const searchQ = String(target.title).split(/\s+/).slice(0, 6).join(" ") || query;
-
-        const sourceList =
-          source === "amazon"
-            ? ["amazon"]
-            : source === "aliexpress"
-              ? ["aliexpress"]
-              : source === "cdiscount"
-                ? ["cdiscount"]
-                : ["amazon", "aliexpress", "cdiscount"];
-
         try {
-          const cmp = await findCheapestSupplier(searchQ, { sources: sourceList, limit: 3 });
-          if (cmp.best) {
+          const cmp = await findCheapestSupplier(supplierQuery, { sources: sourceList, limit: 5 });
+          // Ne garder que des URLs produit fournisseur réelles
+          const valid = (cmp.candidates || []).filter((c) => isSupplierProductUrl(c.url));
+          if (valid.length) {
+            supplier = valid.sort((a, b) => (a.price || 999) - (b.price || 999))[0];
+          } else if (cmp.best && isSupplierProductUrl(cmp.best.url)) {
             supplier = cmp.best;
+          }
+          if (supplier) {
             send({
               type: "log",
-              message: `[SOURCE] ${cmp.compared} prix réels comparés → meilleur: ${String(supplier.source).split("+")[0]} @ ${
+              message: `[SOURCE] Meilleur: ${String(supplier.source).split("+")[0]} @ ${
                 supplier.price != null ? Number(supplier.price).toFixed(2) + "€" : "prix n/a"
               } — ${String(supplier.title || "").slice(0, 50)}`,
             });
-            if (cmp.candidates.length > 1) {
-              const preview = cmp.candidates
-                .slice(0, 3)
-                .map((c) => `${String(c.source).split("+")[0]}:${c.price != null ? c.price.toFixed(2) : "?"}`)
-                .join(" | ");
-              send({ type: "log", message: `[SOURCE] Top: ${preview}` });
-            }
           }
         } catch (e) {
           send({ type: "log", message: `[WARN] Comparaison fournisseurs: ${e.message}` });
         }
 
-        // Fallback historique si aucun résultat scrape
-        if (!supplier) {
-          supplier = {
-            title: target.title,
-            url: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ)}.html`,
-            price: Number(((target.price || 20) * 0.4).toFixed(2)),
-            source: "aliexpress-estimate",
-          };
+        if (!supplier || !isSupplierProductUrl(supplier.url)) {
+          skipped += 1;
           send({
             type: "log",
-            message: `[SOURCE] Fallback estimé AliExpress @ ${supplier.price}€ (scrapes vides)`,
+            message: `[SKIP] Aucun produit fournisseur réel trouvé — on n'importe JAMAIS une annonce eBay`,
           });
+          errors += 1;
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
         }
 
-        // 3) Import détails — fiche produit si URL item (pas page recherche)
         let detail = null;
-        const isProductUrl =
-          supplier.url &&
-          !/wholesale-|\/search\/|SearchText=/i.test(supplier.url) &&
-          (/amazon\.|\/item\/|cdiscount\.com\/.+\.html/i.test(supplier.url));
-        if (isProductUrl) {
-          try {
-            detail = await scrapeProduct(supplier.url);
-            if (detail.price && (!supplier.price || detail.price < supplier.price)) {
-              supplier.price = detail.price;
-            }
-            send({
-              type: "log",
-              message: `[IMPORT] Détails récupérés (${(detail.images || []).length} images, prix ${detail.price || "n/a"})`,
-            });
-          } catch (e) {
-            send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
+        try {
+          detail = await scrapeProduct(supplier.url);
+          detail.images = (detail.images || []).filter(isRealProductImage);
+          if (detail.price && (!supplier.price || detail.price < supplier.price)) {
+            supplier.price = detail.price;
           }
-        } else {
-          send({ type: "log", message: `[IMPORT] Métadonnées eBay + fournisseur` });
+          send({
+            type: "log",
+            message: `[IMPORT] Détails fournisseur (${(detail.images || []).length} images, prix ${detail.price || "n/a"})`,
+          });
+        } catch (e) {
+          send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
         }
 
-        const cost = detail?.price || supplier.price || Number(((target.price || 20) * 0.4).toFixed(2));
+        if (!detail || !detail.title) {
+          skipped += 1;
+          send({ type: "log", message: `[SKIP] Impossible de scraper la fiche fournisseur — abandon` });
+          errors += 1;
+          send({ type: "stats", scanned, imported, listed, errors });
+          continue;
+        }
+
+        const cost = detail.price || supplier.price;
+        if (!cost || cost < 0.5 || cost > 500) {
+          skipped += 1;
+          send({ type: "log", message: `[SKIP] Prix fournisseur invalide (${cost})` });
+          errors += 1;
+          continue;
+        }
+
         const sellPrice = Number((cost * (1 + Number(margin) / 100) * 1.35).toFixed(2));
-        const marginPct = cost > 0 ? (((sellPrice - cost) / sellPrice) * 100).toFixed(0) : margin;
+        const marginPct = (((sellPrice - cost) / sellPrice) * 100).toFixed(0);
         send({
           type: "log",
           message: `[MARGIN] Coût ${Number(cost).toFixed(2)}€ → Revente ${sellPrice}€ (marge ~${marginPct}%)`,
         });
 
-        const title = (detail?.title || supplier.title || target.title || "Produit EBX").slice(0, 80);
-        const images = [
-          ...(detail?.images || []),
-          target.image,
-          supplier.image,
-        ].filter(isRealProductImage);
-
+        const discreet = prepareDiscreetListing(
+          {
+            ...detail,
+            title: stripSupplierProvenance(detail.title),
+            price: cost,
+            source: detail.source || supplier.source,
+            url: supplier.url,
+          },
+          { marginMult: 1 + Number(margin) / 100 }
+        );
+        const title = stripSupplierProvenance(discreet.seo_title || detail.title).slice(0, 80);
+        const images = (discreet.images || []).filter(isRealProductImage);
         const html = buildHtmlFromProduct(
           {
             title,
             images,
-            bullets: detail?.bullets?.length
-              ? detail.bullets
-              : [
-                  "Produit sélectionné via Auto-Snipe",
-                  `Source: ${supplier.source || "fournisseur"}`,
-                  "Description à enrichir avant publication",
-                ],
-            description:
-              detail?.description ||
-              `Opportunité eBay : ${target.title || title}. Fournisseur estimé à ${Number(cost).toFixed(2)}€.`,
+            bullets: (detail.bullets || [])
+              .map((b) => String(b).replace(/^\s*source\s*:\s*/i, "").trim())
+              .filter(Boolean)
+              .slice(0, 8),
+            description: detail.description || "",
             price: cost,
-            source: detail?.source || supplier.source || "snipe",
+            source: detail.source || supplier.source,
           },
-          "#667eea"
+          "#6d7ddf"
         );
 
         const result = insertListingSafe({
@@ -1550,7 +1637,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           html,
           price: sellPrice,
           keywords: query,
-          sourceUrl: supplier.url || target.url || "",
+          sourceUrl: supplier.url,
         });
         if (result.duplicate) {
           send({ type: "log", message: `[SKIP] Doublon récent ignoré — "${title.slice(0, 40)}" (id ${result.id})` });
@@ -1559,17 +1646,10 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         imported += 1;
         send({ type: "stats", scanned, imported, listed, errors });
-        await antiBanDelay({ testMode: testMode !== false, label: "import" });
+        await antiBanDelay({ testMode, label: "import" });
 
-        // 4) Listing (simulation ou réel)
         if (!autoList) {
           send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.id})` });
-        } else if (testMode !== false) {
-          send({
-            type: "log",
-            message: `[SIMULATION] Listé sur eBay à ${sellPrice} EUR — "${title.slice(0, 50)}" (id local ${result.id})`,
-          });
-          listed += 1;
         } else {
           send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
           try {
@@ -1591,23 +1671,9 @@ app.post("/api/auto-snipe", async (req, res) => {
           }
         }
 
-        const supplierLabel = /amazon/i.test(supplier.source || "")
-          ? "Amazon"
-          : /cdiscount/i.test(supplier.source || "")
-            ? "Cdiscount"
-            : "AliExpress";
-        insertOrder.run(
-          `AO-${Date.now().toString().slice(-6)}`,
-          title.slice(0, 80),
-          "ebay_buyer",
-          "pending",
-          supplierLabel,
-          cost,
-          supplier.url || ""
-        );
-
+        // Pas d'insertion Auto-Order ici — uniquement après vraie vente eBay (sync)
         send({ type: "stats", scanned, imported, listed, errors });
-        await antiBanDelay({ testMode: testMode !== false, label: "loop" });
+        await antiBanDelay({ testMode, label: "loop" });
       } catch (err) {
         errors += 1;
         send({ type: "log", message: `[ERROR] ${err.message}` });
@@ -1617,7 +1683,7 @@ app.post("/api/auto-snipe", async (req, res) => {
 
     send({
       type: "log",
-      message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s), ${errors} erreur(s), VeRO bloqués=${veroBlocked}`,
+      message: `[DONE] Auto-Snipe terminé — ${listed} listé(s), ${imported} importé(s), ${errors} erreur(s), skip=${skipped}, VeRO=${veroBlocked}`,
     });
     send({ type: "done", scanned, imported, listed, errors });
   } catch (err) {
@@ -1637,7 +1703,10 @@ app.post("/api/generate-listing", async (req, res) => {
       try {
         scraped = await scrapeProduct(productUrl);
         scraped.images = (scraped.images || []).filter(isRealProductImage);
+        scraped.title = stripSupplierProvenance(scraped.title);
         const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8 });
+        discreet.seo_title = stripSupplierProvenance(discreet.seo_title);
+        if (discreet.product) discreet.product.title = stripSupplierProvenance(discreet.product.title);
         listing = {
           ...discreet,
           html_description: buildHtmlFromProduct(discreet.product, themeColor || "#667eea"),
@@ -1745,9 +1814,20 @@ app.post("/api/rebuild-description", (req, res) => {
 
 app.get("/api/listings", (_req, res) => {
   try {
-    return res.json({ success: true, data: getRecentListings.all() });
+    const rows = getRecentListings.all().filter(listingIsSupplierSourced);
+    return res.json({ success: true, data: rows });
   } catch (err) {
     return res.status(500).json({ success: false, error: "Erreur base de données." });
+  }
+});
+
+app.post("/api/listings/purge-ebay-sources", (_req, res) => {
+  try {
+    const removed = purgeNonSupplierListings();
+    const orders = purgeFakeAutoOrders();
+    res.json({ success: true, removedListings: removed, removedOrders: orders });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -2132,7 +2212,7 @@ app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
     if (created > 0 && (cfg.autoOrderMode || cfg.autoProcessOnSync)) {
       try {
         // Relance logique file (réutilise même endpoint en interne)
-        const rows = getOrders.all().filter((o) => o.status === "pending");
+        const rows = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending");
         const maxLeft = Math.max(0, (cfg.maxPerDay || 50) - (cfg.processedToday || 0));
         autoPack = { processed: 0, ids: [] };
         for (const row of rows.slice(0, maxLeft)) {

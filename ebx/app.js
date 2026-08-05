@@ -1,5 +1,49 @@
 const API = window.location.origin;
 let themeColor = "#6d7ddf";
+const DESC_PALETTE = [
+  "#6d7ddf", "#4452a8", "#242b52", "#e6e6fa", "#22c55e", "#16a34a",
+  "#0ea5e9", "#0284c7", "#f59e0b", "#ef4444", "#ec4899", "#8b5cf6",
+  "#14b8a6", "#84cc16", "#f97316", "#64748b", "#111827", "#a855f7",
+];
+
+function formatSavDate(raw) {
+  if (!raw) return "Date —";
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return String(raw).slice(0, 19);
+  return dt.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function toggleDarkMode(force) {
+  const root = document.documentElement;
+  const body = document.body;
+  const next = typeof force === "boolean" ? force : !body.classList.contains("dark-mode");
+  body.classList.toggle("dark-mode", next);
+  root.classList.toggle("dark", next);
+  localStorage.setItem("ebx-dark", next ? "1" : "0");
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = next ? "☀️" : "🌙";
+  const chk = document.getElementById("settings-dark");
+  if (chk) chk.checked = next;
+}
+
+function initDescPalette() {
+  const render = (el, sizeClass) => {
+    if (!el) return;
+    el.innerHTML = DESC_PALETTE.map(
+      (c) =>
+        `<button type="button" class="color-swatch ${sizeClass} ${
+          themeColor.toLowerCase() === c.toLowerCase() ? "active" : ""
+        }" style="background:${c}" data-theme="${c}" title="${c}" onclick="setTheme('${c}', this)"></button>`
+    ).join("");
+  };
+  render(document.getElementById("desc-color-palette"), "");
+  render(document.getElementById("desc-color-palette-mini"), "");
+}
+
+if (typeof localStorage !== "undefined" && localStorage.getItem("ebx-dark") === "1") {
+  document.addEventListener("DOMContentLoaded", () => toggleDarkMode(true));
+}
+
 let titleData = null;
 let titleTab = "keywords";
 let selectedKeywords = [];
@@ -507,31 +551,41 @@ async function loadAnalytics() {
   try {
     const res = await fetch(API + "/api/dashboard");
     const d = (await res.json()).data || {};
+    const src =
+      d.revenueSource === "ebay_orders"
+        ? "Sync eBay (réel)"
+        : "Aucune vente sync — 0 €";
     document.getElementById("analytics-kpis").innerHTML = [
-      ["CA", `${(d.revenue || 0).toFixed(0)} €`],
+      ["CA boutique", `${Number(d.revenue || 0).toFixed(2)} €`],
       ["Commandes", d.orders || 0],
       ["En attente", d.pendingOrders || 0],
     ]
       .map(
         ([l, v]) =>
-          `<div class="bg-white rounded-2xl border p-5"><p class="text-xs text-zinc-400">${l}</p><p class="text-2xl font-bold mt-1">${v}</p></div>`
+          `<div class="bg-white rounded-2xl border p-5"><p class="text-xs text-zinc-400">${l}</p><p class="text-2xl font-bold mt-1">${v}</p><p class="text-[10px] text-zinc-400 mt-2">${src}</p></div>`
+      )
+      .join("");
+    const orders = Number(d.orders || 0);
+    const pending = Number(d.pendingOrders || 0);
+    const margin = Number(d.margin || 0);
+    const published = Number(d.published || 0);
+    const listings = Number(d.listings || 0);
+    const rows = [
+      ["Marge estimée (sur ventes sync)", Math.min(100, Math.max(0, margin))],
+      ["Commandes livrées / total", orders ? Math.round(((d.delivered || 0) / orders) * 100) : 0],
+      ["En attente / commandes", orders ? Math.round((pending / orders) * 100) : 0],
+      ["Listings publiés / total", listings ? Math.round((published / listings) * 100) : 0],
+    ];
+    document.getElementById("analytics-bars").innerHTML = rows
+      .map(
+        ([label, pct]) =>
+          `<div><div class="flex justify-between text-sm mb-1"><span>${label}</span><span class="text-zinc-400">${pct}%</span></div><div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:${pct}%"></div></div></div>`
       )
       .join("");
   } catch (_) {
     document.getElementById("analytics-kpis").innerHTML = "";
+    document.getElementById("analytics-bars").innerHTML = "";
   }
-  const rows = [
-    ["Conversion", 64],
-    ["Sell-through", 42],
-    ["Marge moyenne", 71],
-    ["Snipes réussis", 55],
-  ];
-  document.getElementById("analytics-bars").innerHTML = rows
-    .map(
-      ([label, pct]) =>
-        `<div><div class="flex justify-between text-sm mb-1"><span>${label}</span><span class="text-zinc-400">${pct}%</span></div><div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:${pct}%"></div></div></div>`
-    )
-    .join("");
 }
 
 function periodFactor(period) {
@@ -550,6 +604,8 @@ async function loadRankings() {
       ? `<span class="inline-flex items-center gap-1.5"><span class="text-[10px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span> ${escapeHtml(json.source || "eBay")}</span>`
       : "Fallback local (ajoutez EBAY_PROD_CLIENT_ID pour le live)";
   }
+  const algoEl = document.getElementById("rankings-algo");
+  if (algoEl && json.algo) algoEl.textContent = "Algo : " + json.algo;
   const list = document.getElementById("rankings-list");
   list.innerHTML = (json.data || [])
     .map((p, i) => {
@@ -761,8 +817,6 @@ async function runSnipe() {
   const cons = document.getElementById("snipe-console");
   btn.disabled = true;
   cons.innerHTML = "";
-  const testMode = document.getElementById("snipe-test").checked;
-  const realMode = document.getElementById("snipe-real").checked;
   const body = {
     query: document.getElementById("snipe-query")?.value || "gadgets",
     count: Number(document.getElementById("snipe-count").value),
@@ -771,7 +825,7 @@ async function runSnipe() {
     ticket: document.getElementById("snipe-ticket").value,
     source: document.getElementById("snipe-source").value,
     autoList: document.getElementById("snipe-autolist").checked,
-    testMode: realMode ? false : testMode,
+    testMode: false,
   };
 
   const res = await fetch(API + "/api/auto-snipe", {
@@ -1083,7 +1137,7 @@ async function loadSupplierConfig() {
                 : `<div class="space-y-2">
               <label class="flex items-center justify-between gap-2 text-xs"><span>Activé</span>
                 <input type="checkbox" class="toggle" ${s.enabled !== false ? "checked" : ""} onchange="toggleSupplier('${k}','enabled',this.checked)" /></label>
-              <label class="flex items-center justify-between gap-2 text-xs"><span>Auto file</span>
+              <label class="flex items-center justify-between gap-2 text-xs"><span>Auto commande</span>
                 <input type="checkbox" class="toggle" ${s.auto ? "checked" : ""} onchange="toggleSupplier('${k}','auto',this.checked)" /></label>
               <button type="button" onclick="connectSupplier('${k}')" class="w-full text-xs px-3 py-1.5 rounded-lg border ${
                 s.connected ? "bg-emerald-50 text-emerald-700" : "bg-[#6d7ddf]/10 text-[#4452a8]"
@@ -1399,6 +1453,9 @@ async function loadSav() {
               <p class="text-[11px] text-zinc-400 mt-0.5 truncate">${escapeHtml(m.sender)} · ${escapeHtml(
               m.item_title || ""
             )}</p>
+              <p class="text-[10px] text-[#6d7ddf] mt-0.5">${escapeHtml(
+                formatSavDate(m.received_at || m.created_at)
+              )}</p>
             </button>`;
           })
           .join("")
@@ -1432,6 +1489,22 @@ function selectSav(id) {
   document.getElementById("sav-subject").textContent = m.subject || "(sans sujet)";
   document.getElementById("sav-status-badge").textContent = m.status;
   document.getElementById("sav-meta").textContent = `${m.sender || ""} · ${m.item_title || ""} · #${m.message_id || m.id}`;
+  const receivedEl = document.getElementById("sav-received");
+  if (receivedEl) {
+    const raw = m.received_at || m.created_at || "";
+    let label = "Date eBay : —";
+    if (raw) {
+      const dt = new Date(raw);
+      label = Number.isNaN(dt.getTime())
+        ? `Date eBay : ${raw}`
+        : `Reçu sur eBay : ${dt.toLocaleString("fr-FR")}`;
+      const ageH = Math.round((Date.now() - dt.getTime()) / 3600000);
+      if (!Number.isNaN(dt.getTime()) && ageH >= 0) {
+        label += ageH < 48 ? ` · il y a ${ageH}h` : ` · il y a ${Math.round(ageH / 24)}j`;
+      }
+    }
+    receivedEl.textContent = label;
+  }
   document.getElementById("sav-body").textContent = m.body || "";
   document.getElementById("sav-draft").value = m.draft || "";
   const note = document.getElementById("sav-escalate-note");
@@ -1440,6 +1513,23 @@ function selectSav(id) {
     note.textContent = "Escalade: " + (m.escalate_reason || "relire avant envoi");
   } else {
     note.classList.add("hidden");
+  }
+}
+
+
+async function deleteSavSelected() {
+  if (!savSelectedId) return alert("Sélectionne un message");
+  if (!confirm("Supprimer ce message de l'inbox EBX ?")) return;
+  try {
+    const res = await fetch(API + "/api/sav/" + savSelectedId, { method: "DELETE" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    savSelectedId = null;
+    document.getElementById("sav-detail")?.classList.add("hidden");
+    document.getElementById("sav-detail-empty")?.classList.remove("hidden");
+    await loadSav();
+  } catch (err) {
+    alert(err.message);
   }
 }
 
@@ -1635,7 +1725,20 @@ async function publishListing(id, btn) {
   btn.disabled = true;
   btn.textContent = "...";
   try {
-    const res = await fetch(API + "/api/publish-to-ebay/" + id, { method: "POST" });
+    const titleHint = btn?.closest("tr")?.querySelector("td")?.textContent || "";
+    const res = await fetch(API + "/api/publish-to-ebay/" + id, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        variations: {
+          enabled: true,
+          aspect: "Couleur",
+          values: /led|bande|strip/i.test(titleHint)
+            ? ["Blanc chaud", "Blanc froid"]
+            : ["Option A", "Option B"],
+        },
+      }),
+    });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     const lid = json.data.listingId || "N/A";
@@ -1823,14 +1926,20 @@ document.getElementById("kw-tabs")?.addEventListener("click", (e) => {
 
 function setTheme(color, el) {
   themeColor = color;
-  document.querySelectorAll(".theme-dot").forEach((d) => d.classList.remove("active"));
-  (el || document.querySelector(`.theme-dot[data-theme="${color}"]`))?.classList.add("active");
+  document.querySelectorAll(".theme-dot, .color-swatch").forEach((d) => d.classList.remove("active"));
+  (el || document.querySelector(`.theme-dot[data-theme="${color}"], .color-swatch[data-theme="${color}"]`))?.classList.add("active");
+  const picker = document.getElementById("desc-color-picker");
+  if (picker) picker.value = color;
+  document.querySelectorAll(`.color-swatch[data-theme="${color}"]`).forEach((d) => d.classList.add("active"));
   if (lastDesc) {
     const tip = document.getElementById("desc-theme-status");
     if (tip) tip.textContent = "Thème mis à jour…";
     regenerateDescTheme().then(() => {
-      if (tip) tip.textContent = "Thème appliqué";
+      if (tip) tip.textContent = "Thème appliqué · " + color;
     });
+  } else {
+    const tip = document.getElementById("desc-theme-status");
+    if (tip) tip.textContent = color;
   }
 }
 
@@ -2094,28 +2203,53 @@ async function loadSetupStatus() {
     const res = await fetch(API + "/api/setup");
     const json = await res.json();
     const d = json.data || {};
+    const nameEl = document.getElementById("settings-profile-name");
+    const emailEl = document.getElementById("settings-profile-email");
+    const envEl = document.getElementById("settings-env");
+    const oauthEl = document.getElementById("settings-oauth");
+    if (nameEl) nameEl.textContent = d.seller?.userId || "Non connecté";
+    if (emailEl) emailEl.textContent = d.seller?.email || "—";
+    if (envEl) envEl.textContent = d.ebayEnv === "production" ? "Production (réel)" : "Hors production";
+    if (oauthEl) oauthEl.textContent = d.seller?.ok ? "Connecté" : d.seller?.error || "À configurer";
+
+    const conn = document.getElementById("settings-connectivity");
+    if (conn) {
+      let suppliers = {};
+      try {
+        const cfg = await (await fetch(API + "/api/auto-orders/config")).json();
+        suppliers = cfg.data || {};
+      } catch (_) {}
+      const cards = [
+        ["eBay", d.seller?.ok, d.seller?.userId || "OAuth"],
+        ["Browse API", d.browse?.ok, d.browse?.api || d.browse?.error || "—"],
+        ["Amazon", suppliers.amazon?.connected, suppliers.amazon?.enabled === false ? "Désactivé" : suppliers.amazon?.connected ? "Connecté" : "Non connecté"],
+        ["AliExpress", suppliers.aliexpress?.connected, suppliers.aliexpress?.connected ? "Connecté" : "Extension / manuel"],
+        ["Cdiscount", suppliers.cdiscount?.connected || suppliers.cdiscount?.enabled, suppliers.cdiscount?.comingSoon ? "Bientôt" : suppliers.cdiscount?.connected ? "Connecté" : "Activé"],
+        ["LLM local", d.llm?.ok, d.llm?.ok ? "OK" : "Optionnel"],
+      ];
+      conn.innerHTML = cards
+        .map(
+          ([label, ok, detail]) =>
+            `<div class="p-3 rounded-xl border ${ok ? "bg-emerald-50 border-emerald-100" : "bg-zinc-50 border-zinc-100"}">
+              <p class="font-medium text-sm">${label}</p>
+              <p class="text-xs text-zinc-500 mt-0.5">${escapeHtml(String(detail || ""))}</p>
+            </div>`
+        )
+        .join("");
+    }
+
     const rows = [
-      [
-        "Mode publication",
-        d.ebayEnv === "production",
-        d.ebayEnv === "production"
-          ? "PRODUCTION (compte réel)"
-          : "SANDBOX (testuser — invisible sur ton vrai eBay)",
-      ],
       [
         "Compte vendeur OAuth",
         d.seller?.ok,
         d.seller?.ok
           ? d.seller.userId + (d.seller.email ? ` (${d.seller.email})` : "")
-          : d.seller?.error || "npm run oauth / oauth:prod",
+          : d.seller?.error || "npm run oauth:prod",
       ],
-      ["Browse API Production (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "Ajoute EBAY_PROD_* dans .env"],
-      ["Clés Sandbox (publish test)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
-      ["Refresh token Sandbox", d.refreshToken, d.refreshToken ? "OK (~18 mois)" : "npm run oauth"],
+      ["Browse API (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "EBAY_PROD_*"],
       ["Refresh token Production", d.refreshTokenProd, d.refreshTokenProd ? "OK" : "npm run oauth:prod"],
-      ["Policies Sandbox", d.policies, d.policies ? "OK" : "npm run policies"],
       ["Policies Production", d.policiesProd, d.policiesProd ? "OK" : "npm run policies:prod"],
-      ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis pour scraper"],
+      ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis"],
     ];
     box.innerHTML = rows
       .map(
@@ -2136,6 +2270,8 @@ async function loadSetupStatus() {
     }
     const mode = document.getElementById("settings-mode");
     if (mode) mode.textContent = d.browse?.ok ? "live browse-api" : "fallback / scrape";
+    const darkChk = document.getElementById("settings-dark");
+    if (darkChk) darkChk.checked = document.body.classList.contains("dark-mode");
   } catch (err) {
     box.innerHTML = `<p class="text-sm text-red-500">Impossible de charger le statut : ${escapeHtml(err.message)}</p>`;
   }
@@ -2146,11 +2282,12 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  initDescPalette();
   const map = [
     ["title-btn", "runTitleBuilder"],
     ["desc-btn", "generateFromUrl"],
