@@ -27,12 +27,14 @@ Tu dois répondre UNIQUEMENT avec un objet JSON valide, sans aucun texte avant o
 Règles pour "seo_title" (CRITIQUE) :
 - NE COPIE PAS le titre fournisseur Amazon/AliExpress.
 - Réécris en français SEO, max 80 caractères, ordre des mots DIFFÉRENT.
-- Pas de nom de marketplace, pas de codes SKU, pas de caractères chinois.
+- Pas de nom de marketplace (AliExpress, Amazon, Cdiscount, eBay), pas de codes SKU, pas de caractères chinois.
+- INTERDICTION : "potentiel de marge", "Source :", "- AliExpress".
 - Inclure 1 bénéfice (Compatible / Compact / Pratique / Neuf / Qualité).
 
 Règles absolues pour le champ "html_description" :
 - Utilise UNIQUEMENT du HTML5 de base et du CSS inline (style="...").
 - INTERDICTION TOTALE : pas de balises <script>, pas de <iframe>, pas de liens CSS externes (<link>), pas de balises <style>, pas de classes CSS complexes non définies inline.
+- INTERDICTION : "potentiel de marge", lignes "Source :", noms de marketplace (AliExpress, Amazon…) dans le titre H1.
 - Structure obligatoire : Un en-tête avec titre, une section de caractéristiques en grille simple (display:grid inline), et un tableau de spécifications.
 - Le design doit être professionnel, mobile-friendly, avec des couleurs douces.
 

@@ -2008,10 +2008,17 @@ async function regenerateDescTheme() {
 }
 
 function applyDescResult(data) {
+  const stripProv = (t) =>
+    String(t || "")
+      .replace(/\s*[-–—|/]\s*(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]*\s*$/gi, "")
+      .replace(/\b(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\b/gi, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  const cleanTitle = stripProv(data.seo_title || data.product_name || data.product?.title || "Produit");
   const product =
     data.product ||
     {
-      title: data.product_name || data.seo_title || "Produit",
+      title: cleanTitle,
       images: data.images || [],
       bullets: [],
       description: "",
@@ -2019,22 +2026,38 @@ function applyDescResult(data) {
       source: data.source || "generic",
       url: data.source_url || "",
     };
-  lastDesc = { ...data, product };
-  const html = data.html_description || "";
+  product.title = stripProv(product.title || cleanTitle);
+  let html = String(data.html_description || "")
+    .replace(
+      /Produit sélectionné pour sa qualité,\s*sa demande eBay et son potentiel de marge\.?/gi,
+      "Produit sélectionné pour sa qualité et sa demande eBay."
+    )
+    .replace(/\s*et son potentiel de marge\.?/gi, ".")
+    .replace(/(?:<br\s*\/?>\s*)?Source\s*:\s*[^<\n]+/gi, "")
+    .replace(
+      /<(?:div|li|p)([^>]*)>\s*(?:<strong>\s*)?Source\s*:?\s*(?:<\/strong>)?\s*[^<]*<\/(?:div|li|p)>/gi,
+      ""
+    )
+    .replace(/<h1([^>]*)>([\s\S]*?)<\/h1>/gi, (_, attrs, inner) => {
+      const plain = String(inner).replace(/<[^>]+>/g, " ");
+      return `<h1${attrs}>${stripProv(plain)}</h1>`;
+    });
+  lastDesc = { ...data, seo_title: cleanTitle, product_name: cleanTitle, product, html_description: html };
+  const previewHtml = html;
   descImages = (data.images && data.images.length ? data.images : product.images) || descImages || [];
   lastDesc.images = descImages;
   lastDesc.product.images = descImages;
 
-  document.getElementById("desc-html").textContent = html;
+  document.getElementById("desc-html").textContent = previewHtml;
   const preview = document.getElementById("desc-preview");
   preview.classList.remove("flex", "items-center", "justify-center", "text-zinc-300");
-  preview.innerHTML = html;
+  preview.innerHTML = previewHtml;
   bindPreviewImages(preview);
 
   const banner = document.getElementById("desc-banner");
   banner.classList.remove("hidden");
   document.getElementById("desc-detected").textContent =
-    "Produit détecté : " + (data.product_name || data.seo_title || "").slice(0, 80);
+    "Produit détecté : " + cleanTitle.slice(0, 80);
   document.getElementById("desc-img-badge").textContent = `${descImages.length} images`;
   document.getElementById("desc-source-badge").textContent = data.source || "generic";
 }

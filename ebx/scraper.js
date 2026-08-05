@@ -1275,16 +1275,21 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
   const priceLabel = product.price ? `${Number(product.price).toFixed(2)} €` : "";
   const displayTitle = stripSupplierProvenance(product.title);
   const whyText =
-    sanitizeReadableText(product.description) ||
-    sanitizeReadableText((product.bullets || []).slice(0, 2).join(" ")) ||
-    "Produit sélectionné pour sa qualité et sa demande eBay.";
+    cleanMarketingCopy(
+      sanitizeReadableText(product.description) ||
+        sanitizeReadableText((product.bullets || []).slice(0, 2).join(" "))
+    ) || "Produit sélectionné pour sa qualité et sa demande eBay.";
   const descFull =
-    sanitizeReadableText(product.description, { maxLen: 1200 }) ||
-    whyText;
+    cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 1200 })) || whyText;
   const bulletItems = (product.bullets || [])
     .filter(Boolean)
-    .map((b) => String(b).replace(/^\s*source\s*:\s*/i, "").trim())
-    .filter(Boolean)
+    .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "").trim()))
+    .filter(
+      (b) =>
+        b &&
+        !/^source\s*:/i.test(b) &&
+        !/^(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]*$/i.test(b)
+    )
     .slice(0, 8);
   const bulletHtml = bulletItems.length
     ? bulletItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
@@ -1292,7 +1297,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
        <li style="margin:0 0 6px;">✔ Qualité sélectionnée pour eBay</li>
        <li style="margin:0 0 6px;">✔ Expédition soignée</li>`;
 
-  return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
+  const rawHtml = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:16px;padding:26px 20px;text-align:center;color:#fff;margin-bottom:18px;">
     <div style="display:inline-flex;gap:8px;margin-bottom:10px;">
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Premium</span>
@@ -1349,6 +1354,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     <p style="font-size:11px;opacity:.85;margin:0;">Retours faciles • Satisfaction garantie • Support réactif</p>
   </div>
 </div>`;
+  return sanitizeListingHtml(rawHtml);
 }
 
 function escapeHtml(str) {
@@ -1434,16 +1440,60 @@ function scrubWhySectionInHtml(html) {
   const cleaned =
     sanitizeReadableText(body) ||
     "Produit sélectionné pour sa qualité et sa demande eBay.";
-  return raw.replace(re, `$1<p$2>${escapeHtml(cleaned)}</p>`);
+  return raw.replace(re, `$1<p$2>${escapeHtml(cleanMarketingCopy(cleaned))}</p>`);
 }
 
 /** Retire la provenance fournisseur du titre affiché (ex. « - AliExpress 15 »). */
 function stripSupplierProvenance(title) {
   return String(title || "")
-    .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/i, "")
-    .replace(/\b(AliExpress|Amazon|Cdiscount|eBay)\s*\d*\s*$/i, "")
+    .replace(/\s*[-–—|/]\s*(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]*\s*$/gi, "")
+    .replace(/\s*\((AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)[^)]*\)\s*$/gi, "")
+    .replace(/\b(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]+\s*$/gi, "")
+    .replace(/\b(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*[-–—|,;]+\s*$/g, "")
+    .trim();
+}
+
+/** Nettoie les formulations marketing indésirables dans un texte. */
+function cleanMarketingCopy(text) {
+  return String(text || "")
+    .replace(
+      /Produit sélectionné pour sa qualité,\s*sa demande eBay et son potentiel de marge\.?/gi,
+      "Produit sélectionné pour sa qualité et sa demande eBay."
+    )
+    .replace(/\s*et son potentiel de marge\.?/gi, ".")
+    .replace(/\s*,\s*et son potentiel de marge/gi, "")
+    .replace(/^\s*source\s*:\s*/gim, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Post-traitement HTML listing : titre sans provenance, sans « potentiel de marge »,
+ * sans lignes « Source : » dans les caractéristiques.
+ */
+function sanitizeListingHtml(html) {
+  let h = String(html || "");
+  if (!h) return h;
+  h = h.replace(
+    /Produit sélectionné pour sa qualité,\s*sa demande eBay et son potentiel de marge\.?/gi,
+    "Produit sélectionné pour sa qualité et sa demande eBay."
+  );
+  h = h.replace(/\s*et son potentiel de marge\.?/gi, ".");
+  // Lignes / cellules « Source : … »
+  h = h.replace(
+    /<(?:div|li|p|tr|td|span)([^>]*)>\s*(?:<strong>\s*)?Source\s*:?\s*(?:<\/strong>)?\s*[^<]*(?:<\/(?:div|li|p|tr|td|span)>)?/gi,
+    ""
+  );
+  h = h.replace(/(?:<br\s*\/?>\s*)?Source\s*:\s*[^<\n]+/gi, "");
+  // Titre h1 sans AliExpress / Amazon / …
+  h = h.replace(/<h1([^>]*)>([\s\S]*?)<\/h1>/gi, (_, attrs, inner) => {
+    const plain = String(inner).replace(/<[^>]+>/g, " ");
+    const cleaned = stripSupplierProvenance(plain);
+    return `<h1${attrs}>${escapeHtml(cleaned)}</h1>`;
+  });
+  return h;
 }
 
 module.exports = {
@@ -1464,4 +1514,6 @@ module.exports = {
   sanitizeReadableText,
   scrubWhySectionInHtml,
   stripSupplierProvenance,
+  cleanMarketingCopy,
+  sanitizeListingHtml,
 };
