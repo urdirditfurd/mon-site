@@ -13,6 +13,8 @@ const {
   scrapeAliExpressSearch,
   scrapeCdiscountSearch,
   findCheapestSupplier,
+  resolvePriceViaSearch,
+  sanitizeProductPrice,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   enrichProductListingCopy,
@@ -1613,6 +1615,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           const cmp = await findCheapestSupplier(supplierQuery, { sources: sourceList, limit: 5 });
           const sourceRank = (s) => {
             const n = String(s || "").split("+")[0].toLowerCase();
+            // Amazon scrapable plus souvent → on tente en premier si prix égal / non confirmé
             if (n === "amazon") return 0;
             if (n === "cdiscount") return 1;
             if (n === "aliexpress") return 2;
@@ -1620,15 +1623,25 @@ app.post("/api/auto-snipe", async (req, res) => {
           };
           candidates = (cmp.candidates || [])
             .filter((c) => isSupplierProductUrl(c.url))
+            .map((c) => {
+              const cleaned = sanitizeProductPrice(c.price, c.title);
+              return {
+                ...c,
+                price: cleaned,
+                priceUnconfirmed: cleaned && !c.priceConfirmed ? true : !!c.priceUnconfirmed,
+              };
+            })
             .sort((a, b) => {
-              // Prix confirmés (scrape) avant hints Bing
+              // Prix confirmés (scrape) avant hints ; Amazon avant Ali si même statut
               const confA = a.priceConfirmed ? 0 : a.priceUnconfirmed ? 2 : a.price > 0 ? 1 : 3;
               const confB = b.priceConfirmed ? 0 : b.priceUnconfirmed ? 2 : b.price > 0 ? 1 : 3;
               if (confA !== confB) return confA - confB;
+              const src = sourceRank(a.source) - sourceRank(b.source);
+              if (src !== 0 && confA !== 0) return src; // hors confirmés : Amazon d'abord
               const pa = a.price != null && a.price > 0 ? a.price : 9999;
               const pb = b.price != null && b.price > 0 ? b.price : 9999;
               if (pa !== pb) return pa - pb;
-              return sourceRank(a.source) - sourceRank(b.source);
+              return src;
             });
           if (!candidates.length && cmp.best && isSupplierProductUrl(cmp.best.url)) {
             candidates = [cmp.best];
@@ -1637,14 +1650,14 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({
             type: "suppliers",
             query: supplierQuery,
-            compared: candidates.filter((c) => c.priceConfirmed || (c.price > 0 && !c.priceUnconfirmed)).length,
+            compared: candidates.filter((c) => c.priceConfirmed).length,
             items: candidates.slice(0, 5).map((c, idx) => ({
               rank: idx + 1,
               source: String(c.source || "").split("+")[0],
               title: String(c.title || "").slice(0, 90),
               price: c.price != null && c.price > 0 ? Number(c.price) : null,
               priceConfirmed: !!c.priceConfirmed,
-              priceUnconfirmed: !!c.priceUnconfirmed,
+              priceUnconfirmed: !!c.priceUnconfirmed || (c.price > 0 && !c.priceConfirmed),
               url: c.url,
               best: idx === 0,
             })),
@@ -1653,7 +1666,11 @@ app.post("/api/auto-snipe", async (req, res) => {
             const best = candidates[0];
             const priceLabel =
               best.price != null && best.price > 0
-                ? `${Number(best.price).toFixed(2)}€${best.priceConfirmed ? " (confirmé)" : best.priceUnconfirmed ? " (estimé Bing — à vérifier)" : ""}`
+                ? `${Number(best.price).toFixed(2)}€${
+                    best.priceConfirmed
+                      ? " (confirmé)"
+                      : " (indicatif — sera vérifié sur la fiche)"
+                  }`
                 : "prix n/a";
             send({
               type: "log",
@@ -1694,14 +1711,27 @@ app.post("/api/auto-snipe", async (req, res) => {
           try {
             detail = await scrapeProduct(cand.url);
             detail.images = (detail.images || []).filter(isRealProductImage);
-            // UNIQUEMENT le prix scrapé sur la fiche produit — refuse les snippets Bing
-            let cost = detail.price > 0 ? Number(detail.price) : null;
+            // UNIQUEMENT prix scrapé / résolu proprement — jamais un hint dimension (8mm→8€)
+            let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
+            if (!(cost > 0)) {
+              send({ type: "log", message: `[PRICE] Résolution web pour ${String(cand.source).split("+")[0]}…` });
+              try {
+                const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title);
+                cost = sanitizeProductPrice(resolved, detail.title || cand.title);
+                if (cost > 0) {
+                  send({
+                    type: "log",
+                    message: `[PRICE] Prix web résolu: ${cost.toFixed(2)}€ (médiane anti-faux-positifs)`,
+                  });
+                }
+              } catch (_) {}
+            }
             if (!(cost > 0)) {
               send({
                 type: "log",
                 message: `[WARN] Prix fiche introuvable${
-                  cand.priceUnconfirmed && cand.price > 0
-                    ? ` (hint Bing ${Number(cand.price).toFixed(2)}€ ignoré — souvent faux)`
+                  cand.price > 0
+                    ? ` (indicatif ${Number(cand.price).toFixed(2)}€ rejeté — non fiable)`
                     : ""
                 } — essai suivant`,
               });
