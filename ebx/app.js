@@ -2035,7 +2035,8 @@ async function publishListingFromModal() {
       return;
     }
     const lid = json.data?.listingId || json.listingId || "n/a";
-    const vars = json.data?.variations || json.variations || "";
+    const v = json.data?.variations;
+    const vars = Array.isArray(v?.values) ? v.values.join(" / ") : "";
     alert(`Publié ! Listing ID: ${lid}${vars ? `\nVariations: ${vars}` : ""}`);
     closeModal();
     loadListings();
