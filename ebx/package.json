@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "kill-port": "node scripts/kill-port.js 3000",
+    "restart": "node scripts/kill-port.js 3000 && node server.js",
     "policies": "node create-policies.js",
     "policies:prod": "node create-policies.js --prod",
     "oauth": "node get-refresh-token.js",

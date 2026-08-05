@@ -808,9 +808,19 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`⚡ EBX Server running on http://localhost:${PORT}`);
   console.log(`📝 Description Builder: desc-v2 (scraper ebx enrichi)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
+});
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`\n❌ Port ${PORT} déjà utilisé — l'ANCIEN serveur tourne encore.`);
+    console.error(`   PowerShell :  npm run kill-port`);
+    console.error(`   Puis :        npm start\n`);
+    console.error(`   Ou en une commande :  npm run restart\n`);
+    process.exit(1);
+  }
+  throw err;
 });

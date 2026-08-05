@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "kill-port": "node scripts/kill-port.js 3000",
+    "restart": "node scripts/kill-port.js 3000 && node server.js",
     "policies": "node create-policies.js",
     "check": "node check-setup.js"
   },
