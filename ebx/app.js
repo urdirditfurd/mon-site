@@ -854,85 +854,11 @@ function colorizeLog(msg) {
   return `<div class="ok">${safe}</div>`;
 }
 
-function renderSnipeSuppliers(ev) {
-  const panel = document.getElementById("snipe-suppliers");
-  const list = document.getElementById("snipe-suppliers-list");
-  const meta = document.getElementById("snipe-suppliers-meta");
-  if (!panel || !list) return;
-  const items = Array.isArray(ev.items) ? ev.items : [];
-  if (!items.length) {
-    panel.classList.add("hidden");
-    list.innerHTML = "";
-    return;
-  }
-  panel.classList.remove("hidden");
-  if (meta) {
-    meta.textContent = `${items.length} offre(s) · ${ev.compared || 0} prix confirmé(s) · « ${String(
-      ev.query || ""
-    )} » — du moins cher au plus cher`;
-  }
-  list.innerHTML = items
-    .map((it) => {
-      const src = escapeHtml(String(it.source || "fournisseur"));
-      const title = escapeHtml(String(it.title || "Sans titre").slice(0, 80));
-      let priceBadge;
-      if (it.price != null && Number(it.price) > 0) {
-        const conf = it.priceConfirmed
-          ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white">VÉRIFIÉ</span>`
-          : it.priceUnconfirmed
-            ? `<span class="text-[10px] text-amber-600 font-medium">non vérifié</span>`
-            : `<span class="text-[10px] text-zinc-400">indicatif</span>`;
-        priceBadge = `<span class="font-bold text-emerald-800">${Number(it.price).toFixed(2)} €</span> ${conf}`;
-      } else {
-        priceBadge = `<span class="text-amber-600 font-medium">prix n/a</span>`;
-      }
-      const badge = it.best
-        ? `<span class="text-[10px] uppercase tracking-wide bg-emerald-600 text-white px-1.5 py-0.5 rounded">Moins cher vérifié</span>`
-        : `<span class="text-[10px] text-zinc-400">#${it.rank || ""}</span>`;
-      const url = String(it.url || "").trim();
-      const link = url
-        ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="text-xs font-medium text-emerald-700 underline shrink-0">Voir l’annonce →</a>`
-        : "";
-      return `<div class="flex items-start justify-between gap-3 bg-white/80 rounded-lg border border-emerald-100 px-3 py-2">
-        <div class="min-w-0 space-y-1">
-          <div class="flex items-center gap-2 flex-wrap">${badge}<span class="text-xs font-semibold text-zinc-700">${src}</span>${priceBadge}</div>
-          <div class="text-sm text-zinc-600 truncate" title="${title}">${title}</div>
-        </div>
-        ${link}
-      </div>`;
-    })
-    .join("");
-}
-
-function renderSnipeMargin(ev) {
-  const box = document.getElementById("snipe-margin-box");
-  const line = document.getElementById("snipe-margin-line");
-  const link = document.getElementById("snipe-margin-link");
-  if (!box || !line) return;
-  box.classList.remove("hidden");
-  line.textContent = `Choisi: ${ev.supplier || "?"} · ${Number(ev.cost).toFixed(2)}€ → ${Number(
-    ev.sellPrice
-  ).toFixed(2)}€ (~${ev.marginPct}%)`;
-  if (link && ev.url) {
-    link.href = ev.url;
-    link.classList.remove("hidden");
-    link.textContent = "Ouvrir l’annonce choisie →";
-  } else if (link) {
-    link.classList.add("hidden");
-  }
-}
-
 async function runSnipe() {
   const btn = document.getElementById("snipe-btn");
   const cons = document.getElementById("snipe-console");
   btn.disabled = true;
   cons.innerHTML = "";
-  const panel = document.getElementById("snipe-suppliers");
-  const list = document.getElementById("snipe-suppliers-list");
-  const marginBox = document.getElementById("snipe-margin-box");
-  if (panel) panel.classList.add("hidden");
-  if (list) list.innerHTML = "";
-  if (marginBox) marginBox.classList.add("hidden");
   document.getElementById("stat-scanned").textContent = "0";
   document.getElementById("stat-imported").textContent = "0";
   document.getElementById("stat-listed").textContent = "0";
@@ -946,7 +872,6 @@ async function runSnipe() {
     ticket: document.getElementById("snipe-ticket").value,
     source: document.getElementById("snipe-source").value,
     autoList: document.getElementById("snipe-autolist").checked,
-    verifiedOnly: document.getElementById("snipe-verified")?.checked !== false,
     testMode: false,
   };
 
@@ -974,12 +899,6 @@ async function runSnipe() {
         if (ev.type === "log") {
           cons.innerHTML += colorizeLog(ev.message);
           cons.scrollTop = cons.scrollHeight;
-        }
-        if (ev.type === "suppliers") {
-          renderSnipeSuppliers(ev);
-        }
-        if (ev.type === "margin") {
-          renderSnipeMargin(ev);
         }
         if (ev.type === "stats" || ev.type === "done") {
           document.getElementById("stat-scanned").textContent = ev.scanned || 0;

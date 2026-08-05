@@ -1490,11 +1490,9 @@ app.post("/api/auto-snipe", async (req, res) => {
     autoList = true,
     source = "auto",
     query = "gadgets",
-    verifiedOnly = true,
   } = req.body || {};
-  // Mode REEL uniquement (plus de Mode Test)
+  // Mode REEL uniquement — flux style EBX officiel (cascade 1 source, pas de comparaison multi-offres)
   const testMode = false;
-  const strictVerified = verifiedOnly !== false && verifiedOnly !== "false";
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1524,21 +1522,13 @@ app.post("/api/auto-snipe", async (req, res) => {
     return true;
   };
 
-  const sourceList =
-    source === "amazon"
-      ? ["amazon"]
-      : source === "aliexpress"
-        ? ["aliexpress"]
-        : source === "cdiscount"
-          ? ["cdiscount"]
-          : ["amazon", "aliexpress", "cdiscount"];
+  const pickFirstProduct = (items) =>
+    (items || []).find((p) => p?.url && isSupplierProductUrl(p.url)) || null;
 
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Prix ${
-        strictVerified ? "VÉRIFIÉ fiche uniquement" : "souple"
-      }`,
+      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Flux EBX officiel (cascade source)`,
     });
     send({
       type: "log",
@@ -1546,7 +1536,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     });
     send({
       type: "log",
-      message: `[RULE] Sources = Amazon / AliExpress / Cdiscount uniquement — jamais d'import d'annonces eBay`,
+      message: `[RULE] eBay = signal demande uniquement — import Amazon / AliExpress / Cdiscount (jamais d'annonce eBay)`,
     });
     const d0 = await antiBanDelay({ testMode, label: "init" });
     send({
@@ -1555,7 +1545,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     });
     await antiBanDelay({ testMode, label: "scan" });
 
-    // 1) Signal demande eBay (tendances) — mots-clés uniquement, pas le produit
+    // 1) Signaux demande eBay (tendances) — mots-clés, pas le produit à importer
     send({ type: "log", message: `[SCAN] Signaux demande eBay pour "${query}"...` });
     let demandHints = [];
     try {
@@ -1579,24 +1569,13 @@ app.post("/api/auto-snipe", async (req, res) => {
     for (let i = 0; i < max; i++) {
       try {
         const hint = demandHints[i];
-        // TOUJOURS chercher avec le mot-clé saisi par l'utilisateur (pas le titre eBay déformé)
-        const searchQ = String(query || "")
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 8)
-          .join(" ") || "gadget";
-        const hintExtra = hint
-          ? String(hint.title)
-              .replace(/\b(collectionneur|livre|ebook|vintage|rare|lot|usb|3m|5m|10m)\b/gi, " ")
-              .split(/\s+/)
-              .filter((w) => w.length > 3 && /led|cob|bande|ruban|blanc|chaud|froid|flexible|étanche|strip/i.test(w))
-              .slice(0, 3)
-              .join(" ")
-          : "";
-        const supplierQueries = [searchQ];
-        if (hintExtra && !searchQ.toLowerCase().includes(hintExtra.toLowerCase().slice(0, 8))) {
-          supplierQueries.push(`${searchQ} ${hintExtra}`.trim());
-        }
+        // Mot-clé utilisateur (pas le titre eBay déformé) — comme EBX officiel
+        const searchQ =
+          String(query || "")
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 8)
+            .join(" ") || "gadget";
 
         send({
           type: "log",
@@ -1618,334 +1597,144 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         await antiBanDelay({ testMode, label: "target" });
 
-        send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})…` });
-        let candidates = [];
-        try {
-          const merged = [];
-          const sourceLog = (m) => send({ type: "log", message: m });
-          for (const sq of supplierQueries) {
-            const cmp = await findCheapestSupplier(sq, {
-              sources: sourceList,
-              limit: 6,
-              onLog: sourceLog,
-            });
-            merged.push(...(cmp.candidates || []));
-            if (cmp.best) merged.push(cmp.best);
-          }
-          const byUrl = new Map();
-          for (const c of merged) {
-            if (!c?.url || !isSupplierProductUrl(c.url)) continue;
-            const key = String(c.url).split("?")[0].toLowerCase();
-            const cleaned = sanitizeProductPrice(c.price, c.title);
-            const row = {
-              ...c,
-              price: cleaned,
-              priceUnconfirmed: cleaned && c.priceUnconfirmed && !c.priceFromMarketplaceCard && !c.priceConfirmed,
-              priceFromMarketplaceCard: !!c.priceFromMarketplaceCard,
-              priceConfirmed: !!c.priceConfirmed,
-            };
-            const prev = byUrl.get(key);
-            if (!prev) {
-              byUrl.set(key, row);
-              continue;
-            }
-            const score = (x) =>
-              (x.priceConfirmed ? 30 : 0) +
-              (x.priceFromMarketplaceCard ? 15 : 0) +
-              (x.price > 0 ? 10 : 0) +
-              Math.min(String(x.title || "").length, 40) / 10;
-            if (score(row) > score(prev)) {
-              byUrl.set(key, {
-                ...prev,
-                ...row,
-                price: row.price || prev.price,
-                priceConfirmed: row.priceConfirmed || prev.priceConfirmed,
-                priceFromMarketplaceCard: row.priceFromMarketplaceCard || prev.priceFromMarketplaceCard,
-              });
-            }
-          }
-          candidates = [...byUrl.values()].sort((a, b) => {
-            // Moins cher d'abord parmi les prix utilisables (confirmé ou carte marketplace)
-            const usable = (x) => x.priceConfirmed || x.priceFromMarketplaceCard || (x.price > 0 && !x.priceUnconfirmed);
-            const ua = usable(a) ? 0 : a.price > 0 ? 1 : 2;
-            const ub = usable(b) ? 0 : b.price > 0 ? 1 : 2;
-            if (ua !== ub) return ua - ub;
-            const pa = a.price > 0 ? a.price : 9999;
-            const pb = b.price > 0 ? b.price : 9999;
-            return pa - pb;
-          });
-
-          send({
-            type: "log",
-            message: `[SOURCE] ${candidates.length} candidat(s) bruts trouvés — vérification fiche en cours…`,
-          });
-          if (candidates[0]?.url) {
-            send({
-              type: "log",
-              message: `[SOURCE] 1er candidat brut: ${String(candidates[0].source).split("+")[0]} — ${String(
-                candidates[0].title || ""
-              ).slice(0, 45)}`,
-            });
-          }
-        } catch (e) {
-          send({ type: "log", message: `[WARN] Comparaison fournisseurs: ${e.message}` });
-        }
-
-        if (!candidates.length) {
-          skipped += 1;
-          send({
-            type: "log",
-            message:
-              `[SKIP] Aucun produit fournisseur réel trouvé (Amazon bloqué ou 0 résultat). ` +
-              `Sur Windows: Chrome installé + npm install dans ebx/ puis redémarre. ` +
-              `Sinon colle une URL amazon.fr/dp/... en Import Manuel. Jamais d'import d'annonce eBay.`,
-          });
-          errors += 1;
-          send({ type: "stats", scanned, imported, listed, errors });
-          continue;
-        }
-
-        // ——— PASS VERIFICATION : scrape chaque fiche, ne garder que les prix réels ———
+        // 2) Cascade 1 source (style EBX) — pas de course au « moins cher » multi-marketplaces
         send({
           type: "log",
-          message: `[VERIFY] Mode ${
-            strictVerified ? "STRICT (fiche produit uniquement)" : "souple (cartes marketplace autorisées)"
-          } — contrôle de ${Math.min(candidates.length, 8)} candidat(s)…`,
+          message: `[SOURCE] Recherche fournisseur (${source}) — cascade EBX…`,
         });
-        const verifiedDetails = new Map();
-        const verifiedList = [];
-        for (let vi = 0; vi < Math.min(candidates.length, 8); vi++) {
-          const cand = candidates[vi];
-          send({
-            type: "log",
-            message: `[VERIFY] ${vi + 1}/${Math.min(candidates.length, 8)} ${String(cand.source).split("+")[0]} — ${String(
-              cand.title || ""
-            ).slice(0, 40)}…`,
-          });
+        let supplier = null;
+        const sourceLog = (m) => send({ type: "log", message: m });
+
+        if (source === "auto" || source === "amazon") {
           try {
-            const detail = await scrapeProduct(cand.url);
-            detail.images = (detail.images || []).filter(isRealProductImage);
-            let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
-            // Amazon / Cdiscount : prix carte search du MÊME ASIN/URL = fiable si fiche sans prix (souvent "voir panier")
-            if (
-              !(cost > 0) &&
-              cand.price > 0 &&
-              cand.priceFromMarketplaceCard &&
-              /^(amazon|cdiscount)/i.test(String(cand.source || ""))
-            ) {
-              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
-              if (cost > 0) {
-                send({
-                  type: "log",
-                  message: `[VERIFY] ✓ ${Number(cost).toFixed(2)}€ (carte ${String(cand.source).split("+")[0]} — fiche sans prix affiché)`,
-                });
-              }
-            }
-            if (!(cost > 0) && !strictVerified) {
-              const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title).catch(() => null);
-              cost = sanitizeProductPrice(resolved, detail.title || cand.title);
-            }
-            if (
-              !(cost > 0) &&
-              !strictVerified &&
-              cand.price > 0 &&
-              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed)
-            ) {
-              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
-            }
-            if (!(cost > 0) || !(detail.title && String(detail.title).length > 8)) {
+            const amazonItems = await scrapeAmazonSearch(searchQ, { limit: 3, onLog: sourceLog });
+            supplier = pickFirstProduct(amazonItems);
+            if (supplier) {
+              supplier.source = supplier.source || "amazon";
               send({
                 type: "log",
-                message: `[VERIFY] ✗ rejeté — pas de prix fiche fiable${
-                  cand.price > 0 ? ` (indicatif ${Number(cand.price).toFixed(2)}€ ignoré)` : ""
-                }`,
+                message: `[SOURCE] Amazon: ${String(supplier.title || "").slice(0, 55)} → ${String(
+                  supplier.url || ""
+                ).slice(0, 70)}`,
               });
-              continue;
             }
-            detail.price = cost;
-            const row = {
-              ...cand,
-              title: detail.title,
-              price: cost,
-              priceConfirmed: true,
-              priceFromMarketplaceCard: false,
-              priceUnconfirmed: false,
-              url: cand.url,
-            };
-            verifiedList.push(row);
-            verifiedDetails.set(String(cand.url).split("?")[0].toLowerCase(), detail);
-            send({
-              type: "log",
-              message: `[VERIFY] ✓ ${Number(cost).toFixed(2)}€ — ${String(detail.title).slice(0, 45)}`,
-            });
           } catch (e) {
-            send({ type: "log", message: `[VERIFY] ✗ ${e.message.slice(0, 80)}` });
+            send({ type: "log", message: `[WARN] Amazon: ${e.message}` });
           }
         }
 
-        verifiedList.sort((a, b) => a.price - b.price);
-        candidates = strictVerified ? verifiedList : verifiedList.length ? verifiedList : candidates;
-
-        send({
-          type: "suppliers",
-          query: searchQ,
-          compared: verifiedList.length,
-          verifiedOnly: strictVerified,
-          items: (strictVerified ? verifiedList : candidates).slice(0, 5).map((c, idx) => ({
-            rank: idx + 1,
-            source: String(c.source || "").split("+")[0],
-            title: String(c.title || "").slice(0, 90),
-            price: c.price != null && c.price > 0 ? Number(c.price) : null,
-            priceConfirmed: !!c.priceConfirmed || verifiedDetails.has(String(c.url).split("?")[0].toLowerCase()),
-            priceUnconfirmed: !c.priceConfirmed && !!c.priceUnconfirmed,
-            url: c.url,
-            best: idx === 0,
-          })),
-        });
-
-        if (!candidates.length || (strictVerified && !verifiedList.length)) {
-          skipped += 1;
+        if (!supplier && source === "cdiscount") {
+          try {
+            const cdItems = await scrapeCdiscountSearch(searchQ, { limit: 3 });
+            supplier = pickFirstProduct(cdItems);
+          } catch (e) {
+            send({ type: "log", message: `[WARN] Cdiscount: ${e.message}` });
+          }
+          if (!supplier) {
+            supplier = {
+              title: searchQ,
+              url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
+              price: null,
+              source: "cdiscount",
+            };
+          } else {
+            supplier.source = supplier.source || "cdiscount";
+          }
           send({
             type: "log",
-            message: `[SKIP] Aucun fournisseur avec prix VÉRIFIÉ sur la fiche. Astuce: Source=Amazon, ou colle l'URL Ali dans Import Manuel.`,
+            message: `[SOURCE] Cdiscount: ${String(supplier.title || "").slice(0, 55)}`,
           });
+        }
+
+        if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
+          try {
+            if (source === "aliexpress") {
+              const aliItems = await scrapeAliExpressSearch(searchQ, { limit: 3 });
+              supplier = pickFirstProduct(aliItems);
+            }
+          } catch (e) {
+            send({ type: "log", message: `[WARN] AliExpress: ${e.message}` });
+          }
+          if (!supplier) {
+            supplier = {
+              title: searchQ,
+              url: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ)}.html`,
+              price: null,
+              source: "aliexpress",
+            };
+          } else {
+            supplier.source = supplier.source || "aliexpress";
+          }
+          send({
+            type: "log",
+            message: `[SOURCE] AliExpress: ${String(supplier.title || "").slice(0, 55)} → ${String(
+              supplier.url || ""
+            ).slice(0, 70)}`,
+          });
+        }
+
+        if (!supplier && source === "auto") {
+          supplier = {
+            title: searchQ,
+            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
+            price: null,
+            source: "cdiscount",
+          };
+          send({ type: "log", message: `[SOURCE] Cdiscount fallback (page recherche)` });
+        }
+
+        if (!supplier) {
+          skipped += 1;
           errors += 1;
+          send({ type: "log", message: `[ERROR] Aucun fournisseur pour "${searchQ}"` });
           send({ type: "stats", scanned, imported, listed, errors });
           continue;
         }
 
-        send({
-          type: "log",
-          message: `[VERIFY] ${verifiedList.length} offre(s) vérifiée(s) — moins cher: ${
-            verifiedList[0]
-              ? `${String(verifiedList[0].source).split("+")[0]} @ ${Number(verifiedList[0].price).toFixed(2)}€`
-              : "n/a"
-          }`,
-        });
-
-        // Import depuis candidats vérifiés (réutilise le scrape du pass VERIFY)
-        let supplier = null;
+        // 3) Import fiche produit (si URL produit réelle)
         let detail = null;
-        for (let ci = 0; ci < Math.min(candidates.length, 5); ci++) {
-          const cand = candidates[ci];
-          const cacheKey = String(cand.url || "").split("?")[0].toLowerCase();
-          send({
-            type: "log",
-            message: `[TRY] #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} @ ${
-              cand.price > 0 ? Number(cand.price).toFixed(2) + "€" : "?"
-            }${cand.priceConfirmed ? " [VÉRIFIÉ]" : ""}`,
-          });
+        if (isSupplierProductUrl(supplier.url)) {
           try {
-            detail = verifiedDetails.get(cacheKey) || null;
-            if (!detail) {
-              detail = await scrapeProduct(cand.url);
-              detail.images = (detail.images || []).filter(isRealProductImage);
+            detail = await scrapeProduct(supplier.url);
+            detail.images = (detail.images || []).filter(isRealProductImage);
+            const costFromPage = sanitizeProductPrice(detail.price, detail.title || supplier.title);
+            if (costFromPage > 0) detail.price = costFromPage;
+            else if (supplier.price > 0) {
+              detail.price = sanitizeProductPrice(supplier.price, detail.title || supplier.title);
             }
-            let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
-            let costOrigin = "fiche";
-
-            if (!(cost > 0) && !strictVerified) {
-              try {
-                const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title);
-                cost = sanitizeProductPrice(resolved, detail.title || cand.title);
-                if (cost > 0) costOrigin = "web";
-              } catch (_) {}
-            }
-            if (
-              !(cost > 0) &&
-              !strictVerified &&
-              cand.price > 0 &&
-              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed)
-            ) {
-              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
-              if (cost > 0) costOrigin = "carte marketplace";
-            }
-
-            // En mode strict : uniquement prix déjà confirmé sur fiche
-            if (strictVerified && !(cost > 0 && cand.priceConfirmed)) {
-              if (!(cost > 0)) {
-                send({ type: "log", message: `[WARN] Pas de prix fiche — essai suivant` });
-                detail = null;
-                continue;
-              }
-            }
-
-            if (!(cost > 0)) {
-              send({ type: "log", message: `[WARN] Prix introuvable — essai suivant` });
-              detail = null;
-              continue;
-            }
-
-            if (!(detail.title && String(detail.title).length > 8) && cand.title) {
-              detail.title = cand.title;
-            }
-            if (!(detail.title && String(detail.title).length > 8)) {
-              send({ type: "log", message: `[WARN] Titre manquant — essai suivant` });
-              detail = null;
-              continue;
-            }
-
-            detail.price = cost;
-            supplier = {
-              ...cand,
-              price: cost,
-              priceConfirmed: true,
-              priceUnconfirmed: false,
-              title: detail.title || cand.title,
-            };
             send({
               type: "log",
-              message: `[IMPORT] OK — ${(detail.images || []).length} images, coût ${cost.toFixed(2)}€ (${costOrigin})`,
+              message: `[IMPORT] Détails OK (${(detail.images || []).length} images, prix ${
+                detail.price > 0 ? Number(detail.price).toFixed(2) + "€" : "n/a"
+              })`,
             });
-            send({
-              type: "suppliers",
-              query: searchQ,
-              compared: verifiedList.length || 1,
-              verifiedOnly: strictVerified,
-              items: [
-                {
-                  rank: 1,
-                  source: String(supplier.source || "").split("+")[0],
-                  title: String(supplier.title || "").slice(0, 90),
-                  price: cost,
-                  priceConfirmed: true,
-                  url: supplier.url,
-                  best: true,
-                },
-                ...candidates
-                  .filter((c) => c.url !== supplier.url)
-                  .slice(0, 4)
-                  .map((c, idx) => ({
-                    rank: idx + 2,
-                    source: String(c.source || "").split("+")[0],
-                    title: String(c.title || "").slice(0, 90),
-                    price: c.price != null && c.price > 0 ? Number(c.price) : null,
-                    priceConfirmed: !!c.priceConfirmed,
-                    url: c.url,
-                    best: false,
-                  })),
-              ],
-            });
-            break;
           } catch (e) {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
-            detail = null;
           }
+        } else {
+          // Pages recherche (wholesale / search) — estimation style EBX officiel
+          const hintPrice = Number(hint?.price) > 0 ? Number(hint.price) : 19.9;
+          const estMult = /cdiscount/i.test(String(supplier.source || "")) ? 0.45 : 0.35;
+          supplier.price = Number((hintPrice * estMult).toFixed(2));
+          send({
+            type: "log",
+            message: `[IMPORT] Page recherche fournisseur — coût estimé ${supplier.price}€ (style EBX). Pour un prix réel, colle une URL produit en Import Manuel.`,
+          });
         }
 
-        if (!supplier || !detail || !detail.title) {
+        const cost =
+          sanitizeProductPrice(detail?.price, detail?.title || supplier.title) ||
+          sanitizeProductPrice(supplier.price, supplier.title) ||
+          null;
+
+        if (!(cost > 0) || cost < 0.5 || cost > 500) {
           skipped += 1;
-          send({ type: "log", message: `[SKIP] Impossible d'obtenir une fiche fournisseur avec prix valide` });
           errors += 1;
+          send({
+            type: "log",
+            message: `[SKIP] Prix fournisseur manquant/invalide — change de Source ou Import Manuel avec URL produit`,
+          });
           send({ type: "stats", scanned, imported, listed, errors });
-          continue;
-        }
-
-        const cost = detail.price || supplier.price;
-        if (!cost || cost < 0.5 || cost > 500) {
-          skipped += 1;
-          send({ type: "log", message: `[SKIP] Prix fournisseur invalide (${cost})` });
-          errors += 1;
           continue;
         }
 
@@ -1955,39 +1744,33 @@ app.post("/api/auto-snipe", async (req, res) => {
           type: "log",
           message: `[MARGIN] Coût ${Number(cost).toFixed(2)}€ → Revente ${sellPrice}€ (marge ~${marginPct}%)`,
         });
-        send({
-          type: "margin",
-          cost: Number(cost),
-          sellPrice,
-          marginPct: Number(marginPct),
-          supplier: String(supplier.source || "").split("+")[0],
-          url: supplier.url,
-          title: String(detail.title || supplier.title || "").slice(0, 100),
-        });
 
-        const discreet = prepareDiscreetListing(
-          {
-            ...detail,
-            title: stripSupplierProvenance(detail.title),
-            price: cost,
-            source: detail.source || supplier.source,
-            url: supplier.url,
-          },
-          { marginMult: 1 + Number(margin) / 100 }
-        );
-        const title = stripSupplierProvenance(discreet.seo_title || detail.title).slice(0, 80);
-        const images = (discreet.images || []).filter(isRealProductImage);
+        const baseProduct = {
+          ...(detail || {}),
+          title: stripSupplierProvenance(detail?.title || supplier.title || searchQ),
+          price: cost,
+          source: detail?.source || supplier.source,
+          url: supplier.url,
+          images: (detail?.images || [supplier.image]).filter(isRealProductImage),
+          bullets: detail?.bullets || [],
+          description: detail?.description || "",
+        };
+        const discreet = prepareDiscreetListing(baseProduct, {
+          marginMult: 1 + Number(margin) / 100,
+        });
+        const title = stripSupplierProvenance(discreet.seo_title || baseProduct.title).slice(0, 80);
+        const images = (discreet.images || baseProduct.images || []).filter(isRealProductImage);
         const html = buildHtmlFromProduct(
           {
             title,
             images,
-            bullets: (detail.bullets || [])
+            bullets: (baseProduct.bullets || [])
               .map((b) => String(b).replace(/^\s*source\s*:\s*/i, "").trim())
               .filter(Boolean)
               .slice(0, 8),
-            description: detail.description || "",
+            description: baseProduct.description || "",
             price: cost,
-            source: detail.source || supplier.source,
+            source: baseProduct.source,
           },
           "#6d7ddf"
         );
@@ -1997,7 +1780,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           html,
           price: sellPrice,
           keywords: query,
-          sourceUrl: supplier.url,
+          sourceUrl: isSupplierProductUrl(supplier.url) ? supplier.url : "",
         });
         if (result.duplicate) {
           send({ type: "log", message: `[SKIP] Doublon récent ignoré — "${title.slice(0, 40)}" (id ${result.id})` });
@@ -2009,7 +1792,10 @@ app.post("/api/auto-snipe", async (req, res) => {
         await antiBanDelay({ testMode, label: "import" });
 
         if (!autoList) {
-          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.id}) → vois Mes Listings` });
+          send({
+            type: "log",
+            message: `[SKIP] Listing auto désactivé — import seul (id ${result.id}) → vois Mes Listings`,
+          });
         } else {
           send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
           try {
