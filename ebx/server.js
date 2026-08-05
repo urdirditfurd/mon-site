@@ -2185,7 +2185,7 @@ app.post("/api/listings/:id/end", async (req, res) => {
 app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
   try {
     const { getRecentOrders } = require("./ebay-api");
-    const { orders } = await getRecentOrders({ limit: 40 });
+    const { orders, env, sellerUserId } = await getRecentOrders({ limit: 40, daysBack: 90 });
     let created = 0;
     let updated = 0;
     for (const o of orders) {
@@ -2285,6 +2285,12 @@ app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
       updated,
       autoProcessed: autoPack?.processed || 0,
       autoOrderMode: cfg.autoOrderMode,
+      ebayEnv: env,
+      sellerUserId: sellerUserId || null,
+      note:
+        orders.length === 0
+          ? `Aucune vente trouvée sur le compte ${sellerUserId || "eBay"} (${env}) ces 90 derniers jours. Normal si tu n'as pas encore de commande acheteur.`
+          : `${orders.length} commande(s) synchronisée(s) depuis ${sellerUserId || "eBay"} (${env}).`,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
