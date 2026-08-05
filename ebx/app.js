@@ -75,6 +75,73 @@ function initDescPalette() {
   syncDescColorIndicators();
 }
 
+function detectThemeFromHtml(html) {
+  const h = String(html || "");
+  const g = h.match(/linear-gradient\([^)]*?,\s*(#[0-9a-fA-F]{3,8})\b/i);
+  if (g?.[1]) return normalizeHex(g[1]);
+  const c = h.match(/\bcolor:\s*(#[0-9a-fA-F]{6})\b/i);
+  if (c?.[1]) return normalizeHex(c[1]);
+  const bg = h.match(/\bbackground:\s*(#[0-9a-fA-F]{6})\b/i);
+  if (bg?.[1]) return normalizeHex(bg[1]);
+  return "#6d7ddf";
+}
+
+function normalizeHex(hex) {
+  let h = String(hex || "#6d7ddf").trim();
+  if (/^#[0-9a-fA-F]{3}$/.test(h)) {
+    h = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`;
+  }
+  return h.toLowerCase();
+}
+
+function replaceThemeInHtml(html, from, to) {
+  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return html;
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(html || "").replace(new RegExp(esc, "gi"), to);
+}
+
+function syncEditThemeIndicators() {
+  const hex = normalizeHex(editThemeColor || "#6d7ddf");
+  const cur = document.getElementById("edit-theme-current");
+  if (cur) cur.style.background = hex;
+  const hexEl = document.getElementById("edit-theme-hex");
+  if (hexEl) hexEl.textContent = hex;
+  const picker = document.getElementById("edit-color-picker");
+  if (picker) picker.value = hex;
+  document.querySelectorAll(".edit-color-swatch").forEach((d) => {
+    d.classList.toggle("active", normalizeHex(d.dataset.theme || "") === hex);
+  });
+}
+
+function initEditPalette() {
+  const swatchHtml = (colors) =>
+    colors
+      .map((c) => {
+        const border = c.toLowerCase() === "#ffffff" ? "border border-zinc-300" : "";
+        return `<button type="button" class="edit-color-swatch ${border}" style="background:${c}" data-theme="${c}" title="${c}" onclick="setEditTheme('${c}', this)"></button>`;
+      })
+      .join("");
+  const quick = document.getElementById("edit-color-quick");
+  if (quick) quick.innerHTML = swatchHtml(DESC_QUICK);
+  const full = document.getElementById("edit-color-palette");
+  if (full) full.innerHTML = swatchHtml(DESC_PALETTE);
+  syncEditThemeIndicators();
+}
+
+function setEditTheme(color, el) {
+  const next = normalizeHex(color || "#6d7ddf");
+  const prev = normalizeHex(editThemeColor || "#6d7ddf");
+  if (editHtmlDraft && prev !== next) {
+    editHtmlDraft = replaceThemeInHtml(editHtmlDraft, prev, next);
+  }
+  editThemeColor = next;
+  const preview = document.getElementById("modal-content");
+  if (preview) preview.innerHTML = editHtmlDraft || "<p class='text-zinc-400'>Pas de description</p>";
+  document.querySelectorAll(".edit-color-swatch").forEach((d) => d.classList.remove("active"));
+  (el || document.querySelector(`.edit-color-swatch[data-theme="${next}"]`))?.classList.add("active");
+  syncEditThemeIndicators();
+}
+
 if (typeof localStorage !== "undefined" && localStorage.getItem("ebx-dark") === "1") {
   document.addEventListener("DOMContentLoaded", () => toggleDarkMode(true));
 }
@@ -90,6 +157,8 @@ let lastCompetitor = null;
 let lastDesc = null;
 let descImages = [];
 let replaceImgIdx = 0;
+let editHtmlDraft = "";
+let editThemeColor = "#6d7ddf";
 
 const PAGE_META = {
   dashboard: ["Dashboard", "Ce qui se passe en temps réel sur eBay"],
@@ -871,7 +940,7 @@ async function runSnipe() {
     marketplace: document.getElementById("snipe-market").value,
     ticket: document.getElementById("snipe-ticket").value,
     source: document.getElementById("snipe-source").value,
-    autoList: document.getElementById("snipe-autolist").checked,
+    autoList: false,
     testMode: false,
   };
 
@@ -1895,21 +1964,12 @@ async function viewListing(id) {
       srcLink.classList.add("hidden");
     }
   }
-  // Préremplir variantes depuis le titre
-  const isLed = /led|bande|strip|cob|n[eé]on/i.test(String(d.seo_title || ""));
-  document.getElementById("edit-var-enabled").checked = true;
-  document.getElementById("edit-var-aspect").value = "Couleur";
-  document.getElementById("edit-var-v1").value = isLed ? "Blanc chaud" : "Option A";
-  document.getElementById("edit-var-v2").value = isLed ? "Blanc froid" : "Option B";
-  try {
-    if (d.variations_json) {
-      const v = JSON.parse(d.variations_json);
-      if (v?.aspect) document.getElementById("edit-var-aspect").value = v.aspect;
-      if (v?.values?.[0]) document.getElementById("edit-var-v1").value = v.values[0];
-      if (v?.values?.[1]) document.getElementById("edit-var-v2").value = v.values[1];
-    }
-  } catch (_) {}
-  document.getElementById("modal-content").innerHTML = d.html_description || "<p class='text-zinc-400'>Pas de description</p>";
+  editHtmlDraft = d.html_description || "";
+  editThemeColor = detectThemeFromHtml(editHtmlDraft);
+  document.getElementById("modal-content").innerHTML =
+    editHtmlDraft || "<p class='text-zinc-400'>Pas de description</p>";
+  initEditPalette();
+  syncEditThemeIndicators();
   const m = document.getElementById("modal");
   m.classList.remove("hidden");
   m.classList.add("flex");
@@ -1929,10 +1989,12 @@ async function saveListingEdits(opts = {}) {
     alert("Prix invalide");
     return false;
   }
+  const html_description =
+    editHtmlDraft || document.getElementById("modal-content")?.innerHTML || undefined;
   const res = await fetch(API + "/api/listings/" + id, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seo_title, suggested_price }),
+    body: JSON.stringify({ seo_title, suggested_price, html_description }),
   });
   const json = await res.json();
   if (!json.success) {
@@ -1952,13 +2014,9 @@ async function publishListingFromModal() {
   const envMode = window.__ebxPublishEnv || "sandbox";
   const warn =
     envMode === "production"
-      ? "Publier sur eBay PRODUCTION avec les variantes choisies ?"
-      : "Publier en SANDBOX avec les variantes choisies ?";
+      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?"
+      : "Publier en SANDBOX ?";
   if (!confirm(warn)) return;
-  const varEnabled = document.getElementById("edit-var-enabled")?.checked !== false;
-  const aspect = document.getElementById("edit-var-aspect")?.value.trim() || "Couleur";
-  const v1 = document.getElementById("edit-var-v1")?.value.trim() || "Blanc chaud";
-  const v2 = document.getElementById("edit-var-v2")?.value.trim() || "Blanc froid";
   const btn = document.getElementById("edit-publish-btn");
   const original = btn?.textContent;
   if (btn) {
@@ -1969,23 +2027,20 @@ async function publishListingFromModal() {
     const res = await fetch(API + "/api/publish-to-ebay/" + id, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        variations: {
-          enabled: varEnabled,
-          aspect,
-          values: [v1, v2].filter(Boolean),
-        },
-      }),
+      body: JSON.stringify({}),
     });
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    const lid = json.data.listingId || "N/A";
-    const vars = (json.data?.variations?.values || []).join(" / ");
+    if (!json.success) {
+      alert(json.error || "Erreur publication");
+      return;
+    }
+    const lid = json.data?.listingId || json.listingId || "n/a";
+    const vars = json.data?.variations || json.variations || "";
     alert(`Publié ! Listing ID: ${lid}${vars ? `\nVariations: ${vars}` : ""}`);
     closeModal();
     loadListings();
-  } catch (err) {
-    alert("Erreur: " + err.message);
+  } catch (e) {
+    alert(e.message || "Erreur publication");
   } finally {
     if (btn) {
       btn.disabled = false;

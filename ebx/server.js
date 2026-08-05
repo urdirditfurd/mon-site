@@ -1487,11 +1487,10 @@ app.post("/api/auto-snipe", async (req, res) => {
     margin = 20,
     marketplace = "France",
     ticket = "all",
-    autoList = true,
     source = "auto",
     query = "gadgets",
   } = req.body || {};
-  // Mode REEL uniquement — flux style EBX officiel (cascade 1 source, pas de comparaison multi-offres)
+  // Mode REEL — import Mes Listings uniquement (pas de publish eBay auto)
   const testMode = false;
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -1528,7 +1527,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Flux EBX officiel (cascade source)`,
+      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Import Mes Listings (pas de publish auto)`,
     });
     send({
       type: "log",
@@ -1789,37 +1788,11 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         imported += 1;
         send({ type: "stats", scanned, imported, listed, errors });
+        send({
+          type: "log",
+          message: `[OK] Importé en Mes Listings (id ${result.id}) — publie depuis Modifier quand tu es prêt`,
+        });
         await antiBanDelay({ testMode, label: "import" });
-
-        if (!autoList) {
-          send({
-            type: "log",
-            message: `[SKIP] Listing auto désactivé — import seul (id ${result.id}) → vois Mes Listings`,
-          });
-        } else {
-          send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
-          try {
-            const listing = getListingById.get(Number(result.id));
-            const pub = await publishToEbay(listing, listing.id, {
-              variations: {
-                enabled: true,
-                aspect: "Couleur",
-                values: /led|bande|strip|cob|n[eé]on/i.test(String(listing.seo_title || ""))
-                  ? ["Blanc chaud", "Blanc froid"]
-                  : ["Option A", "Option B"],
-              },
-            });
-            if (pub?.listingId) {
-              rememberListingPublish(listing.id, pub);
-            }
-            send({ type: "log", message: `[OK] Publié — listingId=${pub.listingId || "n/a"}` });
-            listed += 1;
-          } catch (e) {
-            errors += 1;
-            send({ type: "log", message: `[ERROR] Publish: ${e.message}` });
-            send({ type: "log", message: `[INFO] Import quand même en Mes Listings (id ${result.id})` });
-          }
-        }
 
         // Pas d'insertion Auto-Order ici — uniquement après vraie vente eBay (sync)
         send({ type: "stats", scanned, imported, listed, errors });
