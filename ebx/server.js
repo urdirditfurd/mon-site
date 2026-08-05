@@ -226,6 +226,7 @@ const insertOrder = db.prepare(
 const getOrders = db.prepare("SELECT * FROM auto_orders ORDER BY created_at DESC LIMIT 100");
 const getOrderByRef = db.prepare("SELECT * FROM auto_orders WHERE order_ref = ?");
 const updateOrderStatus = db.prepare("UPDATE auto_orders SET status = ? WHERE order_ref = ?");
+const deleteOrderByRef = db.prepare("DELETE FROM auto_orders WHERE order_ref = ?");
 
 const orderCols = db.prepare("PRAGMA table_info(auto_orders)").all().map((c) => c.name);
 if (!orderCols.includes("ship_json")) {
@@ -1199,6 +1200,49 @@ app.post("/api/auto-orders/:id/advance", (req, res) => {
     const next = flow[Math.min(idx + 1, flow.length - 1)];
     updateOrderStatus.run(next, row.order_ref);
     res.json({ success: true, data: { id: row.order_ref, status: next } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/auto-orders/:id", (req, res) => {
+  try {
+    const row = getOrderByRef.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Commande introuvable" });
+    deleteOrderByRef.run(row.order_ref);
+    res.json({ success: true, data: { id: row.order_ref } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auto-orders/bulk-delete", (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) return res.status(400).json({ success: false, error: "ids requis" });
+    let removed = 0;
+    for (const id of ids) {
+      const row = getOrderByRef.get(id);
+      if (!row) continue;
+      deleteOrderByRef.run(row.order_ref);
+      removed += 1;
+    }
+    res.json({ success: true, removed });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/listings/bulk-delete", (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ success: false, error: "ids requis" });
+    let removed = 0;
+    for (const id of ids) {
+      deleteListingById.run(id);
+      removed += 1;
+    }
+    res.json({ success: true, removed });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

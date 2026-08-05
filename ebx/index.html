@@ -609,13 +609,27 @@
               <p class="text-sm text-zinc-400">Uniquement les commandes synchronisées depuis ton compte eBay</p>
             </div>
             <div class="flex gap-2 flex-wrap">
+              <button id="orders-bulk-delete" onclick="deleteSelectedOrders()" class="hidden text-sm px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-medium">Supprimer la sélection</button>
               <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes eBay</button>
               <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Préparer commandes fournisseurs</button>
               <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
             </div>
           </div>
           <div id="ao-bot-log" class="hidden px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100"></div>
-          <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">ID</th><th class="p-3">Produit + adresse</th><th class="p-3">Fournisseur</th><th class="p-3">Montant</th><th class="p-3">Statut</th><th class="p-3">Actions</th></tr></thead><tbody id="orders-body"></tbody></table>
+          <table class="w-full text-sm">
+            <thead class="text-left text-zinc-400 border-b">
+              <tr>
+                <th class="p-3 w-10"><input type="checkbox" id="orders-select-all" class="rounded border-zinc-300" onchange="toggleSelectAllOrders(this.checked)" title="Tout sélectionner" /></th>
+                <th class="p-3">ID</th>
+                <th class="p-3">Produit + adresse</th>
+                <th class="p-3">Fournisseur</th>
+                <th class="p-3">Montant</th>
+                <th class="p-3">Statut</th>
+                <th class="p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="orders-body"></tbody>
+          </table>
         </div>
       </section>
 
@@ -628,13 +642,25 @@
               <p class="text-sm text-zinc-400">Illimité · variantes eBay activées à la publish · fin d'annonce</p>
             </div>
             <div class="flex gap-2 flex-wrap">
+              <button id="listings-bulk-delete" onclick="deleteSelectedListings()" class="hidden text-sm px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-medium">Supprimer la sélection</button>
               <button onclick="dedupeListings()" class="text-sm px-3 py-1.5 border rounded-lg">Nettoyer doublons</button>
               <button onclick="scrubListingImages()" class="text-sm px-3 py-1.5 border rounded-lg">Réparer images</button>
               <button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
             </div>
           </div>
           <div id="listings-publish-hint" class="hidden px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100"></div>
-          <table class="w-full text-sm"><thead class="text-left text-zinc-400 border-b"><tr><th class="p-3">Date</th><th class="p-3">Titre SEO</th><th class="p-3">Prix</th><th class="p-3 text-right">Actions</th></tr></thead><tbody id="listings-body"></tbody></table>
+          <table class="w-full text-sm">
+            <thead class="text-left text-zinc-400 border-b">
+              <tr>
+                <th class="p-3 w-10"><input type="checkbox" id="listings-select-all" class="rounded border-zinc-300" onchange="toggleSelectAllListings(this.checked)" title="Tout sélectionner" /></th>
+                <th class="p-3">Date</th>
+                <th class="p-3">Titre SEO</th>
+                <th class="p-3">Prix</th>
+                <th class="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="listings-body"></tbody>
+          </table>
         </div>
       </section>
 

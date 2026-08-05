@@ -916,11 +916,16 @@ async function loadOrders() {
     shipped: "bg-green-50 text-green-700",
     delivered: "bg-green-100 text-green-800",
   };
+  const allBtn = document.getElementById("orders-select-all");
+  if (allBtn) allBtn.checked = false;
+  updateOrdersBulkBar();
   document.getElementById("orders-body").innerHTML = (json.data || [])
     .map((o) => {
       const id = String(o.id).replace(/'/g, "\\'");
-      return `<tr class="border-b border-zinc-50 align-top">
-          <td class="p-3 font-mono text-[11px]">${escapeHtml(o.id)}${
+      const safeId = escapeHtml(String(o.id));
+      return `<tr class="border-b border-zinc-50 align-top" data-order-id="${safeId}">
+          <td class="p-3"><input type="checkbox" class="order-check rounded border-zinc-300" value="${safeId}" onchange="updateOrdersBulkBar()" /></td>
+          <td class="p-3 font-mono text-[11px]">${safeId}${
             o.fromEbay ? `<div class="text-[10px] text-emerald-600 mt-1">eBay</div>` : ""
           }</td>
           <td class="p-3"><div class="font-medium">${escapeHtml(o.product)}</div>
@@ -941,10 +946,66 @@ async function loadOrders() {
             <button onclick="openSupplierOrder('${id}')" class="block text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-lg">Ouvrir fournisseur</button>
             <button onclick="copyShipAddress('${id}')" class="block text-xs bg-zinc-50 text-zinc-600 px-2 py-1 rounded-lg">Copier adresse</button>
             <button onclick="advanceOrder('${id}')" class="block text-xs text-brand-600 px-2 py-1">Avancer statut</button>
+            <button onclick="deleteOrder('${id}')" class="block text-xs text-red-600 px-2 py-1">Supprimer</button>
           </td>
         </tr>`;
     })
-    .join("") || `<tr><td colspan="6" class="p-8 text-center text-zinc-300">Aucune commande — clique « Sync ventes eBay ».</td></tr>`;
+    .join("") || `<tr><td colspan="7" class="p-8 text-center text-zinc-300">Aucune commande — clique « Sync ventes eBay ».</td></tr>`;
+}
+
+function selectedOrderIds() {
+  return [...document.querySelectorAll(".order-check:checked")].map((el) => el.value);
+}
+
+function updateOrdersBulkBar() {
+  const n = selectedOrderIds().length;
+  const btn = document.getElementById("orders-bulk-delete");
+  if (!btn) return;
+  btn.classList.toggle("hidden", n === 0);
+  btn.textContent = n <= 1 ? "Supprimer la sélection" : `Supprimer (${n})`;
+  const all = document.querySelectorAll(".order-check");
+  const allBtn = document.getElementById("orders-select-all");
+  if (allBtn && all.length) {
+    allBtn.checked = n === all.length;
+    allBtn.indeterminate = n > 0 && n < all.length;
+  }
+}
+
+function toggleSelectAllOrders(checked) {
+  document.querySelectorAll(".order-check").forEach((el) => {
+    el.checked = checked;
+  });
+  updateOrdersBulkBar();
+}
+
+async function deleteOrder(id) {
+  if (!confirm("Supprimer cette commande de la liste EBX ?")) return;
+  try {
+    const res = await fetch(API + "/api/auto-orders/" + encodeURIComponent(id), { method: "DELETE" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    loadOrders();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function deleteSelectedOrders() {
+  const ids = selectedOrderIds();
+  if (!ids.length) return;
+  if (!confirm(`Supprimer ${ids.length} commande(s) de la liste EBX ?`)) return;
+  try {
+    const res = await fetch(API + "/api/auto-orders/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    loadOrders();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function advanceOrder(id) {
@@ -1030,6 +1091,9 @@ async function loadListings() {
     }
   } catch (_) {}
   window.__ebxPublishEnv = ebayEnv;
+  const allBtn = document.getElementById("listings-select-all");
+  if (allBtn) allBtn.checked = false;
+  updateListingsBulkBar();
   document.getElementById("listings-body").innerHTML = rows.length
     ? rows
         .map((item) => {
@@ -1070,7 +1134,8 @@ async function loadListings() {
               : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 font-medium" title="Annonce sans variations détectées — republie pour activer les variantes eBay">Variante inactive</span>`
             : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-50 text-zinc-400 font-medium" title="Les variations seront activées automatiquement à la publication eBay">Variante à activer</span>`;
           return `
-      <tr class="border-b border-zinc-50">
+      <tr class="border-b border-zinc-50" data-listing-id="${item.id}">
+        <td class="p-3"><input type="checkbox" class="listing-check rounded border-zinc-300" value="${item.id}" onchange="updateListingsBulkBar()" /></td>
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
         <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}${published}${imgWarn}</td>
         <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
@@ -1085,12 +1150,54 @@ async function loadListings() {
               ? `<button onclick="endListingEbay(${item.id}, this)" class="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg">Fin eBay</button>`
               : ""
           }
-          <button onclick="deleteListing(${item.id})" class="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg">Suppr.</button>
         </td>
       </tr>`;
         })
         .join("")
-    : `<tr><td colspan="4" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+    : `<tr><td colspan="5" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+}
+
+function selectedListingIds() {
+  return [...document.querySelectorAll(".listing-check:checked")].map((el) => Number(el.value));
+}
+
+function updateListingsBulkBar() {
+  const n = selectedListingIds().length;
+  const btn = document.getElementById("listings-bulk-delete");
+  if (!btn) return;
+  btn.classList.toggle("hidden", n === 0);
+  btn.textContent = n <= 1 ? "Supprimer la sélection" : `Supprimer (${n})`;
+  const all = document.querySelectorAll(".listing-check");
+  const allBtn = document.getElementById("listings-select-all");
+  if (allBtn && all.length) {
+    allBtn.checked = n === all.length;
+    allBtn.indeterminate = n > 0 && n < all.length;
+  }
+}
+
+function toggleSelectAllListings(checked) {
+  document.querySelectorAll(".listing-check").forEach((el) => {
+    el.checked = checked;
+  });
+  updateListingsBulkBar();
+}
+
+async function deleteSelectedListings() {
+  const ids = selectedListingIds();
+  if (!ids.length) return;
+  if (!confirm(`Supprimer ${ids.length} listing(s) de EBX ?`)) return;
+  try {
+    const res = await fetch(API + "/api/listings/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    loadListings();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 async function syncListing(id, btn) {
