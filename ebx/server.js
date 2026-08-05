@@ -13,6 +13,8 @@ const {
   scrapeAliExpressSearch,
   scrapeCdiscountSearch,
   findCheapestSupplier,
+  searchViaBingRss,
+  parsePrice,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   enrichProductListingCopy,
@@ -1608,29 +1610,58 @@ app.post("/api/auto-snipe", async (req, res) => {
         await antiBanDelay({ testMode, label: "target" });
 
         send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})...` });
-        let supplier = null;
+        let candidates = [];
         try {
           const cmp = await findCheapestSupplier(supplierQuery, { sources: sourceList, limit: 5 });
-          // Ne garder que des URLs produit fournisseur réelles
-          const valid = (cmp.candidates || []).filter((c) => isSupplierProductUrl(c.url));
-          if (valid.length) {
-            supplier = valid.sort((a, b) => (a.price || 999) - (b.price || 999))[0];
-          } else if (cmp.best && isSupplierProductUrl(cmp.best.url)) {
-            supplier = cmp.best;
+          const sourceRank = (s) => {
+            const n = String(s || "").split("+")[0].toLowerCase();
+            if (n === "amazon") return 0;
+            if (n === "cdiscount") return 1;
+            if (n === "aliexpress") return 2;
+            return 3;
+          };
+          candidates = (cmp.candidates || [])
+            .filter((c) => isSupplierProductUrl(c.url))
+            .sort((a, b) => {
+              const pa = a.price != null && a.price > 0 ? a.price : 9999;
+              const pb = b.price != null && b.price > 0 ? b.price : 9999;
+              if (pa !== pb) return pa - pb;
+              return sourceRank(a.source) - sourceRank(b.source);
+            });
+          if (!candidates.length && cmp.best && isSupplierProductUrl(cmp.best.url)) {
+            candidates = [cmp.best];
           }
-          if (supplier) {
+          // Panneau UI : top fournisseurs avec liens
+          send({
+            type: "suppliers",
+            query: supplierQuery,
+            compared: cmp.compared || candidates.filter((c) => c.price > 0).length,
+            items: candidates.slice(0, 5).map((c, idx) => ({
+              rank: idx + 1,
+              source: String(c.source || "").split("+")[0],
+              title: String(c.title || "").slice(0, 90),
+              price: c.price != null && c.price > 0 ? Number(c.price) : null,
+              url: c.url,
+              best: idx === 0,
+            })),
+          });
+          if (candidates[0]) {
+            const best = candidates[0];
             send({
               type: "log",
-              message: `[SOURCE] Meilleur: ${String(supplier.source).split("+")[0]} @ ${
-                supplier.price != null ? Number(supplier.price).toFixed(2) + "€" : "prix n/a"
-              } — ${String(supplier.title || "").slice(0, 50)}`,
+              message: `[SOURCE] Meilleur: ${String(best.source).split("+")[0]} @ ${
+                best.price != null && best.price > 0 ? Number(best.price).toFixed(2) + "€" : "prix n/a"
+              } — ${String(best.title || "").slice(0, 50)}`,
             });
+            if (best.url) {
+              send({ type: "log", message: `[SOURCE] Lien: ${best.url}` });
+            }
           }
         } catch (e) {
           send({ type: "log", message: `[WARN] Comparaison fournisseurs: ${e.message}` });
         }
 
-        if (!supplier || !isSupplierProductUrl(supplier.url)) {
+        if (!candidates.length) {
           skipped += 1;
           send({
             type: "log",
@@ -1641,24 +1672,61 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
+        // Essaie plusieurs candidats jusqu'à obtenir prix + fiche valides
+        let supplier = null;
         let detail = null;
-        try {
-          detail = await scrapeProduct(supplier.url);
-          detail.images = (detail.images || []).filter(isRealProductImage);
-          if (detail.price && (!supplier.price || detail.price < supplier.price)) {
-            supplier.price = detail.price;
-          }
+        for (let ci = 0; ci < Math.min(candidates.length, 5); ci++) {
+          const cand = candidates[ci];
           send({
             type: "log",
-            message: `[IMPORT] Détails fournisseur (${(detail.images || []).length} images, prix ${detail.price || "n/a"})`,
+            message: `[TRY] Candidat #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} ${
+              cand.price != null && cand.price > 0 ? "@ " + Number(cand.price).toFixed(2) + "€" : "(prix à confirmer)"
+            }`,
           });
-        } catch (e) {
-          send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
+          try {
+            detail = await scrapeProduct(cand.url);
+            detail.images = (detail.images || []).filter(isRealProductImage);
+            let cost = detail.price || cand.price || null;
+            // Dernier recours : prix dans le snippet Bing pour cet item
+            if (!(cost > 0) && /aliexpress\.com\/item\/(\d+)/i.test(cand.url)) {
+              const id = cand.url.match(/\/item\/(\d+)/i)[1];
+              try {
+                const rss = await searchViaBingRss(`${id} aliexpress`, {
+                  limit: 5,
+                  linkTest: (link) => link.includes(id),
+                });
+                for (const hit of rss) {
+                  const p = parsePrice(hit.snippet) || parsePrice(hit.title);
+                  if (p > 0) {
+                    cost = p;
+                    break;
+                  }
+                }
+              } catch (_) {}
+            }
+            if (cost > 0) {
+              detail.price = cost;
+              supplier = { ...cand, price: cost, title: detail.title || cand.title };
+              send({
+                type: "log",
+                message: `[IMPORT] Détails OK — ${(detail.images || []).length} images, coût ${Number(cost).toFixed(2)}€`,
+              });
+              break;
+            }
+            send({
+              type: "log",
+              message: `[WARN] Prix introuvable pour ce candidat — essai suivant`,
+            });
+            detail = null;
+          } catch (e) {
+            send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
+            detail = null;
+          }
         }
 
-        if (!detail || !detail.title) {
+        if (!supplier || !detail || !detail.title) {
           skipped += 1;
-          send({ type: "log", message: `[SKIP] Impossible de scraper la fiche fournisseur — abandon` });
+          send({ type: "log", message: `[SKIP] Impossible d'obtenir une fiche fournisseur avec prix valide` });
           errors += 1;
           send({ type: "stats", scanned, imported, listed, errors });
           continue;
@@ -1677,6 +1745,15 @@ app.post("/api/auto-snipe", async (req, res) => {
         send({
           type: "log",
           message: `[MARGIN] Coût ${Number(cost).toFixed(2)}€ → Revente ${sellPrice}€ (marge ~${marginPct}%)`,
+        });
+        send({
+          type: "margin",
+          cost: Number(cost),
+          sellPrice,
+          marginPct: Number(marginPct),
+          supplier: String(supplier.source || "").split("+")[0],
+          url: supplier.url,
+          title: String(detail.title || supplier.title || "").slice(0, 100),
         });
 
         const discreet = prepareDiscreetListing(
@@ -1723,7 +1800,7 @@ app.post("/api/auto-snipe", async (req, res) => {
         await antiBanDelay({ testMode, label: "import" });
 
         if (!autoList) {
-          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.id})` });
+          send({ type: "log", message: `[SKIP] Listing auto désactivé — import seul (id ${result.id}) → vois Mes Listings` });
         } else {
           send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
           try {
@@ -1737,6 +1814,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           } catch (e) {
             errors += 1;
             send({ type: "log", message: `[ERROR] Publish: ${e.message}` });
+            send({ type: "log", message: `[INFO] Import quand même en Mes Listings (id ${result.id})` });
           }
         }
 

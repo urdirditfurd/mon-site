@@ -677,10 +677,10 @@ function parseCdiscount($, baseUrl) {
 function parsePrice(text) {
   if (text == null || text === "") return null;
   const raw = String(text);
-  // Prefer explicit currency amounts
+  // Prefer explicit currency amounts (with or without decimals)
   const withCurrency =
-    raw.match(/(\d+[.,]\d{2})\s*(?:€|EUR|\$|USD)/i) ||
-    raw.match(/(?:€|EUR|\$|USD)\s*(\d+[.,]\d{2})/i);
+    raw.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:€|EUR|\$|USD)/i) ||
+    raw.match(/(?:€|EUR|\$|USD)\s*(\d+(?:[.,]\d{1,2})?)/i);
   if (withCurrency) {
     const n = Number(withCurrency[1].replace(",", "."));
     if (n > 0 && n < 100000) return n;
@@ -1890,12 +1890,29 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
         items.map((i) => ({ ...i, source: i.source || "amazon" }))
       )
     );
+    // Bing RSS — souvent plus fiable pour prix + URL /dp/
+    tasks.push(
+      searchViaBingRss(`${query} site:amazon.fr/dp`, {
+        limit,
+        linkTest: (link) => /amazon\.[a-z.]+\/.*(dp|gp\/product)/i.test(link),
+      })
+        .then((items) => items.map((i) => ({ ...i, source: "amazon+bing" })))
+        .catch(() => [])
+    );
   }
   if (want.has("aliexpress")) {
     tasks.push(
       scrapeAliExpressSearch(query, { limit }).then((items) =>
         items.map((i) => ({ ...i, source: i.source || "aliexpress" }))
       )
+    );
+    tasks.push(
+      searchViaBingRss(`${query} site:aliexpress.com/item prix OR € OR EUR`, {
+        limit: limit + 2,
+        linkTest: (link) => /aliexpress\.[a-z.]+\/item\/\d+/i.test(link),
+      })
+        .then((items) => items.map((i) => ({ ...i, source: "aliexpress+bing" })))
+        .catch(() => [])
     );
   }
   if (want.has("cdiscount")) {
@@ -1904,6 +1921,14 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
         items.map((i) => ({ ...i, source: i.source || "cdiscount" }))
       )
     );
+    tasks.push(
+      searchViaBingRss(`${query} site:cdiscount.com`, {
+        limit,
+        linkTest: (link) => /cdiscount\.com\/.+\.html/i.test(link) && !/search/i.test(link),
+      })
+        .then((items) => items.map((i) => ({ ...i, source: "cdiscount+bing" })))
+        .catch(() => [])
+    );
   }
 
   const results = await Promise.allSettled(tasks);
@@ -1911,8 +1936,28 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
     if (r.status === "fulfilled" && Array.isArray(r.value)) pools.push(...r.value);
   }
 
-  // Enrichir les prix manquants (max 4 fiches) avant comparaison
-  const needPrice = pools.filter((p) => p.url && (p.price == null || p.price <= 0)).slice(0, 4);
+  // Déduplique par URL produit normalisée
+  const byKey = new Map();
+  for (const p of pools) {
+    if (!p?.url) continue;
+    const key = String(p.url)
+      .split("?")[0]
+      .replace(/\/$/, "")
+      .toLowerCase();
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, p);
+      continue;
+    }
+    // Garde le plus complet (prix + meilleur titre)
+    const score = (x) => (x.price > 0 ? 10 : 0) + Math.min(String(x.title || "").length, 40) / 10;
+    if (score(p) > score(prev)) byKey.set(key, { ...prev, ...p, price: p.price || prev.price });
+    else if (!prev.price && p.price) byKey.set(key, { ...prev, price: p.price });
+  }
+  const uniq = [...byKey.values()];
+
+  // Enrichir les prix manquants (max 6 fiches) avant comparaison
+  const needPrice = uniq.filter((p) => p.url && (p.price == null || p.price <= 0)).slice(0, 6);
   for (const item of needPrice) {
     if (/wholesale-|\/search\/|SearchText=/i.test(item.url)) continue;
     try {
@@ -1925,15 +1970,16 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
     } catch (_) {}
   }
 
-  const withPrice = pools.filter((p) => p.url && p.price != null && p.price > 0);
+  const withPrice = uniq.filter((p) => p.url && p.price != null && p.price > 0);
   const priced = withPrice.sort((a, b) => a.price - b.price);
   if (priced.length) {
     return { best: priced[0], candidates: priced.slice(0, 8), compared: priced.length };
   }
-  const any = pools.find(
-    (p) => p.url && p.title && p.title.length > 12 && !/^cdiscount\.com$/i.test(p.title)
-  ) || pools.find((p) => p.url);
-  return { best: any || null, candidates: pools.slice(0, 8), compared: 0 };
+  // Sans prix : retourne quand même des candidats (le sniper essaiera de scraper)
+  const any = uniq
+    .filter((p) => p.url && p.title && p.title.length > 12 && !/^cdiscount\.com$/i.test(p.title))
+    .slice(0, 8);
+  return { best: any[0] || uniq.find((p) => p.url) || null, candidates: any.length ? any : uniq.slice(0, 8), compared: 0 };
 }
 
 function buildHtmlFromProduct(product, themeColor = "#667eea") {
@@ -2226,6 +2272,8 @@ module.exports = {
   scrapeAliExpressSearch,
   scrapeCdiscountSearch,
   findCheapestSupplier,
+  searchViaBingRss,
+  parsePrice,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   enrichProductListingCopy,
