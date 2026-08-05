@@ -329,11 +329,13 @@
             <button onclick="setTheme('#f59e0b', this)" class="theme-dot w-7 h-7 rounded-full bg-amber-500" data-theme="#f59e0b"></button>
             <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary ml-auto">Générer la description</button>
           </div>
+          <p class="text-[11px] text-zinc-400">Après git pull : redémarre le serveur (Ctrl+C → npm start) puis Ctrl+F5. Tu dois voir le badge « desc-v2 ».</p>
         </div>
 
         <div id="desc-banner" class="hidden bg-brand-50 border border-brand-100 rounded-2xl px-5 py-3 flex flex-wrap items-center gap-3 text-sm">
           <span id="desc-detected" class="font-medium text-brand-800"></span>
           <span id="desc-img-badge" class="text-xs bg-white text-brand-700 px-2 py-0.5 rounded-full border"></span>
+          <span id="desc-enrich-badge" class="text-xs bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-100"></span>
           <span id="desc-source-badge" class="text-xs bg-zinc-900 text-white px-2 py-0.5 rounded-full"></span>
         </div>
 
@@ -413,6 +415,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=desc-v2"></script>
 </body>
 </html>

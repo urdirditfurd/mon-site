@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
-const { generateListing } = require("./ai-brain");
+const { generateListing, generateProductCopy } = require("./ebx/ai-brain");
 const { publishToEbay } = require("./ebay-api");
 const {
   getRankings,
@@ -20,7 +20,12 @@ const {
   scrapeAmazonSearch,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  enrichProductListingCopy,
+  stripSupplierProvenance,
+  cleanMarketingCopy,
+  sanitizeListingHtml,
 } = require("./scraper");
+const { prepareDiscreetListing, rewriteEbayTitle } = require("./ebx/business-engine");
 const { browseSearch, browseSellerItems } = require("./ebay-browse");
 
 const app = express();
@@ -96,6 +101,8 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     llm_url: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1",
     mode: "live+fallback",
+    description_builder: "desc-v2",
+    scraper: "ebx/scraper.js",
   });
 });
 
@@ -592,14 +599,29 @@ app.post("/api/generate-listing", async (req, res) => {
     if (productUrl) {
       try {
         scraped = await scrapeProduct(productUrl);
+        scraped.title = stripSupplierProvenance(scraped.title);
+        scraped.description = cleanMarketingCopy(scraped.description || "");
+        scraped.bullets = (scraped.bullets || [])
+          .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
+          .filter((b) => b && !/^source\s*:/i.test(b));
+        const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8 });
+        discreet.seo_title = stripSupplierProvenance(discreet.seo_title);
+        if (discreet.product) {
+          discreet.product.title = stripSupplierProvenance(discreet.product.title);
+          discreet.product.description = cleanMarketingCopy(discreet.product.description || "");
+          discreet.product = enrichProductListingCopy({
+            ...discreet.product,
+            originalTitle: discreet.original_title || scraped.title,
+          });
+        }
         listing = {
-          product_name: scraped.title,
-          seo_title: `${scraped.title}`.slice(0, 80),
-          suggested_price: scraped.price ? Number((scraped.price * 1.8).toFixed(2)) : 29.99,
-          html_description: buildHtmlFromProduct(scraped, themeColor || "#667eea"),
-          images: scraped.images,
+          ...discreet,
+          html_description: sanitizeListingHtml(
+            buildHtmlFromProduct(discreet.product, themeColor || "#667eea")
+          ),
+          images: discreet.product?.images || scraped.images || [],
           source: scraped.source,
-          product: scraped,
+          product: discreet.product,
           live: true,
         };
       } catch (scrapeErr) {
@@ -607,36 +629,90 @@ app.post("/api/generate-listing", async (req, res) => {
         listing = buildDescriptionFromUrl(productUrl, themeColor || "#667eea");
         listing.live = false;
         listing.scrape_error = scrapeErr.message;
-        listing.product = {
-          title: listing.product_name || listing.seo_title,
+        listing.original_title = stripSupplierProvenance(listing.product_name || listing.seo_title);
+        listing.seo_title = stripSupplierProvenance(
+          rewriteEbayTitle(listing.seo_title || listing.product_name || "Produit")
+        );
+        listing.product = enrichProductListingCopy({
+          title: listing.seo_title,
+          originalTitle: listing.original_title,
           images: listing.images || [],
           bullets: [],
           description: "",
           price: listing.suggested_price,
           source: "fallback",
           url: productUrl,
-        };
+        });
+        listing.html_description = sanitizeListingHtml(
+          buildHtmlFromProduct(listing.product, themeColor || "#667eea")
+        );
+        listing.images = listing.product.images || [];
       }
 
-      // Enrichissement LLM optionnel
+      // LLM optionnel : JSON structuré uniquement (pas de HTML IA générique)
       try {
-        const aiPromise = generateListing(
-          listing.product_name || listing.seo_title,
-          `url:${productUrl}, bullets:${(scraped?.bullets || []).join(" | ")}, theme:${themeColor || "#667eea"}`
-        );
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 3000));
+        const baseProduct = {
+          ...(listing.product || scraped || {}),
+          title: listing.original_title || listing.product_name || listing.seo_title,
+          originalTitle: listing.original_title || scraped?.title,
+          images: listing.images || scraped?.images || [],
+        };
+        const aiPromise = generateProductCopy(baseProduct);
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 14000));
         const ai = await Promise.race([aiPromise, timeout]);
-        if (ai?.html_description && !ai._parse_error) {
+        if (ai && !ai._parse_error) {
+          const aiTitle = stripSupplierProvenance(
+            rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title)
+          );
+          const aiSections = Array.isArray(ai.sections) ? ai.sections.filter((s) => s?.body) : [];
+          const aiBenefits = Array.isArray(ai.benefits) ? ai.benefits.filter(Boolean) : [];
+          const product = enrichProductListingCopy({
+            ...baseProduct,
+            title: aiTitle,
+            originalTitle: listing.original_title || baseProduct.title,
+            description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
+            short_pitch: cleanMarketingCopy(ai.short_pitch || baseProduct.short_pitch || ""),
+            sections: aiSections.length ? aiSections : baseProduct.sections,
+            benefits: aiBenefits.length ? aiBenefits : baseProduct.benefits,
+            bullets: aiBenefits.length ? aiBenefits : baseProduct.bullets,
+            specs:
+              ai.specs && typeof ai.specs === "object"
+                ? { ...(baseProduct.specs || {}), ...ai.specs }
+                : baseProduct.specs,
+          });
           listing = {
             ...listing,
-            seo_title: ai.seo_title || listing.seo_title,
-            html_description: ai.html_description,
+            seo_title: aiTitle,
+            product_name: aiTitle,
+            html_description: sanitizeListingHtml(buildHtmlFromProduct(product, themeColor || "#667eea")),
             suggested_price: ai.suggested_price || listing.suggested_price,
             ai_enriched: true,
+            product,
+            images: product.images || listing.images,
           };
         }
       } catch (llmErr) {
         console.warn("[EBX] LLM skip:", llmErr.message);
+      }
+
+      if (listing.product) {
+        listing.product = enrichProductListingCopy({
+          ...listing.product,
+          originalTitle: listing.original_title || listing.product.originalTitle || listing.product.title,
+          images: listing.images || listing.product.images || [],
+        });
+        listing.html_description = sanitizeListingHtml(
+          buildHtmlFromProduct(listing.product, themeColor || "#667eea")
+        );
+        listing.images = listing.product.images || listing.images;
+        listing.enrichment = {
+          version: "desc-v2",
+          sections: (listing.product.sections || []).length,
+          benefits: (listing.product.benefits || []).length,
+          specs: Object.keys(listing.product.specs || {}).length,
+          images: (listing.images || []).length,
+          source: listing.source,
+        };
       }
     } else {
       if (!productName) return res.status(400).json({ error: "productName ou productUrl requis" });
@@ -671,17 +747,30 @@ app.post("/api/rebuild-description", (req, res) => {
   try {
     const { product, themeColor = "#667eea" } = req.body || {};
     if (!product) return res.status(400).json({ success: false, error: "product requis" });
-    const html = buildHtmlFromProduct(product, themeColor);
+    const cleaned = enrichProductListingCopy({
+      ...product,
+      title: stripSupplierProvenance(product.title),
+      originalTitle: product.originalTitle || product.original_title || product.title,
+      description: cleanMarketingCopy(product.description || ""),
+    });
+    const html = sanitizeListingHtml(buildHtmlFromProduct(cleaned, themeColor));
     res.json({
       success: true,
       data: {
-        product_name: product.title,
-        seo_title: String(product.title || "").slice(0, 80),
+        product_name: cleaned.title,
+        seo_title: String(cleaned.title || "").slice(0, 80),
         html_description: html,
-        images: product.images || [],
-        source: product.source || "generic",
-        product,
+        images: cleaned.images || [],
+        source: cleaned.source || "generic",
+        product: cleaned,
         live: true,
+        enrichment: {
+          version: "desc-v2",
+          sections: (cleaned.sections || []).length,
+          benefits: (cleaned.benefits || []).length,
+          specs: Object.keys(cleaned.specs || {}).length,
+          images: (cleaned.images || []).length,
+        },
       },
     });
   } catch (err) {
@@ -721,6 +810,7 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`⚡ EBX Server running on http://localhost:${PORT}`);
+  console.log(`📝 Description Builder: desc-v2 (scraper ebx enrichi)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
 });

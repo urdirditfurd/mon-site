@@ -725,9 +725,14 @@ async function regenerateDescTheme() {
     (lastDesc
       ? {
           title: lastDesc.product_name || lastDesc.seo_title || "Produit",
+          originalTitle: lastDesc.original_title || lastDesc.product_name,
           images: descImages.length ? descImages : lastDesc.images || [],
-          bullets: [],
-          description: "",
+          bullets: lastDesc.product?.bullets || [],
+          benefits: lastDesc.product?.benefits || [],
+          sections: lastDesc.product?.sections || [],
+          specs: lastDesc.product?.specs || {},
+          description: lastDesc.product?.description || "",
+          short_pitch: lastDesc.product?.short_pitch || "",
           price: lastDesc.suggested_price,
           source: lastDesc.source || "generic",
         }
@@ -738,7 +743,11 @@ async function regenerateDescTheme() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        product: { ...product, images: descImages.length ? descImages : product.images || [] },
+        product: {
+          ...product,
+          originalTitle: product.originalTitle || lastDesc?.original_title || product.title,
+          images: descImages.length ? descImages : product.images || [],
+        },
         themeColor,
       }),
     });
@@ -779,6 +788,23 @@ function applyDescResult(data) {
   document.getElementById("desc-detected").textContent =
     "Produit détecté : " + (data.product_name || data.seo_title || "").slice(0, 80);
   document.getElementById("desc-img-badge").textContent = `${descImages.length} images`;
+  const enrich = data.enrichment || {};
+  const sec = enrich.sections ?? (data.product?.sections || []).length;
+  const ben = enrich.benefits ?? (data.product?.benefits || data.product?.bullets || []).length;
+  let enrichEl = document.getElementById("desc-enrich-badge");
+  if (!enrichEl && banner) {
+    enrichEl = document.createElement("span");
+    enrichEl.id = "desc-enrich-badge";
+    enrichEl.className =
+      "text-xs bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-100";
+    banner.insertBefore(enrichEl, document.getElementById("desc-source-badge"));
+  }
+  if (enrichEl) {
+    enrichEl.textContent =
+      sec || ben
+        ? `${sec || 0} sections · ${ben || 0} bénéfices · desc-v2`
+        : "desc-v2 — régénère après restart serveur";
+  }
   document.getElementById("desc-source-badge").textContent = data.source || "generic";
 }
 
