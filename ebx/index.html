@@ -698,16 +698,25 @@
             <p class="text-sm text-zinc-400">Collez le lien du produit fournisseur (Amazon, AliExpress, Cdiscount)</p>
           </div>
           <input id="desc-url" class="w-full px-4 py-2.5 rounded-xl border text-sm" placeholder="URL du produit *" value="https://www.amazon.fr/dp/B09V3KXJPB" />
-          <div class="space-y-2">
-            <div class="flex flex-wrap gap-3 items-center justify-between">
-              <span class="text-xs text-zinc-500 font-medium">Nuancier / palette</span>
-              <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary">Générer la description</button>
+          <div class="flex flex-wrap gap-3 items-center justify-between">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs text-zinc-500">Thème :</span>
+              <div id="desc-color-quick" class="flex items-center gap-1.5"></div>
+              <span id="desc-theme-current" class="w-5 h-5 rounded border border-zinc-200 shrink-0" title="Couleur active" style="background:#6d7ddf"></span>
+              <button type="button" id="desc-colors-toggle" onclick="toggleDescColors()" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50">Afficher les couleurs</button>
+            </div>
+            <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary">Générer la description</button>
+          </div>
+          <div id="desc-colors-panel" class="hidden rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-xs font-medium text-zinc-500 uppercase tracking-wider">Nuancier</p>
+              <span id="desc-theme-status" class="text-[11px] text-zinc-400"></span>
             </div>
             <div id="desc-color-palette" class="flex flex-wrap gap-2"></div>
-            <div class="flex items-center gap-2 text-xs text-zinc-400">
-              <label for="desc-color-picker">Couleur libre :</label>
-              <input type="color" id="desc-color-picker" value="#6d7ddf" class="w-8 h-8 rounded cursor-pointer border-0 bg-transparent" onchange="setTheme(this.value)" />
-              <span id="desc-theme-status" class="text-[11px]"></span>
+            <div class="flex items-center gap-3 pt-1 border-t border-zinc-200">
+              <label for="desc-color-picker" class="text-xs text-zinc-500">Couleur personnalisée</label>
+              <input type="color" id="desc-color-picker" value="#6d7ddf" class="w-9 h-9 rounded cursor-pointer border border-zinc-200 bg-white" onchange="setTheme(this.value)" />
+              <code id="desc-theme-hex" class="text-xs text-zinc-500 font-mono">#6d7ddf</code>
             </div>
           </div>
         </div>
@@ -726,7 +735,8 @@
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-xs text-zinc-400">Couleur :</span>
-              <div id="desc-color-palette-mini" class="flex flex-wrap gap-1.5"></div>
+              <span id="desc-theme-current-mini" class="w-5 h-5 rounded border border-zinc-200 shrink-0" style="background:#6d7ddf"></span>
+              <button type="button" onclick="toggleDescColors(true)" class="text-xs px-2 py-1 rounded-lg border text-zinc-500 hover:bg-zinc-50">Afficher les couleurs</button>
             </div>
             <button onclick="copyHtml()" class="text-sm px-3 py-1.5 bg-zinc-900 text-white rounded-lg">Copier HTML</button>
           </div>

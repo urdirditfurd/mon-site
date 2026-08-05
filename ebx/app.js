@@ -1,9 +1,13 @@
 const API = window.location.origin;
 let themeColor = "#6d7ddf";
+const DESC_QUICK = ["#6d7ddf", "#242b52", "#22c55e", "#ef4444"];
 const DESC_PALETTE = [
-  "#6d7ddf", "#4452a8", "#242b52", "#e6e6fa", "#22c55e", "#16a34a",
-  "#0ea5e9", "#0284c7", "#f59e0b", "#ef4444", "#ec4899", "#8b5cf6",
-  "#14b8a6", "#84cc16", "#f97316", "#64748b", "#111827", "#a855f7",
+  "#6d7ddf", "#4452a8", "#242b52", "#1e1b4b", "#e6e6fa", "#c7d2fe",
+  "#0ea5e9", "#0284c7", "#0369a1", "#14b8a6", "#0d9488", "#134e4a",
+  "#22c55e", "#16a34a", "#15803d", "#84cc16", "#65a30d", "#3f6212",
+  "#f59e0b", "#d97706", "#f97316", "#ea580c", "#ef4444", "#dc2626",
+  "#ec4899", "#db2777", "#a855f7", "#8b5cf6", "#7c3aed", "#64748b",
+  "#475569", "#334155", "#1f2937", "#111827", "#0f172a", "#ffffff",
 ];
 
 function formatSavDate(raw) {
@@ -26,18 +30,49 @@ function toggleDarkMode(force) {
   if (chk) chk.checked = next;
 }
 
+function syncDescColorIndicators() {
+  const hex = themeColor || "#6d7ddf";
+  ["desc-theme-current", "desc-theme-current-mini"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.background = hex;
+  });
+  const hexEl = document.getElementById("desc-theme-hex");
+  if (hexEl) hexEl.textContent = hex;
+  const picker = document.getElementById("desc-color-picker");
+  if (picker) picker.value = hex;
+  document.querySelectorAll(".color-swatch").forEach((d) => {
+    d.classList.toggle("active", (d.dataset.theme || "").toLowerCase() === hex.toLowerCase());
+  });
+}
+
+function toggleDescColors(forceOpen) {
+  const panel = document.getElementById("desc-colors-panel");
+  const btn = document.getElementById("desc-colors-toggle");
+  if (!panel) return;
+  const open =
+    typeof forceOpen === "boolean" ? forceOpen : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !open);
+  if (btn) btn.textContent = open ? "Masquer les couleurs" : "Afficher les couleurs";
+  if (open) {
+    document.getElementById("page-description")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 function initDescPalette() {
-  const render = (el, sizeClass) => {
-    if (!el) return;
-    el.innerHTML = DESC_PALETTE.map(
-      (c) =>
-        `<button type="button" class="color-swatch ${sizeClass} ${
+  const swatchHtml = (colors) =>
+    colors
+      .map((c) => {
+        const border = c.toLowerCase() === "#ffffff" ? "border border-zinc-300" : "";
+        return `<button type="button" class="color-swatch ${border} ${
           themeColor.toLowerCase() === c.toLowerCase() ? "active" : ""
-        }" style="background:${c}" data-theme="${c}" title="${c}" onclick="setTheme('${c}', this)"></button>`
-    ).join("");
-  };
-  render(document.getElementById("desc-color-palette"), "");
-  render(document.getElementById("desc-color-palette-mini"), "");
+        }" style="background:${c}" data-theme="${c}" title="${c}" onclick="setTheme('${c}', this)"></button>`;
+      })
+      .join("");
+  const quick = document.getElementById("desc-color-quick");
+  if (quick) quick.innerHTML = swatchHtml(DESC_QUICK);
+  const full = document.getElementById("desc-color-palette");
+  if (full) full.innerHTML = swatchHtml(DESC_PALETTE);
+  syncDescColorIndicators();
 }
 
 if (typeof localStorage !== "undefined" && localStorage.getItem("ebx-dark") === "1") {
@@ -1927,10 +1962,8 @@ document.getElementById("kw-tabs")?.addEventListener("click", (e) => {
 function setTheme(color, el) {
   themeColor = color;
   document.querySelectorAll(".theme-dot, .color-swatch").forEach((d) => d.classList.remove("active"));
-  (el || document.querySelector(`.theme-dot[data-theme="${color}"], .color-swatch[data-theme="${color}"]`))?.classList.add("active");
-  const picker = document.getElementById("desc-color-picker");
-  if (picker) picker.value = color;
-  document.querySelectorAll(`.color-swatch[data-theme="${color}"]`).forEach((d) => d.classList.add("active"));
+  (el || document.querySelector(`.color-swatch[data-theme="${color}"]`))?.classList.add("active");
+  syncDescColorIndicators();
   if (lastDesc) {
     const tip = document.getElementById("desc-theme-status");
     if (tip) tip.textContent = "Thème mis à jour…";
@@ -2282,7 +2315,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 
