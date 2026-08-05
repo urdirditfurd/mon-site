@@ -1780,7 +1780,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           html,
           price: sellPrice,
           keywords: query,
-          sourceUrl: isSupplierProductUrl(supplier.url) ? supplier.url : "",
+          sourceUrl: supplier.url || "",
         });
         if (result.duplicate) {
           send({ type: "log", message: `[SKIP] Doublon récent ignoré — "${title.slice(0, 40)}" (id ${result.id})` });
