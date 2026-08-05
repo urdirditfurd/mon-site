@@ -315,10 +315,11 @@ function sanitizeAspects(aspects) {
       .slice(0, 10);
     if (values.length) out[key] = values;
   }
-  if (!out.Brand) out.Brand = ["Unbranded"];
+  const isFr = (process.env.EBAY_MARKETPLACE_ID || "").toUpperCase() === "EBAY_FR";
+  const defaultBrand = isFr ? "Sans marque" : "Unbranded";
+  if (!out.Brand) out.Brand = [defaultBrand];
   // eBay FR exige souvent la clé localisée "Marque" (erreur 25002 si absente)
   if (!out.Marque) out.Marque = out.Brand;
-  if (!out.Brand) out.Brand = out.Marque;
   return out;
 }
 
