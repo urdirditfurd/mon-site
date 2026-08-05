@@ -1575,28 +1575,33 @@ app.post("/api/auto-snipe", async (req, res) => {
     for (let i = 0; i < max; i++) {
       try {
         const hint = demandHints[i];
-        // Recherche fournisseur sur le mot-clé niche (pas le titre eBay collection)
+        // TOUJOURS chercher avec le mot-clé saisi par l'utilisateur (pas le titre eBay déformé)
         const searchQ = String(query || "")
           .split(/\s+/)
           .filter(Boolean)
-          .slice(0, 6)
+          .slice(0, 8)
           .join(" ") || "gadget";
-        const hintKw = hint
+        const hintExtra = hint
           ? String(hint.title)
-              .replace(/\b(collectionneur|livre|ebook|vintage|rare|lot)\b/gi, " ")
+              .replace(/\b(collectionneur|livre|ebook|vintage|rare|lot|usb|3m|5m|10m)\b/gi, " ")
               .split(/\s+/)
-              .filter((w) => w.length > 3)
-              .slice(0, 5)
+              .filter((w) => w.length > 3 && /led|cob|bande|ruban|blanc|chaud|froid|flexible|étanche|strip/i.test(w))
+              .slice(0, 3)
               .join(" ")
           : "";
-        const supplierQuery = hintKw || searchQ;
+        const supplierQueries = [searchQ];
+        if (hintExtra && !searchQ.toLowerCase().includes(hintExtra.toLowerCase().slice(0, 8))) {
+          supplierQueries.push(`${searchQ} ${hintExtra}`.trim());
+        }
 
         send({
           type: "log",
-          message: `[TARGET] Recherche fournisseur: "${supplierQuery}"${hint ? ` (demande eBay: "${String(hint.title).slice(0, 40)}…")` : ""}`,
+          message: `[TARGET] Recherche fournisseur: "${searchQ}"${
+            hint ? ` (signal demande eBay: "${String(hint.title).slice(0, 40)}…")` : ""
+          }`,
         });
 
-        const vero = scanVero(supplierQuery);
+        const vero = scanVero(searchQ);
         if (vero.level === "block") {
           veroBlocked += 1;
           send({ type: "log", message: `[VERO] BLOQUÉ — ${vero.message}` });
@@ -1609,76 +1614,93 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         await antiBanDelay({ testMode, label: "target" });
 
-        send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})...` });
+        send({ type: "log", message: `[SOURCE] Comparaison live fournisseurs (${source})…` });
         let candidates = [];
         try {
-          const cmp = await findCheapestSupplier(supplierQuery, { sources: sourceList, limit: 5 });
-          const sourceRank = (s) => {
-            const n = String(s || "").split("+")[0].toLowerCase();
-            // Amazon scrapable plus souvent → on tente en premier si prix égal / non confirmé
-            if (n === "amazon") return 0;
-            if (n === "cdiscount") return 1;
-            if (n === "aliexpress") return 2;
-            return 3;
-          };
-          candidates = (cmp.candidates || [])
-            .filter((c) => isSupplierProductUrl(c.url))
-            .map((c) => {
-              const cleaned = sanitizeProductPrice(c.price, c.title);
-              return {
-                ...c,
-                price: cleaned,
-                priceUnconfirmed: cleaned && !c.priceConfirmed ? true : !!c.priceUnconfirmed,
-              };
-            })
-            .sort((a, b) => {
-              // Prix confirmés (scrape) avant hints ; Amazon avant Ali si même statut
-              const confA = a.priceConfirmed ? 0 : a.priceUnconfirmed ? 2 : a.price > 0 ? 1 : 3;
-              const confB = b.priceConfirmed ? 0 : b.priceUnconfirmed ? 2 : b.price > 0 ? 1 : 3;
-              if (confA !== confB) return confA - confB;
-              const src = sourceRank(a.source) - sourceRank(b.source);
-              if (src !== 0 && confA !== 0) return src; // hors confirmés : Amazon d'abord
-              const pa = a.price != null && a.price > 0 ? a.price : 9999;
-              const pb = b.price != null && b.price > 0 ? b.price : 9999;
-              if (pa !== pb) return pa - pb;
-              return src;
-            });
-          if (!candidates.length && cmp.best && isSupplierProductUrl(cmp.best.url)) {
-            candidates = [cmp.best];
+          const merged = [];
+          for (const sq of supplierQueries) {
+            const cmp = await findCheapestSupplier(sq, { sources: sourceList, limit: 6 });
+            merged.push(...(cmp.candidates || []));
+            if (cmp.best) merged.push(cmp.best);
           }
-          // Panneau UI : top fournisseurs avec liens
+          const byUrl = new Map();
+          for (const c of merged) {
+            if (!c?.url || !isSupplierProductUrl(c.url)) continue;
+            const key = String(c.url).split("?")[0].toLowerCase();
+            const cleaned = sanitizeProductPrice(c.price, c.title);
+            const row = {
+              ...c,
+              price: cleaned,
+              priceUnconfirmed: cleaned && c.priceUnconfirmed && !c.priceFromMarketplaceCard && !c.priceConfirmed,
+              priceFromMarketplaceCard: !!c.priceFromMarketplaceCard,
+              priceConfirmed: !!c.priceConfirmed,
+            };
+            const prev = byUrl.get(key);
+            if (!prev) {
+              byUrl.set(key, row);
+              continue;
+            }
+            const score = (x) =>
+              (x.priceConfirmed ? 30 : 0) +
+              (x.priceFromMarketplaceCard ? 15 : 0) +
+              (x.price > 0 ? 10 : 0) +
+              Math.min(String(x.title || "").length, 40) / 10;
+            if (score(row) > score(prev)) {
+              byUrl.set(key, {
+                ...prev,
+                ...row,
+                price: row.price || prev.price,
+                priceConfirmed: row.priceConfirmed || prev.priceConfirmed,
+                priceFromMarketplaceCard: row.priceFromMarketplaceCard || prev.priceFromMarketplaceCard,
+              });
+            }
+          }
+          candidates = [...byUrl.values()].sort((a, b) => {
+            // Moins cher d'abord parmi les prix utilisables (confirmé ou carte marketplace)
+            const usable = (x) => x.priceConfirmed || x.priceFromMarketplaceCard || (x.price > 0 && !x.priceUnconfirmed);
+            const ua = usable(a) ? 0 : a.price > 0 ? 1 : 2;
+            const ub = usable(b) ? 0 : b.price > 0 ? 1 : 2;
+            if (ua !== ub) return ua - ub;
+            const pa = a.price > 0 ? a.price : 9999;
+            const pb = b.price > 0 ? b.price : 9999;
+            return pa - pb;
+          });
+
           send({
             type: "suppliers",
-            query: supplierQuery,
-            compared: candidates.filter((c) => c.priceConfirmed).length,
+            query: searchQ,
+            compared: candidates.filter((c) => c.priceConfirmed || c.priceFromMarketplaceCard).length,
             items: candidates.slice(0, 5).map((c, idx) => ({
               rank: idx + 1,
               source: String(c.source || "").split("+")[0],
               title: String(c.title || "").slice(0, 90),
               price: c.price != null && c.price > 0 ? Number(c.price) : null,
-              priceConfirmed: !!c.priceConfirmed,
-              priceUnconfirmed: !!c.priceUnconfirmed || (c.price > 0 && !c.priceConfirmed),
+              priceConfirmed: !!(c.priceConfirmed || c.priceFromMarketplaceCard),
+              priceUnconfirmed: !!c.priceUnconfirmed && !c.priceFromMarketplaceCard && !c.priceConfirmed,
               url: c.url,
               best: idx === 0,
             })),
           });
           if (candidates[0]) {
             const best = candidates[0];
-            const priceLabel =
-              best.price != null && best.price > 0
-                ? `${Number(best.price).toFixed(2)}€${
-                    best.priceConfirmed
-                      ? " (confirmé)"
-                      : " (indicatif — sera vérifié sur la fiche)"
-                  }`
-                : "prix n/a";
+            const tag = best.priceConfirmed
+              ? "confirmé fiche"
+              : best.priceFromMarketplaceCard
+                ? "prix carte marketplace"
+                : best.price > 0
+                  ? "indicatif"
+                  : "n/a";
             send({
               type: "log",
-              message: `[SOURCE] Candidat #1: ${String(best.source).split("+")[0]} @ ${priceLabel} — ${String(best.title || "").slice(0, 50)}`,
+              message: `[SOURCE] Meilleur: ${String(best.source).split("+")[0]} @ ${
+                best.price > 0 ? Number(best.price).toFixed(2) + "€" : "?"
+              } (${tag}) — ${String(best.title || "").slice(0, 50)}`,
             });
-            if (best.url) {
-              send({ type: "log", message: `[SOURCE] Lien: ${best.url}` });
-            }
+            if (best.url) send({ type: "log", message: `[SOURCE] Lien: ${best.url}` });
+            send({
+              type: "log",
+              message: `[SOURCE] ${candidates.length} candidat(s) — recherches: ${supplierQueries.map((q) => `"${q}"`).join(", ")}`,
+            });
           }
         } catch (e) {
           send({ type: "log", message: `[WARN] Comparaison fournisseurs: ${e.message}` });
@@ -1695,56 +1717,92 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
-        // Essaie plusieurs candidats — le prix FINAL doit venir du scrape page (jamais Bing seul)
+        // Essaie plusieurs candidats — prix fiche, carte marketplace, ou résolution web
         let supplier = null;
         let detail = null;
         for (let ci = 0; ci < Math.min(candidates.length, 5); ci++) {
           const cand = candidates[ci];
+          const priceTag = cand.priceConfirmed
+            ? ""
+            : cand.priceFromMarketplaceCard
+              ? " (carte marketplace)"
+              : cand.priceUnconfirmed
+                ? " (hint)"
+                : "";
           send({
             type: "log",
             message: `[TRY] Candidat #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} ${
               cand.price != null && cand.price > 0
-                ? `@ ${Number(cand.price).toFixed(2)}€${cand.priceUnconfirmed ? " (hint)" : ""}`
+                ? `@ ${Number(cand.price).toFixed(2)}€${priceTag}`
                 : "(prix à confirmer sur la fiche)"
             }`,
           });
           try {
             detail = await scrapeProduct(cand.url);
             detail.images = (detail.images || []).filter(isRealProductImage);
-            // UNIQUEMENT prix scrapé / résolu proprement — jamais un hint dimension (8mm→8€)
             let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
+            let costOrigin = "fiche";
+
             if (!(cost > 0)) {
               send({ type: "log", message: `[PRICE] Résolution web pour ${String(cand.source).split("+")[0]}…` });
               try {
                 const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title);
                 cost = sanitizeProductPrice(resolved, detail.title || cand.title);
                 if (cost > 0) {
+                  costOrigin = "web";
                   send({
                     type: "log",
-                    message: `[PRICE] Prix web résolu: ${cost.toFixed(2)}€ (médiane anti-faux-positifs)`,
+                    message: `[PRICE] Prix web résolu: ${cost.toFixed(2)}€`,
                   });
                 }
               } catch (_) {}
             }
+
+            // Prix carte Amazon / Ali / Cdiscount (recherche marketplace) = utilisable
+            if (
+              !(cost > 0) &&
+              cand.price > 0 &&
+              (cand.priceFromMarketplaceCard || cand.priceConfirmed || !cand.priceUnconfirmed)
+            ) {
+              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
+              if (cost > 0) {
+                costOrigin = "carte marketplace";
+                send({
+                  type: "log",
+                  message: `[PRICE] Prix carte marketplace accepté: ${cost.toFixed(2)}€ (fiche sans prix / anti-bot)`,
+                });
+              }
+            }
+
             if (!(cost > 0)) {
               send({
                 type: "log",
-                message: `[WARN] Prix fiche introuvable${
-                  cand.price > 0
-                    ? ` (indicatif ${Number(cand.price).toFixed(2)}€ rejeté — non fiable)`
+                message: `[WARN] Prix introuvable${
+                  cand.priceUnconfirmed && cand.price > 0
+                    ? ` (hint Bing ${Number(cand.price).toFixed(2)}€ rejeté)`
                     : ""
                 } — essai suivant`,
               });
               detail = null;
               continue;
             }
-            // Si hint Bing très différent du prix réel → alerte + on garde le réel
-            if (cand.price > 0 && Math.abs(cand.price - cost) / cost > 0.25) {
+
+            if (cand.price > 0 && costOrigin === "fiche" && Math.abs(cand.price - cost) / cost > 0.25) {
               send({
                 type: "log",
-                message: `[PRICE] Hint ${Number(cand.price).toFixed(2)}€ ≠ fiche ${cost.toFixed(2)}€ → on utilise ${cost.toFixed(2)}€ (réel)`,
+                message: `[PRICE] Indicatif ${Number(cand.price).toFixed(2)}€ ≠ fiche ${cost.toFixed(2)}€ → ${cost.toFixed(2)}€`,
               });
             }
+
+            if (!(detail.title && String(detail.title).length > 8) && cand.title) {
+              detail.title = cand.title;
+            }
+            if (!(detail.title && String(detail.title).length > 8)) {
+              send({ type: "log", message: `[WARN] Titre produit manquant — essai suivant` });
+              detail = null;
+              continue;
+            }
+
             detail.price = cost;
             supplier = {
               ...cand,
@@ -1755,12 +1813,11 @@ app.post("/api/auto-snipe", async (req, res) => {
             };
             send({
               type: "log",
-              message: `[IMPORT] Détails OK — ${(detail.images || []).length} images, coût RÉEL ${cost.toFixed(2)}€`,
+              message: `[IMPORT] OK — ${(detail.images || []).length} images, coût ${cost.toFixed(2)}€ (${costOrigin})`,
             });
-            // Rafraîchir le panneau avec le prix confirmé en tête
             send({
               type: "suppliers",
-              query: supplierQuery,
+              query: searchQ,
               compared: 1,
               items: [
                 {
@@ -1780,7 +1837,7 @@ app.post("/api/auto-snipe", async (req, res) => {
                     source: String(c.source || "").split("+")[0],
                     title: String(c.title || "").slice(0, 90),
                     price: c.price != null && c.price > 0 ? Number(c.price) : null,
-                    priceConfirmed: !!c.priceConfirmed,
+                    priceConfirmed: !!(c.priceConfirmed || c.priceFromMarketplaceCard),
                     priceUnconfirmed: !!c.priceUnconfirmed,
                     url: c.url,
                     best: false,
@@ -1789,6 +1846,31 @@ app.post("/api/auto-snipe", async (req, res) => {
             });
             break;
           } catch (e) {
+            if (
+              cand.price > 0 &&
+              (cand.priceFromMarketplaceCard || !cand.priceUnconfirmed) &&
+              cand.title &&
+              String(cand.title).length > 12
+            ) {
+              const cost = sanitizeProductPrice(cand.price, cand.title);
+              if (cost > 0) {
+                detail = {
+                  title: cand.title,
+                  price: cost,
+                  images: cand.image ? [cand.image] : [],
+                  bullets: [],
+                  description: "",
+                  source: cand.source,
+                  url: cand.url,
+                };
+                supplier = { ...cand, price: cost, priceConfirmed: true, title: cand.title };
+                send({
+                  type: "log",
+                  message: `[IMPORT] Fallback carte marketplace — coût ${cost.toFixed(2)}€ (${String(e.message).slice(0, 60)})`,
+                });
+                break;
+              }
+            }
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
             detail = null;
           }
