@@ -170,27 +170,163 @@ function parseAmazon($, baseUrl) {
   };
 }
 
-function parseAliExpress($, baseUrl) {
+function isBlockedSupplierHtml(html = "", title = "") {
+  const h = String(html || "");
+  const t = String(title || "");
+  return (
+    /_____tmd_____|punish\?|Captcha Interception|unusual traffic|x5secdata|access denied|robot check/i.test(
+      h.slice(0, 8000)
+    ) || /captcha|punish|accès refusé|access denied/i.test(t)
+  );
+}
+
+function extractAliProductId(url = "") {
+  const m = String(url).match(/\/item\/(\d{6,})/i) || String(url).match(/[?&]productId=(\d{6,})/i);
+  return m ? m[1] : null;
+}
+
+/** Parse le JSON produit embarqué (runParams / imagePathList / props). */
+function extractAliExpressEmbedded(html = "") {
+  const out = {
+    title: "",
+    price: null,
+    images: [],
+    bullets: [],
+    specs: {},
+    description: "",
+  };
+  const raw = String(html || "");
+  if (!raw || raw.length < 500) return out;
+
+  const subject =
+    raw.match(/"subject"\s*:\s*"((?:\\.|[^"\\]){8,280})"/) ||
+    raw.match(/"title"\s*:\s*"((?:\\.|[^"\\]){8,280})"/);
+  if (subject) {
+    try {
+      out.title = cleanText(JSON.parse(`"${subject[1]}"`));
+    } catch {
+      out.title = cleanText(subject[1].replace(/\\u[\dA-Fa-f]{4}/g, (m) =>
+        String.fromCharCode(parseInt(m.slice(2), 16))
+      ).replace(/\\"/g, '"'));
+    }
+  }
+
+  const priceMatch =
+    raw.match(/"formatedActivityPrice"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"formatedPrice"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"formatTradePrice"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"minPrice"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"actSkuMultiCurrencyCalPrice"\s*:\s*"?([\d.]+)"?/i);
+  if (priceMatch) out.price = parsePrice(priceMatch[1]);
+
+  const imgBlock = raw.match(/"imagePathList"\s*:\s*\[([^\]]{20,8000})\]/);
+  if (imgBlock) {
+    const urls = imgBlock[1].match(/https?:\\?\/\\?\/[^"\\]+/g) || [];
+    urls.forEach((u) => {
+      const fixed = u.replace(/\\u002F/g, "/").replace(/\\\//g, "/");
+      if (/alicdn|aliexpress-media/i.test(fixed)) out.images.push(fixed.startsWith("http") ? fixed : `https:${fixed}`);
+    });
+  }
+  const looseImgs = raw.match(/https?:\\?\/\\?\/ae\d*\.alicdn\.com[^"'\\\s]+?\.(?:jpg|jpeg|png|webp)/gi) || [];
+  looseImgs.slice(0, 20).forEach((u) => {
+    out.images.push(u.replace(/\\u002F/g, "/").replace(/\\\//g, "/"));
+  });
+
+  // Propriétés / specs
+  const propRe =
+    /"attrName"\s*:\s*"((?:\\.|[^"\\])+)"\s*,\s*"attrValue"\s*:\s*"((?:\\.|[^"\\])+)"/g;
+  let pm;
+  while ((pm = propRe.exec(raw)) && Object.keys(out.specs).length < 16) {
+    let k = pm[1];
+    let v = pm[2];
+    try {
+      k = JSON.parse(`"${k}"`);
+      v = JSON.parse(`"${v}"`);
+    } catch {
+      k = k.replace(/\\"/g, '"');
+      v = v.replace(/\\"/g, '"');
+    }
+    k = cleanText(k);
+    v = cleanText(v);
+    if (k && v && v.length < 120 && !/undefined|null/i.test(v)) {
+      out.specs[k] = v;
+      const bullet = `${k} : ${v}`;
+      if (bullet.length > 8 && bullet.length < 160) out.bullets.push(bullet);
+    }
+  }
+
+  const descMatch =
+    raw.match(/"productDescription"\s*:\s*"((?:\\.|[^"\\]){20,1200})"/) ||
+    raw.match(/"description"\s*:\s*"((?:\\.|[^"\\]){40,1200})"/);
+  if (descMatch) {
+    try {
+      out.description = sanitizeReadableText(JSON.parse(`"${descMatch[1]}"`), { maxLen: 900 });
+    } catch {
+      out.description = sanitizeReadableText(descMatch[1], { maxLen: 900 });
+    }
+  }
+
+  return out;
+}
+
+function parseAliExpress($, baseUrl, rawHtml = "") {
+  const html = rawHtml || $.root().html() || "";
+  const embedded = extractAliExpressEmbedded(html);
+
+  const jsonLdTitle = (() => {
+    let found = "";
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const data = JSON.parse($(el).html() || "{}");
+        const node = Array.isArray(data) ? data[0] : data;
+        if (node?.name) found = cleanText(node.name);
+        if (node?.offers?.price && embedded.price == null) embedded.price = parsePrice(node.offers.price);
+        if (node?.image) {
+          const imgs = Array.isArray(node.image) ? node.image : [node.image];
+          imgs.forEach((u) => embedded.images.push(String(u)));
+        }
+      } catch (_) {}
+    });
+    return found;
+  })();
+
   const title =
+    embedded.title ||
     cleanText($("h1").first().text()) ||
     cleanText($("meta[property='og:title']").attr("content")) ||
+    jsonLdTitle ||
     cleanText($("title").text());
+
+  if (isBlockedSupplierHtml(html, title)) {
+    return {
+      source: "aliexpress",
+      title: "",
+      price: null,
+      currency: "EUR",
+      bullets: [],
+      specs: {},
+      description: "",
+      images: [],
+      url: baseUrl,
+      blocked: true,
+    };
+  }
 
   const priceText =
     cleanText($("[class*='price']").first().text()) ||
     cleanText($("meta[property='og:price:amount']").attr("content"));
-  const price = parsePrice(priceText);
+  const price = embedded.price || parsePrice(priceText);
 
-  const images = new Set();
+  const images = new Set(embedded.images || []);
   const og = $("meta[property='og:image']").attr("content");
   if (og) images.add(og);
   $("img").each((_, el) => {
-    const src = $(el).attr("src") || $(el).attr("data-src");
-    const u = absUrl(baseUrl, src);
-    if (u && /\.(jpg|jpeg|png|webp)/i.test(u) && u.length > 40) images.add(u.split("?")[0]);
+    const src = $(el).attr("src") || $(el).attr("data-src") || $(el).attr("data-srcset");
+    const u = absUrl(baseUrl, String(src || "").split(" ")[0]);
+    if (u && /alicdn|aliexpress-media/i.test(u) && u.length > 40) images.add(u.split("?")[0]);
   });
 
-  const bullets = [];
+  const bullets = [...(embedded.bullets || [])];
   $("li, .product-property-item, [class*='specification'] span, [class*='Attribute']").each((_, el) => {
     const t = sanitizeReadableText(cleanText($(el).text()), { maxLen: 180 });
     if (t && t.length > 12 && t.length < 180 && !bullets.includes(t)) bullets.push(t);
@@ -205,19 +341,253 @@ function parseAliExpress($, baseUrl) {
     });
   }
 
+  const specs = { ...(embedded.specs || {}) };
+  const description =
+    embedded.description ||
+    metaDesc ||
+    (bullets[0] ? bullets.slice(0, 3).join(". ") : "") ||
+    "";
+
   return {
     source: "aliexpress",
-    title: title || "Produit AliExpress",
+    title: title || "",
     price,
     currency: "EUR",
-    bullets: bullets.slice(0, 8),
-    description:
-      metaDesc ||
-      (bullets[0] ? bullets.slice(0, 3).join(". ") : "") ||
-      "Accessoire LED / électronique — modèle neuf, prêt à l'emploi.",
-    images: uniqueProductImages([...images], { limit: 8 }),
+    bullets: bullets.slice(0, 10),
+    specs,
+    description,
+    images: uniqueProductImages([...images], { limit: 10 }),
     url: baseUrl,
   };
+}
+
+/**
+ * Fallback quand AliExpress renvoie un captcha : titre + snippet via DDG/Bing,
+ * puis images/specs via pages miroir qui réutilisent le même contenu alicdn.
+ */
+async function scrapeAliExpressViaWebFallback(url) {
+  const productId = extractAliProductId(url);
+  if (!productId) throw new Error("AliExpress: ID produit introuvable dans l'URL");
+
+  const queries = [
+    `${productId} aliexpress`,
+    `site:aliexpress.com/item ${productId}`,
+    `"${productId}" site:aliexpress.com`,
+    `site:fr.aliexpress.com/item ${productId}`,
+  ];
+
+  let best = null;
+  let englishTitle = "";
+  let englishSnippet = "";
+  const candidates = [];
+  for (const q of queries) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt) await new Promise((r) => setTimeout(r, 400));
+        const items = await searchViaDuckDuckGo(q, {
+          linkTest: (link) => /aliexpress\.[a-z.]+\/item\/\d+/i.test(link) && link.includes(productId),
+          limit: 10,
+        });
+        for (const hit of items) {
+          if (hit?.title && hit.title.length > 12) candidates.push(hit);
+        }
+        if (candidates.length >= 3) break;
+      } catch (err) {
+        console.warn("[ali web fallback search]", err.message);
+      }
+    }
+    if (candidates.length >= 3) break;
+  }
+
+  // Déduplique par URL
+  const byUrl = new Map();
+  for (const c of candidates) {
+    if (!byUrl.has(c.url)) byUrl.set(c.url, c);
+  }
+  const uniq = [...byUrl.values()];
+
+  for (const hit of uniq) {
+    const sn = cleanText(hit.snippet || "");
+    const buyMatch = sn.match(/(?:Buy|Achetez)\s+(.+?)\s+(?:at|sur)\s+Ali(?:Express)?/i);
+    if (/fr\.aliexpress/i.test(hit.url) || /[àâäéèêëïîôùûüç]/i.test(hit.title) || /Achetez/i.test(sn)) {
+      // candidat FR
+    }
+    if (buyMatch?.[1] && !/[àâäéèêëïîôùûüç]/i.test(buyMatch[1])) {
+      if (buyMatch[1].length > englishTitle.length) {
+        englishTitle = cleanText(buyMatch[1]);
+        englishSnippet = sn;
+      }
+    } else if (/[A-Za-z]{4,}/.test(hit.title) && !/[àâäéèêëïîôùûüç]/i.test(hit.title)) {
+      const t = cleanText(hit.title).replace(/\s*[-–|]\s*AliExpress.*$/i, "").replace(/\s*\.\.\.\s*$/, "");
+      if (t.length > englishTitle.length) englishTitle = t;
+    }
+  }
+
+  const frHit =
+    uniq.find((i) => /fr\.aliexpress/i.test(i.url)) ||
+    uniq.find((i) => /[àâäéèêëïîôùûüç]/i.test(i.title)) ||
+    uniq.find((i) => /Achetez/i.test(i.snippet || ""));
+  best = frHit || uniq[0];
+
+  if (!best?.title) throw new Error("AliExpress: impossible de récupérer le titre (captcha + recherche)");
+
+  // Titre affiché : FR prioritaire (snippet Achetez …), sinon titre résultat
+  let title = cleanText(best.title)
+    .replace(/\s*[-–|]\s*AliExpress.*$/i, "")
+    .replace(/\s*\.\.\.\s*$/, "")
+    .trim();
+  const frBuy = cleanText(best.snippet || "").match(/Achetez\s+(.+?)\s+sur\s+Ali/i);
+  if (frBuy?.[1] && frBuy[1].length > 20) {
+    title = cleanText(frBuy[1]);
+  } else if ((!/[àâäéèêëïîôùûüç]/i.test(title) || title.length < 20) && englishTitle) {
+    title = englishTitle;
+  }
+  const snippet = cleanText(best.snippet || englishSnippet || "");
+
+  const product = {
+    source: "aliexpress+web",
+    title,
+    price: best.price || null,
+    currency: "EUR",
+    bullets: [],
+    specs: {},
+    description: cleanMarketingCopy(snippet).slice(0, 700),
+    images: [],
+    url,
+    live: true,
+    web_fallback: true,
+  };
+
+  // Probe affiliés type /product/{slug} à partir du titre EN (souvent mêmes images alicdn)
+  try {
+    const slugBase = (englishTitle || title)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 140);
+    const slugVariants = slugBase
+      ? [
+          slugBase,
+          slugBase.replace(/-ali-?express.*$/, ""),
+          `${slugBase}-stress-relief`,
+          slugBase.split("-").slice(0, 12).join("-"),
+        ]
+      : [];
+    const probeHosts = ["dogsbites.com", "www.dogsbites.com"];
+    const probeUrls = [];
+    for (const host of probeHosts) {
+      for (const slug of [...new Set(slugVariants)].filter(Boolean)) {
+        probeUrls.push(`https://${host}/product/${slug}`);
+      }
+    }
+    for (const probe of probeUrls.slice(0, 8)) {
+      if (product.images.length >= 5) break;
+      try {
+        const { html } = await fetchHtml(probe);
+        if (html.length < 3000 || isBlockedSupplierHtml(html)) continue;
+        if (!/alicdn|aliexpress-media/i.test(html)) continue;
+        const loose =
+          html.match(
+            /https?:\/\/[^"'\\\s>]*(?:alicdn\.com|aliexpress-media\.com)[^"'\\\s>]+\.(?:jpg|jpeg|png|webp)/gi
+          ) || [];
+        loose.forEach((u) => product.images.push(u.split("?")[0]));
+        const $ = cheerio.load(html);
+        $("tr").each((_, el) => {
+          const cells = $(el).find("th,td");
+          if (cells.length >= 2) {
+            const k = cleanText($(cells[0]).text());
+            const v = cleanText($(cells[1]).text());
+            if (k && v && k.length < 60 && v.length < 120 && !product.specs[k]) {
+              product.specs[k] = v;
+              if (!/brand|origin|choice|chemical|none/i.test(k) && !/^none$/i.test(v)) {
+                product.bullets.push(`${k} : ${v}`);
+              }
+            }
+          }
+        });
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn("[ali affiliate probe]", err.message);
+  }
+
+  // Enrichir via pages miroir / re-listings (souvent mêmes images alicdn + specs)
+  try {
+    const titleWords = title
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 7)
+      .join(" ");
+    const mirrorQueries = [
+      englishTitle ? `"${englishTitle.split(/\s+/).slice(0, 8).join(" ")}"` : null,
+      `"${titleWords}"`,
+      `"${productId}" fidget OR squishy OR product`,
+    ].filter(Boolean);
+    for (const mirrorQuery of mirrorQueries) {
+      if (product.images.length >= 5) break;
+      const mirrors = await searchViaDuckDuckGo(mirrorQuery, {
+        linkTest: (link) =>
+          /^https?:\/\//i.test(link) &&
+          !/duckduckgo|bing\.com|google\.|youtube\.|facebook\.|login|privacy/i.test(link),
+        limit: 8,
+      });
+      for (const m of mirrors.slice(0, 6)) {
+        try {
+          if (/aliexpress\./i.test(m.url)) continue;
+          const { html } = await fetchHtml(m.url);
+          if (isBlockedSupplierHtml(html) || html.length < 1500) continue;
+          const $ = cheerio.load(html);
+          $("img").each((_, el) => {
+            const src = $(el).attr("src") || $(el).attr("data-src") || $(el).attr("data-lazy-src");
+            const u = absUrl(m.url, String(src || "").split(" ")[0]);
+            if (
+              u &&
+              /alicdn|aliexpress-media|media-amazon|ssl-images-amazon|ebayimg/i.test(u) &&
+              !/sprite|pixel|icon|logo|spinner/i.test(u)
+            ) {
+              product.images.push(u.split("?")[0]);
+            }
+          });
+          const loose =
+            html.match(
+              /https?:\/\/[^"'\\\s>]*(?:alicdn\.com|aliexpress-media\.com|media-amazon\.com|ebayimg\.com)[^"'\\\s>]+\.(?:jpg|jpeg|png|webp)/gi
+            ) || [];
+          loose.forEach((u) => {
+            if (!/sprite|pixel|icon|logo/i.test(u)) product.images.push(u.split("?")[0]);
+          });
+          $("tr").each((_, el) => {
+            const cells = $(el).find("th,td");
+            if (cells.length >= 2) {
+              const k = cleanText($(cells[0]).text());
+              const v = cleanText($(cells[1]).text());
+              if (k && v && k.length < 60 && v.length < 120 && !product.specs[k]) {
+                product.specs[k] = v;
+                if (!/brand|origin|choice|chemical|none/i.test(k) && !/^none$/i.test(v)) {
+                  product.bullets.push(`${k} : ${v}`);
+                }
+              }
+            }
+          });
+          if (product.images.length >= 4) break;
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    console.warn("[ali mirror enrich]", err.message);
+  }
+
+  product.images = uniqueProductImages(product.images, { limit: 10 });
+  if (!product.bullets.length && snippet) {
+    snippet.split(/[.;|]/).forEach((part) => {
+      const p = cleanText(part);
+      if (p.length > 25 && p.length < 160) product.bullets.push(p);
+    });
+  }
+  product.bullets = product.bullets.slice(0, 10);
+
+  return enrichProductListingCopy(product);
 }
 
 function parseEbayItem($, baseUrl) {
@@ -337,6 +707,13 @@ async function scrapeProductViaJina(url) {
   const data = payload.data || payload;
   const title = cleanText(data.title || "").split(":")[0].trim();
   const content = data.content || data.text || "";
+  if (
+    isBlockedSupplierHtml(content, title) ||
+    /Captcha Interception|unusual traffic/i.test(title) ||
+    /Captcha Interception|unusual traffic/i.test(content.slice(0, 2000))
+  ) {
+    throw new Error("Jina: page captcha / bloquée");
+  }
   const images = [];
   const imgMatches = content.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/g);
   for (const m of imgMatches) {
@@ -347,7 +724,7 @@ async function scrapeProductViaJina(url) {
   for (const line of content.split("\n")) {
     const t = cleanText(line.replace(/^[\-*•]\s*/, ""));
     if (t.length > 25 && t.length < 180 && /[a-zA-ZÀ-ÿ]/.test(t)) {
-      if (/about this item|skip to|acheter|buy now|ajouter/i.test(t)) continue;
+      if (/about this item|skip to|acheter|buy now|ajouter|captcha|unusual traffic/i.test(t)) continue;
       bullets.push(t);
     }
     if (bullets.length >= 6) break;
@@ -357,7 +734,7 @@ async function scrapeProductViaJina(url) {
 
   if (!title || title.length < 3) throw new Error("Jina: titre introuvable");
 
-  return {
+  return enrichProductListingCopy({
     source: detectSource(url) + "+jina",
     title,
     price,
@@ -367,7 +744,7 @@ async function scrapeProductViaJina(url) {
     images: uniqueProductImages(images, { limit: 8 }),
     url,
     live: true,
-  };
+  });
 }
 
 async function scrapeProduct(url) {
@@ -376,6 +753,9 @@ async function scrapeProduct(url) {
   // 1) Tentative fetch direct
   try {
     const { html, finalUrl } = await fetchHtml(url);
+    if (isBlockedSupplierHtml(html)) {
+      throw new Error("Page fournisseur bloquée (captcha)");
+    }
     const $ = cheerio.load(html);
 
     let product;
@@ -384,7 +764,7 @@ async function scrapeProduct(url) {
         product = parseAmazon($, finalUrl);
         break;
       case "aliexpress":
-        product = parseAliExpress($, finalUrl);
+        product = parseAliExpress($, finalUrl, html);
         break;
       case "cdiscount":
         product = parseCdiscount($, finalUrl);
@@ -396,27 +776,233 @@ async function scrapeProduct(url) {
         product = parseGeneric($, finalUrl);
     }
 
-    if (product.title && product.title.length >= 3 && !/robot|captcha|sign in|error page/i.test(product.title)) {
-      // Jamais picsum : image incohérente avec le produit (ex. pinceaux → photo random)
+    if (product.blocked) throw new Error("Page AliExpress captcha / punish");
+
+    if (product.title && product.title.length >= 3 && !/robot|captcha|sign in|error page|^produit aliexpress$/i.test(product.title)) {
       product.images = (product.images || []).filter(isRealProductImage);
       product.live = true;
-      return product;
+      return enrichProductListingCopy(product);
     }
   } catch (err) {
     console.warn("[scrape direct]", err.message);
   }
 
   // 2) Fallback Jina reader (contourne beaucoup d'anti-bots)
-  const viaJina = await scrapeProductViaJina(url);
-  if (
-    !viaJina.title ||
-    viaJina.title.length < 3 ||
-    /page introuvable|not found|robot|captcha|sign in|error page|accès refusé/i.test(viaJina.title)
-  ) {
-    throw new Error(`Impossible d'extraire le produit (${source}) — essayez une autre URL`);
+  try {
+    const viaJina = await scrapeProductViaJina(url);
+    if (
+      viaJina.title &&
+      viaJina.title.length >= 3 &&
+      !/page introuvable|not found|robot|captcha|sign in|error page|accès refusé|interception/i.test(viaJina.title)
+    ) {
+      viaJina.images = (viaJina.images || []).filter(isRealProductImage);
+      return viaJina;
+    }
+  } catch (err) {
+    console.warn("[scrape jina]", err.message);
   }
-  viaJina.images = (viaJina.images || []).filter(isRealProductImage);
-  return viaJina;
+
+  // 3) AliExpress : recherche web (titre FR + images alicdn miroirs)
+  if (source === "aliexpress") {
+    try {
+      const viaWeb = await scrapeAliExpressViaWebFallback(url);
+      viaWeb.images = (viaWeb.images || []).filter(isRealProductImage);
+      return viaWeb;
+    } catch (err) {
+      console.warn("[scrape ali web]", err.message);
+    }
+  }
+
+  throw new Error(`Impossible d'extraire le produit (${source}) — essayez une autre URL`);
+}
+
+/**
+ * Enrichit un produit scrapé avec sections, bénéfices et specs utilisables
+ * dans le Description Builder (sans noms de marketplace / marge).
+ */
+function enrichProductListingCopy(product = {}) {
+  const title = cleanText(product.title || "Produit");
+  const t = title.toLowerCase();
+  const existingSpecs =
+    product.specs && typeof product.specs === "object" && !Array.isArray(product.specs)
+      ? { ...product.specs }
+      : {};
+  const bullets = [...(product.bullets || [])].map((b) => cleanText(b)).filter(Boolean);
+
+  const pick = (...candidates) => candidates.find((c) => c && String(c).trim()) || "";
+
+  // Inférences légères à partir du titre (complètent le scrape, ne inventent pas une autre catégorie)
+  const material = pick(
+    existingSpecs.Matériau,
+    existingSpecs.Material,
+    existingSpecs.Materiau,
+    /silicone/i.test(t) && "Silicone",
+    /tpe|tpr|thermoplastic/i.test(t) && "TPE / TPR",
+    /pu\b|polyurethane|mousse/i.test(t) && "Mousse PU",
+    /coton|cotton/i.test(t) && "Coton",
+    /abs\b|plastique|plastic/i.test(t) && "Plastique",
+    /métal|metal|alu|acier|steel/i.test(t) && "Métal",
+    /bois|wood/i.test(t) && "Bois"
+  );
+  const dimMatch =
+    title.match(/(\d+[.,]?\d*)\s*[x×*]\s*(\d+[.,]?\d*)\s*[x×*]?\s*(\d+[.,]?\d*)?\s*(cm|mm)/i) ||
+    title.match(/(\d+[.,]?\d*)\s*(cm|mm)\b/i);
+  let dimensions = existingSpecs.Dimensions || existingSpecs.Size || existingSpecs.Taille || "";
+  if (!dimensions && dimMatch) {
+    dimensions = dimMatch[0].replace(/\*/g, "×").replace(/,/g, ".");
+  }
+  const weight = existingSpecs.Poids || existingSpecs.Weight || "";
+  const age = existingSpecs["Recommend Age"] || existingSpecs.Âge || existingSpecs.Age || "";
+  if (/14\+/.test(String(existingSpecs["Recommend Age"] || "")) && !age) {
+    /* keep */
+  }
+
+  const isFidget = /fidget|squishy|anti-?stress|décompression|decompression|squeeze|anxiety|souple|élastique|elastique|beurre|butter|fromage|cheese/i.test(
+    t
+  );
+  const isLed = /led|rgb|lumière|lumiere|neopixel|ws2812/i.test(t);
+  const isPhone = /coque|iphone|samsung|chargeur|cable|câble|usb|magsafe/i.test(t);
+
+  const specs = {
+    État: "Neuf",
+    Marque: existingSpecs.Brand || existingSpecs["Brand Name"] || existingSpecs.Marque || "Sans marque / générique",
+    ...existingSpecs,
+  };
+  if (material) specs.Matériau = specs.Matériau || material;
+  if (dimensions) specs.Dimensions = specs.Dimensions || dimensions;
+  if (weight) specs.Poids = specs.Poids || weight;
+  if (age || existingSpecs["Recommend Age"]) {
+    specs["Âge recommandé"] = age || existingSpecs["Recommend Age"];
+  }
+  if (isFidget) {
+    specs.Type = specs.Type && !/crystal soil/i.test(String(specs.Type)) ? specs.Type : "Jouet anti-stress / fidget";
+    specs.Usage = specs.Usage || "Soulagement du stress, focus, manipulation sensorielle";
+    if (!specs.Matériau) specs.Matériau = "Matière souple élastique (type TPE/TPR)";
+    // Normalise dimensions floues héritées
+    if (!specs.Dimensions || /format compact/i.test(String(specs.Dimensions))) {
+      specs.Dimensions = "Environ 12–15 cm";
+    }
+    specs["Sans BPA"] = specs["Sans BPA"] || "Matériaux non toxiques (non comestible)";
+  } else if (isLed) {
+    specs.Type = specs.Type || "Éclairage LED";
+  } else if (isPhone) {
+    specs.Type = specs.Type || "Accessoire mobile";
+  }
+  // Nettoie specs bruyantes Ali
+  delete specs.Choice;
+  delete specs["High-concerned chemical"];
+  if (/crystal soil/i.test(String(specs.Type || ""))) delete specs.Type;
+  if (/^none$/i.test(String(specs.Marque || ""))) specs.Marque = "Sans marque / générique";
+  if (/^none$/i.test(String(specs["Brand Name"] || ""))) delete specs["Brand Name"];
+  if (/^none$/i.test(String(specs.Brand || ""))) delete specs.Brand;
+  // Déduplique Brand Name / Marque
+  if (specs["Brand Name"] && specs.Marque) delete specs["Brand Name"];
+  if (specs["Recommend Age"] && specs["Âge recommandé"]) delete specs["Recommend Age"];
+  if (/mainland china/i.test(String(specs.Origin || ""))) {
+    specs.Origine = "Import";
+    delete specs.Origin;
+  }
+
+  const shortPitchRaw =
+    product.short_pitch ||
+    product.description ||
+    (isFidget
+      ? "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
+      : `Découvrez ${title.slice(0, 90)} — sélectionné pour sa qualité et son usage quotidien.`);
+  let shortPitch = cleanMarketingCopy(shortPitchRaw);
+  if (!shortPitch || shortPitch.length < 40 || /trouvez plus|find more|transport maritime/i.test(shortPitch)) {
+    shortPitch = isFidget
+      ? "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
+      : `Découvrez ${stripSupplierProvenance(title).slice(0, 90)} — qualité et usage quotidien.`;
+  }
+
+  let sections = Array.isArray(product.sections) ? product.sections.filter((s) => s?.body) : [];
+  if (!sections.length) {
+    if (isFidget) {
+      sections = [
+        {
+          heading: "Matière souple et résistante",
+          body: `${specs.Matériau || "Matière élastique"} agréable au toucher, conçue pour être pressée, étirée et remodelée sans se déchirer facilement. Retour lent à la forme pour une sensation satisfaisante.`,
+        },
+        {
+          heading: "Design amusant et réaliste",
+          body: /beurre|butter|fromage|cheese/i.test(t)
+            ? "Forme inspirée d'un bâton de beurre / fromage : look décalé, parfait pour le bureau, la maison ou un cadeau original."
+            : "Design soigné et original qui attire l'œil tout en restant discret à manipuler.",
+        },
+        {
+          heading: "Soulagement du stress au quotidien",
+          body: "Idéal pour canaliser le stress, améliorer la concentration ou simplement s'occuper les mains — silencieux, portable et prêt à l'emploi.",
+        },
+      ];
+    } else {
+      const desc = cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 500 }) || "");
+      sections = [
+        {
+          heading: "Description du produit",
+          body: desc || `${title} — produit neuf, prêt à l'emploi, pensé pour un usage quotidien fiable.`,
+        },
+        {
+          heading: "Points forts",
+          body: bullets.slice(0, 3).join(" · ") || "Finition soignée, utilisation simple, excellent rapport qualité-prix.",
+        },
+        {
+          heading: "Pourquoi l'adopter",
+          body: "Sélectionné pour sa praticité et sa demande : une solution concrète, livrée soigneusement.",
+        },
+      ];
+    }
+  }
+
+  let benefits = [...(product.benefits || [])].map((b) => cleanText(b)).filter(Boolean);
+  if (!benefits.length) {
+    if (isFidget) {
+      const matLabel = material || specs.Matériau || "Matière souple élastique";
+      benefits = [
+        `${matLabel} — durable et agréable au toucher`,
+        specs.Dimensions ? `Taille compacte : ${specs.Dimensions}` : "Format compact et portable",
+        "Texture agréable, retour lent (slow-rise)",
+        "Aide à réduire le stress et l'anxiété",
+        "Surface lavable à l'eau, hygiénique",
+        "Cadeau original (ados / adultes) — non comestible",
+      ];
+    } else {
+      benefits = bullets.slice(0, 6);
+      if (benefits.length < 3) {
+        benefits = [
+          ...benefits,
+          material ? `Matériau : ${material}` : "Matériaux sélectionnés",
+          "Produit neuf, prêt à l'emploi",
+          "Idéal pour un usage quotidien",
+          "Expédition soignée",
+        ].filter(Boolean);
+      }
+    }
+  }
+  benefits = [...new Set(benefits)].slice(0, 8);
+
+  // Bullets = bénéfices si scrape pauvre
+  const mergedBullets = bullets.length >= 3 ? bullets.slice(0, 8) : benefits.slice(0, 8);
+
+  let description = cleanMarketingCopy(product.description || "");
+  if (
+    !description ||
+    description.length < 50 ||
+    /trouvez plus|find more|sur pour|achetez |transport maritime|free shipping|10000\d{3}/i.test(description)
+  ) {
+    description = sections.map((s) => s.body).filter(Boolean).join(" ") || shortPitch;
+  }
+
+  return {
+    ...product,
+    title,
+    short_pitch: shortPitch,
+    description,
+    bullets: mergedBullets,
+    benefits,
+    sections,
+    specs,
+  };
 }
 
 function isRealProductImage(src) {
@@ -912,7 +1498,47 @@ async function fetchJinaContent(url) {
   throw lastErr || new Error("Jina unavailable");
 }
 
+async function searchViaBingRss(query, { linkTest, limit = 8 } = {}) {
+  const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "application/rss+xml,application/xml,text/xml,*/*" },
+  });
+  if (!res.ok) throw new Error(`Bing RSS HTTP ${res.status}`);
+  const xml = await res.text();
+  const $ = cheerio.load(xml, { xmlMode: true });
+  const items = [];
+  const seen = new Set();
+  $("item").each((_, el) => {
+    if (items.length >= limit) return;
+    const title = cleanText($(el).find("title").first().text());
+    let link = cleanText($(el).find("link").first().text());
+    const snippet = cleanText($(el).find("description").first().text());
+    if (!title || title.length < 8 || !link) return;
+    if (typeof linkTest === "function" && !linkTest(link)) return;
+    link = link.split("#")[0];
+    if (seen.has(link)) return;
+    if (/tracking|privacy|sitemap|intellectual property/i.test(title)) return;
+    seen.add(link);
+    items.push({
+      title: title.slice(0, 180),
+      url: link,
+      price: parsePrice(title) || parsePrice(snippet) || null,
+      image: null,
+      snippet,
+    });
+  });
+  return items;
+}
+
 async function searchViaDuckDuckGo(siteQuery, { linkTest, limit = 5 } = {}) {
+  // 1) Bing RSS — plus stable que le HTML DDG/Bing (souvent captcha)
+  try {
+    const rss = await searchViaBingRss(siteQuery, { linkTest, limit });
+    if (rss.length) return rss;
+  } catch (err) {
+    console.warn("[bing rss]", err.message);
+  }
+
   const attempts = [
     `https://html.duckduckgo.com/html/?q=${encodeURIComponent(siteQuery)}`,
     `https://www.bing.com/search?q=${encodeURIComponent(siteQuery)}&count=20`,
@@ -926,6 +1552,7 @@ async function searchViaDuckDuckGo(siteQuery, { linkTest, limit = 5 } = {}) {
       });
       if (!res.ok) continue;
       const html = await res.text();
+      if (/anomaly|challenge|unusual traffic|captcha/i.test(html.slice(0, 2500))) continue;
       const $ = cheerio.load(html);
 
       // DuckDuckGo result blocks
@@ -1258,44 +1885,75 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
 }
 
 function buildHtmlFromProduct(product, themeColor = "#667eea") {
-  const imgs = (product.images || []).filter(isRealProductImage).slice(0, 6);
+  const enriched = enrichProductListingCopy(product || {});
+  const imgs = (enriched.images || []).filter(isRealProductImage).slice(0, 8);
 
   const placeholder = `<div style="background:#f4f4f5;border-radius:14px;padding:48px 16px;text-align:center;color:#71717a;font-size:13px;">Image produit à ajouter</div>`;
-  const mainImg = imgs[0]
-    ? `<img src="${escapeHtml(imgs[0])}" alt="${escapeHtml(product.title)}" style="width:100%;border-radius:14px;max-height:280px;object-fit:cover;" />`
-    : placeholder;
-  const sideImgs = imgs
-    .slice(1, 3)
-    .map(
-      (src) =>
-        `<img src="${escapeHtml(src)}" alt="" style="width:100%;border-radius:12px;margin-bottom:8px;max-height:130px;object-fit:cover;" />`
-    )
+  const imgTag = (src, maxH = 280) =>
+    `<img src="${escapeHtml(src)}" alt="${escapeHtml(enriched.title)}" style="width:100%;border-radius:14px;max-height:${maxH}px;object-fit:cover;" />`;
+
+  const displayTitle = stripSupplierProvenance(enriched.title);
+  const shortPitch =
+    cleanMarketingCopy(enriched.short_pitch || "") ||
+    cleanMarketingCopy(sanitizeReadableText(enriched.description, { maxLen: 220 })) ||
+    "Produit sélectionné pour sa qualité et son usage quotidien.";
+
+  const sections = (enriched.sections || []).slice(0, 3);
+  const sectionHtml = sections
+    .map((sec, idx) => {
+      const heading = escapeHtml(sec.heading || `Point ${idx + 1}`);
+      const body = escapeHtml(cleanMarketingCopy(sec.body || ""));
+      const sideImg = imgs[idx + 1] ? imgTag(imgs[idx + 1], 160) : "";
+      return `<div style="display:grid;grid-template-columns:${sideImg ? "1.4fr 1fr" : "1fr"};gap:12px;margin-bottom:14px;align-items:center;">
+      <div style="background:#fafafe;border-radius:12px;padding:14px;border:1px solid #eee;">
+        <h3 style="font-size:14px;margin:0 0 8px;color:${themeColor};">${heading}</h3>
+        <p style="font-size:13px;line-height:1.7;color:#444;margin:0;">${body}</p>
+      </div>
+      ${sideImg ? `<div>${sideImg}</div>` : ""}
+    </div>`;
+    })
     .join("\n");
 
-  const priceLabel = product.price ? `${Number(product.price).toFixed(2)} €` : "";
-  const displayTitle = stripSupplierProvenance(product.title);
-  const whyText =
-    cleanMarketingCopy(
-      sanitizeReadableText(product.description) ||
-        sanitizeReadableText((product.bullets || []).slice(0, 2).join(" "))
-    ) || "Produit sélectionné pour sa qualité et sa demande eBay.";
-  const descFull =
-    cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 1200 })) || whyText;
-  const bulletItems = (product.bullets || [])
-    .filter(Boolean)
+  const hero = imgs[0] ? imgTag(imgs[0], 300) : placeholder;
+
+  const benefitItems = (enriched.benefits || enriched.bullets || [])
     .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "").trim()))
     .filter(
       (b) =>
         b &&
         !/^source\s*:/i.test(b) &&
-        !/^(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]*$/i.test(b)
+        !/^(AliExpress|Amazon(?:\.[a-z]+)?|Cdiscount|eBay)\s*[\d.]*$/i.test(b) &&
+        !/potentiel de marge|politique ebay/i.test(b)
     )
     .slice(0, 8);
-  const bulletHtml = bulletItems.length
-    ? bulletItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
+  const bulletHtml = benefitItems.length
+    ? benefitItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
     : `<li style="margin:0 0 6px;">✔ Produit neuf, prêt à l'emploi</li>
-       <li style="margin:0 0 6px;">✔ Qualité sélectionnée pour eBay</li>
+       <li style="margin:0 0 6px;">✔ Qualité sélectionnée</li>
        <li style="margin:0 0 6px;">✔ Expédition soignée</li>`;
+
+  const specs = enriched.specs && typeof enriched.specs === "object" ? enriched.specs : {};
+  const specRows = Object.entries(specs)
+    .filter(([k, v]) => k && v && !/^source$/i.test(k) && !/aliexpress|amazon|cdiscount/i.test(String(v)))
+    .slice(0, 16)
+    .map(
+      ([k, v]) =>
+        `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid #f0f0f5;">
+        <span style="color:#666;">${escapeHtml(k)}</span>
+        <strong style="text-align:right;color:#222;">${escapeHtml(String(v))}</strong>
+      </div>`
+    )
+    .join("");
+
+  const galleryExtra =
+    imgs.length > 4
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">
+      ${imgs
+        .slice(4, 7)
+        .map((src) => imgTag(src, 120))
+        .join("")}
+    </div>`
+      : "";
 
   const rawHtml = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:16px;padding:26px 20px;text-align:center;color:#fff;margin-bottom:18px;">
@@ -1305,52 +1963,48 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Garanti</span>
     </div>
     <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(displayTitle)}</h1>
-    <p style="font-size:13px;opacity:.9;margin:0;">Découvrez le Produit${priceLabel ? " — " + priceLabel : ""}</p>
+    <p style="font-size:13px;opacity:.9;margin:0;">${escapeHtml(shortPitch.slice(0, 160))}</p>
   </div>
+
+  <div style="margin-bottom:16px;">${hero}</div>
+
+  <div style="margin-bottom:8px;">
+    <h2 style="font-size:15px;margin:0 0 12px;color:${themeColor};">Découvrez le produit</h2>
+    ${sectionHtml || `<p style="font-size:13px;line-height:1.75;color:#444;">${escapeHtml(shortPitch)}</p>`}
+  </div>
+
+  ${galleryExtra}
 
   <div style="background:#fafafe;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #eee;">
-    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">Description du produit</h2>
-    <p style="font-size:13px;line-height:1.75;color:#444;margin:0;white-space:pre-wrap;">${escapeHtml(descFull)}</p>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;margin-bottom:18px;">
-    <div>${mainImg}</div>
-    <div>${sideImgs || '<div style="background:#f4f4f5;border-radius:12px;height:100%;min-height:120px;"></div>'}</div>
-  </div>
-
-  <div style="background:#fafafe;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #eee;">
-    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">Pourquoi Ce Produit ?</h2>
+    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">Pourquoi ce produit ?</h2>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
       <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">✦</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Qualité</p></div>
-      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">🛡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Garantie</p></div>
-      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">⚡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Expédition</p></div>
+      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">🛡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Fiabilité</p></div>
+      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">⚡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Praticité</p></div>
     </div>
   </div>
 
   <div style="margin-bottom:16px;">
-    <h2 style="font-size:15px;margin:0 0 8px;color:${themeColor};">Bénéfices Produit</h2>
+    <h2 style="font-size:15px;margin:0 0 8px;color:${themeColor};">Bénéfices produit</h2>
     <ul style="margin:0;padding-left:18px;font-size:13px;color:#444;line-height:1.6;">${bulletHtml}</ul>
   </div>
 
   <div style="border-radius:12px;border:1px solid #e8e8f0;overflow:hidden;margin-bottom:16px;">
-    <div style="background:${themeColor};color:#fff;padding:10px 16px;font-size:13px;font-weight:600;">Caractéristiques Techniques</div>
-    <div style="padding:12px 16px;font-size:12px;color:#555;line-height:1.9;">
-      <div><strong>État :</strong> Neuf</div>
-      <div><strong>Marque :</strong> Sans marque / générique</div>
-      <div><strong>EAN :</strong> Ne s'applique pas</div>
-      ${priceLabel ? `<div><strong>Réf. prix :</strong> ${priceLabel}</div>` : ""}
+    <div style="background:${themeColor};color:#fff;padding:10px 16px;font-size:13px;font-weight:600;">Caractéristiques techniques</div>
+    <div style="padding:12px 16px;font-size:12px;color:#555;line-height:1.6;">
+      ${specRows || `<div><strong>État :</strong> Neuf</div>`}
     </div>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Contenu</p><p style="font-size:11px;color:#666;margin:0;">Produit + notice</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Contenu</p><p style="font-size:11px;color:#666;margin:0;">Article comme sur les photos</p></div>
     <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Authenticité</p><p style="font-size:11px;color:#666;margin:0;">Sélection vérifiée</p></div>
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Retours</p><p style="font-size:11px;color:#666;margin:0;">Politique eBay</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Retours</p><p style="font-size:11px;color:#666;margin:0;">Selon conditions de l'annonce</p></div>
     <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Support</p><p style="font-size:11px;color:#666;margin:0;">Réponse rapide</p></div>
   </div>
 
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:12px;padding:18px;text-align:center;color:#fff;">
-    <p style="font-size:15px;font-weight:700;margin:0 0 4px;">Commandez Maintenant !</p>
+    <p style="font-size:15px;font-weight:700;margin:0 0 4px;">Commandez maintenant</p>
     <p style="font-size:11px;opacity:.85;margin:0;">Retours faciles • Satisfaction garantie • Support réactif</p>
   </div>
 </div>`;
@@ -1465,7 +2119,22 @@ function cleanMarketingCopy(text) {
     .replace(/\s*et son potentiel de marge\.?/gi, ".")
     .replace(/\s*,\s*et son potentiel de marge/gi, "")
     .replace(/^\s*source\s*:\s*/gim, "")
-    .replace(/\s+/g, " ")
+    // Snippets moteurs de recherche / marketplace
+    .replace(/\b(?:achetez|buy|compra|koop)\s+.{0,220}?\b(?:sur|at|bei|en)\s+aliexpress\b.{0,220}/gi, "")
+    .replace(/\bat\s+aliexpress\b.{0,120}/gi, "")
+    .replace(/\bsur\s+aliexpress\b.{0,120}/gi, "")
+    .replace(/\b(?:aliexpress|amazon(?:\.[a-z]+)?|cdiscount|ebay)\b/gi, " ")
+    .replace(/\bFind more.{0,160}$/gi, "")
+    .replace(/\bTrouvez plus.{0,160}$/gi, "")
+    .replace(/\bAppréciez Transport.{0,200}$/gi, "")
+    .replace(/\bEnjoy Free Shipping.{0,200}$/gi, "")
+    .replace(/\bVente à durée limitée.{0,100}$/gi, "")
+    .replace(/\bLimited Time Sale.{0,100}$/gi, "")
+    .replace(/\bFacile à rendre\b/gi, "")
+    .replace(/\bEasy Return\b/gi, "")
+    .replace(/\b\d{5,}\b/g, " ") // IDs / codes bruités des snippets
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*[-–—|,;]+\s*$/g, "")
     .trim();
 }
 
@@ -1507,6 +2176,7 @@ module.exports = {
   findCheapestSupplier,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  enrichProductListingCopy,
   injectProductImagesIntoHtml,
   countRealImagesInHtml,
   detectSource,

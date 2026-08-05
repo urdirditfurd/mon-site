@@ -15,6 +15,7 @@ const {
   findCheapestSupplier,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
+  enrichProductListingCopy,
   injectProductImagesIntoHtml,
   countRealImagesInHtml,
   isRealProductImage,
@@ -53,7 +54,7 @@ const {
   getDashboardStats,
   getAutoOrders,
 } = require("./mock-data");
-const { generateListing, generateSavReply } = require("./ai-brain");
+const { generateListing, generateSavReply, generateProductCopy } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
 
 function defaultVariantValuesForTitle(title = "") {
@@ -1814,26 +1815,36 @@ app.post("/api/generate-listing", async (req, res) => {
         );
       }
 
-      // Enrichissement LLM optionnel — titre / prix seulement (pas le HTML IA qui réintroduit AliExpress / marge)
+      // Enrichissement LLM optionnel — JSON structuré (sections / bénéfices / specs), HTML via template
       try {
-        const aiPromise = generateListing(
-          listing.original_title || listing.product_name || listing.seo_title,
-          `IMPORTANT: réécris un titre eBay FR DIFFÉRENT du titre fournisseur. INTERDICTION: AliExpress, Amazon, Cdiscount, eBay, "potentiel de marge", "Source :" dans le titre. url:${productUrl}, bullets:${(scraped?.bullets || []).join(" | ")}, theme:${themeColor || "#667eea"}`
-        );
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 8000));
+        const baseProduct = {
+          ...(listing.product || scraped || {}),
+          title: listing.original_title || listing.product_name || listing.seo_title,
+          images: listing.images || scraped?.images || [],
+        };
+        const aiPromise = generateProductCopy(baseProduct);
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 14000));
         const ai = await Promise.race([aiPromise, timeout]);
         if (ai && !ai._parse_error) {
-          const aiTitle = stripSupplierProvenance(rewriteEbayTitle(ai.seo_title || listing.seo_title));
-          const imgs = listing.images || scraped?.images || [];
-          const product = {
-            ...(listing.product || {}),
+          const aiTitle = stripSupplierProvenance(
+            rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title)
+          );
+          const product = enrichProductListingCopy({
+            ...baseProduct,
             title: aiTitle,
-            images: imgs,
-            description: cleanMarketingCopy(listing.product?.description || scraped?.description || ""),
-            bullets: listing.product?.bullets || scraped?.bullets || [],
-            price: listing.product?.price || scraped?.price,
-            source: listing.product?.source || scraped?.source,
-          };
+            originalTitle: listing.original_title || baseProduct.title,
+            description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
+            short_pitch: cleanMarketingCopy(ai.short_pitch || ""),
+            sections: Array.isArray(ai.sections) ? ai.sections : baseProduct.sections,
+            benefits: Array.isArray(ai.benefits) ? ai.benefits : baseProduct.benefits,
+            bullets: Array.isArray(ai.benefits) ? ai.benefits : baseProduct.bullets,
+            specs:
+              ai.specs && typeof ai.specs === "object"
+                ? { ...(baseProduct.specs || {}), ...ai.specs }
+                : baseProduct.specs,
+            price: baseProduct.price || scraped?.price,
+            source: baseProduct.source || scraped?.source,
+          });
           listing = {
             ...listing,
             seo_title: aiTitle,
@@ -1843,6 +1854,7 @@ app.post("/api/generate-listing", async (req, res) => {
             ai_enriched: true,
             title_rewritten: true,
             product,
+            images: product.images || listing.images,
           };
         }
       } catch (llmErr) {
@@ -1888,14 +1900,14 @@ app.post("/api/rebuild-description", (req, res) => {
   try {
     const { product, themeColor = "#667eea" } = req.body || {};
     if (!product) return res.status(400).json({ success: false, error: "product requis" });
-    const cleanedProduct = {
+    const cleanedProduct = enrichProductListingCopy({
       ...product,
       title: stripSupplierProvenance(product.title),
       description: cleanMarketingCopy(product.description || ""),
       bullets: (product.bullets || [])
         .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
         .filter((b) => b && !/^source\s*:/i.test(b)),
-    };
+    });
     const html = sanitizeListingHtml(buildHtmlFromProduct(cleanedProduct, themeColor));
     res.json({
       success: true,

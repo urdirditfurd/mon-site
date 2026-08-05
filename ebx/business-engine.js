@@ -160,14 +160,23 @@ function rewriteEbayTitle(productName, keywords = []) {
   const hooks = ["Compatible", "Pratique", "Compact", "Universal", "Premium"];
   const hook = hooks[tokens.join("").length % hooks.length];
   const core = tokens.slice(0, 6).join(" ");
-  const tail = extras.length ? extras.join(" ") : "Livraison rapide";
+  // Évite d'ajouter "Livraison rapide" / extras bruyants si le titre FR est déjà riche
+  const looksFrProduct = /[àâäéèêëïîôùûüç]/i.test(raw) || /jouet|anti-stress|souple|coque|chargeur/i.test(raw);
+  const tail = looksFrProduct ? "" : extras.length ? extras.join(" ") : "Livraison rapide";
   let title = `${hook} ${core} ${tail} Neuf`.replace(/\s+/g, " ").trim();
+
+  // Titres FR longs : version courte orientée bénéfice (style EBX)
+  if (looksFrProduct && tokens.length >= 3) {
+    const shortCore = tokens.slice(0, 5).join(" ");
+    title = `${shortCore} Neuf`.replace(/\s+/g, " ").trim();
+    if (title.length < 28) title = `${hook} ${title}`;
+  }
 
   // Si trop proche du titre brut, force un reorder
   const sim = similarityRatio(raw.toLowerCase(), title.toLowerCase());
   if (sim > 0.72 && tokens.length > 3) {
     const rotated = [...tokens.slice(2), ...tokens.slice(0, 2)];
-    title = `${rotated.join(" ")} Qualité Pro Neuf`.replace(/\s+/g, " ").trim();
+    title = `${rotated.slice(0, 6).join(" ")} Qualité Neuf`.replace(/\s+/g, " ").trim();
   }
 
   if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "");
@@ -189,11 +198,20 @@ function similarityRatio(a, b) {
  */
 function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
   const bullets = scraped.bullets || [];
+  // Mots-clés courts uniquement (évite d'injecter des phrases de bénéfices dans le titre)
   const kwFromBullets = bullets
     .join(" ")
-    .split(/[\s,;/|]+/)
-    .filter((w) => w.length > 3)
-    .slice(0, 8);
+    .split(/[\s,;/|:—-]+/)
+    .map((w) => w.trim())
+    .filter(
+      (w) =>
+        w.length > 4 &&
+        w.length < 18 &&
+        !/matière|durable|compact|taille|surface|cadeau|original|texture|agréable|brand|origin|mainland|china|none|recommend|choice/i.test(
+          w
+        )
+    )
+    .slice(0, 4);
   const originalTitle = scraped.title || "Produit";
   const seoTitle = rewriteEbayTitle(originalTitle, kwFromBullets);
   const images = discreetImageOrder(scraped.images || []);
@@ -203,6 +221,10 @@ function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
     originalTitle,
     images,
     bullets,
+    sections: scraped.sections || [],
+    benefits: scraped.benefits || bullets,
+    specs: scraped.specs || {},
+    short_pitch: scraped.short_pitch || scraped.description || "",
   };
   const cost = Number(scraped.price) || 0;
   return {

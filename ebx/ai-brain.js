@@ -153,4 +153,58 @@ Réponds UNIQUEMENT en JSON:
   };
 }
 
-module.exports = { generateListing, cleanAndParseJSON, generateSavReply };
+/**
+ * Enrichit un listing à partir des infos produit scrapées (titre, bullets, specs).
+ * Retourne du JSON structuré — le HTML est reconstruit côté template (pas de HTML IA).
+ */
+async function generateProductCopy(product = {}) {
+  const title = String(product.title || product.originalTitle || "Produit").slice(0, 160);
+  const bullets = (product.bullets || []).slice(0, 8).join(" | ");
+  const specs = product.specs
+    ? Object.entries(product.specs)
+        .slice(0, 12)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(" | ")
+    : "";
+  const desc = String(product.description || "").slice(0, 500);
+
+  const system = `Tu es un rédacteur eBay FR. Réponds UNIQUEMENT en JSON valide.
+Objectif: décrire le VRAI produit (attributs physiques / usage), pas le service vendeur.
+INTERDICTION: AliExpress, Amazon, Cdiscount, eBay, "potentiel de marge", "Source :", "demande eBay".
+Titre SEO max 80 caractères, français français, ordre de mots différent du titre fournisseur.
+
+Format:
+{
+  "seo_title": "string",
+  "short_pitch": "1 phrase accrocheuse",
+  "sections": [{"heading":"string","body":"2-3 phrases"}],
+  "benefits": ["6 bénéfices produit concrets"],
+  "specs": {"Matériau":"...","Dimensions":"...","Type":"...","État":"Neuf"},
+  "suggested_price": number
+}`;
+
+  const user = `Produit scrapé:
+Titre: ${title}
+Description: ${desc}
+Bullets: ${bullets}
+Specs: ${specs}
+Prix fournisseur: ${product.price ?? "n/a"}
+
+Génère 3 sections (matière/design/usage si pertinent), 6 bénéfices et un tableau specs réalistes déduits du produit.`;
+
+  const completion = await client.chat.completions.create({
+    model: "local-model",
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.55,
+    max_tokens: 1600,
+  });
+
+  const parsed = cleanAndParseJSON(completion.choices[0].message.content);
+  if (parsed._parse_error) throw new Error("Product copy LLM parse fail");
+  return parsed;
+}
+
+module.exports = { generateListing, cleanAndParseJSON, generateSavReply, generateProductCopy };
