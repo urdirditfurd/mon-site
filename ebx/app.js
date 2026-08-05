@@ -2027,7 +2027,7 @@ async function publishListingFromModal() {
     const res = await fetch(API + "/api/publish-to-ebay/" + id, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ variations: { enabled: false } }),
     });
     const json = await res.json();
     if (!json.success) {
@@ -2067,19 +2067,10 @@ async function publishListing(id, btn) {
   btn.disabled = true;
   btn.textContent = "...";
   try {
-    const titleHint = btn?.closest("tr")?.querySelector("td")?.textContent || "";
     const res = await fetch(API + "/api/publish-to-ebay/" + id, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        variations: {
-          enabled: true,
-          aspect: "Couleur",
-          values: /led|bande|strip|cob/i.test(titleHint)
-            ? ["Blanc chaud", "Blanc froid"]
-            : ["Option A", "Option B"],
-        },
-      }),
+      body: JSON.stringify({ variations: { enabled: false } }),
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);

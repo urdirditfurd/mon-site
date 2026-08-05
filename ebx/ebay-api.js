@@ -703,9 +703,9 @@ async function resolveCategoryId(token, title) {
 }
 
 /**
- * Aspects requis pour une catégorie (Taxonomy get_item_aspects_for_category).
+ * Aspects requis + aspects autorisés en variations pour une catégorie.
  */
-async function fetchRequiredAspectNames(token, categoryId) {
+async function fetchCategoryAspectMeta(token, categoryId) {
   const marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US");
   const treeId = categoryTreeIdForMarketplace(marketplaceId);
   const url =
@@ -716,21 +716,32 @@ async function fetchRequiredAspectNames(token, categoryId) {
     const res = await ebayHttpsRequest("GET", url, { token });
     if (!res.ok) {
       console.warn(`[EBX] Aspects catégorie HTTP ${res.status}`);
-      return [];
+      return { required: [], variationAspects: [] };
     }
     const data = res.json();
     const aspects = data?.aspects || [];
-    return aspects
+    const mapAsp = (a) => ({
+      name: a.localizedAspectName || a.aspectName,
+      values: (a.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean),
+    });
+    const required = aspects
       .filter((a) => a?.aspectConstraint?.aspectRequired)
-      .map((a) => ({
-        name: a.localizedAspectName || a.aspectName,
-        values: (a.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean),
-      }))
+      .map(mapAsp)
       .filter((a) => a.name);
+    const variationAspects = aspects
+      .filter((a) => a?.aspectConstraint?.aspectEnabledForVariations)
+      .map(mapAsp)
+      .filter((a) => a.name);
+    return { required, variationAspects };
   } catch (err) {
-    console.warn("[EBX] fetchRequiredAspectNames:", err.message);
-    return [];
+    console.warn("[EBX] fetchCategoryAspectMeta:", err.message);
+    return { required: [], variationAspects: [] };
   }
+}
+
+async function fetchRequiredAspectNames(token, categoryId) {
+  const meta = await fetchCategoryAspectMeta(token, categoryId);
+  return meta.required;
 }
 
 function guessAspectValue(aspectName, title, allowedValues) {
@@ -855,12 +866,66 @@ function defaultVariantValues(title = "") {
   return ["Option A", "Option B"];
 }
 
+/**
+ * Résout les variations pour la catégorie eBay.
+ * Si « Couleur » n'est pas autorisé (erreur 25002), choisit un aspect valide
+ * ou désactive les variations → publish simple.
+ */
+async function resolveVariationsForCategory(token, categoryId, title, input = {}) {
+  if (input?.enabled === false) {
+    return { enabled: false, aspect: null, values: [] };
+  }
+
+  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
+  const meta = await fetchCategoryAspectMeta(token, categoryId);
+  const allowed = meta.variationAspects || [];
+  const wanted = String(input?.aspect || (isFr ? "Couleur" : "Color")).trim();
+
+  let chosen =
+    allowed.find((a) => a.name.toLowerCase() === wanted.toLowerCase()) ||
+    allowed.find((a) => /^(couleur|color|colour)$/i.test(a.name)) ||
+    allowed.find((a) => /couleur|color|colour|teinte|shade|size|taille|longueur/i.test(a.name)) ||
+    allowed[0] ||
+    null;
+
+  if (!chosen) {
+    console.warn(
+      `[EBX] Catégorie ${categoryId}: aucun aspect variation autorisé — publish simple (évite 25002 Couleur)`
+    );
+    return { enabled: false, aspect: null, values: [] };
+  }
+
+  if (wanted && chosen.name.toLowerCase() !== wanted.toLowerCase()) {
+    console.warn(
+      `[EBX] Aspect « ${wanted} » non autorisé en variation — utilisation de « ${chosen.name} »`
+    );
+  }
+
+  let values = (input?.values || []).map((v) => String(v).trim()).filter(Boolean);
+  if (chosen.values?.length >= 2) {
+    // Prefer taxonomy values that match requested labels, else first two allowed
+    const matched = values
+      .map((v) => chosen.values.find((av) => String(av).toLowerCase() === v.toLowerCase()) || null)
+      .filter(Boolean);
+    if (matched.length >= 2) values = matched.slice(0, 6);
+    else values = chosen.values.slice(0, 2);
+  } else if (values.length < 2) {
+    values = defaultVariantValues(title);
+  }
+
+  const uniq = [...new Set(values)].slice(0, 6);
+  while (uniq.length < 2) uniq.push(`Variante ${uniq.length + 1}`);
+
+  return { enabled: true, aspect: chosen.name, values: uniq };
+}
+
 function normalizeVariations(input, title) {
+  // Legacy helper — prefer resolveVariationsForCategory at publish time
+  if (input?.enabled === false) return { aspect: null, values: [], enabled: false };
   const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
   const aspect = String(input?.aspect || (isFr ? "Couleur" : "Color")).trim() || (isFr ? "Couleur" : "Color");
   let values = (input?.values || []).map((v) => String(v).trim()).filter(Boolean);
   if (values.length < 2) values = defaultVariantValues(title);
-  // eBay exige au moins 2 variantes distinctes
   const uniq = [...new Set(values)].slice(0, 6);
   while (uniq.length < 2) uniq.push(`Variante ${uniq.length + 1}`);
   return { aspect, values: uniq, enabled: input?.enabled !== false };
@@ -885,6 +950,16 @@ async function publishByInventoryItemGroup(token, groupKey) {
   const data = res.json();
   if (!res.ok) {
     throw new Error(`Publish group error (${res.status}): ${JSON.stringify(data)}`);
+  }
+  return { listingId: data.listingId, status: "published" };
+}
+
+async function publishOffer(token, offerId) {
+  const url = `${ebayApiBase()}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`;
+  const res = await ebayHttpsRequest("POST", url, { token, body: {}, contentLanguage: true });
+  const data = res.json();
+  if (!res.ok) {
+    throw new Error(`Publish offer error (${res.status}): ${JSON.stringify(data)}`);
   }
   return { listingId: data.listingId, status: "published" };
 }
@@ -941,17 +1016,55 @@ async function publishToEbay(listing, listingDbId, options = {}) {
   const categoryId = await resolveCategoryId(token, title);
   const baseAspects = await buildAspectsForCategory(token, categoryId, title);
   const locationKey = await ensureInventoryLocation(token);
-  const variations = normalizeVariations(options.variations, title);
+  // Par défaut: pas de variations (évite 25002 « Couleur non autorisée »).
+  // Si enabled=true, on ne garde que les aspects variation validés par Taxonomy.
+  const variationInput =
+    options.variations && typeof options.variations === "object"
+      ? options.variations
+      : { enabled: false };
+  const variations = await resolveVariationsForCategory(token, categoryId, title, variationInput);
 
   console.log(
     `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) locale=${ebayMarketplaceLocale()} market=${env(
       "EBAY_MARKETPLACE_ID",
       "EBAY_US"
-    )} category=${categoryId} variations=${variations.values.join("|")}`
+    )} category=${categoryId} variations=${
+      variations.enabled ? `${variations.aspect}:${variations.values.join("|")}` : "off (simple)"
+    }`
   );
 
-  // Toujours publier en variations (≥2) — sinon eBay refuse d'ajouter des variantes après coup
   const stamp = Date.now();
+
+  // ——— Publish simple (1 SKU) ———
+  if (!variations.enabled) {
+    const sku = `EBX-${listingDbId}-${stamp}`;
+    const aspects = sanitizeAspects({
+      ...baseAspects,
+      Brand: baseAspects.Brand || baseAspects.Marque || ["Unbranded"],
+      Marque: baseAspects.Marque || baseAspects.Brand || ["Sans marque"],
+      EAN: ["Does not apply"],
+      MPN: ["Does not apply"],
+    });
+    const inv = await createOrReplaceInventoryItem(token, sku, listing, aspects, {
+      ean: ["Does not apply"],
+    });
+    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
+    const { listingId } = await publishOffer(token, offerId);
+    return {
+      sku,
+      skus: [sku],
+      groupKey: null,
+      offerId,
+      listingId,
+      status: "published",
+      categoryId,
+      variations: { enabled: false, aspect: null, values: [] },
+      imageCount: inv.imageUrls?.length || 0,
+      env: isProduction() ? "production" : "sandbox",
+    };
+  }
+
+  // ——— Publish avec variations (item group) ———
   const groupKey = `EBX-G-${listingDbId}-${stamp}`;
   const skus = [];
   let firstOfferId = null;
@@ -985,7 +1098,6 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     title: sanitizeEbayTitle(title),
     description: String(listing.html_description || title).slice(0, 490000),
     imageUrls: hostedImages.slice(0, 8),
-    // Aspects communs (Marque obligatoire sur FR — sinon erreur 25002 au publish group)
     aspects: sanitizeAspects({
       Brand: baseAspects.Brand || ["Unbranded"],
       Marque: baseAspects.Marque || baseAspects.Brand || ["Sans marque"],

@@ -59,16 +59,6 @@ const {
 const { generateListing, generateSavReply, generateProductCopy } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
 
-function defaultVariantValuesForTitle(title = "") {
-  const t = String(title || "").toLowerCase();
-  if (/led|bande|strip|n[eé]on|lumineuse|blanc chaud|froid|kelvin|cct/i.test(t)) {
-    return ["Blanc chaud", "Blanc froid"];
-  }
-  if (/coque|case|housse|silicone/i.test(t)) return ["Noir", "Transparent"];
-  if (/cable|câble|usb|hdmi/i.test(t)) return ["1 m", "2 m"];
-  return ["Option A", "Option B"];
-}
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -151,7 +141,8 @@ const updateListingPublish = db.prepare(
 
 function rememberListingPublish(localId, pub = {}) {
   const vars = pub.variations || null;
-  const active = vars && Array.isArray(vars.values) && vars.values.length >= 2 ? 1 : pub.listingId ? 1 : 0;
+  const active =
+    vars && vars.enabled !== false && Array.isArray(vars.values) && vars.values.length >= 2 ? 1 : 0;
   updateListingPublish.run(
     String(pub.listingId || ""),
     String(pub.offerId || ""),
@@ -2251,11 +2242,11 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       console.warn("[EBX] GetUser avant publish:", err.message);
     }
     await antiBanDelay({ testMode: false, label: "publish" });
-    const variations = req.body?.variations || {
-      enabled: true,
-      aspect: "Couleur",
-      values: defaultVariantValuesForTitle(listing.seo_title),
-    };
+    // Défaut: publish simple (pas de « Couleur » forcé — erreur eBay 25002 sur beaucoup de catégories FR)
+    const variations =
+      req.body?.variations && typeof req.body.variations === "object"
+        ? req.body.variations
+        : { enabled: false };
     const result = await publishToEbay(listing, listing.id, { variations });
     if (result?.listingId) {
       rememberListingPublish(listing.id, result);
