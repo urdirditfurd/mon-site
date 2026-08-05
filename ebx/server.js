@@ -2220,6 +2220,25 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
   try {
     let listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+
+    // Déjà publié localement → ne pas recréer une 2e annonce (doublon eBay)
+    if (listing.ebay_listing_id && !req.body?.force && !req.body?.republish) {
+      const isFr = String(process.env.EBAY_MARKETPLACE_ID || "").toUpperCase() === "EBAY_FR";
+      const host = isFr ? "https://www.ebay.fr" : "https://www.ebay.com";
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_PUBLISHED",
+        error:
+          `Cette annonce est déjà en ligne sur eBay (#${listing.ebay_listing_id}).\n` +
+          `Pour éviter un doublon : augmente la quantité sur eBay, ou termine l’ancienne puis republie avec force.\n` +
+          `Lien : ${host}/itm/${listing.ebay_listing_id}`,
+        data: {
+          ebayListingId: listing.ebay_listing_id,
+          link: `${host}/itm/${listing.ebay_listing_id}`,
+        },
+      });
+    }
+
     const vero = scanVero(`${listing.seo_title} ${listing.html_description || ""}`);
     if (vero.level === "block" && !req.body?.force) {
       return res.status(400).json({
@@ -2229,7 +2248,12 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       });
     }
     listing = await ensureListingImages(listing);
-    const { isProduction, getSellerIdentity } = require("./ebay-api");
+    const {
+      isProduction,
+      getSellerIdentity,
+      parseDuplicateListingError,
+      differentiateEbayTitle,
+    } = require("./ebay-api");
     let sellerUserId = null;
     try {
       const seller = await getSellerIdentity();
@@ -2242,12 +2266,83 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       console.warn("[EBX] GetUser avant publish:", err.message);
     }
     await antiBanDelay({ testMode: false, label: "publish" });
-    // Défaut: publish simple (pas de « Couleur » forcé — erreur eBay 25002 sur beaucoup de catégories FR)
     const variations =
       req.body?.variations && typeof req.body.variations === "object"
         ? req.body.variations
         : { enabled: false };
-    const result = await publishToEbay(listing, listing.id, { variations });
+
+    let result;
+    try {
+      result = await publishToEbay(listing, listing.id, { variations });
+    } catch (pubErr) {
+      const dup = parseDuplicateListingError(pubErr);
+      if (!dup) throw pubErr;
+
+      // 1er refus doublon : un retry avec titre différencié (Pack/Kit/…)
+      if (req.body?.differentiate !== false && req.body?.linkExisting !== true) {
+        const newTitle = differentiateEbayTitle(listing.seo_title);
+        console.warn(`[EBX] Doublon eBay → retry titre « ${newTitle} » (était « ${listing.seo_title} »)`);
+        try {
+          const retryListing = { ...listing, seo_title: newTitle };
+          result = await publishToEbay(retryListing, listing.id, { variations });
+          if (result?.listingId) {
+            db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?").run(newTitle, listing.id);
+            rememberListingPublish(listing.id, result);
+            return res.json({
+              success: true,
+              data: {
+                ...result,
+                sellerUserId,
+                vero,
+                differentiatedTitle: newTitle,
+                note:
+                  `eBay a refusé un doublon — publié avec le titre différencié « ${newTitle} ». ` +
+                  (dup.existingListingId
+                    ? `Ancienne annonce toujours active : #${dup.existingListingId}`
+                    : ""),
+              },
+            });
+          }
+        } catch (retryErr) {
+          const dup2 = parseDuplicateListingError(retryErr) || dup;
+          console.error("[EBX] Retry différencié échoué:", retryErr.message);
+          return res.status(409).json({
+            success: false,
+            code: "DUPLICATE_LISTING",
+            error: dup2.message,
+            data: dup2,
+          });
+        }
+      }
+
+      // Option : rattacher le listing local à l’annonce eBay déjà en ligne
+      if (req.body?.linkExisting && dup.existingListingId) {
+        rememberListingPublish(listing.id, {
+          listingId: dup.existingListingId,
+          offerId: listing.ebay_offer_id || "",
+          env: isProduction() ? "production" : "sandbox",
+          variations: { enabled: false },
+        });
+        return res.json({
+          success: true,
+          data: {
+            listingId: dup.existingListingId,
+            linkedExisting: true,
+            link: dup.link,
+            sellerUserId,
+            note: "Listing local rattaché à l’annonce eBay déjà en ligne (pas de nouveau publish).",
+          },
+        });
+      }
+
+      return res.status(409).json({
+        success: false,
+        code: "DUPLICATE_LISTING",
+        error: dup.message,
+        data: dup,
+      });
+    }
+
     if (result?.listingId) {
       rememberListingPublish(listing.id, result);
       const saved = getListingById.get(listing.id);
@@ -2261,6 +2356,11 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("[EBX] Erreur eBay :", err.message);
+    const { parseDuplicateListingError } = require("./ebay-api");
+    const dup = parseDuplicateListingError(err);
+    if (dup) {
+      return res.status(409).json({ success: false, code: "DUPLICATE_LISTING", error: dup.message, data: dup });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 });

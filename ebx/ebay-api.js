@@ -303,6 +303,67 @@ function sanitizeEbayTitle(title) {
     .slice(0, 80);
 }
 
+/**
+ * eBay refuse les annonces « identiques » (policy duplicate listing).
+ * Extrait l'ID existant + message FR actionnable.
+ */
+function parseDuplicateListingError(errOrText) {
+  const text = typeof errOrText === "string" ? errOrText : String(errOrText?.message || errOrText || "");
+  if (!/objets? identiques|identical|already.*listed|déjà mis en vente|listing-multi/i.test(text)) {
+    return null;
+  }
+  let existingId = null;
+  let existingTitle = null;
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}$/);
+    const payload = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    const err = payload?.errors?.[0];
+    const params = Object.fromEntries((err?.parameters || []).map((p) => [String(p.name), p.value]));
+    existingTitle = params["0"] || null;
+    existingId = params["1"] || null;
+  } catch (_) {}
+  if (!existingId) {
+    const m = text.match(/\((\d{9,16})\)/);
+    if (m) existingId = m[1];
+  }
+  const isFr = (process.env.EBAY_MARKETPLACE_ID || "").toUpperCase() === "EBAY_FR";
+  const host = isFr ? "https://www.ebay.fr" : "https://www.ebay.com";
+  const link = existingId ? `${host}/itm/${existingId}` : null;
+  return {
+    code: "DUPLICATE_LISTING",
+    existingListingId: existingId,
+    existingTitle,
+    link,
+    message:
+      `eBay refuse un doublon : cette annonce ressemble déjà à une vente active` +
+      (existingTitle ? ` « ${existingTitle} »` : "") +
+      (existingId ? ` (#${existingId})` : "") +
+      `.\n\nQue faire :\n` +
+      `1) Ouvre l’annonce existante et augmente la quantité\n` +
+      `2) Ou termine l’ancienne annonce sur eBay puis republie\n` +
+      `3) Ou change le titre / les photos ici (Modifier) pour une annonce vraiment différente` +
+      (link ? `\n\nLien : ${link}` : ""),
+  };
+}
+
+/** Titre légèrement différent pour un 2e essai après refus doublon. */
+function differentiateEbayTitle(title) {
+  let t = sanitizeEbayTitle(title);
+  const stamps = ["Pack", "Kit", "Lot", "Pro", "Plus"];
+  const stamp = stamps[Math.floor(Math.random() * stamps.length)];
+  // Retire un suffixe déjà ajouté
+  t = t.replace(/\s+(Pack|Kit|Lot|Pro|Plus)\s*$/i, "").trim();
+  // Évite de coller trop près d'un « Neuf » terminal
+  if (/\bneuf\b$/i.test(t)) {
+    t = t.replace(/\bneuf\b$/i, `${stamp} Neuf`).trim();
+  } else {
+    const room = 80 - t.length - 1 - stamp.length;
+    if (room >= 0) t = `${t} ${stamp}`;
+    else t = sanitizeEbayTitle(`${t.slice(0, Math.max(20, 80 - stamp.length - 1))} ${stamp}`);
+  }
+  return sanitizeEbayTitle(t);
+}
+
 /** Aspects Inventory : uniquement { "Name": ["value"] } non vides. */
 function sanitizeAspects(aspects) {
   const out = {};
@@ -1431,4 +1492,7 @@ module.exports = {
   isProduction,
   ebayApiBase,
   ebayAuthUrl,
+  parseDuplicateListingError,
+  differentiateEbayTitle,
+  sanitizeEbayTitle,
 };

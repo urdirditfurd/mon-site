@@ -2037,7 +2037,10 @@ async function publishListingFromModal() {
     const lid = json.data?.listingId || json.listingId || "n/a";
     const v = json.data?.variations;
     const vars = Array.isArray(v?.values) ? v.values.join(" / ") : "";
-    alert(`Publié ! Listing ID: ${lid}${vars ? `\nVariations: ${vars}` : ""}`);
+    const note = json.data?.note || json.data?.differentiatedTitle
+      ? `\n\n${json.data.note || `Titre ajusté : ${json.data.differentiatedTitle}`}`
+      : "";
+    alert(`Publié ! Listing ID: ${lid}${vars ? `\nVariations: ${vars}` : ""}${note}`);
     closeModal();
     loadListings();
   } catch (e) {
@@ -2077,15 +2080,21 @@ async function publishListing(id, btn) {
     const lid = json.data.listingId || "N/A";
     const penv = json.data.env || envMode;
     const seller = json.data.sellerUserId ? `\nCompte vendeur : ${json.data.sellerUserId}` : "";
+    const isFr = /ebay_fr|france/i.test(String(window.__ebxMarketplace || "EBAY_FR"));
     const link =
       penv === "production"
-        ? `https://www.ebay.com/itm/${lid}`
+        ? `https://www.ebay.${isFr ? "fr" : "com"}/itm/${lid}`
         : `https://www.sandbox.ebay.com/itm/${lid}`;
     const note =
       penv === "production"
         ? "Visible sur ton vrai eBay (Active listings)."
         : "Visible UNIQUEMENT sur sandbox.ebay.com (compte test) — pas sur ebay.com réel.";
-    alert(`Publié (${penv}) !${seller}\nListing ID: ${lid}\n\n${note}\n\nOuvre : ${link}`);
+    const extra = json.data?.note
+      ? `\n\n${json.data.note}`
+      : json.data?.differentiatedTitle
+        ? `\n\nTitre ajusté anti-doublon : ${json.data.differentiatedTitle}`
+        : "";
+    alert(`Publié (${penv}) !${seller}\nListing ID: ${lid}\n\n${note}${extra}\n\nOuvre : ${link}`);
     loadListings();
   } catch (err) {
     btn.textContent = original;
