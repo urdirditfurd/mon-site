@@ -1054,28 +1054,63 @@ async function getSellerIdentity() {
   };
 }
 
-async function getRecentOrders({ limit = 20 } = {}) {
+async function getRecentOrders({ limit = 40, daysBack = 90 } = {}) {
   loadEbayEnv();
   const token = await getAccessToken();
-  const url =
-    `${ebayApiBase()}/sell/fulfillment/v1/order?limit=${Math.min(Number(limit) || 20, 50)}` +
-    `&filter=${encodeURIComponent("orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}")}`;
-  const res = await ebayHttpsRequest("GET", url, { token });
-  if (!res.ok) {
-    // Fallback sans filtre
-    const res2 = await ebayHttpsRequest(
-      "GET",
-      `${ebayApiBase()}/sell/fulfillment/v1/order?limit=${Math.min(Number(limit) || 20, 50)}`,
-      { token }
-    );
-    if (!res2.ok) {
-      throw new Error(`Orders API (${res2.status}): ${res2.text.slice(0, 200)}`);
+  const lim = Math.min(Number(limit) || 40, 50);
+  const base = `${ebayApiBase()}/sell/fulfillment/v1/order`;
+
+  const attempts = [];
+  // 1) Commandes ouvertes (à expédier)
+  attempts.push(
+    `${base}?limit=${lim}&filter=${encodeURIComponent("orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}")}`
+  );
+  // 2) Toutes les commandes récentes (90 jours) — même déjà expédiées
+  const end = new Date();
+  const start = new Date(Date.now() - Math.max(1, daysBack) * 86400000);
+  const dateFilter = `creationdate:[${start.toISOString()}..${end.toISOString()}]`;
+  attempts.push(`${base}?limit=${lim}&filter=${encodeURIComponent(dateFilter)}`);
+  // 3) Sans filtre
+  attempts.push(`${base}?limit=${lim}`);
+
+  const byId = new Map();
+  let lastError = null;
+  let lastStatus = null;
+  let apiOk = false;
+
+  for (const url of attempts) {
+    try {
+      const res = await ebayHttpsRequest("GET", url, { token });
+      lastStatus = res.status;
+      if (!res.ok) {
+        lastError = `Orders API (${res.status}): ${String(res.text || "").slice(0, 180)}`;
+        continue;
+      }
+      apiOk = true;
+      const data = res.json();
+      for (const o of data?.orders || []) {
+        if (o?.orderId) byId.set(o.orderId, o);
+      }
+    } catch (e) {
+      lastError = e.message;
     }
-    const data2 = res2.json();
-    return { orders: data2?.orders || [], env: isProduction() ? "production" : "sandbox" };
   }
-  const data = res.json();
-  return { orders: data?.orders || [], env: isProduction() ? "production" : "sandbox" };
+
+  if (!apiOk && lastError) {
+    throw new Error(lastError);
+  }
+
+  let seller = null;
+  try {
+    seller = await getSellerIdentity();
+  } catch (_) {}
+
+  return {
+    orders: [...byId.values()],
+    env: isProduction() ? "production" : "sandbox",
+    sellerUserId: seller?.userId || null,
+    httpStatus: lastStatus,
+  };
 }
 
 /** Appel Trading API XML (IAF OAuth). */
