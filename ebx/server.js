@@ -1622,8 +1622,13 @@ app.post("/api/auto-snipe", async (req, res) => {
         let candidates = [];
         try {
           const merged = [];
+          const sourceLog = (m) => send({ type: "log", message: m });
           for (const sq of supplierQueries) {
-            const cmp = await findCheapestSupplier(sq, { sources: sourceList, limit: 6 });
+            const cmp = await findCheapestSupplier(sq, {
+              sources: sourceList,
+              limit: 6,
+              onLog: sourceLog,
+            });
             merged.push(...(cmp.candidates || []));
             if (cmp.best) merged.push(cmp.best);
           }
@@ -1690,7 +1695,10 @@ app.post("/api/auto-snipe", async (req, res) => {
           skipped += 1;
           send({
             type: "log",
-            message: `[SKIP] Aucun produit fournisseur réel trouvé — on n'importe JAMAIS une annonce eBay`,
+            message:
+              `[SKIP] Aucun produit fournisseur réel trouvé (Amazon bloqué ou 0 résultat). ` +
+              `Sur Windows: Chrome installé + npm install dans ebx/ puis redémarre. ` +
+              `Sinon colle une URL amazon.fr/dp/... en Import Manuel. Jamais d'import d'annonce eBay.`,
           });
           errors += 1;
           send({ type: "stats", scanned, imported, listed, errors });

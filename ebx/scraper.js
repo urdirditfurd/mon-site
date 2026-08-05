@@ -70,35 +70,76 @@ async function fetchHtmlViaCurl(url) {
  * Chrome/Edge installé (playwright-core) — contournement anti-bot Amazon sur Windows.
  * Pas de téléchargement Chromium : utilise le navigateur déjà présent.
  */
-async function fetchHtmlViaChrome(url, { waitMs = 2500 } = {}) {
+function windowsBrowserCandidates() {
+  const local = process.env.LOCALAPPDATA || "";
+  const pf = process.env["ProgramFiles"] || "C:\\Program Files";
+  const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  return [
+    { channel: "chrome" },
+    { channel: "msedge" },
+    { executablePath: `${pf}\\Google\\Chrome\\Application\\chrome.exe` },
+    { executablePath: `${pf86}\\Google\\Chrome\\Application\\chrome.exe` },
+    { executablePath: `${local}\\Google\\Chrome\\Application\\chrome.exe` },
+    { executablePath: `${pf86}\\Microsoft\\Edge\\Application\\msedge.exe` },
+    { executablePath: `${pf}\\Microsoft\\Edge\\Application\\msedge.exe` },
+    { channel: "chromium" },
+  ];
+}
+
+async function fetchHtmlViaChrome(url, { waitMs = 3500 } = {}) {
   let chromium;
   try {
     ({ chromium } = require("playwright-core"));
   } catch {
-    throw new Error("playwright-core non installé (npm i playwright-core)");
+    throw new Error("playwright-core non installé — dans le dossier ebx: npm install");
   }
-  const channels = process.platform === "win32" ? ["chrome", "msedge", "chromium"] : ["chrome", "chromium"];
+
+  const launches =
+    process.platform === "win32"
+      ? windowsBrowserCandidates()
+      : [{ channel: "chrome" }, { channel: "chromium" }];
+
   let lastErr = null;
-  for (const channel of channels) {
+  for (const opt of launches) {
     let browser;
     try {
       browser = await chromium.launch({
-        channel,
+        ...opt,
         headless: true,
-        args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--window-size=1365,900",
+        ],
       });
-      const page = await browser.newPage({
+      const context = await browser.newContext({
         userAgent: UA,
         locale: "fr-FR",
+        viewport: { width: 1365, height: 900 },
         extraHTTPHeaders: { "Accept-Language": "fr-FR,fr;q=0.9" },
       });
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-      await new Promise((r) => setTimeout(r, waitMs));
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      // Attend les cartes produit Amazon
+      try {
+        await page.waitForSelector('[data-component-type="s-search-result"], #productTitle, #dp', {
+          timeout: 12000,
+        });
+      } catch (_) {
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+      await new Promise((r) => setTimeout(r, 800));
       const html = await page.content();
       const finalUrl = page.url();
       await browser.close();
       if (html.length < 2000) throw new Error("Chrome: HTML trop court");
-      console.log(`[fetch chrome/${channel}] OK len=${html.length}`);
+      if (isAmazonBlockedHtml(html)) throw new Error("Chrome: captcha Amazon toujours présent");
+      const label = opt.channel || opt.executablePath || "browser";
+      console.log(`[fetch chrome] OK via ${label} len=${html.length}`);
       return { html, finalUrl };
     } catch (e) {
       lastErr = e;
@@ -107,7 +148,7 @@ async function fetchHtmlViaChrome(url, { waitMs = 2500 } = {}) {
       } catch (_) {}
     }
   }
-  throw lastErr || new Error("Chrome/Edge introuvable");
+  throw lastErr || new Error("Chrome/Edge introuvable — installe Google Chrome");
 }
 
 /** Essaie fetch → curl → Chrome jusqu'à obtenir une page exploitable. */
@@ -1848,55 +1889,87 @@ function parseAmazonSearchHtml(html, finalUrl, query, limit = 5) {
 /**
  * Recherche produits fournisseurs (Amazon FR search page)
  */
-async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
+async function scrapeAmazonSearch(query, { limit = 5, onLog = null } = {}) {
+  const log = (msg) => {
+    console.log(msg);
+    if (typeof onLog === "function") {
+      try {
+        onLog(msg);
+      } catch (_) {}
+    }
+  };
   const url = `https://www.amazon.fr/s?k=${encodeURIComponent(query)}`;
+  const preferChrome = process.platform === "win32";
 
-  // 1) fetch → curl → Chrome (anti-bot Windows)
+  // 1) Sur Windows : Chrome d'abord (Node fetch = captcha quasi certain)
   try {
+    log(`[amazon] Recherche "${query}" (${preferChrome ? "Chrome→curl→fetch" : "fetch→curl→Chrome"})…`);
     const { html, finalUrl } = await fetchHtmlResilient(url, {
-      preferChrome: false,
+      preferChrome,
       extraHeaders: { Referer: "https://www.amazon.fr/" },
     });
     const blocked = isAmazonBlockedHtml(html);
     const cardCount = (html.match(/data-component-type="s-search-result"/g) || []).length;
-    console.log(
-      `[amazon search] HTML len=${html.length} cards=${cardCount} captcha=${blocked ? "oui" : "non"}`
-    );
+    log(`[amazon] HTML len=${html.length} cards=${cardCount} captcha=${blocked ? "oui" : "non"}`);
     if (!blocked) {
       const items = parseAmazonSearchHtml(html, finalUrl, query, limit);
       if (items.length) {
-        console.log(`[amazon search] ${items.length} résultat(s) pour "${query}"`);
+        log(`[amazon] ✓ ${items.length} résultat(s) trouvés`);
         return items;
       }
+      log(`[amazon] Page OK mais 0 carte parsée — essai Chrome forcé…`);
     } else {
-      console.warn("[amazon search] page captcha/robot — essai Chrome…");
-      try {
-        const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 3500 });
-        const items = parseAmazonSearchHtml(viaChrome.html, viaChrome.finalUrl, query, limit);
-        if (items.length) {
-          console.log(`[amazon search chrome] ${items.length} résultat(s) pour "${query}"`);
-          return items;
-        }
-      } catch (e) {
-        console.warn("[amazon search chrome]", e.message);
-      }
+      log(`[amazon] Captcha détecté — essai Chrome forcé…`);
     }
-  } catch (err) {
-    console.warn("[amazon search direct/curl]", err.message);
     try {
-      const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 3500 });
+      const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 4000 });
       const items = parseAmazonSearchHtml(viaChrome.html, viaChrome.finalUrl, query, limit);
       if (items.length) {
-        console.log(`[amazon search chrome] ${items.length} résultat(s) pour "${query}"`);
+        log(`[amazon] ✓ Chrome: ${items.length} résultat(s)`);
+        return items;
+      }
+      log(`[amazon] Chrome OK mais 0 produit parsé`);
+    } catch (e) {
+      log(`[amazon] Chrome échec: ${e.message}`);
+    }
+  } catch (err) {
+    log(`[amazon] fetch/curl échec: ${err.message}`);
+    try {
+      const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 4000 });
+      const items = parseAmazonSearchHtml(viaChrome.html, viaChrome.finalUrl, query, limit);
+      if (items.length) {
+        log(`[amazon] ✓ Chrome: ${items.length} résultat(s)`);
         return items;
       }
     } catch (e) {
-      console.warn("[amazon search chrome]", e.message);
+      log(`[amazon] Chrome échec: ${e.message}`);
     }
   }
 
-  // 2) Jina
+  // 2) Variante sans accents
+  const asciiQ = String(query || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (asciiQ && asciiQ.toLowerCase() !== String(query).toLowerCase()) {
+    try {
+      log(`[amazon] Retry sans accents: "${asciiQ}"`);
+      const altUrl = `https://www.amazon.fr/s?k=${encodeURIComponent(asciiQ)}`;
+      const via = await fetchHtmlResilient(altUrl, { preferChrome: true });
+      if (!isAmazonBlockedHtml(via.html)) {
+        const items = parseAmazonSearchHtml(via.html, via.finalUrl, asciiQ, limit);
+        if (items.length) {
+          log(`[amazon] ✓ ${items.length} résultat(s) (sans accents)`);
+          return items;
+        }
+      }
+    } catch (e) {
+      log(`[amazon] Retry accents: ${e.message}`);
+    }
+  }
+
+  // 3) Jina
   try {
+    log(`[amazon] Fallback Jina…`);
     const content = await fetchJinaContent(url);
     const items = [];
     const re = /\[([^\]]{8,140})\]\((https:\/\/www\.amazon\.[a-z.]+\/[^\s)]+)\)/g;
@@ -1917,19 +1990,23 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
         source: "amazon+jina",
       });
     }
-    if (items.length) return items;
+    if (items.length) {
+      log(`[amazon] ✓ Jina: ${items.length}`);
+      return items;
+    }
   } catch (err) {
-    console.warn("[amazon search jina]", err.message);
+    log(`[amazon] Jina: ${err.message}`);
   }
 
-  // 3) Bing / DDG
+  // 4) Bing / DDG
   try {
+    log(`[amazon] Fallback Bing/DDG…`);
     const ddg = await searchViaDuckDuckGo(`${query} site:amazon.fr/dp`, {
       limit,
       linkTest: (link) => /amazon\.[a-z.]+\/(?:.*\/)?(?:dp|gp\/product)\//i.test(link),
     });
     if (ddg.length) {
-      console.log(`[amazon search ddg/bing] ${ddg.length} lien(s)`);
+      log(`[amazon] ✓ Bing/DDG: ${ddg.length} lien(s)`);
       return ddg.map((i) => {
         const asin = (String(i.url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
         return {
@@ -1940,10 +2017,12 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
       });
     }
   } catch (err) {
-    console.warn("[amazon search ddg]", err.message);
+    log(`[amazon] Bing/DDG: ${err.message}`);
   }
 
-  console.warn(`[amazon search] ÉCHEC total pour "${query}" — installe Chrome ou colle une URL /dp/ en Import Manuel`);
+  log(
+    `[amazon] ✗ ÉCHEC total — vérifie: 1) npm install dans ebx/ 2) Chrome installé 3) ou Import Manuel avec URL amazon.fr/dp/...`
+  );
   return [];
 }
 
@@ -2347,7 +2426,10 @@ async function scrapeCdiscountSearch(query, { limit = 5 } = {}) {
 /**
  * Compare Amazon / AliExpress / Cdiscount et retourne le moins cher avec prix réel si possible.
  */
-async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3 } = {}) {
+async function findCheapestSupplier(
+  query,
+  { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3, onLog = null } = {}
+) {
   const pools = [];
   const tasks = [];
   const want = new Set(sources.includes("auto") ? ["amazon", "aliexpress", "cdiscount"] : sources);
@@ -2390,7 +2472,7 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
   }
   if (want.has("amazon")) {
     tasks.push(
-      scrapeAmazonSearch(query, { limit }).then((items) =>
+      scrapeAmazonSearch(query, { limit, onLog }).then((items) =>
         items.map((i) => ({
           ...i,
           source: i.source || "amazon",
@@ -2430,6 +2512,12 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
   const results = await Promise.allSettled(tasks);
   for (const r of results) {
     if (r.status === "fulfilled" && Array.isArray(r.value)) pools.push(...r.value);
+  }
+
+  if (typeof onLog === "function") {
+    try {
+      onLog(`[SOURCE] ${pools.length} candidat(s) bruts après scrape (avant dédup/VERIFY)`);
+    } catch (_) {}
   }
 
   // Déduplique par URL produit normalisée
