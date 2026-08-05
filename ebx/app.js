@@ -503,6 +503,13 @@ async function loadDashboard() {
       : `<p class="text-zinc-400 text-sm py-4">Aucune tendance.</p>`;
   }
 
+  const trendUpdated = document.getElementById("dash-trending-updated");
+  if (trendUpdated) {
+    const ts = d.trendingUpdatedAt ? new Date(d.trendingUpdatedAt) : new Date();
+    const hhmm = ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    trendUpdated.textContent = `Mis à jour ${hhmm}`;
+  }
+
   const nicheBox = document.getElementById("dash-niches");
   if (nicheBox) {
     const niches = d.niches || [];
@@ -1045,6 +1052,23 @@ async function loadListings() {
             !item.has_images && !item.ebay_listing_id
               ? `<div class="text-[11px] text-rose-500 mt-1">Sans image — republier tentera de récupérer depuis la source</div>`
               : "";
+          let varAspect = "";
+          let varValues = [];
+          try {
+            const vj = item.variations_json ? JSON.parse(item.variations_json) : null;
+            if (vj?.aspect) varAspect = vj.aspect;
+            if (Array.isArray(vj?.values)) varValues = vj.values;
+          } catch (_) {}
+          const variationsOk =
+            Boolean(item.variations_active) ||
+            (Boolean(item.ebay_listing_id) && varValues.length >= 2);
+          const varianteBadge = item.ebay_listing_id
+            ? variationsOk
+              ? `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold" title="Variations activées à la publication — tu pourras ajouter d'autres caractéristiques plus tard sur eBay${
+                  varAspect ? ` (${varAspect}: ${varValues.join(", ")})` : ""
+                }">Variante OK · active</span>`
+              : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 font-medium" title="Annonce sans variations détectées — republie pour activer les variantes eBay">Variante inactive</span>`
+            : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-50 text-zinc-400 font-medium" title="Les variations seront activées automatiquement à la publication eBay">Variante à activer</span>`;
           return `
       <tr class="border-b border-zinc-50">
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
@@ -1055,7 +1079,7 @@ async function loadListings() {
           <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">${
             item.ebay_listing_id ? "Republier" : "Publier eBay"
           }</button>
-          <button onclick="syncListing(${item.id}, this)" class="text-xs bg-zinc-50 text-zinc-600 px-3 py-1.5 rounded-lg">Sync</button>
+          ${varianteBadge}
           ${
             item.ebay_offer_id
               ? `<button onclick="endListingEbay(${item.id}, this)" class="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg">Fin eBay</button>`
