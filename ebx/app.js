@@ -2115,9 +2115,14 @@ async function regenerateDescTheme() {
     (lastDesc
       ? {
           title: lastDesc.product_name || lastDesc.seo_title || "Produit",
+          originalTitle: lastDesc.original_title || lastDesc.product_name,
           images: descImages.length ? descImages : lastDesc.images || [],
-          bullets: [],
-          description: "",
+          bullets: lastDesc.product?.bullets || [],
+          benefits: lastDesc.product?.benefits || [],
+          sections: lastDesc.product?.sections || [],
+          specs: lastDesc.product?.specs || {},
+          description: lastDesc.product?.description || lastDesc.product?.short_pitch || "",
+          short_pitch: lastDesc.product?.short_pitch || "",
           price: lastDesc.suggested_price,
           source: lastDesc.source || "generic",
         }
@@ -2128,7 +2133,11 @@ async function regenerateDescTheme() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        product: { ...product, images: descImages.length ? descImages : product.images || [] },
+        product: {
+          ...product,
+          originalTitle: product.originalTitle || lastDesc?.original_title || product.title,
+          images: descImages.length ? descImages : product.images || [],
+        },
         themeColor,
       }),
     });
@@ -2192,6 +2201,16 @@ function applyDescResult(data) {
   document.getElementById("desc-detected").textContent =
     "Produit détecté : " + cleanTitle.slice(0, 80);
   document.getElementById("desc-img-badge").textContent = `${descImages.length} images`;
+  const enrich = data.enrichment || {};
+  const sec = enrich.sections ?? (data.product?.sections || []).length;
+  const ben = enrich.benefits ?? (data.product?.benefits || data.product?.bullets || []).length;
+  const enrichEl = document.getElementById("desc-enrich-badge");
+  if (enrichEl) {
+    enrichEl.textContent =
+      sec || ben
+        ? `${sec || 0} sections · ${ben || 0} bénéfices`
+        : "enrichissement faible — régénère après restart serveur";
+  }
   document.getElementById("desc-source-badge").textContent = data.source || "generic";
 }
 

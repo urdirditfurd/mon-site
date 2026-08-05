@@ -747,8 +747,32 @@ async function scrapeProductViaJina(url) {
   });
 }
 
+function isWeakProductTitle(title = "") {
+  const t = cleanText(title);
+  if (!t || t.length < 8) return true;
+  if (/^(aliexpress|amazon(?:\.[a-z]+)?|cdiscount|ebay|produit(?:\s+aliexpress)?)$/i.test(t)) return true;
+  if (/^\d{6,}$/.test(t)) return true; // ID numérique seul
+  if (/robot|captcha|sign in|error page|accès refusé|interception|not found|page introuvable/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** Scraping trop pauvre → on force les fallbacks (titre générique / 0 image / 0 bullet). */
+function isThinProduct(product = {}) {
+  if (!product || isWeakProductTitle(product.title)) return true;
+  const imgs = (product.images || []).filter(isRealProductImage);
+  const bullets = product.bullets || [];
+  const desc = cleanText(product.description || "");
+  const genericDesc = /accessoire led|modèle neuf, prêt|produit sélectionné pour sa qualité/i.test(desc);
+  if (imgs.length === 0 && bullets.length === 0) return true;
+  if (imgs.length === 0 && (desc.length < 40 || genericDesc)) return true;
+  return false;
+}
+
 async function scrapeProduct(url) {
   const source = detectSource(url);
+  let directProduct = null;
 
   // 1) Tentative fetch direct
   try {
@@ -778,10 +802,15 @@ async function scrapeProduct(url) {
 
     if (product.blocked) throw new Error("Page AliExpress captcha / punish");
 
-    if (product.title && product.title.length >= 3 && !/robot|captcha|sign in|error page|^produit aliexpress$/i.test(product.title)) {
+    if (!isWeakProductTitle(product.title)) {
       product.images = (product.images || []).filter(isRealProductImage);
       product.live = true;
-      return enrichProductListingCopy(product);
+      directProduct = enrichProductListingCopy(product);
+      // AliExpress souvent en shell JS : titre OK mais 0 image → enrichir via web
+      if (!(source === "aliexpress" && isThinProduct(directProduct))) {
+        return directProduct;
+      }
+      console.warn("[scrape direct] produit AliExpress trop pauvre → fallback web");
     }
   } catch (err) {
     console.warn("[scrape direct]", err.message);
@@ -790,13 +819,15 @@ async function scrapeProduct(url) {
   // 2) Fallback Jina reader (contourne beaucoup d'anti-bots)
   try {
     const viaJina = await scrapeProductViaJina(url);
-    if (
-      viaJina.title &&
-      viaJina.title.length >= 3 &&
-      !/page introuvable|not found|robot|captcha|sign in|error page|accès refusé|interception/i.test(viaJina.title)
-    ) {
+    if (!isWeakProductTitle(viaJina.title)) {
       viaJina.images = (viaJina.images || []).filter(isRealProductImage);
-      return viaJina;
+      if (!(source === "aliexpress" && isThinProduct(viaJina))) {
+        return viaJina;
+      }
+      if (!directProduct || (viaJina.images || []).length > (directProduct.images || []).length) {
+        directProduct = viaJina;
+      }
+      console.warn("[scrape jina] produit trop pauvre → fallback web");
     }
   } catch (err) {
     console.warn("[scrape jina]", err.message);
@@ -807,10 +838,28 @@ async function scrapeProduct(url) {
     try {
       const viaWeb = await scrapeAliExpressViaWebFallback(url);
       viaWeb.images = (viaWeb.images || []).filter(isRealProductImage);
+      // Merge : garde le meilleur titre / images
+      if (directProduct) {
+        const merged = enrichProductListingCopy({
+          ...directProduct,
+          ...viaWeb,
+          title: !isWeakProductTitle(viaWeb.title) ? viaWeb.title : directProduct.title,
+          images: [...(viaWeb.images || []), ...(directProduct.images || [])],
+          bullets: [...(viaWeb.bullets || []), ...(directProduct.bullets || [])],
+          specs: { ...(directProduct.specs || {}), ...(viaWeb.specs || {}) },
+          description: viaWeb.description || directProduct.description,
+        });
+        merged.images = uniqueProductImages(merged.images, { limit: 10 });
+        return merged;
+      }
       return viaWeb;
     } catch (err) {
       console.warn("[scrape ali web]", err.message);
     }
+  }
+
+  if (directProduct && !isWeakProductTitle(directProduct.title)) {
+    return directProduct;
   }
 
   throw new Error(`Impossible d'extraire le produit (${source}) — essayez une autre URL`);
@@ -822,7 +871,10 @@ async function scrapeProduct(url) {
  */
 function enrichProductListingCopy(product = {}) {
   const title = cleanText(product.title || "Produit");
-  const t = title.toLowerCase();
+  // Inclut originalTitle / description pour détecter la catégorie même après réécriture SEO
+  const t = `${title} ${product.originalTitle || product.original_title || ""} ${product.description || ""} ${
+    product.short_pitch || ""
+  }`.toLowerCase();
   const existingSpecs =
     product.specs && typeof product.specs === "object" && !Array.isArray(product.specs)
       ? { ...product.specs }

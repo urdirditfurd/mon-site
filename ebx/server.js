@@ -423,6 +423,7 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     llm_url: process.env.LOCAL_LLM_URL || "http://localhost:1234/v1",
     mode: "live+fallback",
+    description_builder: "desc-v2",
   });
 });
 
@@ -1815,11 +1816,12 @@ app.post("/api/generate-listing", async (req, res) => {
         );
       }
 
-      // Enrichissement LLM optionnel — JSON structuré (sections / bénéfices / specs), HTML via template
+      // Enrichissement LLM optionnel — ne remplace pas un bon scrape par du vide / générique
       try {
         const baseProduct = {
           ...(listing.product || scraped || {}),
           title: listing.original_title || listing.product_name || listing.seo_title,
+          originalTitle: listing.original_title || scraped?.title,
           images: listing.images || scraped?.images || [],
         };
         const aiPromise = generateProductCopy(baseProduct);
@@ -1829,15 +1831,17 @@ app.post("/api/generate-listing", async (req, res) => {
           const aiTitle = stripSupplierProvenance(
             rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title)
           );
+          const aiSections = Array.isArray(ai.sections) ? ai.sections.filter((s) => s?.body) : [];
+          const aiBenefits = Array.isArray(ai.benefits) ? ai.benefits.filter(Boolean) : [];
           const product = enrichProductListingCopy({
             ...baseProduct,
             title: aiTitle,
             originalTitle: listing.original_title || baseProduct.title,
             description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
-            short_pitch: cleanMarketingCopy(ai.short_pitch || ""),
-            sections: Array.isArray(ai.sections) ? ai.sections : baseProduct.sections,
-            benefits: Array.isArray(ai.benefits) ? ai.benefits : baseProduct.benefits,
-            bullets: Array.isArray(ai.benefits) ? ai.benefits : baseProduct.bullets,
+            short_pitch: cleanMarketingCopy(ai.short_pitch || baseProduct.short_pitch || ""),
+            sections: aiSections.length ? aiSections : baseProduct.sections,
+            benefits: aiBenefits.length ? aiBenefits : baseProduct.benefits,
+            bullets: aiBenefits.length ? aiBenefits : baseProduct.bullets,
             specs:
               ai.specs && typeof ai.specs === "object"
                 ? { ...(baseProduct.specs || {}), ...ai.specs }
@@ -1859,6 +1863,27 @@ app.post("/api/generate-listing", async (req, res) => {
         }
       } catch (llmErr) {
         console.warn("[EBX] LLM skip:", llmErr.message);
+      }
+
+      // Garantit sections/bénéfices même sans LLM
+      if (listing.product) {
+        listing.product = enrichProductListingCopy({
+          ...listing.product,
+          originalTitle: listing.original_title || listing.product.originalTitle || listing.product.title,
+          images: listing.images || listing.product.images || [],
+        });
+        listing.html_description = sanitizeListingHtml(
+          buildHtmlFromProduct(listing.product, themeColor || "#667eea")
+        );
+        listing.images = listing.product.images || listing.images;
+        listing.enrichment = {
+          version: "desc-v2",
+          sections: (listing.product.sections || []).length,
+          benefits: (listing.product.benefits || []).length,
+          specs: Object.keys(listing.product.specs || {}).length,
+          images: (listing.images || []).length,
+          source: listing.source,
+        };
       }
     } else {
       if (!productName) return res.status(400).json({ error: "productName ou productUrl requis" });
@@ -1903,6 +1928,7 @@ app.post("/api/rebuild-description", (req, res) => {
     const cleanedProduct = enrichProductListingCopy({
       ...product,
       title: stripSupplierProvenance(product.title),
+      originalTitle: product.originalTitle || product.original_title || product.title,
       description: cleanMarketingCopy(product.description || ""),
       bullets: (product.bullets || [])
         .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
@@ -1919,6 +1945,13 @@ app.post("/api/rebuild-description", (req, res) => {
         source: cleanedProduct.source || "generic",
         product: cleanedProduct,
         live: true,
+        enrichment: {
+          version: "desc-v2",
+          sections: (cleanedProduct.sections || []).length,
+          benefits: (cleanedProduct.benefits || []).length,
+          specs: Object.keys(cleanedProduct.specs || {}).length,
+          images: (cleanedProduct.images || []).length,
+        },
       },
     });
   } catch (err) {
@@ -2442,6 +2475,7 @@ app.delete("/api/accounts/:id", (req, res) => {
 app.listen(PORT, () => {
   const { isProduction } = require("./ebay-api");
   console.log(`⚡ EBX Server running on http://localhost:${PORT}`);
+  console.log(`📝 Description Builder: desc-v2 (infos produit enrichies)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
   console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);

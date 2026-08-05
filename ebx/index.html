@@ -733,6 +733,7 @@
               <button type="button" id="desc-colors-toggle" onclick="toggleDescColors()" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50">Afficher les couleurs</button>
             </div>
             <button id="desc-btn" onclick="generateFromUrl()" class="btn-primary">Générer la description</button>
+            <p class="text-[11px] text-zinc-400 mt-2">Après un <code class="bg-zinc-100 px-1 rounded">git pull</code>, redémarre le serveur (<code class="bg-zinc-100 px-1 rounded">Ctrl+C</code> puis <code class="bg-zinc-100 px-1 rounded">npm start</code>) puis recharge la page (Ctrl+F5).</p>
           </div>
           <div id="desc-colors-panel" class="hidden rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3">
             <div class="flex items-center justify-between gap-2">
@@ -751,6 +752,7 @@
         <div id="desc-banner" class="hidden bg-brand-50 border border-brand-100 rounded-2xl px-5 py-3 flex flex-wrap items-center gap-3 text-sm">
           <span id="desc-detected" class="font-medium text-brand-800"></span>
           <span id="desc-img-badge" class="text-xs bg-white text-brand-700 px-2 py-0.5 rounded-full border"></span>
+          <span id="desc-enrich-badge" class="text-xs bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-100"></span>
           <span id="desc-source-badge" class="text-xs bg-zinc-900 text-white px-2 py-0.5 rounded-full"></span>
         </div>
 
@@ -931,6 +933,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=desc-v2"></script>
 </body>
 </html>
