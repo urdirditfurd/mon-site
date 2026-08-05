@@ -1118,7 +1118,9 @@ async function syncEbayOrders() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     let msg = `Sync eBay: ${json.fetched} lue(s), ${json.created} nouvelle(s), ${json.updated || 0} maj.`;
+    if (json.sellerUserId) msg += `\nCompte: ${json.sellerUserId} (${json.ebayEnv || "production"})`;
     if (json.autoProcessed) msg += `\nBot: ${json.autoProcessed} commande(s) préparée(s) auto.`;
+    if (json.note) msg += `\n\n${json.note}`;
     alert(msg);
     loadOrders();
     refreshBotStatus();
