@@ -867,7 +867,7 @@ function renderSnipeSuppliers(ev) {
   }
   panel.classList.remove("hidden");
   if (meta) {
-    meta.textContent = `${items.length} offre(s) · ${ev.compared || 0} avec prix · « ${String(
+    meta.textContent = `${items.length} offre(s) · ${ev.compared || 0} prix confirmé(s) · « ${String(
       ev.query || ""
     )} » — du moins cher au plus cher`;
   }
@@ -875,10 +875,17 @@ function renderSnipeSuppliers(ev) {
     .map((it) => {
       const src = escapeHtml(String(it.source || "fournisseur"));
       const title = escapeHtml(String(it.title || "Sans titre").slice(0, 80));
-      const price =
-        it.price != null && Number(it.price) > 0
-          ? `<span class="font-bold text-emerald-800">${Number(it.price).toFixed(2)} €</span>`
-          : `<span class="text-amber-600 font-medium">prix n/a</span>`;
+      let priceBadge;
+      if (it.price != null && Number(it.price) > 0) {
+        const conf = it.priceConfirmed
+          ? `<span class="text-[10px] text-emerald-600">confirmé</span>`
+          : it.priceUnconfirmed
+            ? `<span class="text-[10px] text-amber-600">estimé — vérifier</span>`
+            : "";
+        priceBadge = `<span class="font-bold text-emerald-800">${Number(it.price).toFixed(2)} €</span> ${conf}`;
+      } else {
+        priceBadge = `<span class="text-amber-600 font-medium">prix n/a</span>`;
+      }
       const badge = it.best
         ? `<span class="text-[10px] uppercase tracking-wide bg-emerald-600 text-white px-1.5 py-0.5 rounded">Moins cher</span>`
         : `<span class="text-[10px] text-zinc-400">#${it.rank || ""}</span>`;
@@ -888,7 +895,7 @@ function renderSnipeSuppliers(ev) {
         : "";
       return `<div class="flex items-start justify-between gap-3 bg-white/80 rounded-lg border border-emerald-100 px-3 py-2">
         <div class="min-w-0 space-y-1">
-          <div class="flex items-center gap-2 flex-wrap">${badge}<span class="text-xs font-semibold text-zinc-700">${src}</span>${price}</div>
+          <div class="flex items-center gap-2 flex-wrap">${badge}<span class="text-xs font-semibold text-zinc-700">${src}</span>${priceBadge}</div>
           <div class="text-sm text-zinc-600 truncate" title="${title}">${title}</div>
         </div>
         ${link}
@@ -1218,7 +1225,7 @@ async function loadListings() {
         <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}${published}${imgWarn}</td>
         <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
         <td class="p-3 text-right space-x-2 whitespace-nowrap">
-          <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Voir</button>
+          <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Modifier</button>
           <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">${
             item.ebay_listing_id ? "Republier" : "Publier eBay"
           }</button>
@@ -1947,11 +1954,124 @@ async function viewListing(id) {
   const res = await fetch(API + "/api/listings/" + id);
   const json = await res.json();
   if (!json.success) return alert("Impossible de charger");
-  document.getElementById("modal-title").textContent = json.data.seo_title || "Listing";
-  document.getElementById("modal-content").innerHTML = json.data.html_description || "";
+  const d = json.data;
+  document.getElementById("edit-listing-id").value = String(d.id);
+  const titleEl = document.getElementById("edit-seo-title");
+  titleEl.value = d.seo_title || "";
+  document.getElementById("edit-title-len").textContent = String((titleEl.value || "").length);
+  titleEl.oninput = () => {
+    document.getElementById("edit-title-len").textContent = String(titleEl.value.length);
+  };
+  document.getElementById("edit-price").value =
+    d.suggested_price != null ? Number(d.suggested_price).toFixed(2) : "";
+  const sub = document.getElementById("modal-subtitle");
+  if (sub) sub.textContent = `Listing #${d.id}${d.ebay_listing_id ? " · déjà publié eBay" : " · brouillon local"}`;
+  const srcLink = document.getElementById("edit-source-link");
+  if (srcLink) {
+    if (d.source_url) {
+      srcLink.href = d.source_url;
+      srcLink.classList.remove("hidden");
+    } else {
+      srcLink.classList.add("hidden");
+    }
+  }
+  // Préremplir variantes depuis le titre
+  const isLed = /led|bande|strip|cob|n[eé]on/i.test(String(d.seo_title || ""));
+  document.getElementById("edit-var-enabled").checked = true;
+  document.getElementById("edit-var-aspect").value = "Couleur";
+  document.getElementById("edit-var-v1").value = isLed ? "Blanc chaud" : "Option A";
+  document.getElementById("edit-var-v2").value = isLed ? "Blanc froid" : "Option B";
+  try {
+    if (d.variations_json) {
+      const v = JSON.parse(d.variations_json);
+      if (v?.aspect) document.getElementById("edit-var-aspect").value = v.aspect;
+      if (v?.values?.[0]) document.getElementById("edit-var-v1").value = v.values[0];
+      if (v?.values?.[1]) document.getElementById("edit-var-v2").value = v.values[1];
+    }
+  } catch (_) {}
+  document.getElementById("modal-content").innerHTML = d.html_description || "<p class='text-zinc-400'>Pas de description</p>";
   const m = document.getElementById("modal");
   m.classList.remove("hidden");
   m.classList.add("flex");
+}
+
+async function saveListingEdits(opts = {}) {
+  const quiet = !!opts.quiet;
+  const id = document.getElementById("edit-listing-id")?.value;
+  if (!id) return false;
+  const seo_title = document.getElementById("edit-seo-title").value.trim();
+  const suggested_price = Number(document.getElementById("edit-price").value);
+  if (!seo_title) {
+    alert("Titre requis");
+    return false;
+  }
+  if (!(suggested_price > 0)) {
+    alert("Prix invalide");
+    return false;
+  }
+  const res = await fetch(API + "/api/listings/" + id, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seo_title, suggested_price }),
+  });
+  const json = await res.json();
+  if (!json.success) {
+    alert(json.error || "Erreur sauvegarde");
+    return false;
+  }
+  if (!quiet) alert("Annonce enregistrée");
+  loadListings();
+  return true;
+}
+
+async function publishListingFromModal() {
+  const id = document.getElementById("edit-listing-id")?.value;
+  if (!id) return;
+  const saved = await saveListingEdits({ quiet: true });
+  if (!saved) return;
+  const envMode = window.__ebxPublishEnv || "sandbox";
+  const warn =
+    envMode === "production"
+      ? "Publier sur eBay PRODUCTION avec les variantes choisies ?"
+      : "Publier en SANDBOX avec les variantes choisies ?";
+  if (!confirm(warn)) return;
+  const varEnabled = document.getElementById("edit-var-enabled")?.checked !== false;
+  const aspect = document.getElementById("edit-var-aspect")?.value.trim() || "Couleur";
+  const v1 = document.getElementById("edit-var-v1")?.value.trim() || "Blanc chaud";
+  const v2 = document.getElementById("edit-var-v2")?.value.trim() || "Blanc froid";
+  const btn = document.getElementById("edit-publish-btn");
+  const original = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Publication…";
+  }
+  try {
+    const res = await fetch(API + "/api/publish-to-ebay/" + id, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        variations: {
+          enabled: varEnabled,
+          aspect,
+          values: [v1, v2].filter(Boolean),
+        },
+      }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const lid = json.data.listingId || "N/A";
+    const vars = (json.data?.variations?.values || []).join(" / ");
+    alert(`Publié ! Listing ID: ${lid}${vars ? `\nVariations: ${vars}` : ""}`);
+    closeModal();
+    loadListings();
+  } catch (err) {
+    alert("Erreur: " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = original || "Enregistrer & Publier";
+    }
+  }
 }
 
 function closeModal() {
@@ -1964,7 +2084,7 @@ async function publishListing(id, btn) {
   const envMode = window.__ebxPublishEnv || "sandbox";
   const warn =
     envMode === "production"
-      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?\n\nL'annonce apparaîtra dans Vendre → Annonces actives de CE compte OAuth."
+      ? "Publier sur eBay PRODUCTION (compte vendeur RÉEL) ?\n\nL'annonce apparaîtra dans Vendre → Annonces actives de CE compte OAuth.\n\nAstuce : clique « Voir » pour modifier titre / prix / couleurs avant."
       : "ATTENTION : mode SANDBOX\n\nL'annonce ira sur le compte TEST (testuser),\nPAS sur ton vrai compte eBay.\n\nPour le réel : mets EBAY_ENV=production dans .env puis redémarre.\n\nContinuer en Sandbox ?";
   if (!confirm(warn)) return;
   const original = btn.textContent;
@@ -1979,7 +2099,7 @@ async function publishListing(id, btn) {
         variations: {
           enabled: true,
           aspect: "Couleur",
-          values: /led|bande|strip/i.test(titleHint)
+          values: /led|bande|strip|cob/i.test(titleHint)
             ? ["Blanc chaud", "Blanc froid"]
             : ["Option A", "Option B"],
         },
@@ -2568,7 +2688,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

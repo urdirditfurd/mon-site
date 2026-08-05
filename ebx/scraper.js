@@ -215,9 +215,29 @@ function extractAliExpressEmbedded(html = "") {
     raw.match(/"formatedActivityPrice"\s*:\s*"([^"]+)"/i) ||
     raw.match(/"formatedPrice"\s*:\s*"([^"]+)"/i) ||
     raw.match(/"formatTradePrice"\s*:\s*"([^"]+)"/i) ||
-    raw.match(/"minPrice"\s*:\s*"?([\d.]+)"?/i) ||
-    raw.match(/"actSkuMultiCurrencyCalPrice"\s*:\s*"?([\d.]+)"?/i);
+    raw.match(/"skuActivityAmount"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"skuAmount"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"actSkuCalPrice"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"actSkuMultiCurrencyCalPrice"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"targetSkuPriceInfo"[^}]{0,200}"salePriceString"\s*:\s*"([^"]+)"/i) ||
+    raw.match(/"salePrice"\s*:\s*"?([\d.]+)"?/i);
   if (priceMatch) out.price = parsePrice(priceMatch[1]);
+  // Fourchette Ali : prendre le prix affiché "max" si min trop bas vs max (évite faux 1–2€)
+  const maxPriceMatch =
+    raw.match(/"maxPrice"\s*:\s*"?([\d.]+)"?/i) ||
+    raw.match(/"maxActivityAmount"\s*:\s*"?([\d.]+)"?/i);
+  const minPriceMatch = raw.match(/"minPrice"\s*:\s*"?([\d.]+)"?/i);
+  if (!out.price && minPriceMatch) out.price = parsePrice(minPriceMatch[1]);
+  if (maxPriceMatch) {
+    const maxP = parsePrice(maxPriceMatch[1]);
+    // Si on n'a que minPrice et max >> min, préfère une moyenne basse crédible (min réel souvent promo variante)
+    if (out.price > 0 && maxP > out.price * 2.5 && maxP < 500) {
+      // Ne pas utiliser un min aberrant : garde max si min semble un leurre (< 30% du max)
+      if (out.price < maxP * 0.35) out.price = maxP;
+    } else if (!out.price && maxP > 0) {
+      out.price = maxP;
+    }
+  }
 
   const imgBlock = raw.match(/"imagePathList"\s*:\s*\[([^\]]{20,8000})\]/);
   if (imgBlock) {
@@ -729,8 +749,11 @@ async function scrapeProductViaJina(url) {
     }
     if (bullets.length >= 6) break;
   }
-  const priceMatch = content.match(/(\d+[.,]\d{2})\s*€/);
-  const price = priceMatch ? parsePrice(priceMatch[1]) : null;
+  const priceMatch =
+    content.match(/(\d+[.,]\d{2})\s*€/) ||
+    content.match(/€\s*(\d+[.,]\d{2})/) ||
+    content.match(/(?:price|prix|EUR)\s*[:=]?\s*(\d+[.,]\d{2})/i);
+  const price = priceMatch ? parsePrice(priceMatch[1] + " €") : null;
 
   if (!title || title.length < 3) throw new Error("Jina: titre introuvable");
 
@@ -1956,13 +1979,16 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
   }
   const uniq = [...byKey.values()];
 
-  // Enrichir les prix manquants (max 6 fiches) avant comparaison
+  // Enrichir les prix manquants (max 6 fiches) avant comparaison — seul le scrape page compte comme prix réel
   const needPrice = uniq.filter((p) => p.url && (p.price == null || p.price <= 0)).slice(0, 6);
   for (const item of needPrice) {
     if (/wholesale-|\/search\/|SearchText=/i.test(item.url)) continue;
     try {
       const detail = await scrapeProduct(item.url);
-      if (detail.price > 0) item.price = detail.price;
+      if (detail.price > 0) {
+        item.price = detail.price;
+        item.priceConfirmed = true;
+      }
       if (detail.title && detail.title.length > 12 && !/^produit |^cdiscount\.com$/i.test(detail.title)) {
         item.title = detail.title;
       }
@@ -1970,8 +1996,23 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
     } catch (_) {}
   }
 
+  // Les prix issus uniquement de snippets Bing restent des hints (pas confirmés)
+  for (const p of uniq) {
+    if (p.price > 0 && !p.priceConfirmed && /\+bing$/i.test(String(p.source || ""))) {
+      p.priceHint = p.price;
+      // Ne pas classer comme prix fiable — le sniper devra confirmer via scrape
+      p.priceUnconfirmed = true;
+    }
+  }
+
   const withPrice = uniq.filter((p) => p.url && p.price != null && p.price > 0);
-  const priced = withPrice.sort((a, b) => a.price - b.price);
+  // Préfère les prix confirmés (scrape page) pour le classement "moins cher"
+  const priced = withPrice.sort((a, b) => {
+    const confA = a.priceConfirmed ? 0 : 1;
+    const confB = b.priceConfirmed ? 0 : 1;
+    if (confA !== confB) return confA - confB;
+    return a.price - b.price;
+  });
   if (priced.length) {
     return { best: priced[0], candidates: priced.slice(0, 8), compared: priced.length };
   }

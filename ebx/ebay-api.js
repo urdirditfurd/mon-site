@@ -316,6 +316,9 @@ function sanitizeAspects(aspects) {
     if (values.length) out[key] = values;
   }
   if (!out.Brand) out.Brand = ["Unbranded"];
+  // eBay FR exige souvent la clé localisée "Marque" (erreur 25002 si absente)
+  if (!out.Marque) out.Marque = out.Brand;
+  if (!out.Brand) out.Brand = out.Marque;
   return out;
 }
 
@@ -545,10 +548,14 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
   const shortDesc = (plain || title).slice(0, 4000);
   const mergedAspects = sanitizeAspects({
     Brand: ["Unbranded"],
+    Marque: ["Sans marque"],
     EAN: ["Does not apply"],
     MPN: ["Does not apply"],
     ...aspects,
   });
+  // Aligne Brand ↔ Marque pour EBAY_FR
+  if (mergedAspects.Brand && !mergedAspects.Marque) mergedAspects.Marque = mergedAspects.Brand;
+  if (mergedAspects.Marque && !mergedAspects.Brand) mergedAspects.Brand = mergedAspects.Marque;
   const ean = options.ean || ["Does not apply"];
 
   const attempts = [
@@ -576,6 +583,7 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
           title,
           aspects: {
             Brand: mergedAspects.Brand || ["Unbranded"],
+            Marque: mergedAspects.Marque || mergedAspects.Brand || ["Sans marque"],
             EAN: ["Does not apply"],
             ...(aspects && Object.keys(aspects).length
               ? Object.fromEntries(Object.entries(aspects).slice(0, 3))
@@ -802,16 +810,19 @@ async function buildAspectsForCategory(token, categoryId, title) {
   const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
 
   // Toujours renseigner Marque + identifiants (eBay les demande souvent)
-  aspects.Brand = [
-    guessAspectValue("Brand", title, isFr ? ["Unbranded", "Sans marque", "Generic"] : ["Unbranded", "Generic"]),
-  ];
+  const brandVal = isFr ? "Sans marque" : "Unbranded";
+  aspects.Brand = [brandVal];
+  aspects.Marque = [brandVal];
   aspects.EAN = ["Does not apply"];
   aspects.MPN = ["Does not apply"];
 
   for (const asp of required) {
     const key = asp.name;
-    if (/^brand$|marque/i.test(key)) {
-      aspects[key] = aspects.Brand;
+    if (/^brand$|^marque$/i.test(key)) {
+      aspects[key] = [guessAspectValue(key, title, asp.values?.length ? asp.values : [brandVal])];
+      // Garde les deux clés synchronisées
+      aspects.Brand = aspects[key];
+      aspects.Marque = aspects[key];
       continue;
     }
     if (/ean|gtin|upc|isbn/i.test(key)) {
@@ -951,7 +962,8 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     const aspects = sanitizeAspects({
       ...baseAspects,
       [variations.aspect]: [value],
-      Brand: baseAspects.Brand || ["Unbranded"],
+      Brand: baseAspects.Brand || baseAspects.Marque || ["Unbranded"],
+      Marque: baseAspects.Marque || baseAspects.Brand || ["Sans marque"],
       EAN: ["Does not apply"],
       MPN: ["Does not apply"],
     });
@@ -972,6 +984,18 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     title: sanitizeEbayTitle(title),
     description: String(listing.html_description || title).slice(0, 490000),
     imageUrls: hostedImages.slice(0, 8),
+    // Aspects communs (Marque obligatoire sur FR — sinon erreur 25002 au publish group)
+    aspects: sanitizeAspects({
+      Brand: baseAspects.Brand || ["Unbranded"],
+      Marque: baseAspects.Marque || baseAspects.Brand || ["Sans marque"],
+      EAN: ["Does not apply"],
+      MPN: ["Does not apply"],
+      ...Object.fromEntries(
+        Object.entries(baseAspects).filter(
+          ([k]) => !new RegExp(`^${variations.aspect}$`, "i").test(k)
+        )
+      ),
+    }),
     variesBy: {
       specifications: [
         {

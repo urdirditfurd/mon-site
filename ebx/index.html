@@ -433,7 +433,11 @@
             <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Paramètres</p>
             <div class="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
               <div class="lg:col-span-2"><label class="text-xs text-zinc-500">Mot-clé / niche</label><input id="snipe-query" type="text" value="éponge maquillage" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
-              <div><label class="text-xs text-zinc-500">Produits à sniper</label><input id="snipe-count" type="number" min="1" max="100" value="3" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
+              <div>
+                <label class="text-xs text-zinc-500">Combien d’annonces</label>
+                <input id="snipe-count" type="number" min="1" max="100" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" />
+                <p class="text-[10px] text-zinc-400 mt-1">Nb de produits à importer/lister en 1 lancement (ex. 1 = une seule annonce)</p>
+              </div>
               <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
               <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option><option>Germany</option><option>United Kingdom</option></select></div>
               <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
@@ -923,11 +927,65 @@
     </div>
   </main>
 
-  <!-- Listing modal -->
+  <!-- Listing edit modal -->
   <div id="modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-auto p-6">
-      <div class="flex justify-between mb-4"><h3 id="modal-title" class="font-semibold"></h3><button onclick="closeModal()" class="text-xl text-zinc-400">&times;</button></div>
-      <div id="modal-content"></div>
+    <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-auto p-6">
+      <div class="flex justify-between items-start mb-4 gap-3">
+        <div>
+          <h3 class="font-semibold text-lg">Modifier l’annonce</h3>
+          <p id="modal-subtitle" class="text-xs text-zinc-400 mt-0.5"></p>
+        </div>
+        <button type="button" onclick="closeModal()" class="text-xl text-zinc-400 hover:text-zinc-700">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Titre eBay</label>
+          <input id="edit-seo-title" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm font-medium" maxlength="80" />
+          <p class="text-[10px] text-zinc-400 mt-1"><span id="edit-title-len">0</span>/80</p>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Prix de vente (€)</label>
+            <input id="edit-price" type="number" step="0.01" min="0.5" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" />
+          </div>
+          <div class="flex items-end">
+            <a id="edit-source-link" href="#" target="_blank" rel="noopener" class="text-xs text-emerald-700 underline hidden">Ouvrir la fiche fournisseur →</a>
+          </div>
+        </div>
+        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <label class="text-sm font-semibold flex items-center gap-2">
+              <input id="edit-var-enabled" type="checkbox" class="toggle" checked />
+              Variations Couleur
+            </label>
+            <span class="text-[10px] text-zinc-400">Modifie avant de publier</span>
+          </div>
+          <div class="grid sm:grid-cols-3 gap-2">
+            <div>
+              <label class="text-[10px] text-zinc-400">Attribut</label>
+              <input id="edit-var-aspect" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Couleur" />
+            </div>
+            <div>
+              <label class="text-[10px] text-zinc-400">Variante 1</label>
+              <input id="edit-var-v1" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Blanc chaud" />
+            </div>
+            <div>
+              <label class="text-[10px] text-zinc-400">Variante 2</label>
+              <input id="edit-var-v2" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Blanc froid" />
+            </div>
+          </div>
+        </div>
+        <div>
+          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Aperçu description</label>
+          <div id="modal-content" class="mt-2 border rounded-xl p-3 max-h-56 overflow-auto bg-white text-sm"></div>
+        </div>
+        <div class="flex flex-wrap gap-2 justify-end pt-2 border-t">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl border text-sm">Fermer</button>
+          <button type="button" id="edit-save-btn" onclick="saveListingEdits()" class="px-4 py-2 rounded-xl border text-sm bg-zinc-50 font-medium">Enregistrer</button>
+          <button type="button" id="edit-publish-btn" onclick="publishListingFromModal()" class="btn-primary text-sm">Enregistrer &amp; Publier</button>
+        </div>
+      </div>
+      <input type="hidden" id="edit-listing-id" value="" />
     </div>
   </div>
 
@@ -948,6 +1006,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-suppliers"></script>
+  <script src="app.js?v=snipe-fix-v2"></script>
 </body>
 </html>

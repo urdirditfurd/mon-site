@@ -13,8 +13,6 @@ const {
   scrapeAliExpressSearch,
   scrapeCdiscountSearch,
   findCheapestSupplier,
-  searchViaBingRss,
-  parsePrice,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   enrichProductListingCopy,
@@ -1623,6 +1621,10 @@ app.post("/api/auto-snipe", async (req, res) => {
           candidates = (cmp.candidates || [])
             .filter((c) => isSupplierProductUrl(c.url))
             .sort((a, b) => {
+              // Prix confirmés (scrape) avant hints Bing
+              const confA = a.priceConfirmed ? 0 : a.priceUnconfirmed ? 2 : a.price > 0 ? 1 : 3;
+              const confB = b.priceConfirmed ? 0 : b.priceUnconfirmed ? 2 : b.price > 0 ? 1 : 3;
+              if (confA !== confB) return confA - confB;
               const pa = a.price != null && a.price > 0 ? a.price : 9999;
               const pb = b.price != null && b.price > 0 ? b.price : 9999;
               if (pa !== pb) return pa - pb;
@@ -1635,23 +1637,27 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({
             type: "suppliers",
             query: supplierQuery,
-            compared: cmp.compared || candidates.filter((c) => c.price > 0).length,
+            compared: candidates.filter((c) => c.priceConfirmed || (c.price > 0 && !c.priceUnconfirmed)).length,
             items: candidates.slice(0, 5).map((c, idx) => ({
               rank: idx + 1,
               source: String(c.source || "").split("+")[0],
               title: String(c.title || "").slice(0, 90),
               price: c.price != null && c.price > 0 ? Number(c.price) : null,
+              priceConfirmed: !!c.priceConfirmed,
+              priceUnconfirmed: !!c.priceUnconfirmed,
               url: c.url,
               best: idx === 0,
             })),
           });
           if (candidates[0]) {
             const best = candidates[0];
+            const priceLabel =
+              best.price != null && best.price > 0
+                ? `${Number(best.price).toFixed(2)}€${best.priceConfirmed ? " (confirmé)" : best.priceUnconfirmed ? " (estimé Bing — à vérifier)" : ""}`
+                : "prix n/a";
             send({
               type: "log",
-              message: `[SOURCE] Meilleur: ${String(best.source).split("+")[0]} @ ${
-                best.price != null && best.price > 0 ? Number(best.price).toFixed(2) + "€" : "prix n/a"
-              } — ${String(best.title || "").slice(0, 50)}`,
+              message: `[SOURCE] Candidat #1: ${String(best.source).split("+")[0]} @ ${priceLabel} — ${String(best.title || "").slice(0, 50)}`,
             });
             if (best.url) {
               send({ type: "log", message: `[SOURCE] Lien: ${best.url}` });
@@ -1672,7 +1678,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
-        // Essaie plusieurs candidats jusqu'à obtenir prix + fiche valides
+        // Essaie plusieurs candidats — le prix FINAL doit venir du scrape page (jamais Bing seul)
         let supplier = null;
         let detail = null;
         for (let ci = 0; ci < Math.min(candidates.length, 5); ci++) {
@@ -1680,44 +1686,78 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({
             type: "log",
             message: `[TRY] Candidat #${ci + 1}/${Math.min(candidates.length, 5)} — ${String(cand.source).split("+")[0]} ${
-              cand.price != null && cand.price > 0 ? "@ " + Number(cand.price).toFixed(2) + "€" : "(prix à confirmer)"
+              cand.price != null && cand.price > 0
+                ? `@ ${Number(cand.price).toFixed(2)}€${cand.priceUnconfirmed ? " (hint)" : ""}`
+                : "(prix à confirmer sur la fiche)"
             }`,
           });
           try {
             detail = await scrapeProduct(cand.url);
             detail.images = (detail.images || []).filter(isRealProductImage);
-            let cost = detail.price || cand.price || null;
-            // Dernier recours : prix dans le snippet Bing pour cet item
-            if (!(cost > 0) && /aliexpress\.com\/item\/(\d+)/i.test(cand.url)) {
-              const id = cand.url.match(/\/item\/(\d+)/i)[1];
-              try {
-                const rss = await searchViaBingRss(`${id} aliexpress`, {
-                  limit: 5,
-                  linkTest: (link) => link.includes(id),
-                });
-                for (const hit of rss) {
-                  const p = parsePrice(hit.snippet) || parsePrice(hit.title);
-                  if (p > 0) {
-                    cost = p;
-                    break;
-                  }
-                }
-              } catch (_) {}
-            }
-            if (cost > 0) {
-              detail.price = cost;
-              supplier = { ...cand, price: cost, title: detail.title || cand.title };
+            // UNIQUEMENT le prix scrapé sur la fiche produit — refuse les snippets Bing
+            let cost = detail.price > 0 ? Number(detail.price) : null;
+            if (!(cost > 0)) {
               send({
                 type: "log",
-                message: `[IMPORT] Détails OK — ${(detail.images || []).length} images, coût ${Number(cost).toFixed(2)}€`,
+                message: `[WARN] Prix fiche introuvable${
+                  cand.priceUnconfirmed && cand.price > 0
+                    ? ` (hint Bing ${Number(cand.price).toFixed(2)}€ ignoré — souvent faux)`
+                    : ""
+                } — essai suivant`,
               });
-              break;
+              detail = null;
+              continue;
             }
+            // Si hint Bing très différent du prix réel → alerte + on garde le réel
+            if (cand.price > 0 && Math.abs(cand.price - cost) / cost > 0.25) {
+              send({
+                type: "log",
+                message: `[PRICE] Hint ${Number(cand.price).toFixed(2)}€ ≠ fiche ${cost.toFixed(2)}€ → on utilise ${cost.toFixed(2)}€ (réel)`,
+              });
+            }
+            detail.price = cost;
+            supplier = {
+              ...cand,
+              price: cost,
+              priceConfirmed: true,
+              priceUnconfirmed: false,
+              title: detail.title || cand.title,
+            };
             send({
               type: "log",
-              message: `[WARN] Prix introuvable pour ce candidat — essai suivant`,
+              message: `[IMPORT] Détails OK — ${(detail.images || []).length} images, coût RÉEL ${cost.toFixed(2)}€`,
             });
-            detail = null;
+            // Rafraîchir le panneau avec le prix confirmé en tête
+            send({
+              type: "suppliers",
+              query: supplierQuery,
+              compared: 1,
+              items: [
+                {
+                  rank: 1,
+                  source: String(supplier.source || "").split("+")[0],
+                  title: String(supplier.title || "").slice(0, 90),
+                  price: cost,
+                  priceConfirmed: true,
+                  url: supplier.url,
+                  best: true,
+                },
+                ...candidates
+                  .filter((c) => c.url !== supplier.url)
+                  .slice(0, 4)
+                  .map((c, idx) => ({
+                    rank: idx + 2,
+                    source: String(c.source || "").split("+")[0],
+                    title: String(c.title || "").slice(0, 90),
+                    price: c.price != null && c.price > 0 ? Number(c.price) : null,
+                    priceConfirmed: !!c.priceConfirmed,
+                    priceUnconfirmed: !!c.priceUnconfirmed,
+                    url: c.url,
+                    best: false,
+                  })),
+              ],
+            });
+            break;
           } catch (e) {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
             detail = null;
@@ -1805,7 +1845,15 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({ type: "log", message: `[LISTING] Publication eBay (mode REEL)...` });
           try {
             const listing = getListingById.get(Number(result.id));
-            const pub = await publishToEbay(listing, listing.id);
+            const pub = await publishToEbay(listing, listing.id, {
+              variations: {
+                enabled: true,
+                aspect: "Couleur",
+                values: /led|bande|strip|cob|n[eé]on/i.test(String(listing.seo_title || ""))
+                  ? ["Blanc chaud", "Blanc froid"]
+                  : ["Option A", "Option B"],
+              },
+            });
             if (pub?.listingId) {
               rememberListingPublish(listing.id, pub);
             }
@@ -2110,12 +2158,13 @@ app.post("/api/listings/dedupe", (_req, res) => {
 
 const updateListingHtml = db.prepare("UPDATE listings SET html_description = ? WHERE id = ?");
 const updateListingTitle = db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?");
+const updateListingPrice = db.prepare("UPDATE listings SET suggested_price = ? WHERE id = ?");
 
 app.patch("/api/listings/:id", (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
-    const { seo_title, html_description } = req.body || {};
+    const { seo_title, html_description, suggested_price } = req.body || {};
     if (seo_title != null) {
       const title = String(seo_title)
         .replace(/\s+/g, " ")
@@ -2128,6 +2177,14 @@ app.patch("/api/listings/:id", (req, res) => {
     if (html_description != null) {
       updateListingHtml.run(String(html_description), listing.id);
       listing.html_description = html_description;
+    }
+    if (suggested_price != null && suggested_price !== "") {
+      const price = Number(suggested_price);
+      if (!(price > 0) || price > 100000) {
+        return res.status(400).json({ success: false, error: "Prix invalide" });
+      }
+      updateListingPrice.run(price, listing.id);
+      listing.suggested_price = price;
     }
     return res.json({ success: true, data: getListingById.get(listing.id) });
   } catch (err) {
