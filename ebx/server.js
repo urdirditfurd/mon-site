@@ -1536,7 +1536,9 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL (anti-ban humain)`,
+      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Prix ${
+        strictVerified ? "VÉRIFIÉ fiche uniquement" : "souple"
+      }`,
     });
     send({
       type: "log",
@@ -1669,39 +1671,15 @@ app.post("/api/auto-snipe", async (req, res) => {
           });
 
           send({
-            type: "suppliers",
-            query: searchQ,
-            compared: candidates.filter((c) => c.priceConfirmed || c.priceFromMarketplaceCard).length,
-            items: candidates.slice(0, 5).map((c, idx) => ({
-              rank: idx + 1,
-              source: String(c.source || "").split("+")[0],
-              title: String(c.title || "").slice(0, 90),
-              price: c.price != null && c.price > 0 ? Number(c.price) : null,
-              priceConfirmed: !!(c.priceConfirmed || c.priceFromMarketplaceCard),
-              priceUnconfirmed: !!c.priceUnconfirmed && !c.priceFromMarketplaceCard && !c.priceConfirmed,
-              url: c.url,
-              best: idx === 0,
-            })),
+            type: "log",
+            message: `[SOURCE] ${candidates.length} candidat(s) bruts trouvés — vérification fiche en cours…`,
           });
-          if (candidates[0]) {
-            const best = candidates[0];
-            const tag = best.priceConfirmed
-              ? "confirmé fiche"
-              : best.priceFromMarketplaceCard
-                ? "prix carte marketplace"
-                : best.price > 0
-                  ? "indicatif"
-                  : "n/a";
+          if (candidates[0]?.url) {
             send({
               type: "log",
-              message: `[SOURCE] Meilleur: ${String(best.source).split("+")[0]} @ ${
-                best.price > 0 ? Number(best.price).toFixed(2) + "€" : "?"
-              } (${tag}) — ${String(best.title || "").slice(0, 50)}`,
-            });
-            if (best.url) send({ type: "log", message: `[SOURCE] Lien: ${best.url}` });
-            send({
-              type: "log",
-              message: `[SOURCE] ${candidates.length} candidat(s) — recherches: ${supplierQueries.map((q) => `"${q}"`).join(", ")}`,
+              message: `[SOURCE] 1er candidat brut: ${String(candidates[0].source).split("+")[0]} — ${String(
+                candidates[0].title || ""
+              ).slice(0, 45)}`,
             });
           }
         } catch (e) {
@@ -1740,6 +1718,21 @@ app.post("/api/auto-snipe", async (req, res) => {
             const detail = await scrapeProduct(cand.url);
             detail.images = (detail.images || []).filter(isRealProductImage);
             let cost = sanitizeProductPrice(detail.price, detail.title || cand.title);
+            // Amazon / Cdiscount : prix carte search du MÊME ASIN/URL = fiable si fiche sans prix (souvent "voir panier")
+            if (
+              !(cost > 0) &&
+              cand.price > 0 &&
+              cand.priceFromMarketplaceCard &&
+              /^(amazon|cdiscount)/i.test(String(cand.source || ""))
+            ) {
+              cost = sanitizeProductPrice(cand.price, detail.title || cand.title);
+              if (cost > 0) {
+                send({
+                  type: "log",
+                  message: `[VERIFY] ✓ ${Number(cost).toFixed(2)}€ (carte ${String(cand.source).split("+")[0]} — fiche sans prix affiché)`,
+                });
+              }
+            }
             if (!(cost > 0) && !strictVerified) {
               const resolved = await resolvePriceViaSearch(cand.url, detail.title || cand.title).catch(() => null);
               cost = sanitizeProductPrice(resolved, detail.title || cand.title);

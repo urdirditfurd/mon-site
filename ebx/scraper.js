@@ -109,9 +109,22 @@ function parseAmazon($, baseUrl) {
 
   const priceText =
     cleanText($(".a-price .a-offscreen").first().text()) ||
+    cleanText($("#corePrice_feature_div .a-offscreen").first().text()) ||
+    cleanText($("#corePriceDisplay_desktop_feature_div .a-offscreen").first().text()) ||
     cleanText($("#priceblock_ourprice").text()) ||
-    cleanText($("#priceblock_dealprice").text());
-  const price = parsePrice(priceText);
+    cleanText($("#priceblock_dealprice").text()) ||
+    cleanText($("#price_inside_buybox").text()) ||
+    cleanText($("input#twister-plus-price-data-price").attr("value")) ||
+    cleanText($("[data-a-color='price'] .a-offscreen").first().text());
+  let price = parsePrice(priceText);
+  if (!(price > 0)) {
+    const html = $.root().html() || "";
+    const m =
+      html.match(/"priceAmount"\s*:\s*([\d.]+)/i) ||
+      html.match(/"displayPrice"\s*:\s*"([^"]+)"/i) ||
+      html.match(/data-a-color="price"[^>]*>[\s\S]*?a-offscreen[^>]*>([^<]+)/i);
+    if (m) price = parsePrice(m[1]);
+  }
 
   const bullets = [];
   $("#feature-bullets li span.a-list-item").each((_, el) => {
@@ -1638,49 +1651,85 @@ function buildKeywordAnalysisFromItems(query, items) {
 async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
   const url = `https://www.amazon.fr/s?k=${encodeURIComponent(query)}`;
 
-  // Direct
+  // Direct — sélecteurs 2025/2026 : h2 n'a plus de <a>, lien via a[href*=/dp/] ou data-asin
   try {
-    const { html, finalUrl } = await fetchHtml(url);
+    const { html, finalUrl } = await fetchHtml(url, {
+      Referer: "https://www.amazon.fr/",
+    });
     const $ = cheerio.load(html);
     const items = [];
+    const seen = new Set();
+
+    const pushItem = (title, link, price, image) => {
+      if (!title || title.length < 8 || !link) return;
+      const asin = (String(link).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
+      const key = asin || String(link).split("?")[0];
+      if (seen.has(key)) return;
+      if (/sign in|compte|panier|prime|deliver to|results for/i.test(title)) return;
+      seen.add(key);
+      const canonical = asin ? `https://www.amazon.fr/dp/${asin}` : String(link).split("?")[0];
+      items.push({
+        title: title.slice(0, 180),
+        url: canonical,
+        price: price > 0 ? price : null,
+        image: image || null,
+        source: "amazon",
+        priceFromMarketplaceCard: !!(price > 0),
+      });
+    };
+
     $("[data-component-type='s-search-result']").each((_, el) => {
       if (items.length >= limit) return;
       const root = $(el);
-      const title = cleanText(root.find("h2 a span").first().text() || root.find("h2").text());
-      const linkPath = root.find("h2 a").attr("href");
-      const link = absUrl(finalUrl, linkPath);
-      const price = parsePrice(root.find(".a-price .a-offscreen").first().text());
-      const image = root.find("img.s-image").attr("src");
-      if (title && link) {
-        items.push({
-          title,
-          url: link,
-          price,
-          image,
-          source: "amazon",
-          priceFromMarketplaceCard: !!(price > 0),
-        });
-      }
+      const asin = String(root.attr("data-asin") || "").trim();
+      if (!asin || asin.length < 8) return;
+      const title = cleanText(
+        root.find("h2").first().text() ||
+          root.find("span.a-size-base-plus, span.a-size-medium, span.a-text-normal").first().text()
+      );
+      let href =
+        root.find('a[href*="/dp/"]').first().attr("href") ||
+        root.find('a[href*="/gp/product/"]').first().attr("href") ||
+        "";
+      let link = href ? absUrl(finalUrl, href) : `https://www.amazon.fr/dp/${asin}`;
+      const price = parsePrice(
+        root.find(".a-price .a-offscreen").first().text() ||
+          root.find(".a-price").first().text() ||
+          root.find("[data-a-color='price']").first().text()
+      );
+      const image = root.find("img.s-image").attr("src") || root.find("img").first().attr("src");
+      pushItem(title, link, price, image);
     });
-    if (items.length) return items;
+
+    // Fallback regex si structure DOM encore différente
+    if (!items.length) {
+      const asins = [...new Set((html.match(/data-asin="([A-Z0-9]{10})"/g) || []).map((m) => m.match(/([A-Z0-9]{10})/)[1]))];
+      for (const asin of asins.slice(0, limit * 2)) {
+        if (items.length >= limit) break;
+        // Cherche un titre proche de l'asin dans le HTML
+        const idx = html.indexOf(`data-asin="${asin}"`);
+        const slice = html.slice(idx, idx + 2500);
+        const titleMatch =
+          slice.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([^<]{12,160})<\/span>/i) ||
+          slice.match(/<h2[^>]*>([^<]{12,160})<\/h2>/i);
+        const title = cleanText(titleMatch?.[1] || `${query} — Amazon ${asin}`);
+        const priceMatch = slice.match(/a-offscreen[^>]*>([^<]*\d+[.,]\d{2}[^<]*)</i);
+        const price = parsePrice(priceMatch?.[1] || "");
+        pushItem(title, `https://www.amazon.fr/dp/${asin}`, price, null);
+      }
+    }
+
+    if (items.length) {
+      console.log(`[amazon search] ${items.length} résultat(s) pour "${query}"`);
+      return items.slice(0, limit);
+    }
   } catch (err) {
     console.warn("[amazon search direct]", err.message);
   }
 
   // Jina fallback — parse markdown links
   try {
-    const res = await fetch(`https://r.jina.ai/${url}`, {
-      headers: { "User-Agent": UA },
-    });
-    if (!res.ok) throw new Error(`Jina ${res.status}`);
-    const contentType = res.headers.get("content-type") || "";
-    let content = "";
-    if (contentType.includes("application/json")) {
-      const payload = await res.json();
-      content = payload.data?.content || "";
-    } else {
-      content = await res.text();
-    }
+    const content = await fetchJinaContent(url);
     const items = [];
     const re = /\[([^\]]{8,140})\]\((https:\/\/www\.amazon\.[a-z.]+\/[^\s)]+)\)/g;
     let m;
@@ -1689,30 +1738,52 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
       const title = cleanText(m[1]);
       let link = m[2].split(")")[0].split(" ")[0];
       if (seen.has(link) || /sign in|account|panier|prime|deliver to|filters|keyboard|skip to/i.test(title)) continue;
-      if (!/\/(dp|gp\/product)\//i.test(link) && !/\/sspa\/click/i.test(link)) {
-        // garder aussi les liens /dp/ dans query params
-        if (!link.includes("/dp/") && !link.includes("%2Fdp%2F")) continue;
-      }
+      const asin = (link.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
+      if (!asin && !/\/dp\//i.test(link)) continue;
       seen.add(link);
-      items.push({ title, url: link, price: null, image: null, source: "amazon+jina" });
+      items.push({
+        title,
+        url: asin ? `https://www.amazon.fr/dp/${asin}` : link,
+        price: null,
+        image: null,
+        source: "amazon+jina",
+      });
     }
-    // fallback looser: any amazon dp link nearby title lines
     if (!items.length) {
       const dpRe = /https:\/\/www\.amazon\.[a-z.]+\/(?:[^\/\s]+\/)?dp\/[A-Z0-9]{8,12}/g;
       const dps = [...new Set(content.match(dpRe) || [])].slice(0, limit);
       dps.forEach((link, i) => {
+        const asin = (link.match(/\/dp\/([A-Z0-9]{10})/i) || [])[1];
         items.push({
           title: `${query} — produit ${i + 1}`,
-          url: link,
+          url: asin ? `https://www.amazon.fr/dp/${asin}` : link,
           price: null,
           image: null,
           source: "amazon+jina",
         });
       });
     }
-    return items;
+    if (items.length) return items;
   } catch (err) {
     console.warn("[amazon search jina]", err.message);
+  }
+
+  // Bing / DDG en dernier recours
+  try {
+    const ddg = await searchViaDuckDuckGo(`${query} site:amazon.fr/dp`, {
+      limit,
+      linkTest: (link) => /amazon\.[a-z.]+\/(?:.*\/)?(?:dp|gp\/product)\//i.test(link),
+    });
+    return ddg.map((i) => {
+      const asin = (String(i.url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
+      return {
+        ...i,
+        url: asin ? `https://www.amazon.fr/dp/${asin}` : i.url,
+        source: "amazon+ddg",
+      };
+    });
+  } catch (err) {
+    console.warn("[amazon search ddg]", err.message);
     return [];
   }
 }
@@ -2276,10 +2347,27 @@ async function findCheapestSupplier(query, { sources = ["amazon", "aliexpress", 
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
     return a.price - b.price;
   });
-  if (priced.length) {
+
+  // Toujours inclure aussi des fiches sans prix (le pass VERIFY les scrapera)
+  const noPrice = uniq
+    .filter((p) => p.url && p.title && !(p.price > 0))
+    .filter((p) => !/^cdiscount\.com$/i.test(p.title))
+    .slice(0, 8);
+
+  const merged = [];
+  const seenUrl = new Set();
+  for (const p of [...priced, ...noPrice]) {
+    const key = String(p.url).split("?")[0].toLowerCase();
+    if (seenUrl.has(key)) continue;
+    seenUrl.add(key);
+    merged.push(p);
+    if (merged.length >= 8) break;
+  }
+
+  if (merged.length) {
     return {
-      best: priced[0],
-      candidates: priced.slice(0, 8),
+      best: priced[0] || merged[0],
+      candidates: merged,
       compared: priced.filter((p) => p.priceConfirmed || p.priceFromMarketplaceCard).length,
     };
   }
