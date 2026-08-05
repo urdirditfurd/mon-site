@@ -4,22 +4,142 @@
  */
 
 const cheerio = require("cheerio");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
 
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+const BROWSER_HEADERS = {
+  "User-Agent": UA,
+  "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Cache-Control": "max-age=0",
+  "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  "Sec-Ch-Ua-Mobile": "?0",
+  "Sec-Ch-Ua-Platform": '"Windows"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+};
 
 async function fetchHtml(url, extraHeaders = {}) {
   const res = await fetch(url, {
     headers: {
-      "User-Agent": UA,
-      "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      ...BROWSER_HEADERS,
       ...extraHeaders,
     },
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} pour ${url}`);
   return { html: await res.text(), finalUrl: res.url };
+}
+
+/** curl.exe — souvent moins bloqué que fetch() Node sur Windows. */
+async function fetchHtmlViaCurl(url) {
+  const bin = process.platform === "win32" ? "curl.exe" : "curl";
+  const { stdout } = await execFileAsync(
+    bin,
+    [
+      "-sL",
+      "--max-time",
+      "30",
+      "-A",
+      UA,
+      "-H",
+      "Accept-Language: fr-FR,fr;q=0.9",
+      "-H",
+      "Accept: text/html,application/xhtml+xml",
+      "-H",
+      "Sec-Fetch-Dest: document",
+      "-H",
+      "Sec-Fetch-Mode: navigate",
+      url,
+    ],
+    { maxBuffer: 12 * 1024 * 1024, windowsHide: true }
+  );
+  if (!stdout || stdout.length < 500) throw new Error("curl: réponse vide");
+  return { html: stdout, finalUrl: url };
+}
+
+/**
+ * Chrome/Edge installé (playwright-core) — contournement anti-bot Amazon sur Windows.
+ * Pas de téléchargement Chromium : utilise le navigateur déjà présent.
+ */
+async function fetchHtmlViaChrome(url, { waitMs = 2500 } = {}) {
+  let chromium;
+  try {
+    ({ chromium } = require("playwright-core"));
+  } catch {
+    throw new Error("playwright-core non installé (npm i playwright-core)");
+  }
+  const channels = process.platform === "win32" ? ["chrome", "msedge", "chromium"] : ["chrome", "chromium"];
+  let lastErr = null;
+  for (const channel of channels) {
+    let browser;
+    try {
+      browser = await chromium.launch({
+        channel,
+        headless: true,
+        args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+      });
+      const page = await browser.newPage({
+        userAgent: UA,
+        locale: "fr-FR",
+        extraHTTPHeaders: { "Accept-Language": "fr-FR,fr;q=0.9" },
+      });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await new Promise((r) => setTimeout(r, waitMs));
+      const html = await page.content();
+      const finalUrl = page.url();
+      await browser.close();
+      if (html.length < 2000) throw new Error("Chrome: HTML trop court");
+      console.log(`[fetch chrome/${channel}] OK len=${html.length}`);
+      return { html, finalUrl };
+    } catch (e) {
+      lastErr = e;
+      try {
+        if (browser) await browser.close();
+      } catch (_) {}
+    }
+  }
+  throw lastErr || new Error("Chrome/Edge introuvable");
+}
+
+/** Essaie fetch → curl → Chrome jusqu'à obtenir une page exploitable. */
+async function fetchHtmlResilient(url, { preferChrome = false, extraHeaders = {} } = {}) {
+  const attempts = preferChrome
+    ? [
+        () => fetchHtmlViaChrome(url),
+        () => fetchHtml(url, extraHeaders),
+        () => fetchHtmlViaCurl(url),
+      ]
+    : [
+        () => fetchHtml(url, extraHeaders),
+        () => fetchHtmlViaCurl(url),
+        () => fetchHtmlViaChrome(url),
+      ];
+  let lastErr = null;
+  for (const run of attempts) {
+    try {
+      const out = await run();
+      if (out?.html && out.html.length > 800) return out;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error(`fetchHtmlResilient failed: ${url}`);
+}
+
+function isAmazonBlockedHtml(html = "") {
+  const h = String(html || "").slice(0, 8000);
+  return /opfcaptcha|validateCaptcha|api\/challenge|sorry\/index|robot check|enter the characters|automated access/i.test(
+    h
+  );
 }
 
 function absUrl(base, src) {
@@ -938,10 +1058,19 @@ async function scrapeProduct(url) {
   const source = detectSource(url);
   let directProduct = null;
 
-  // 1) Tentative fetch direct
+  // 1) Tentative fetch (Node → curl → Chrome si Amazon)
   try {
-    const { html, finalUrl } = await fetchHtml(url);
-    if (isBlockedSupplierHtml(html)) {
+    let html;
+    let finalUrl;
+    try {
+      ({ html, finalUrl } = await fetchHtmlResilient(url, {
+        preferChrome: source === "amazon",
+        extraHeaders: { Referer: source === "amazon" ? "https://www.amazon.fr/" : undefined },
+      }));
+    } catch (e) {
+      throw e;
+    }
+    if (isBlockedSupplierHtml(html) || (source === "amazon" && isAmazonBlockedHtml(html))) {
       throw new Error("Page fournisseur bloquée (captcha)");
     }
     const $ = cheerio.load(html);
@@ -1646,88 +1775,127 @@ function buildKeywordAnalysisFromItems(query, items) {
 }
 
 /**
+ * Parse HTML résultats Amazon → items {title,url,price,image}
+ */
+function parseAmazonSearchHtml(html, finalUrl, query, limit = 5) {
+  const $ = cheerio.load(html);
+  const items = [];
+  const seen = new Set();
+
+  const pushItem = (title, link, price, image) => {
+    if (!title || title.length < 8 || !link) return;
+    const asin = (String(link).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
+    const key = asin || String(link).split("?")[0];
+    if (seen.has(key)) return;
+    if (/sign in|compte|panier|prime|deliver to|results for/i.test(title)) return;
+    seen.add(key);
+    const canonical = asin ? `https://www.amazon.fr/dp/${asin}` : String(link).split("?")[0];
+    items.push({
+      title: title.slice(0, 180),
+      url: canonical,
+      price: price > 0 ? price : null,
+      image: image || null,
+      source: "amazon",
+      priceFromMarketplaceCard: !!(price > 0),
+    });
+  };
+
+  $("[data-component-type='s-search-result']").each((_, el) => {
+    if (items.length >= limit) return;
+    const root = $(el);
+    const asin = String(root.attr("data-asin") || "").trim();
+    if (!asin || asin.length < 8) return;
+    const title = cleanText(
+      root.find("h2").first().text() ||
+        root.find("span.a-size-base-plus, span.a-size-medium, span.a-text-normal").first().text()
+    );
+    const href =
+      root.find('a[href*="/dp/"]').first().attr("href") ||
+      root.find('a[href*="/gp/product/"]').first().attr("href") ||
+      "";
+    const link = href ? absUrl(finalUrl, href) : `https://www.amazon.fr/dp/${asin}`;
+    const price = parsePrice(
+      root.find(".a-price .a-offscreen").first().text() ||
+        root.find(".a-price").first().text() ||
+        root.find("[data-a-color='price']").first().text()
+    );
+    const image = root.find("img.s-image").attr("src") || root.find("img").first().attr("src");
+    pushItem(title, link, price, image);
+  });
+
+  if (!items.length) {
+    const asins = [
+      ...new Set(
+        (html.match(/data-asin="([A-Z0-9]{10})"/g) || []).map((m) => m.match(/([A-Z0-9]{10})/)[1])
+      ),
+    ];
+    for (const asin of asins.slice(0, limit * 2)) {
+      if (items.length >= limit) break;
+      const idx = html.indexOf(`data-asin="${asin}"`);
+      const slice = html.slice(idx, idx + 2500);
+      const titleMatch =
+        slice.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([^<]{12,160})<\/span>/i) ||
+        slice.match(/<h2[^>]*>([^<]{12,160})<\/h2>/i);
+      const title = cleanText(titleMatch?.[1] || `${query} — Amazon ${asin}`);
+      const priceMatch = slice.match(/a-offscreen[^>]*>([^<]*\d+[.,]\d{2}[^<]*)</i);
+      const price = parsePrice(priceMatch?.[1] || "");
+      pushItem(title, `https://www.amazon.fr/dp/${asin}`, price, null);
+    }
+  }
+  return items.slice(0, limit);
+}
+
+/**
  * Recherche produits fournisseurs (Amazon FR search page)
  */
 async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
   const url = `https://www.amazon.fr/s?k=${encodeURIComponent(query)}`;
 
-  // Direct — sélecteurs 2025/2026 : h2 n'a plus de <a>, lien via a[href*=/dp/] ou data-asin
+  // 1) fetch → curl → Chrome (anti-bot Windows)
   try {
-    const { html, finalUrl } = await fetchHtml(url, {
-      Referer: "https://www.amazon.fr/",
+    const { html, finalUrl } = await fetchHtmlResilient(url, {
+      preferChrome: false,
+      extraHeaders: { Referer: "https://www.amazon.fr/" },
     });
-    const $ = cheerio.load(html);
-    const items = [];
-    const seen = new Set();
-
-    const pushItem = (title, link, price, image) => {
-      if (!title || title.length < 8 || !link) return;
-      const asin = (String(link).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
-      const key = asin || String(link).split("?")[0];
-      if (seen.has(key)) return;
-      if (/sign in|compte|panier|prime|deliver to|results for/i.test(title)) return;
-      seen.add(key);
-      const canonical = asin ? `https://www.amazon.fr/dp/${asin}` : String(link).split("?")[0];
-      items.push({
-        title: title.slice(0, 180),
-        url: canonical,
-        price: price > 0 ? price : null,
-        image: image || null,
-        source: "amazon",
-        priceFromMarketplaceCard: !!(price > 0),
-      });
-    };
-
-    $("[data-component-type='s-search-result']").each((_, el) => {
-      if (items.length >= limit) return;
-      const root = $(el);
-      const asin = String(root.attr("data-asin") || "").trim();
-      if (!asin || asin.length < 8) return;
-      const title = cleanText(
-        root.find("h2").first().text() ||
-          root.find("span.a-size-base-plus, span.a-size-medium, span.a-text-normal").first().text()
-      );
-      let href =
-        root.find('a[href*="/dp/"]').first().attr("href") ||
-        root.find('a[href*="/gp/product/"]').first().attr("href") ||
-        "";
-      let link = href ? absUrl(finalUrl, href) : `https://www.amazon.fr/dp/${asin}`;
-      const price = parsePrice(
-        root.find(".a-price .a-offscreen").first().text() ||
-          root.find(".a-price").first().text() ||
-          root.find("[data-a-color='price']").first().text()
-      );
-      const image = root.find("img.s-image").attr("src") || root.find("img").first().attr("src");
-      pushItem(title, link, price, image);
-    });
-
-    // Fallback regex si structure DOM encore différente
-    if (!items.length) {
-      const asins = [...new Set((html.match(/data-asin="([A-Z0-9]{10})"/g) || []).map((m) => m.match(/([A-Z0-9]{10})/)[1]))];
-      for (const asin of asins.slice(0, limit * 2)) {
-        if (items.length >= limit) break;
-        // Cherche un titre proche de l'asin dans le HTML
-        const idx = html.indexOf(`data-asin="${asin}"`);
-        const slice = html.slice(idx, idx + 2500);
-        const titleMatch =
-          slice.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([^<]{12,160})<\/span>/i) ||
-          slice.match(/<h2[^>]*>([^<]{12,160})<\/h2>/i);
-        const title = cleanText(titleMatch?.[1] || `${query} — Amazon ${asin}`);
-        const priceMatch = slice.match(/a-offscreen[^>]*>([^<]*\d+[.,]\d{2}[^<]*)</i);
-        const price = parsePrice(priceMatch?.[1] || "");
-        pushItem(title, `https://www.amazon.fr/dp/${asin}`, price, null);
+    const blocked = isAmazonBlockedHtml(html);
+    const cardCount = (html.match(/data-component-type="s-search-result"/g) || []).length;
+    console.log(
+      `[amazon search] HTML len=${html.length} cards=${cardCount} captcha=${blocked ? "oui" : "non"}`
+    );
+    if (!blocked) {
+      const items = parseAmazonSearchHtml(html, finalUrl, query, limit);
+      if (items.length) {
+        console.log(`[amazon search] ${items.length} résultat(s) pour "${query}"`);
+        return items;
+      }
+    } else {
+      console.warn("[amazon search] page captcha/robot — essai Chrome…");
+      try {
+        const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 3500 });
+        const items = parseAmazonSearchHtml(viaChrome.html, viaChrome.finalUrl, query, limit);
+        if (items.length) {
+          console.log(`[amazon search chrome] ${items.length} résultat(s) pour "${query}"`);
+          return items;
+        }
+      } catch (e) {
+        console.warn("[amazon search chrome]", e.message);
       }
     }
-
-    if (items.length) {
-      console.log(`[amazon search] ${items.length} résultat(s) pour "${query}"`);
-      return items.slice(0, limit);
-    }
   } catch (err) {
-    console.warn("[amazon search direct]", err.message);
+    console.warn("[amazon search direct/curl]", err.message);
+    try {
+      const viaChrome = await fetchHtmlViaChrome(url, { waitMs: 3500 });
+      const items = parseAmazonSearchHtml(viaChrome.html, viaChrome.finalUrl, query, limit);
+      if (items.length) {
+        console.log(`[amazon search chrome] ${items.length} résultat(s) pour "${query}"`);
+        return items;
+      }
+    } catch (e) {
+      console.warn("[amazon search chrome]", e.message);
+    }
   }
 
-  // Jina fallback — parse markdown links
+  // 2) Jina
   try {
     const content = await fetchJinaContent(url);
     const items = [];
@@ -1749,43 +1917,34 @@ async function scrapeAmazonSearch(query, { limit = 5 } = {}) {
         source: "amazon+jina",
       });
     }
-    if (!items.length) {
-      const dpRe = /https:\/\/www\.amazon\.[a-z.]+\/(?:[^\/\s]+\/)?dp\/[A-Z0-9]{8,12}/g;
-      const dps = [...new Set(content.match(dpRe) || [])].slice(0, limit);
-      dps.forEach((link, i) => {
-        const asin = (link.match(/\/dp\/([A-Z0-9]{10})/i) || [])[1];
-        items.push({
-          title: `${query} — produit ${i + 1}`,
-          url: asin ? `https://www.amazon.fr/dp/${asin}` : link,
-          price: null,
-          image: null,
-          source: "amazon+jina",
-        });
-      });
-    }
     if (items.length) return items;
   } catch (err) {
     console.warn("[amazon search jina]", err.message);
   }
 
-  // Bing / DDG en dernier recours
+  // 3) Bing / DDG
   try {
     const ddg = await searchViaDuckDuckGo(`${query} site:amazon.fr/dp`, {
       limit,
       linkTest: (link) => /amazon\.[a-z.]+\/(?:.*\/)?(?:dp|gp\/product)\//i.test(link),
     });
-    return ddg.map((i) => {
-      const asin = (String(i.url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
-      return {
-        ...i,
-        url: asin ? `https://www.amazon.fr/dp/${asin}` : i.url,
-        source: "amazon+ddg",
-      };
-    });
+    if (ddg.length) {
+      console.log(`[amazon search ddg/bing] ${ddg.length} lien(s)`);
+      return ddg.map((i) => {
+        const asin = (String(i.url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i) || [])[1];
+        return {
+          ...i,
+          url: asin ? `https://www.amazon.fr/dp/${asin}` : i.url,
+          source: "amazon+ddg",
+        };
+      });
+    }
   } catch (err) {
     console.warn("[amazon search ddg]", err.message);
-    return [];
   }
+
+  console.warn(`[amazon search] ÉCHEC total pour "${query}" — installe Chrome ou colle une URL /dp/ en Import Manuel`);
+  return [];
 }
 
 async function fetchJinaContent(url) {

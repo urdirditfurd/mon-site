@@ -2,14 +2,15 @@
   "name": "ebx",
   "version": "1.0.0",
   "description": "EBX — AI Dropshipping Automation Dashboard with Local LLM",
-  "main": "server.js",
+  "main": "ebx/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "kill-port": "node scripts/kill-port.js 3000",
-    "restart": "node scripts/kill-port.js 3000 && node server.js",
-    "policies": "node create-policies.js",
-    "check": "node check-setup.js"
+    "start": "node ebx/server.js",
+    "dev": "node ebx/server.js",
+    "kill-port": "node ebx/scripts/kill-port.js 3000",
+    "restart": "node ebx/scripts/kill-port.js 3000 && node ebx/server.js",
+    "policies": "node ebx/create-policies.js",
+    "policies:prod": "node ebx/create-policies.js --prod",
+    "check": "node ebx/check-setup.js"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -19,6 +20,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonrepair": "^3.11.2",
-    "openai": "^4.77.0"
+    "openai": "^4.77.0",
+    "playwright-core": "^1.49.1"
   }
 }

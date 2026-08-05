@@ -454,9 +454,9 @@
               <label class="flex items-center justify-between gap-4 text-sm"><span>Prix vérifié fiche uniquement<br><span class="text-xs text-zinc-400">Ignore Bing / cartes — seul un prix scrapé sur la page produit compte (recommandé)</span></span><input id="snipe-verified" type="checkbox" class="toggle" checked /></label>
             </div>
             <p class="text-[11px] text-zinc-500 mt-3 leading-relaxed">
-              <strong class="text-zinc-700">Fiabilité :</strong> AliExpress bloque souvent le scrape (captcha) → préfère
-              <em>Source = Amazon</em> pour des prix vérifiés, ou colle l’URL Ali exacte dans
-              <em>Import Manuel</em>. EBX officiel utilise des connecteurs fournisseurs dédiés ; ce clone vérifie chaque fiche une par une.
+              <strong class="text-zinc-700">Fiabilité :</strong> sur Windows, Amazon bloque souvent Node —
+              le serveur utilise alors <em>curl</em> puis <em>Chrome/Edge</em> installé (playwright-core).
+              Garde Chrome installé. Sinon colle l’URL produit dans <em>Import Manuel</em>.
             </p>
           </div>
 
@@ -1012,6 +1012,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-amazon-fix"></script>
+  <script src="app.js?v=snipe-chrome-v1"></script>
 </body>
 </html>
