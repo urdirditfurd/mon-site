@@ -150,14 +150,47 @@ function extractImagesFromHtml(html) {
     .filter(Boolean);
 }
 
-function applyImageOrderToHtml(html, images) {
+function extractImageFitsFromHtml(html, count) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = String(html || "");
+  const tags = [...wrapper.querySelectorAll("img")];
+  const fits = [];
+  for (let i = 0; i < count; i++) {
+    const style = String(tags[i]?.getAttribute("style") || "").toLowerCase();
+    fits.push(/object-fit\s*:\s*contain/i.test(style) ? "contain" : "cover");
+  }
+  return fits;
+}
+
+function applyImagePresentationToHtml(html, images, fits) {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = String(html || "");
   const tags = [...wrapper.querySelectorAll("img")];
   tags.forEach((img, idx) => {
     if (images[idx]) img.setAttribute("src", images[idx]);
+    const fit = fits[idx] === "contain" ? "contain" : "cover";
+    let style = String(img.getAttribute("style") || "");
+    if (/object-fit\s*:/i.test(style)) {
+      style = style.replace(/object-fit\s*:\s*[^;]+;?/gi, `object-fit:${fit};`);
+    } else {
+      style = `${style.replace(/;?\s*$/, "")};object-fit:${fit};`.replace(/^;/, "");
+    }
+    // contain = moins zoomé : laisse un peu plus de hauteur visible
+    if (fit === "contain") {
+      if (/max-height\s*:/i.test(style)) {
+        style = style.replace(/max-height\s*:\s*[^;]+;?/gi, "max-height:360px;");
+      }
+      if (!/background\s*:/i.test(style)) {
+        style += "background:#f4f4f5;";
+      }
+    }
+    img.setAttribute("style", style.replace(/;;+/g, ";").trim());
   });
   return wrapper.innerHTML;
+}
+
+function applyImageOrderToHtml(html, images) {
+  return applyImagePresentationToHtml(html, images, editImageFits);
 }
 
 function renderEditImagesManager() {
@@ -170,12 +203,20 @@ function renderEditImagesManager() {
   box.innerHTML = editImageUrls
     .map((src, idx) => {
       const isMain = idx === 0;
+      const fit = editImageFits[idx] === "contain" ? "contain" : "cover";
+      const zoomLabel = fit === "contain" ? "Vue entière" : "Zoomée";
       return `<div class="rounded-xl overflow-hidden border bg-white ${isMain ? "ring-2 ring-brand-500 border-brand-200" : "border-zinc-200"}">
-        <img src="${escapeHtml(src)}" class="w-full h-32 object-cover bg-zinc-50" alt="Image ${idx + 1}" />
+        <div class="w-full h-36 bg-zinc-100 flex items-center justify-center overflow-hidden">
+          <img src="${escapeHtml(src)}" class="w-full h-full bg-zinc-50" style="object-fit:${fit}" alt="Image ${idx + 1}" />
+        </div>
         <div class="p-2 space-y-2">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-[11px] ${isMain ? "text-brand-700 font-semibold" : "text-zinc-400"}">#${idx + 1}${isMain ? " · Principale" : ""}</span>
+            <span class="text-[11px] ${isMain ? "text-brand-700 font-semibold" : "text-zinc-400"}">#${idx + 1}${isMain ? " · Principale" : ""} · ${zoomLabel}</span>
             <button type="button" onclick="promoteEditImage(${idx})" class="text-[11px] px-2 py-1 rounded border ${isMain ? "bg-brand-50 border-brand-200 text-brand-700" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}">Première</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="zoomEditImage(${idx}, -1)" class="px-2 py-1.5 rounded border text-sm font-semibold border-zinc-200 text-zinc-700 hover:bg-zinc-50" title="Dézoomer (voir toute la photo)">−</button>
+            <button type="button" onclick="zoomEditImage(${idx}, 1)" class="px-2 py-1.5 rounded border text-sm font-semibold border-zinc-200 text-zinc-700 hover:bg-zinc-50" title="Zoomer (remplir le cadre)">+</button>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <button type="button" onclick="moveEditImage(${idx}, -1)" class="px-2 py-1 rounded border text-xs ${idx === 0 ? "text-zinc-300 border-zinc-100 cursor-not-allowed" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}" ${idx === 0 ? "disabled" : ""}>← Gauche</button>
@@ -193,27 +234,47 @@ function renderEditModalPreview() {
   renderEditImagesManager();
 }
 
+function syncEditImagePresentation() {
+  editHtmlDraft = applyImagePresentationToHtml(editHtmlDraft, editImageUrls, editImageFits);
+  renderEditModalPreview();
+}
+
 function moveEditImage(index, delta) {
   const from = Number(index);
   const to = from + Number(delta);
   if (from < 0 || from >= editImageUrls.length || to < 0 || to >= editImageUrls.length) return;
   const next = [...editImageUrls];
+  const nextFits = [...editImageFits];
   const [img] = next.splice(from, 1);
+  const [fit] = nextFits.splice(from, 1);
   next.splice(to, 0, img);
+  nextFits.splice(to, 0, fit || "cover");
   editImageUrls = next;
-  editHtmlDraft = applyImageOrderToHtml(editHtmlDraft, editImageUrls);
-  renderEditModalPreview();
+  editImageFits = nextFits;
+  syncEditImagePresentation();
 }
 
 function promoteEditImage(index) {
   const idx = Number(index);
   if (idx <= 0 || idx >= editImageUrls.length) return;
   const next = [...editImageUrls];
+  const nextFits = [...editImageFits];
   const [img] = next.splice(idx, 1);
+  const [fit] = nextFits.splice(idx, 1);
   next.unshift(img);
+  nextFits.unshift(fit || "cover");
   editImageUrls = next;
-  editHtmlDraft = applyImageOrderToHtml(editHtmlDraft, editImageUrls);
-  renderEditModalPreview();
+  editImageFits = nextFits;
+  syncEditImagePresentation();
+}
+
+/** − = vue entière (moins zoomé), + = remplir le cadre (plus zoomé). */
+function zoomEditImage(index, direction) {
+  const idx = Number(index);
+  if (idx < 0 || idx >= editImageUrls.length) return;
+  while (editImageFits.length < editImageUrls.length) editImageFits.push("cover");
+  editImageFits[idx] = Number(direction) < 0 ? "contain" : "cover";
+  syncEditImagePresentation();
 }
 
 if (typeof localStorage !== "undefined" && localStorage.getItem("ebx-dark") === "1") {
@@ -234,6 +295,8 @@ let replaceImgIdx = 0;
 let editHtmlDraft = "";
 let editThemeColor = "#6d7ddf";
 let editImageUrls = [];
+/** Par image : "cover" (zoomée) | "contain" (vue entière). */
+let editImageFits = [];
 
 const PAGE_META = {
   dashboard: ["Dashboard", "Ce qui se passe en temps réel sur eBay"],
@@ -2052,6 +2115,7 @@ async function viewListing(id) {
   editHtmlDraft = d.html_description || "";
   editThemeColor = detectThemeFromHtml(editHtmlDraft);
   editImageUrls = extractImagesFromHtml(editHtmlDraft);
+  editImageFits = extractImageFitsFromHtml(editHtmlDraft, editImageUrls.length);
   initEditPalette();
   syncEditThemeIndicators();
   renderEditModalPreview();
@@ -2824,7 +2888,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","setEditTheme"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 
