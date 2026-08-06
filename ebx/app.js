@@ -2773,6 +2773,12 @@ async function loadSetupStatus() {
         .join("");
     }
 
+    const pr = d.publishReady;
+    const prOk = pr?.ok === true;
+    const prDetail = prOk
+      ? `OK · retours ${pr.policies?.returnDays ?? "?"}j · ${pr.currency || ""} · qty/mois ${pr.privileges?.sellingLimit?.quantity ?? "n/a"}`
+      : (pr?.issues || []).slice(0, 2).join(" · ") || pr?.warnings?.[0] || "Vérifie policies / limites";
+
     const rows = [
       [
         "Compte vendeur OAuth",
@@ -2781,6 +2787,7 @@ async function loadSetupStatus() {
           ? d.seller.userId + (d.seller.email ? ` (${d.seller.email})` : "")
           : d.seller?.error || "npm run oauth:prod",
       ],
+      ["Publish eBay prêt (préflight)", prOk, prDetail],
       ["Browse API (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "EBAY_PROD_*"],
       ["Refresh token Production", d.refreshTokenProd, d.refreshTokenProd ? "OK" : "npm run oauth:prod"],
       ["Policies Production", d.policiesProd, d.policiesProd ? "OK" : "npm run policies:prod"],
@@ -2791,7 +2798,7 @@ async function loadSetupStatus() {
         ([label, ok, detail]) =>
           `<div class="flex items-start gap-3 p-3 rounded-xl border ${ok ? "bg-green-50 border-green-100" : "bg-amber-50 border-amber-100"}">
             <span class="text-lg leading-none">${ok ? "✅" : "⚠️"}</span>
-            <div class="min-w-0"><p class="text-sm font-medium">${label}</p><p class="text-xs text-zinc-500 truncate">${escapeHtml(String(detail || ""))}</p></div>
+            <div class="min-w-0"><p class="text-sm font-medium">${label}</p><p class="text-xs text-zinc-500">${escapeHtml(String(detail || ""))}</p></div>
           </div>`
       )
       .join("");
