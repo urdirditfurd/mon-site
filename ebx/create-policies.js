@@ -363,15 +363,15 @@ async function createPaymentPolicy(token) {
 async function createReturnPolicy(token) {
   console.log("→ Création Return Policy...");
   const market = marketplace();
+  // FR/UE : 30 jours minimum. Pas de returnMethod=REPLACEMENT (souvent refusé / 25019).
   const body = {
-    name: "EBX Returns",
+    name: "EBX Returns 30j",
     marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
     returnsAccepted: true,
     returnPeriod: { value: 30, unit: "DAY" },
     refundMethod: "MONEY_BACK",
-    returnShippingCostPayer: "SELLER",
-    returnMethod: "REPLACEMENT",
+    returnShippingCostPayer: "BUYER",
   };
 
   const { status, data } = await ebayFetch("POST", "/sell/account/v1/return_policy", body, token);
@@ -387,10 +387,17 @@ async function createReturnPolicy(token) {
     null,
     token
   );
-  const existing = list.data?.returnPolicies?.[0];
-  if (existing) {
-    console.log("  ✅ Existing Return Policy ID:", existing.returnPolicyId);
-    return existing.returnPolicyId;
+  const policies = list.data?.returnPolicies || [];
+  // Préfère une policy 30 jours si plusieurs existent
+  const preferred =
+    policies.find((p) => Number(p?.returnPeriod?.value) >= 30 && p.returnsAccepted !== false) ||
+    policies[0];
+  if (preferred) {
+    console.log("  ✅ Existing Return Policy ID:", preferred.returnPolicyId);
+    if (Number(preferred?.returnPeriod?.value) < 30) {
+      console.log("  ⚠️  Cette policy a < 30 jours de retour — risque d’erreur 25019 sur eBay FR.");
+    }
+    return preferred.returnPolicyId;
   }
   console.error("  ❌", JSON.stringify(data));
   return null;

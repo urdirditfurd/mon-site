@@ -126,7 +126,9 @@ function rewriteEbayTitle(productName, keywords = []) {
     .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/gi, " ")
     .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship|ebay)\b/gi, " ")
     .replace(/\b[A-Z]{0,3}\d{5,}\b/g, " ") // codes SKU
-    .replace(/[|【】\[\]{}]/g, " ")
+    .replace(/\([^)]*type[^)]*\)/gi, " ") // (type TPE/TPR) etc.
+    .replace(/[|【】\[\]{}()]/g, " ")
+    .replace(/\b(garanti|garantie|authentique|authenticité|réplique|replica)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -143,6 +145,9 @@ function rewriteEbayTitle(productName, keywords = []) {
     "pcs",
     "pc",
     "set",
+    "type",
+    "tpe",
+    "tpr",
   ]);
   const tokens = raw
     .split(/\s+/)
@@ -179,7 +184,9 @@ function rewriteEbayTitle(productName, keywords = []) {
     title = `${rotated.slice(0, 6).join(" ")} Qualité Neuf`.replace(/\s+/g, " ").trim();
   }
 
-  if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "");
+  if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
+  // Sécurité : pas de parenthèse ouverte résiduelle
+  title = title.replace(/\([^)]*$/g, " ").replace(/\s{2,}/g, " ").trim();
   return title || "Produit Compatible Qualité Premium Neuf".slice(0, 80);
 }
 

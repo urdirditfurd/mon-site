@@ -2736,7 +2736,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     <div style="display:inline-flex;gap:8px;margin-bottom:10px;">
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Premium</span>
       <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Neuf</span>
-      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Garanti</span>
+      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Qualité</span>
     </div>
     <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(displayTitle)}</h1>
     <p style="font-size:13px;opacity:.9;margin:0;">${escapeHtml(shortPitch.slice(0, 160))}</p>
@@ -2774,14 +2774,14 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
     <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Contenu</p><p style="font-size:11px;color:#666;margin:0;">Article comme sur les photos</p></div>
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Authenticité</p><p style="font-size:11px;color:#666;margin:0;">Sélection vérifiée</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Sélection</p><p style="font-size:11px;color:#666;margin:0;">Produit vérifié avant envoi</p></div>
     <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Retours</p><p style="font-size:11px;color:#666;margin:0;">Selon conditions de l'annonce</p></div>
     <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Support</p><p style="font-size:11px;color:#666;margin:0;">Réponse rapide</p></div>
   </div>
 
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:12px;padding:18px;text-align:center;color:#fff;">
     <p style="font-size:15px;font-weight:700;margin:0 0 4px;">Commandez maintenant</p>
-    <p style="font-size:11px;opacity:.85;margin:0;">Retours faciles • Satisfaction garantie • Support réactif</p>
+    <p style="font-size:11px;opacity:.85;margin:0;">Retours selon l’annonce • Support réactif • Expédition soignée</p>
   </div>
 </div>`;
   return sanitizeListingHtml(rawHtml);
@@ -2932,6 +2932,12 @@ function sanitizeListingHtml(html) {
     ""
   );
   h = h.replace(/(?:<br\s*\/?>\s*)?Source\s*:\s*[^<\n]+/gi, "");
+  // Termes qui déclenchent souvent le filtre eBay 25019
+  h = h.replace(/>\s*Garanti\s*</gi, ">Qualité<");
+  h = h.replace(/>\s*Garantie\s*</gi, ">Qualité<");
+  h = h.replace(/Satisfaction garantie/gi, "Satisfaction client");
+  h = h.replace(/Authenticité/gi, "Sélection");
+  h = h.replace(/Authentique/gi, "Sélectionné");
   // Titre h1 sans AliExpress / Amazon / …
   h = h.replace(/<h1([^>]*)>([\s\S]*?)<\/h1>/gi, (_, attrs, inner) => {
     const plain = String(inner).replace(/<[^>]+>/g, " ");

@@ -296,11 +296,54 @@ function sleep(ms) {
 }
 
 function sanitizeEbayTitle(title) {
-  return String(title || "EBX Product")
+  let t = String(title || "EBX Product")
     .replace(/[\u0000-\u001F\u007F]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80);
+    // Coupe les parenthèses / crochets non fermés (titre tronqué à 80)
+    .replace(/\([^)]*$/g, " ")
+    .replace(/\[[^\]]*$/g, " ")
+    .replace(/\s*\(\s*type\s*$/i, " ")
+    .replace(/\b(garantie|garanti|authentique|authenticité|réplique|replica|contrefa[cç]on|fake)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*[-–—|,;:]+\s*$/g, "")
+    .trim();
+  if (t.length > 80) t = t.slice(0, 80).replace(/\s+\S*$/, "").trim();
+  return t || "Produit Qualité Premium Neuf";
+}
+
+/**
+ * Nettoie titre + HTML avant publish (évite filtres eBay 25019 / mots interdits).
+ */
+function sanitizeListingForEbayPublish(listing) {
+  const src = listing || {};
+  let title = sanitizeEbayTitle(src.seo_title || src.title || "Produit");
+  let html = String(src.html_description || "");
+
+  const riskyHtml = [
+    [/>\s*Garanti\s*</gi, ">Qualité<"],
+    [/>\s*Garantie\s*</gi, ">Qualité<"],
+    [/Satisfaction garantie/gi, "Satisfaction client"],
+    [/Authenticité/gi, "Sélection"],
+    [/Authentique/gi, "Sélectionné"],
+    [/100\s*%\s*garanti[e]?/gi, "Contrôle qualité"],
+    [/(?:meilleur|lowest)\s+prix/gi, "Bon rapport qualité-prix"],
+    [/r[eé]plique/gi, "alternative"],
+    [/contrefa[cç]on/gi, ""],
+    [/\bfake\b/gi, ""],
+    [/\bdrop\s*ship(?:ping)?\b/gi, ""],
+    [/\bwholesale\b/gi, ""],
+  ];
+  for (const [re, rep] of riskyHtml) html = html.replace(re, rep);
+
+  // Retire mentions marketplace / fournisseur restantes
+  html = html
+    .replace(/\b(?:aliexpress|amazon(?:\.[a-z]+)?|cdiscount|temu|wish)\b/gi, " ")
+    .replace(/\s{2,}/g, " ");
+
+  return {
+    ...src,
+    seo_title: title,
+    html_description: html,
+  };
 }
 
 /**
@@ -383,6 +426,13 @@ function formatEbayPublishError(errOrText) {
     25007: "Politique business invalide → npm run policies:prod et mets à jour les IDs dans .env.",
     25008: "Politique manquante → npm run policies:prod.",
     25009: "Emplacement inventaire manquant → le serveur devrait le créer auto (merchant location).",
+    25019:
+      "eBay bloque la mise en vente (limites vendeur, politiques, ou contenu).\n\n" +
+      "Vérifie dans l’ordre :\n" +
+      "1) Seller Hub → Limites / Restrictions (quota d’annonces mensuel ?)\n" +
+      "2) Politiques business FR : retours 30 jours + livraison France (Colissimo) — npm run policies:prod\n" +
+      "3) Titre/description : retire Garanti / Authentique / réplique / dropshipping\n" +
+      "4) Si le compte est neuf ou restreint : publie d’abord 1 annonce manuelle depuis eBay.fr",
     25601: "SKU / offer déjà utilisé → republie (nouveau SKU) ou termine l’ancienne offre.",
     25604: "Offer introuvable — republie depuis Mes Listings.",
     25709: "Locale / Content-Language incorrect — vérifie EBAY_MARKETPLACE_ID (ex. EBAY_FR).",
@@ -393,6 +443,11 @@ function formatEbayPublishError(errOrText) {
 
   const tip = errorId && tips[errorId] ? tips[errorId] : null;
   const idPart = errorId != null ? `eBay #${errorId}` : "eBay";
+
+  // 25019 : message eBay générique — on remplace par la checklist FR
+  if (errorId === 25019) {
+    return `eBay #25019 — ${detail || "Mise en vente refusée"}\n\n→ ${tips[25019]}`;
+  }
 
   if (detail) {
     return tip ? `${idPart} — ${detail}\n\n→ ${tip}` : `${idPart} — ${detail}`;
@@ -1186,6 +1241,8 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     );
   }
 
+  listing = sanitizeListingForEbayPublish(listing);
+
   const token = await getAccessToken();
   const title = listing.seo_title || "EBX Product";
   const categoryId = await resolveCategoryId(token, title);
@@ -1610,4 +1667,5 @@ module.exports = {
   formatEbayPublishError,
   differentiateEbayTitle,
   sanitizeEbayTitle,
+  sanitizeListingForEbayPublish,
 };
