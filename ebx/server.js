@@ -425,7 +425,7 @@ function envPresent(v) {
 }
 
 app.get("/api/setup", async (_req, res) => {
-  const { isProduction, getSellerIdentity } = require("./ebay-api");
+  const { isProduction, getSellerIdentity, diagnosePublishReadiness, getAccessToken } = require("./ebay-api");
   const setup = {
     prodKeys: envPresent(process.env.EBAY_PROD_CLIENT_ID) && envPresent(process.env.EBAY_PROD_CLIENT_SECRET),
     sandboxKeys: envPresent(process.env.EBAY_CLIENT_ID) && envPresent(process.env.EBAY_CLIENT_SECRET),
@@ -434,6 +434,7 @@ app.get("/api/setup", async (_req, res) => {
     userToken: envPresent(process.env.EBAY_USER_TOKEN),
     ruName: envPresent(process.env.EBAY_RU_NAME),
     ebayEnv: isProduction() ? "production" : "sandbox",
+    marketplace: process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
     policies:
       envPresent(process.env.EBAY_FULFILLMENT_POLICY_ID) &&
       envPresent(process.env.EBAY_PAYMENT_POLICY_ID) &&
@@ -446,6 +447,7 @@ app.get("/api/setup", async (_req, res) => {
     browse: { ok: false, api: null, error: null, sample: null },
     llm: { ok: false },
     seller: { ok: false, userId: null, email: null, error: null },
+    publishReady: null,
   };
 
   try {
@@ -458,6 +460,13 @@ app.get("/api/setup", async (_req, res) => {
     };
   } catch (err) {
     setup.seller = { ok: false, userId: null, email: null, error: err.message };
+  }
+
+  try {
+    const token = await getAccessToken();
+    setup.publishReady = await diagnosePublishReadiness(token, { price: 29.99 });
+  } catch (err) {
+    setup.publishReady = { ok: false, issues: [err.message], warnings: [] };
   }
 
   try {
@@ -483,6 +492,28 @@ app.get("/api/setup", async (_req, res) => {
   }
 
   res.json({ success: true, data: setup });
+});
+
+app.get("/api/ebay/preflight", async (_req, res) => {
+  try {
+    const { getAccessToken, diagnosePublishReadiness, getSellerIdentity, isProduction } = require("./ebay-api");
+    const token = await getAccessToken();
+    const diagnosis = await diagnosePublishReadiness(token, { price: 29.99 });
+    let seller = null;
+    try {
+      seller = await getSellerIdentity();
+    } catch (_) {}
+    res.json({
+      success: true,
+      data: {
+        env: isProduction() ? "production" : "sandbox",
+        seller,
+        ...diagnosis,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get("/api/dashboard", async (_req, res) => {

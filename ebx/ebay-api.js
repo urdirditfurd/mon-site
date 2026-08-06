@@ -444,10 +444,13 @@ function formatEbayPublishError(errOrText) {
   const tip = errorId && tips[errorId] ? tips[errorId] : null;
   const idPart = errorId != null ? `eBay #${errorId}` : "eBay";
 
-  // 25019 : message eBay générique — on remplace par la checklist FR
-  if (errorId === 25019) {
+  // 25019 : garder le diagnostic live s'il est déjà dans le message
+  if (errorId === 25019 || /25019|Cannot revise listing|ne peut pas être mis en vente/i.test(raw)) {
+    if (/Diagnostic EBX|Publish bloqué \(préflight\)/i.test(raw)) return raw;
     return `eBay #25019 — ${detail || "Mise en vente refusée"}\n\n→ ${tips[25019]}`;
   }
+
+  if (/Publish bloqué \(préflight\)/i.test(raw)) return raw;
 
   if (detail) {
     return tip ? `${idPart} — ${detail}\n\n→ ${tip}` : `${idPart} — ${detail}`;
@@ -763,12 +766,13 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
   if (mergedAspects.Brand && !mergedAspects.Marque) mergedAspects.Marque = mergedAspects.Brand;
   if (mergedAspects.Marque && !mergedAspects.Brand) mergedAspects.Brand = mergedAspects.Marque;
   const ean = options.ean || ["Does not apply"];
+  const qty = Math.max(1, Number(options.quantity) || 1);
 
   const attempts = [
     {
       label: "full",
       body: {
-        availability: { shipToLocationAvailability: { quantity: 10 } },
+        availability: { shipToLocationAvailability: { quantity: qty } },
         condition: "NEW",
         product: {
           title: options.variantLabel ? `${title} — ${options.variantLabel}`.slice(0, 80) : title,
@@ -783,7 +787,7 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
     {
       label: "minimal",
       body: {
-        availability: { shipToLocationAvailability: { quantity: 10 } },
+        availability: { shipToLocationAvailability: { quantity: qty } },
         condition: "NEW",
         product: {
           title,
@@ -800,7 +804,7 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
     {
       label: "bare",
       body: {
-        availability: { shipToLocationAvailability: { quantity: 10 } },
+        availability: { shipToLocationAvailability: { quantity: qty } },
         condition: "NEW",
         product: {
           title,
@@ -1184,6 +1188,161 @@ async function publishByInventoryItemGroup(token, groupKey) {
   return { listingId: data.listingId, status: "published" };
 }
 
+function currencyForMarketplace(marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US")) {
+  switch (String(marketplaceId || "").toUpperCase()) {
+    case "EBAY_GB":
+      return "GBP";
+    case "EBAY_FR":
+    case "EBAY_DE":
+    case "EBAY_IT":
+    case "EBAY_ES":
+      return "EUR";
+    case "EBAY_AU":
+      return "AUD";
+    case "EBAY_CA":
+      return "CAD";
+    case "EBAY_US":
+    default:
+      return "USD";
+  }
+}
+
+async function fetchSellerPrivileges(token) {
+  const url = `${ebayApiBase()}/sell/account/v1/privilege`;
+  const res = await ebayHttpsRequest("GET", url, { token });
+  if (!res.ok) {
+    console.warn(`[EBX] privilege HTTP ${res.status}: ${res.text.slice(0, 200)}`);
+    return null;
+  }
+  return res.json();
+}
+
+async function fetchPolicyById(token, kind, policyId) {
+  if (!policyId) return null;
+  const url = `${ebayApiBase()}/sell/account/v1/${kind}/${encodeURIComponent(policyId)}`;
+  const res = await ebayHttpsRequest("GET", url, { token });
+  if (!res.ok) {
+    console.warn(`[EBX] ${kind} ${policyId} HTTP ${res.status}`);
+    return { error: true, status: res.status, text: res.text.slice(0, 200) };
+  }
+  return res.json();
+}
+
+/**
+ * Préflight publish : limites vendeur + politiques + devise marketplace.
+ * Retourne des issues FR actionnables (peut bloquer avant l’appel publish).
+ */
+async function diagnosePublishReadiness(token, { price } = {}) {
+  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const currency = currencyForMarketplace(market);
+  const issues = [];
+  const warnings = [];
+
+  const priv = await fetchSellerPrivileges(token);
+  if (priv) {
+    if (priv.sellerRegistrationCompleted === false) {
+      issues.push(
+        "Inscription vendeur eBay incomplète (sellerRegistrationCompleted=false). Termine l’inscription vendeur sur eBay.fr puis réessaie."
+      );
+    }
+    const qtyCap = priv.sellingLimit?.quantity;
+    const amtCap = Number(priv.sellingLimit?.amount?.value);
+    const amtCur = priv.sellingLimit?.amount?.currency || currency;
+    if (qtyCap != null && Number(qtyCap) <= 0) {
+      issues.push(
+        `Limite quantité mensuelle eBay = ${qtyCap}. Demande une hausse dans Seller Hub → Limites, ou attends le reset mensuel.`
+      );
+    } else if (qtyCap != null && Number(qtyCap) <= 5) {
+      warnings.push(`Compte limité : max ${qtyCap} article(s)/mois — on publie en quantité 1.`);
+    }
+    if (Number.isFinite(amtCap) && amtCap > 0 && price && Number(price) > amtCap) {
+      issues.push(
+        `Prix ${price} ${currency} > plafond mensuel de ventes (${amtCap} ${amtCur}). Baisse le prix ou demande une hausse de limite.`
+      );
+    } else if (Number.isFinite(amtCap) && amtCap > 0) {
+      warnings.push(`Plafond ventes mensuel : ${amtCap} ${amtCur}.`);
+    }
+  } else {
+    warnings.push("Impossible de lire /privilege (scope sell.account manquant ?). Continue quand même.");
+  }
+
+  const returnId = ebayReturnPolicyId();
+  const fulfillId = ebayFulfillmentPolicyId();
+  const paymentId = ebayPaymentPolicyId();
+  const ret = await fetchPolicyById(token, "return_policy", returnId);
+  const ful = await fetchPolicyById(token, "fulfillment_policy", fulfillId);
+  const pay = await fetchPolicyById(token, "payment_policy", paymentId);
+
+  if (ret?.error) {
+    issues.push(`Return policy ${returnId} introuvable (${ret.status}). Lance npm run policies:prod et mets à jour .env.`);
+  } else if (ret) {
+    if (ret.returnsAccepted === false) {
+      issues.push("Ta return policy refuse les retours — eBay FR exige des retours (souvent 30 jours).");
+    }
+    const days = Number(ret.returnPeriod?.value);
+    if (Number.isFinite(days) && days < 30 && /^EBAY_(FR|DE|IT|ES)$/i.test(market)) {
+      issues.push(
+        `Return policy = ${days} jour(s) — pour ${market} il faut ≥ 30 jours. npm run policies:prod puis mets EBAY_RETURN_POLICY_ID_PROD.`
+      );
+    }
+    if (ret.marketplaceId && ret.marketplaceId !== market) {
+      issues.push(
+        `Return policy marketplace=${ret.marketplaceId} ≠ ${market}. Recrée les policies pour le bon marketplace.`
+      );
+    }
+  }
+
+  if (ful?.error) {
+    issues.push(`Fulfillment policy ${fulfillId} introuvable (${ful.status}). npm run policies:prod.`);
+  } else if (ful) {
+    const hasShip = (ful.shippingOptions || []).some((o) => (o.shippingServices || []).length > 0);
+    if (!hasShip) {
+      issues.push("Fulfillment policy sans mode de livraison — crée une policy Colissimo (France).");
+    }
+    if (ful.marketplaceId && ful.marketplaceId !== market) {
+      issues.push(`Fulfillment policy marketplace=${ful.marketplaceId} ≠ ${market}.`);
+    }
+  }
+
+  if (pay?.error) {
+    issues.push(`Payment policy ${paymentId} introuvable (${pay.status}). npm run policies:prod.`);
+  } else if (pay?.marketplaceId && pay.marketplaceId !== market) {
+    issues.push(`Payment policy marketplace=${pay.marketplaceId} ≠ ${market}.`);
+  }
+
+  const envCurrency = env("EBAY_CURRENCY");
+  if (envCurrency && envCurrency.toUpperCase() !== currency) {
+    warnings.push(
+      `EBAY_CURRENCY=${envCurrency} ignoré — marketplace ${market} force ${currency}.`
+    );
+  }
+
+  return {
+    ok: issues.length === 0,
+    market,
+    currency,
+    issues,
+    warnings,
+    privileges: priv,
+    policies: {
+      returnDays: ret && !ret.error ? Number(ret.returnPeriod?.value) : null,
+      returnsAccepted: ret && !ret.error ? ret.returnsAccepted !== false : null,
+      fulfillmentHasShipping:
+        ful && !ful.error
+          ? (ful.shippingOptions || []).some((o) => (o.shippingServices || []).length > 0)
+          : null,
+    },
+  };
+}
+
+function resolvePublishQuantity(privileges) {
+  const cap = privileges?.sellingLimit?.quantity;
+  if (cap == null) return 1; // prudent pour comptes nouveaux / inconnus
+  const n = Number(cap);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.min(1, Math.max(1, n)); // toujours 1 au 1er publish (évite 25019 limites)
+}
+
 async function publishOffer(token, offerId) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`;
   const res = await ebayHttpsRequest("POST", url, { token, body: {}, contentLanguage: true });
@@ -1194,26 +1353,33 @@ async function publishOffer(token, offerId) {
   return { listingId: data.listingId, status: "published" };
 }
 
-async function createOffer(token, sku, listing, categoryId, merchantLocationKey) {
+async function createOffer(token, sku, listing, categoryId, merchantLocationKey, options = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
-  const listingHtml = String(listing.html_description || listing.seo_title || "EBX Product").slice(0, 490000);
+  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const currency = currencyForMarketplace(market);
+  const quantity = Math.max(1, Number(options.quantity) || 1);
+  const listingHtml = String(
+    options.minimalDescription
+      ? `<div style="font-family:Arial,sans-serif;padding:12px;"><p>${String(listing.seo_title || "Produit neuf").replace(/</g, "")}</p><p>Article neuf. Voir les photos.</p></div>`
+      : listing.html_description || listing.seo_title || "EBX Product"
+  ).slice(0, 490000);
   const body = {
     sku,
-    marketplaceId: process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
+    marketplaceId: market,
     format: "FIXED_PRICE",
     listingDescription: listingHtml,
-    availableQuantity: 10,
+    availableQuantity: quantity,
     pricingSummary: {
       price: {
         value: String(Number(listing.suggested_price) > 0 ? Number(listing.suggested_price).toFixed(2) : "29.99"),
-        currency: process.env.EBAY_CURRENCY || "USD",
+        currency,
       },
     },
     categoryId,
     merchantLocationKey:
       merchantLocationKey ||
       env("EBAY_MERCHANT_LOCATION_KEY") ||
-      (process.env.EBAY_MARKETPLACE_ID === "EBAY_FR" ? "ebx_fr_wh" : "ebx_us_wh"),
+      (market === "EBAY_FR" ? "ebx_fr_wh" : "ebx_us_wh"),
     listingPolicies: {
       fulfillmentPolicyId: ebayFulfillmentPolicyId(),
       paymentPolicyId: ebayPaymentPolicyId(),
@@ -1225,7 +1391,51 @@ async function createOffer(token, sku, listing, categoryId, merchantLocationKey)
   if (!res.ok) {
     throw new Error(`Offer API error (${res.status}) [locale=${res.locale}]: ${JSON.stringify(data)}`);
   }
-  return { offerId: data.offerId, status: "offer_created" };
+  return { offerId: data.offerId, status: "offer_created", quantity, currency };
+}
+
+/**
+ * Enrichit le message 25019 avec le diagnostic live (limites / policies).
+ */
+function format25019WithDiagnosis(detail, diagnosis) {
+  const lines = [
+    `eBay #25019 — ${detail || "Cannot revise listing / mise en vente refusée"}`,
+    "",
+    "→ Diagnostic EBX :",
+  ];
+  if (diagnosis?.issues?.length) {
+    diagnosis.issues.forEach((i, idx) => lines.push(`${idx + 1}) ${i}`));
+  } else {
+    lines.push("Aucun blocage détecté côté policies/limites API.");
+    lines.push("Causes restantes les plus fréquentes :");
+    lines.push("1) Restriction compte vendeur (Seller Hub → Compte → Restrictions)");
+    lines.push("2) Quota d’annonces actives atteint (pas seulement le plafond ventes)");
+    lines.push("3) Publie 1 annonce manuelle sur eBay.fr pour « débloquer » l’API");
+  }
+  if (diagnosis?.warnings?.length) {
+    lines.push("");
+    lines.push("Infos :");
+    diagnosis.warnings.forEach((w) => lines.push(`• ${w}`));
+  }
+  const qty = diagnosis?.privileges?.sellingLimit?.quantity;
+  const amt = diagnosis?.privileges?.sellingLimit?.amount;
+  if (qty != null || amt) {
+    lines.push("");
+    lines.push(
+      `Limites API : quantité/mois=${qty ?? "n/a"}` +
+        (amt ? `, montant/mois=${amt.value} ${amt.currency}` : "")
+    );
+  }
+  if (diagnosis?.policies) {
+    lines.push(
+      `Policies : retours=${diagnosis.policies.returnDays ?? "?"}j` +
+        `, shipping=${diagnosis.policies.fulfillmentHasShipping ? "OK" : "KO"}` +
+        `, market=${diagnosis.market}, devise=${diagnosis.currency}`
+    );
+  }
+  lines.push("");
+  lines.push("Actions : npm run policies:prod → maj .env → redémarre → republie.");
+  return lines.join("\n");
 }
 
 async function publishToEbay(listing, listingDbId, options = {}) {
@@ -1244,12 +1454,22 @@ async function publishToEbay(listing, listingDbId, options = {}) {
   listing = sanitizeListingForEbayPublish(listing);
 
   const token = await getAccessToken();
+  const diagnosis = await diagnosePublishReadiness(token, {
+    price: listing.suggested_price,
+  });
+  for (const w of diagnosis.warnings || []) console.warn(`[EBX] Preflight: ${w}`);
+  if (!diagnosis.ok) {
+    throw new Error(
+      `Publish bloqué (préflight) :\n` + diagnosis.issues.map((i, n) => `${n + 1}) ${i}`).join("\n")
+    );
+  }
+
   const title = listing.seo_title || "EBX Product";
   const categoryId = await resolveCategoryId(token, title);
   const baseAspects = await buildAspectsForCategory(token, categoryId, title);
   const locationKey = await ensureInventoryLocation(token);
+  const quantity = resolvePublishQuantity(diagnosis.privileges);
   // Par défaut: pas de variations (évite 25002 « Couleur non autorisée »).
-  // Si enabled=true, on ne garde que les aspects variation validés par Taxonomy.
   const variationInput =
     options.variations && typeof options.variations === "object"
       ? options.variations
@@ -1260,7 +1480,7 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     `[EBX] Publish (${isProduction() ? "PRODUCTION" : "sandbox"}) locale=${ebayMarketplaceLocale()} market=${env(
       "EBAY_MARKETPLACE_ID",
       "EBAY_US"
-    )} category=${categoryId} variations=${
+    )} category=${categoryId} qty=${quantity} currency=${diagnosis.currency} variations=${
       variations.enabled ? `${variations.aspect}:${variations.values.join("|")}` : "off (simple)"
     }`
   );
@@ -1279,21 +1499,74 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     });
     const inv = await createOrReplaceInventoryItem(token, sku, listing, aspects, {
       ean: ["Does not apply"],
+      quantity,
     });
-    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
-    const { listingId } = await publishOffer(token, offerId);
-    return {
-      sku,
-      skus: [sku],
-      groupKey: null,
-      offerId,
-      listingId,
-      status: "published",
-      categoryId,
-      variations: { enabled: false, aspect: null, values: [] },
-      imageCount: inv.imageUrls?.length || 0,
-      env: isProduction() ? "production" : "sandbox",
-    };
+    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey, {
+      quantity,
+    });
+
+    try {
+      const { listingId } = await publishOffer(token, offerId);
+      return {
+        sku,
+        skus: [sku],
+        groupKey: null,
+        offerId,
+        listingId,
+        status: "published",
+        categoryId,
+        variations: { enabled: false, aspect: null, values: [] },
+        imageCount: inv.imageUrls?.length || 0,
+        env: isProduction() ? "production" : "sandbox",
+        quantity,
+        diagnosis,
+      };
+    } catch (pubErr) {
+      const is25019 = /25019|Cannot revise listing|ne peut pas être mis en vente/i.test(
+        String(pubErr.message || "")
+      );
+      if (!is25019) throw pubErr;
+
+      console.warn("[EBX] 25019 → retry description minimale + qty=1…");
+      try {
+        await updateOfferPriceQuantity(offerId, { quantity: 1 });
+        // Recrée l’offer description via PUT offer
+        const getUrl = `${ebayApiBase()}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`;
+        const existing = await ebayHttpsRequest("GET", getUrl, { token });
+        if (existing.ok) {
+          const offer = existing.json();
+          offer.availableQuantity = 1;
+          offer.listingDescription = `<div style="font-family:Arial,sans-serif;padding:12px;"><p>${String(
+            title
+          ).replace(/[<>]/g, "")}</p><p>Article neuf. Voir les photos de l'annonce.</p></div>`;
+          offer.pricingSummary = offer.pricingSummary || {};
+          offer.pricingSummary.price = {
+            value: String(Number(listing.suggested_price) > 0 ? Number(listing.suggested_price).toFixed(2) : "29.99"),
+            currency: diagnosis.currency,
+          };
+          await ebayHttpsRequest("PUT", getUrl, { token, body: offer, contentLanguage: true });
+        }
+        const { listingId } = await publishOffer(token, offerId);
+        return {
+          sku,
+          skus: [sku],
+          groupKey: null,
+          offerId,
+          listingId,
+          status: "published",
+          categoryId,
+          variations: { enabled: false, aspect: null, values: [] },
+          imageCount: inv.imageUrls?.length || 0,
+          env: isProduction() ? "production" : "sandbox",
+          quantity: 1,
+          diagnosis,
+          note: "Publié après retry 25019 (description minimale).",
+        };
+      } catch (retryErr) {
+        const live = await diagnosePublishReadiness(token, { price: listing.suggested_price });
+        throw new Error(format25019WithDiagnosis(pubErr.message, live));
+      }
+    }
   }
 
   // ——— Publish avec variations (item group) ———
@@ -1317,10 +1590,13 @@ async function publishToEbay(listing, listingDbId, options = {}) {
       ean: ["Does not apply"],
       variantLabel: value,
       imageUrls: hostedImages.length ? hostedImages : undefined,
+      quantity,
     });
     if (inv.imageUrls?.length) hostedImages = inv.imageUrls;
     skus.push(sku);
-    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey);
+    const { offerId } = await createOffer(token, sku, listing, categoryId, locationKey, {
+      quantity,
+    });
     if (!firstOfferId) firstOfferId = offerId;
   }
 
@@ -1351,19 +1627,28 @@ async function publishToEbay(listing, listingDbId, options = {}) {
     },
   };
   await createOrReplaceInventoryItemGroup(token, groupKey, groupBody);
-  const { listingId } = await publishByInventoryItemGroup(token, groupKey);
-
-  return {
-    sku: skus[0],
-    skus,
-    groupKey,
-    offerId: firstOfferId,
-    listingId,
-    status: "published",
-    categoryId,
-    variations,
-    env: isProduction() ? "production" : "sandbox",
-  };
+  try {
+    const { listingId } = await publishByInventoryItemGroup(token, groupKey);
+    return {
+      sku: skus[0],
+      skus,
+      groupKey,
+      offerId: firstOfferId,
+      listingId,
+      status: "published",
+      categoryId,
+      variations,
+      env: isProduction() ? "production" : "sandbox",
+      quantity,
+      diagnosis,
+    };
+  } catch (pubErr) {
+    if (/25019|Cannot revise listing|ne peut pas être mis en vente/i.test(String(pubErr.message || ""))) {
+      const live = await diagnosePublishReadiness(token, { price: listing.suggested_price });
+      throw new Error(format25019WithDiagnosis(pubErr.message, live));
+    }
+    throw pubErr;
+  }
 }
 
 /**
@@ -1668,4 +1953,7 @@ module.exports = {
   differentiateEbayTitle,
   sanitizeEbayTitle,
   sanitizeListingForEbayPublish,
+  diagnosePublishReadiness,
+  fetchSellerPrivileges,
+  currencyForMarketplace,
 };
