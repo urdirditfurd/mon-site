@@ -81,6 +81,54 @@ function scanVero(text) {
   };
 }
 
+/**
+ * Produits souvent refusés sur eBay FR (substances dangereuses / PI_HAZ).
+ * Liste heuristique — eBay a le dernier mot.
+ */
+const HAZARDOUS_PATTERNS = [
+  /\bslime\b/i,
+  /\bbutter\s*stick\b/i,
+  /\bbutter\s*slime\b/i,
+  /\bputty\b/i,
+  /\bfluffy\s*slime\b/i,
+  /\bp[aâ]te\s*[aà]\s*modeler\b/i,
+  /\bgel\s*(sticky|collant|souple)\b/i,
+  /\bsquishy\b.*\b(gel|slime|butter|putty)\b/i,
+  /\b(slime|putty|butter)\b.*\bsquishy\b/i,
+  /\bnaphthal(?:ene|ine)\b/i,
+  /\bboules?\s+de\s+naphthal/i,
+  /\banti[\s-]?mites?\b/i,
+  /\bpesticide\b/i,
+  /\binsecticide\b/i,
+  /\bherbicide\b/i,
+  /\bacide\s+(sulfurique|chlorhydrique|nitrique)\b/i,
+  /\bchloroforme\b/i,
+  /\bm[eé]thanol\b.*\b(pur|absolu)\b/i,
+  /\bbatter(?:y|ie)s?\s*(lithium|li[\s-]?ion|18650)\b/i,
+  /\blithium[\s-]?ion\b/i,
+  /\be[\s-]?liquid\b/i,
+  /\bcbd\b|\bcannabis\b|\bthc\b/i,
+  /\bnitrous|\bprotoxyde\b/i,
+];
+
+function scanHazardous(text) {
+  const hay = String(text || "");
+  const hits = HAZARDOUS_PATTERNS.filter((re) => re.test(hay)).map((re) =>
+    String(re).replace(/^\/|\/[a-z]*$/gi, "").slice(0, 40)
+  );
+  return {
+    ok: hits.length === 0,
+    hits,
+    level: hits.length === 0 ? "clear" : "block",
+    message:
+      hits.length === 0
+        ? "Aucun signal substances dangereuses"
+        : `Risque substances dangereuses eBay FR : ${hits.slice(0, 4).join(", ")}. ` +
+          `Souvent refusé (erreur 25019 / PI_HAZ). Change de produit. ` +
+          `https://www.ebay.fr/pages/help/policies/hazardous-materials.html`,
+  };
+}
+
 /** Score SEO 0–100 à partir d'un titre + mots-clés. */
 function scoreSeoTitle(title, keywords = []) {
   const t = String(title || "").trim();
@@ -545,6 +593,7 @@ module.exports = {
   sleep,
   antiBanDelay,
   scanVero,
+  scanHazardous,
   scoreSeoTitle,
   buildAiTitle,
   rewriteEbayTitle,

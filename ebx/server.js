@@ -35,6 +35,7 @@ const {
 const {
   antiBanDelay,
   scanVero,
+  scanHazardous,
   scoreSeoTitle,
   buildAiTitle,
   prepareDiscreetListing,
@@ -1645,6 +1646,12 @@ app.post("/api/auto-snipe", async (req, res) => {
         if (!vero.ok) {
           send({ type: "log", message: `[VERO] Attention — ${vero.message}` });
         }
+        const hazQ = scanHazardous(searchQ);
+        if (hazQ.level === "block") {
+          send({ type: "log", message: `[HAZMAT] BLOQUÉ requête — ${hazQ.message}` });
+          skipped += 1;
+          continue;
+        }
         await antiBanDelay({ testMode, label: "target" });
 
         // 2) Cascade 1 source (style EBX) — pas de course au « moins cher » multi-marketplaces
@@ -1805,6 +1812,17 @@ app.post("/api/auto-snipe", async (req, res) => {
           bullets: detail?.bullets || [],
           description: detail?.description || "",
         };
+        const hazProduct = scanHazardous(
+          `${baseProduct.title} ${baseProduct.description || ""} ${(baseProduct.bullets || []).join(" ")}`
+        );
+        if (hazProduct.level === "block") {
+          send({
+            type: "log",
+            message: `[HAZMAT] SKIP produit — ${hazProduct.message}`,
+          });
+          skipped += 1;
+          continue;
+        }
         const discreet = prepareDiscreetListing(baseProduct, {
           marginMult: 1 + Number(margin) / 100,
         });
@@ -2305,6 +2323,18 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
         success: false,
         error: `VeRO: ${vero.message}. Corrige le titre ou force=true si tu assumes le risque.`,
         vero,
+      });
+    }
+    const haz = scanHazardous(`${listing.seo_title} ${listing.html_description || ""}`);
+    if (haz.level === "block" && !req.body?.force) {
+      return res.status(400).json({
+        success: false,
+        code: "HAZARDOUS_MATERIALS",
+        error:
+          `⛔ Substances dangereuses (pré-contrôle EBX)\n\n${haz.message}\n\n` +
+          `Ce produit sera refusé par eBay (erreur 25019 / PI_HAZ). ` +
+          `Choisis un autre produit — slime / butter stick / putty sont souvent interdits sur eBay.fr.`,
+        hazardous: haz,
       });
     }
     listing = await ensureListingImages(listing);

@@ -390,12 +390,98 @@ function parseDuplicateListingError(errOrText) {
 }
 
 /**
+ * Extrait la vraie raison d’un 25019 depuis errors[].parameters
+ * (ex. substances dangereuses, VeRO, etc.).
+ */
+function decodeEbayHtmlEntities(text) {
+  return String(text || "")
+    .replace(/&eacute;/gi, "é")
+    .replace(/&egrave;/gi, "è")
+    .replace(/&agrave;/gi, "à")
+    .replace(/&ocirc;/gi, "ô")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractEbayPolicyBlockReason(errOrText) {
+  const raw = typeof errOrText === "string" ? errOrText : String(errOrText?.message || errOrText || "");
+  let payload = null;
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) payload = JSON.parse(jsonMatch[0]);
+  } catch (_) {}
+  const err = payload?.errors?.[0] || {};
+  const params = Object.fromEntries((err.parameters || []).map((p) => [String(p.name), String(p.value || "")]));
+  const joined = Object.values(params).join(" \n ");
+  const code = params["2"] || "";
+  const policyUrl =
+    params["4"] ||
+    (joined.match(/https?:\/\/[^\s"']+hazardous[^\s"']*/i) || [])[0] ||
+    null;
+
+  if (/PI_HAZ|hazardous|substances?\s+dangereuses|mat[eé]riaux?\s+dangereux/i.test(joined + code + raw)) {
+    const plain =
+      decodeEbayHtmlEntities(params["0"] || params["1"] || "") ||
+      "Cet objet est interdit par le règlement eBay sur les substances dangereuses.";
+    return {
+      code: "HAZARDOUS_MATERIALS",
+      policyCode: code || "PI_HAZ",
+      policyUrl: policyUrl || "https://www.ebay.fr/pages/help/policies/hazardous-materials.html",
+      message:
+        `⛔ PRODUIT INTERDIT — Substances dangereuses (eBay FR)\n\n` +
+        `${plain}\n\n` +
+        `Ce n’est PAS un problème de limites ni de policies.\n` +
+        `eBay refuse cette catégorie de produit (souvent : slime / butter squishy / putty / gels / certains jouets souples).\n\n` +
+        `Que faire :\n` +
+        `1) Ne republie PAS ce listing — change de produit\n` +
+        `2) Évite slime, butter stick, putty, gel sticky, pâte à modeler chimique\n` +
+        `3) Lis : ${policyUrl || "https://www.ebay.fr/pages/help/policies/hazardous-materials.html"}`,
+    };
+  }
+
+  if (/PI_VERO|VeRO|propri[eé]t[eé] intellectuelle|counterfeit/i.test(joined + code + raw)) {
+    return {
+      code: "VERO",
+      policyCode: code || "PI_VERO",
+      policyUrl: null,
+      message:
+        `⛔ PRODUIT BLOQUÉ — VeRO / propriété intellectuelle\n\n` +
+        `${decodeEbayHtmlEntities(params["0"] || params["1"] || "Marque protégée.")}\n` +
+        `Change de produit (pas de marque Apple/Nike/etc. sans autorisation).`,
+    };
+  }
+
+  // Message clair générique depuis le param 0/1 si présent
+  if (params["0"] || params["1"]) {
+    const plain = decodeEbayHtmlEntities(params["0"] || params["1"]);
+    if (plain && plain.length > 20) {
+      return {
+        code: "POLICY_BLOCK",
+        policyCode: code || null,
+        policyUrl,
+        message: `⛔ eBay refuse cette annonce (règlement)\n\n${plain}`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Transforme une erreur eBay brute (souvent message="Error" + longMessage utile)
  * en texte FR actionnable pour l’UI.
  */
 function formatEbayPublishError(errOrText) {
   const raw = typeof errOrText === "string" ? errOrText : String(errOrText?.message || errOrText || "");
   if (!raw.trim()) return "Erreur eBay inconnue — regarde la console serveur ([EBX] Erreur eBay).";
+
+  const policy = extractEbayPolicyBlockReason(raw);
+  if (policy) return policy.message;
 
   const dup = parseDuplicateListingError(raw);
   if (dup) return dup.message;
@@ -427,12 +513,8 @@ function formatEbayPublishError(errOrText) {
     25008: "Politique manquante → npm run policies:prod.",
     25009: "Emplacement inventaire manquant → le serveur devrait le créer auto (merchant location).",
     25019:
-      "eBay bloque la mise en vente (limites vendeur, politiques, ou contenu).\n\n" +
-      "Vérifie dans l’ordre :\n" +
-      "1) Seller Hub → Limites / Restrictions (quota d’annonces mensuel ?)\n" +
-      "2) Politiques business FR : retours 30 jours + livraison France (Colissimo) — npm run policies:prod\n" +
-      "3) Titre/description : retire Garanti / Authentique / réplique / dropshipping\n" +
-      "4) Si le compte est neuf ou restreint : publie d’abord 1 annonce manuelle depuis eBay.fr",
+      "eBay bloque la mise en vente (règlement, limites, ou politiques).\n\n" +
+      "Vérifie : substances dangereuses, VeRO, limites Seller Hub, policies FR 30j.",
     25601: "SKU / offer déjà utilisé → republie (nouveau SKU) ou termine l’ancienne offre.",
     25604: "Offer introuvable — republie depuis Mes Listings.",
     25709: "Locale / Content-Language incorrect — vérifie EBAY_MARKETPLACE_ID (ex. EBAY_FR).",
@@ -444,20 +526,20 @@ function formatEbayPublishError(errOrText) {
   const tip = errorId && tips[errorId] ? tips[errorId] : null;
   const idPart = errorId != null ? `eBay #${errorId}` : "eBay";
 
-  // 25019 : garder le diagnostic live s'il est déjà dans le message
+  // 25019 : garder le diagnostic live s'il est déjà enrichi (et sans policy déjà extraite)
   if (errorId === 25019 || /25019|Cannot revise listing|ne peut pas être mis en vente/i.test(raw)) {
-    if (/Diagnostic EBX|Publish bloqué \(préflight\)/i.test(raw)) return raw;
+    if (/⛔ PRODUIT|Diagnostic EBX|Publish bloqué \(préflight\)/i.test(raw)) return raw;
     return `eBay #25019 — ${detail || "Mise en vente refusée"}\n\n→ ${tips[25019]}`;
   }
 
-  if (/Publish bloqué \(préflight\)/i.test(raw)) return raw;
+  if (/Publish bloqué \(préflight\)|⛔ PRODUIT/i.test(raw)) return raw;
 
   if (detail) {
     return tip ? `${idPart} — ${detail}\n\n→ ${tip}` : `${idPart} — ${detail}`;
   }
 
   // Messages locaux déjà clairs
-  if (/policies manquantes|aucune image|héberger les images|VeRO|Gallery|EPS|OAuth|refresh/i.test(raw)) {
+  if (/policies manquantes|aucune image|héberger les images|VeRO|Gallery|EPS|OAuth|refresh|dangereux|hazardous/i.test(raw)) {
     return raw;
   }
 
@@ -1396,10 +1478,14 @@ async function createOffer(token, sku, listing, categoryId, merchantLocationKey,
 
 /**
  * Enrichit le message 25019 avec le diagnostic live (limites / policies).
+ * Priorité : raison règlement (hazardous / VeRO) si présente dans l’erreur eBay.
  */
 function format25019WithDiagnosis(detail, diagnosis) {
+  const policy = extractEbayPolicyBlockReason(detail);
+  if (policy) return policy.message;
+
   const lines = [
-    `eBay #25019 — ${detail || "Cannot revise listing / mise en vente refusée"}`,
+    `eBay #25019 — mise en vente refusée`,
     "",
     "→ Diagnostic EBX :",
   ];
@@ -1407,10 +1493,7 @@ function format25019WithDiagnosis(detail, diagnosis) {
     diagnosis.issues.forEach((i, idx) => lines.push(`${idx + 1}) ${i}`));
   } else {
     lines.push("Aucun blocage détecté côté policies/limites API.");
-    lines.push("Causes restantes les plus fréquentes :");
-    lines.push("1) Restriction compte vendeur (Seller Hub → Compte → Restrictions)");
-    lines.push("2) Quota d’annonces actives atteint (pas seulement le plafond ventes)");
-    lines.push("3) Publie 1 annonce manuelle sur eBay.fr pour « débloquer » l’API");
+    lines.push("Regarde le détail eBay (souvent : substances dangereuses, VeRO, restriction compte).");
   }
   if (diagnosis?.warnings?.length) {
     lines.push("");
@@ -1433,8 +1516,11 @@ function format25019WithDiagnosis(detail, diagnosis) {
         `, market=${diagnosis.market}, devise=${diagnosis.currency}`
     );
   }
-  lines.push("");
-  lines.push("Actions : npm run policies:prod → maj .env → redémarre → republie.");
+  if (detail) {
+    lines.push("");
+    lines.push("Détail brut eBay :");
+    lines.push(String(detail).slice(0, 500));
+  }
   return lines.join("\n");
 }
 
@@ -1950,6 +2036,7 @@ module.exports = {
   ebayAuthUrl,
   parseDuplicateListingError,
   formatEbayPublishError,
+  extractEbayPolicyBlockReason,
   differentiateEbayTitle,
   sanitizeEbayTitle,
   sanitizeListingForEbayPublish,
