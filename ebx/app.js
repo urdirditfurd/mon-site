@@ -135,11 +135,85 @@ function setEditTheme(color, el) {
     editHtmlDraft = replaceThemeInHtml(editHtmlDraft, prev, next);
   }
   editThemeColor = next;
-  const preview = document.getElementById("modal-content");
-  if (preview) preview.innerHTML = editHtmlDraft || "<p class='text-zinc-400'>Pas de description</p>";
   document.querySelectorAll(".edit-color-swatch").forEach((d) => d.classList.remove("active"));
   (el || document.querySelector(`.edit-color-swatch[data-theme="${next}"]`))?.classList.add("active");
   syncEditThemeIndicators();
+  renderEditModalPreview();
+}
+
+function extractImagesFromHtml(html) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = String(html || "");
+  return [...wrapper.querySelectorAll("img")]
+    .map((img) => img.getAttribute("src") || "")
+    .map((src) => src.trim())
+    .filter(Boolean);
+}
+
+function applyImageOrderToHtml(html, images) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = String(html || "");
+  const tags = [...wrapper.querySelectorAll("img")];
+  tags.forEach((img, idx) => {
+    if (images[idx]) img.setAttribute("src", images[idx]);
+  });
+  return wrapper.innerHTML;
+}
+
+function renderEditImagesManager() {
+  const box = document.getElementById("edit-images-list");
+  if (!box) return;
+  if (!editImageUrls.length) {
+    box.innerHTML = `<div class="col-span-full text-sm text-zinc-400">Aucune image détectée dans cette annonce.</div>`;
+    return;
+  }
+  box.innerHTML = editImageUrls
+    .map((src, idx) => {
+      const isMain = idx === 0;
+      return `<div class="rounded-xl overflow-hidden border bg-white ${isMain ? "ring-2 ring-brand-500 border-brand-200" : "border-zinc-200"}">
+        <img src="${escapeHtml(src)}" class="w-full h-32 object-cover bg-zinc-50" alt="Image ${idx + 1}" />
+        <div class="p-2 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[11px] ${isMain ? "text-brand-700 font-semibold" : "text-zinc-400"}">#${idx + 1}${isMain ? " · Principale" : ""}</span>
+            <button type="button" onclick="promoteEditImage(${idx})" class="text-[11px] px-2 py-1 rounded border ${isMain ? "bg-brand-50 border-brand-200 text-brand-700" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}">Première</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="moveEditImage(${idx}, -1)" class="px-2 py-1 rounded border text-xs ${idx === 0 ? "text-zinc-300 border-zinc-100 cursor-not-allowed" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}" ${idx === 0 ? "disabled" : ""}>← Gauche</button>
+            <button type="button" onclick="moveEditImage(${idx}, 1)" class="px-2 py-1 rounded border text-xs ${idx === editImageUrls.length - 1 ? "text-zinc-300 border-zinc-100 cursor-not-allowed" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}" ${idx === editImageUrls.length - 1 ? "disabled" : ""}>Droite →</button>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderEditModalPreview() {
+  const preview = document.getElementById("modal-content");
+  if (preview) preview.innerHTML = editHtmlDraft || "<p class='text-zinc-400'>Pas de description</p>";
+  renderEditImagesManager();
+}
+
+function moveEditImage(index, delta) {
+  const from = Number(index);
+  const to = from + Number(delta);
+  if (from < 0 || from >= editImageUrls.length || to < 0 || to >= editImageUrls.length) return;
+  const next = [...editImageUrls];
+  const [img] = next.splice(from, 1);
+  next.splice(to, 0, img);
+  editImageUrls = next;
+  editHtmlDraft = applyImageOrderToHtml(editHtmlDraft, editImageUrls);
+  renderEditModalPreview();
+}
+
+function promoteEditImage(index) {
+  const idx = Number(index);
+  if (idx <= 0 || idx >= editImageUrls.length) return;
+  const next = [...editImageUrls];
+  const [img] = next.splice(idx, 1);
+  next.unshift(img);
+  editImageUrls = next;
+  editHtmlDraft = applyImageOrderToHtml(editHtmlDraft, editImageUrls);
+  renderEditModalPreview();
 }
 
 if (typeof localStorage !== "undefined" && localStorage.getItem("ebx-dark") === "1") {
@@ -159,6 +233,7 @@ let descImages = [];
 let replaceImgIdx = 0;
 let editHtmlDraft = "";
 let editThemeColor = "#6d7ddf";
+let editImageUrls = [];
 
 const PAGE_META = {
   dashboard: ["Dashboard", "Ce qui se passe en temps réel sur eBay"],
@@ -1970,10 +2045,10 @@ async function viewListing(id) {
   }
   editHtmlDraft = d.html_description || "";
   editThemeColor = detectThemeFromHtml(editHtmlDraft);
-  document.getElementById("modal-content").innerHTML =
-    editHtmlDraft || "<p class='text-zinc-400'>Pas de description</p>";
+  editImageUrls = extractImagesFromHtml(editHtmlDraft);
   initEditPalette();
   syncEditThemeIndicators();
+  renderEditModalPreview();
   const m = document.getElementById("modal");
   m.classList.remove("hidden");
   m.classList.add("flex");
@@ -2061,6 +2136,10 @@ function closeModal() {
   const m = document.getElementById("modal");
   m.classList.add("hidden");
   m.classList.remove("flex");
+}
+
+function closeModalIfBackdrop(event) {
+  if (event?.target?.id === "modal") closeModal();
 }
 
 async function publishListing(id, btn) {
