@@ -1001,6 +1001,22 @@
     </div>
   </div>
 
-  <script src="app.js?v=rankings-price-v1"></script>
+  <!-- Publish error modal (message eBay lisible + copier) -->
+  <div id="error-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[60] p-4" onclick="closeErrorModalIfBackdrop(event)">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+      <div class="flex justify-between items-start gap-3 mb-3">
+        <h3 class="font-semibold text-lg text-red-700">Publication eBay — erreur</h3>
+        <button type="button" onclick="closeErrorModal()" class="text-xl text-zinc-400 hover:text-zinc-700">&times;</button>
+      </div>
+      <p class="text-xs text-zinc-500 mb-2">Copie ce message et envoie-le-moi si le problème continue.</p>
+      <textarea id="error-modal-text" readonly class="w-full h-48 text-sm rounded-xl border border-red-100 bg-red-50/40 p-3 font-mono leading-relaxed"></textarea>
+      <div class="mt-4 flex justify-end gap-2">
+        <button type="button" onclick="copyErrorModalText()" class="px-4 py-2 rounded-xl border text-sm">Copier</button>
+        <button type="button" onclick="closeErrorModal()" class="btn-primary text-sm">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=publish-error-v2"></script>
 </body>
 </html>

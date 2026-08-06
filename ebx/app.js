@@ -1705,7 +1705,8 @@ async function publishManualListing() {
         body: JSON.stringify({ seo_title: seoEl.value.trim() }),
       });
     }
-    const varEnabled = document.getElementById("manual-var-enabled")?.checked !== false;
+    // Défaut: publish simple (évite 25002 Couleur). Variations seulement si case cochée.
+    const varEnabled = document.getElementById("manual-var-enabled")?.checked === true;
     const aspect = document.getElementById("manual-var-aspect")?.value.trim() || "Couleur";
     const v1 = document.getElementById("manual-var-v1")?.value.trim() || "Blanc chaud";
     const v2 = document.getElementById("manual-var-v2")?.value.trim() || "Blanc froid";
@@ -1723,8 +1724,13 @@ async function publishManualListing() {
         },
       }),
     });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    let json = {};
+    try {
+      json = await res.json();
+    } catch (_) {
+      throw new Error(`Réponse serveur invalide (HTTP ${res.status})`);
+    }
+    if (!json.success) throw new Error(extractPublishErrorMessage(json, `HTTP ${res.status}`));
     document.getElementById("manual-status-label").textContent = "Publié";
     const vars = (json.data?.variations?.values || []).join(" / ");
     alert(
@@ -1734,7 +1740,7 @@ async function publishManualListing() {
     );
     navigate("listings");
   } catch (err) {
-    alert("Publication: " + err.message);
+    showPublishError(err.message || "Erreur publication");
   }
 }
 
@@ -2085,6 +2091,58 @@ async function saveListingEdits(opts = {}) {
   return true;
 }
 
+function showPublishError(message) {
+  const text = String(message || "Erreur publication eBay (sans détail).").trim();
+  try {
+    localStorage.setItem("ebx-last-publish-error", text);
+  } catch (_) {}
+  const box = document.getElementById("error-modal-text");
+  const modal = document.getElementById("error-modal");
+  if (box && modal) {
+    box.value = text;
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    return;
+  }
+  alert(text);
+}
+
+function closeErrorModal() {
+  const modal = document.getElementById("error-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function closeErrorModalIfBackdrop(event) {
+  if (event?.target?.id === "error-modal") closeErrorModal();
+}
+
+async function copyErrorModalText() {
+  const box = document.getElementById("error-modal-text");
+  const text = box?.value || "";
+  try {
+    await navigator.clipboard.writeText(text);
+    alert("Erreur copiée.");
+  } catch (_) {
+    box?.select();
+    document.execCommand("copy");
+    alert("Erreur copiée.");
+  }
+}
+
+function extractPublishErrorMessage(json, fallback) {
+  if (!json || typeof json !== "object") return fallback || "Erreur publication";
+  const err = json.error;
+  if (typeof err === "string" && err.trim() && !/^error$/i.test(err.trim())) return err.trim();
+  if (err && typeof err === "object") {
+    const nested = err.longMessage || err.message || err.error;
+    if (nested) return String(nested);
+  }
+  if (json.raw && String(json.raw).trim()) return String(json.raw).trim();
+  return fallback || "Erreur publication eBay (sans détail). Regarde la console serveur.";
+}
+
 async function publishListingFromModal() {
   const id = document.getElementById("edit-listing-id")?.value;
   if (!id) return;
@@ -2108,9 +2166,15 @@ async function publishListingFromModal() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ variations: { enabled: false } }),
     });
-    const json = await res.json();
+    let json = {};
+    try {
+      json = await res.json();
+    } catch (_) {
+      showPublishError(`Réponse serveur invalide (HTTP ${res.status}). Le serveur tourne-t-il encore ?`);
+      return;
+    }
     if (!json.success) {
-      alert(json.error || "Erreur publication");
+      showPublishError(extractPublishErrorMessage(json, `Erreur publication (HTTP ${res.status})`));
       return;
     }
     const lid = json.data?.listingId || json.listingId || "n/a";
@@ -2123,7 +2187,7 @@ async function publishListingFromModal() {
     closeModal();
     loadListings();
   } catch (e) {
-    alert(e.message || "Erreur publication");
+    showPublishError(e.message || "Erreur publication (réseau)");
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -2158,8 +2222,13 @@ async function publishListing(id, btn) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ variations: { enabled: false } }),
     });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    let json = {};
+    try {
+      json = await res.json();
+    } catch (_) {
+      throw new Error(`Réponse serveur invalide (HTTP ${res.status})`);
+    }
+    if (!json.success) throw new Error(extractPublishErrorMessage(json, `HTTP ${res.status}`));
     const lid = json.data.listingId || "N/A";
     const penv = json.data.env || envMode;
     const seller = json.data.sellerUserId ? `\nCompte vendeur : ${json.data.sellerUserId}` : "";
@@ -2180,9 +2249,10 @@ async function publishListing(id, btn) {
     alert(`Publié (${penv}) !${seller}\nListing ID: ${lid}\n\n${note}${extra}\n\nOuvre : ${link}`);
     loadListings();
   } catch (err) {
+    showPublishError(err.message || "Erreur publication");
+  } finally {
     btn.textContent = original;
     btn.disabled = false;
-    alert("Erreur: " + err.message);
   }
 }
 
@@ -2747,7 +2817,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","setEditTheme"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

@@ -2335,10 +2335,11 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
         } catch (retryErr) {
           const dup2 = parseDuplicateListingError(retryErr) || dup;
           console.error("[EBX] Retry différencié échoué:", retryErr.message);
+          const { formatEbayPublishError } = require("./ebay-api");
           return res.status(409).json({
             success: false,
             code: "DUPLICATE_LISTING",
-            error: dup2.message,
+            error: dup2.message || formatEbayPublishError(retryErr),
             data: dup2,
           });
         }
@@ -2385,12 +2386,17 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("[EBX] Erreur eBay :", err.message);
-    const { parseDuplicateListingError } = require("./ebay-api");
+    const { parseDuplicateListingError, formatEbayPublishError } = require("./ebay-api");
     const dup = parseDuplicateListingError(err);
     if (dup) {
       return res.status(409).json({ success: false, code: "DUPLICATE_LISTING", error: dup.message, data: dup });
     }
-    return res.status(500).json({ success: false, error: err.message });
+    const friendly = formatEbayPublishError(err);
+    return res.status(500).json({
+      success: false,
+      error: friendly,
+      raw: String(err.message || "").slice(0, 2000),
+    });
   }
 });
 

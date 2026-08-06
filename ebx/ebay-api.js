@@ -346,6 +346,77 @@ function parseDuplicateListingError(errOrText) {
   };
 }
 
+/**
+ * Transforme une erreur eBay brute (souvent message="Error" + longMessage utile)
+ * en texte FR actionnable pour l’UI.
+ */
+function formatEbayPublishError(errOrText) {
+  const raw = typeof errOrText === "string" ? errOrText : String(errOrText?.message || errOrText || "");
+  if (!raw.trim()) return "Erreur eBay inconnue — regarde la console serveur ([EBX] Erreur eBay).";
+
+  const dup = parseDuplicateListingError(raw);
+  if (dup) return dup.message;
+
+  let payload = null;
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) payload = JSON.parse(jsonMatch[0]);
+  } catch (_) {}
+
+  const errors = Array.isArray(payload?.errors) ? payload.errors : [];
+  const first = errors[0] || {};
+  const errorId = first.errorId != null ? Number(first.errorId) : null;
+  const longMessage = String(first.longMessage || first.message || "").trim();
+  const shortMessage = String(first.message || "").trim();
+  const detail =
+    longMessage && !/^error$/i.test(longMessage)
+      ? longMessage
+      : shortMessage && !/^error$/i.test(shortMessage)
+        ? shortMessage
+        : "";
+
+  const tips = {
+    1001: "Token OAuth invalide ou expiré → npm run oauth:prod (ou oauth) puis redémarre le serveur.",
+    1100: "Accès refusé eBay (scope manquant) → reconnecte OAuth avec les scopes Sell Inventory.",
+    25002: "Aspect produit refusé (Marque/Couleur/Type…) → ouvre Modifier, simplifie le titre, republie.",
+    25005: "Catégorie invalide (non-feuille) → laisse Taxonomy choisir, ou change EBAY_CATEGORY_ID.",
+    25007: "Politique business invalide → npm run policies:prod et mets à jour les IDs dans .env.",
+    25008: "Politique manquante → npm run policies:prod.",
+    25009: "Emplacement inventaire manquant → le serveur devrait le créer auto (merchant location).",
+    25601: "SKU / offer déjà utilisé → republie (nouveau SKU) ou termine l’ancienne offre.",
+    25604: "Offer introuvable — republie depuis Mes Listings.",
+    25709: "Locale / Content-Language incorrect — vérifie EBAY_MARKETPLACE_ID (ex. EBAY_FR).",
+    25710: "Marketplace mismatch — aligne EBAY_MARKETPLACE_ID avec ton compte vendeur.",
+    25713: "Image galerie refusée — change l’ordre des photos ou réimporte le produit.",
+    25718: "Description Inventory trop longue — déjà tronquée côté EBX, réessaie.",
+  };
+
+  const tip = errorId && tips[errorId] ? tips[errorId] : null;
+  const idPart = errorId != null ? `eBay #${errorId}` : "eBay";
+
+  if (detail) {
+    return tip ? `${idPart} — ${detail}\n\n→ ${tip}` : `${idPart} — ${detail}`;
+  }
+
+  // Messages locaux déjà clairs
+  if (/policies manquantes|aucune image|héberger les images|VeRO|Gallery|EPS|OAuth|refresh/i.test(raw)) {
+    return raw;
+  }
+
+  // Évite d’afficher seulement « Error »
+  if (/^error$/i.test(raw.trim()) || /\bmessage"\s*:\s*"Error"/i.test(raw)) {
+    return tip
+      ? `${idPart} — erreur sans détail.\n\n→ ${tip}`
+      : `${idPart} — erreur sans détail. Ouvre la console serveur (ligne [EBX] Erreur eBay) et copie le JSON.`;
+  }
+
+  // JSON trop long : garde un extrait lisible
+  if (raw.length > 900) {
+    return `${idPart} — ${raw.slice(0, 700)}…`;
+  }
+  return raw;
+}
+
 /** Titre légèrement différent pour un 2e essai après refus doublon. */
 function differentiateEbayTitle(title) {
   let t = sanitizeEbayTitle(title);
@@ -463,13 +534,29 @@ function extractImageUrls(html) {
   return urls;
 }
 
+function refererForImageUrl(imageUrl) {
+  const u = String(imageUrl || "").toLowerCase();
+  if (/alicdn\.com|aliexpress\.|ae01\.alicdn/i.test(u)) return "https://www.aliexpress.com/";
+  if (/cdiscount\.|cdscdn\.|octopia/i.test(u)) return "https://www.cdiscount.com/";
+  if (/media-amazon\.|ssl-images-amazon\.|amazon\./i.test(u)) return "https://www.amazon.fr/";
+  if (/ebayimg\.|ebaystatic\./i.test(u)) return "https://www.ebay.fr/";
+  try {
+    const host = new URL(imageUrl).origin;
+    return host + "/";
+  } catch {
+    return "https://www.google.com/";
+  }
+}
+
 async function downloadImageBuffer(imageUrl) {
+  const referer = refererForImageUrl(imageUrl);
   const res = await fetch(imageUrl, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-      Referer: "https://www.amazon.fr/",
+      Referer: referer,
+      "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
     },
     redirect: "follow",
   });
@@ -588,7 +675,9 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
     imageUrls = await hostImagesForGallery(token, sourceImages);
     if (!imageUrls.length) {
       throw new Error(
-        "Impossible d'héberger les images sur eBay (Gallery). Vérifie que les images source sont accessibles."
+        "Impossible d'héberger les images sur eBay (Gallery / EPS). " +
+          "Cause fréquente : images AliExpress/Amazon bloquées. " +
+          "Réimporte le produit, vérifie que les photos s'affichent dans Modifier, puis republie."
       );
     }
   }
@@ -647,12 +736,24 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
             Brand: mergedAspects.Brand || ["Unbranded"],
             Marque: mergedAspects.Marque || mergedAspects.Brand || ["Sans marque"],
             EAN: ["Does not apply"],
-            ...(aspects && Object.keys(aspects).length
-              ? Object.fromEntries(Object.entries(aspects).slice(0, 3))
-              : {}),
           },
           imageUrls: imageUrls.slice(0, 1),
           ean: ["Does not apply"],
+        },
+      },
+    },
+    {
+      label: "bare",
+      body: {
+        availability: { shipToLocationAvailability: { quantity: 10 } },
+        condition: "NEW",
+        product: {
+          title,
+          aspects: {
+            Brand: ["Unbranded"],
+            Marque: ["Sans marque"],
+          },
+          imageUrls: imageUrls.slice(0, 1),
         },
       },
     },
@@ -660,9 +761,21 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
 
   let lastErr = "";
   for (let i = 0; i < attempts.length; i++) {
-    const { label, body } = attempts[i];
+    let { label, body } = attempts[i];
+    // Si le précédent refus cite un aspect invalide, on le retire pour la suite
+    if (i > 0 && lastErr) {
+      const badAspect = (lastErr.match(/aspect[^"']*['"]([^"']+)['"]/i) ||
+        lastErr.match(/['"]([A-Za-zÀ-ÿ ]+)['"]\s+(?:is not|n'est pas|non autoris)/i) ||
+        [])[1];
+      if (badAspect && body?.product?.aspects?.[badAspect]) {
+        const cleaned = { ...body, product: { ...body.product, aspects: { ...body.product.aspects } } };
+        delete cleaned.product.aspects[badAspect];
+        body = cleaned;
+        label = `${label}-sans-${badAspect}`;
+      }
+    }
     if (i > 0) {
-      const wait = 1500 * i;
+      const wait = 1200 * i;
       console.warn(`[EBX] Inventory retry ${i + 1}/${attempts.length} (${label}) dans ${wait}ms…`);
       await sleep(wait);
     } else {
@@ -933,7 +1046,8 @@ function defaultVariantValues(title = "") {
  * ou désactive les variations → publish simple.
  */
 async function resolveVariationsForCategory(token, categoryId, title, input = {}) {
-  if (input?.enabled === false) {
+  // Opt-in strict : sans enabled=true → publish simple (évite 25002 Couleur)
+  if (input?.enabled !== true) {
     return { enabled: false, aspect: null, values: [] };
   }
 
@@ -1493,6 +1607,7 @@ module.exports = {
   ebayApiBase,
   ebayAuthUrl,
   parseDuplicateListingError,
+  formatEbayPublishError,
   differentiateEbayTitle,
   sanitizeEbayTitle,
 };
