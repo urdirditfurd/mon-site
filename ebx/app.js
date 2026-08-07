@@ -288,6 +288,7 @@ let kwPageIdx = 0;
 const KW_PER_PAGE = 8;
 let rankingsPeriod = "day";
 let dashTrendPeriod = "day";
+let dashMarketplace = "FR";
 let competitorPeriod = "month";
 let lastCompetitor = null;
 let lastDesc = null;
@@ -372,6 +373,11 @@ document.getElementById("dash-trending-period")?.addEventListener("click", (e) =
   loadDashboard({ refreshTrend: false });
 });
 
+document.getElementById("dash-market")?.addEventListener("change", (e) => {
+  dashMarketplace = String(e.target.value || "FR").toUpperCase();
+  loadDashboard({ refreshTrend: true, period: dashTrendPeriod });
+});
+
 document.getElementById("sniper-tabs")?.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-stab]");
   if (!btn) return;
@@ -451,19 +457,40 @@ let calSelectedEvent = null;
 let marketTickTimer = null;
 
 function formatEuro(n, decimals = 0) {
-  const v = Number(n) || 0;
-  return (
-    v.toLocaleString("fr-FR", {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    }) + " €"
-  );
+  return formatMoney(n, "EUR", decimals);
 }
 
-function formatCaShort(n) {
+function formatMoney(n, currency = "EUR", decimals = 0) {
   const v = Number(n) || 0;
-  if (v >= 1000) return Math.round(v / 1000) + "k €";
-  return formatEuro(v, 0);
+  const cur = String(currency || "EUR").toUpperCase();
+  const locale = cur === "USD" ? "en-US" : cur === "GBP" ? "en-GB" : "fr-FR";
+  const code = cur === "USD" || cur === "GBP" ? cur : "EUR";
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals,
+    }).format(v);
+  } catch (_) {
+    const sym = code === "USD" ? "$" : code === "GBP" ? "£" : "€";
+    return `${v.toLocaleString(locale, { maximumFractionDigits: decimals })} ${sym}`;
+  }
+}
+
+function currencyForMarket(market) {
+  const m = String(market || "FR").toUpperCase();
+  if (m === "US") return "USD";
+  if (m === "GB") return "GBP";
+  return "EUR";
+}
+
+function formatCaShort(n, currency = "EUR") {
+  const v = Number(n) || 0;
+  const cur = String(currency || "EUR").toUpperCase();
+  const sym = cur === "USD" ? "$" : cur === "GBP" ? "£" : "€";
+  if (v >= 1000) return Math.round(v / 1000) + "k " + sym;
+  return formatMoney(v, cur, 0);
 }
 
 function productThumbHtml(image, title, sizeClass = "w-12 h-12") {
@@ -645,9 +672,16 @@ async function loadDashboard(opts = {}) {
   bindDashboardCalendarControls();
   const refresh = opts.refreshTrend ? "1" : "0";
   const period = opts.period || dashTrendPeriod || "day";
+  const marketEl = document.getElementById("dash-market");
+  if (opts.marketplace) dashMarketplace = String(opts.marketplace).toUpperCase();
+  else if (marketEl?.value) dashMarketplace = String(marketEl.value).toUpperCase();
+  const marketplace = dashMarketplace || "FR";
+  if (marketEl && marketEl.value !== marketplace) marketEl.value = marketplace;
+
+  const moneyCur = currencyForMarket(marketplace);
   const trendBox = document.getElementById("dash-trending");
-  if (trendBox && opts.refreshTrend) {
-    trendBox.innerHTML = `<p class="text-zinc-400 text-sm py-4">Chargement des tendances…</p>`;
+  if (trendBox && (opts.refreshTrend || opts.marketplace)) {
+    trendBox.innerHTML = `<p class="text-zinc-400 text-sm py-4">Chargement tendances ${escapeHtml(marketplace)}…</p>`;
   }
 
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -655,7 +689,10 @@ async function loadDashboard(opts = {}) {
   let d = {};
   try {
     const res = await fetch(
-      API + `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&refresh=${refresh}`,
+      API +
+        `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&marketplace=${encodeURIComponent(
+          marketplace
+        )}&refresh=${refresh}`,
       ctrl ? { signal: ctrl.signal } : undefined
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -664,7 +701,7 @@ async function loadDashboard(opts = {}) {
   } catch (err) {
     console.warn("[EBX] dashboard load:", err);
     const caEl = document.getElementById("dash-market-ca");
-    if (caEl && caEl.textContent.includes("—")) caEl.textContent = formatEuro(180000, 2);
+    if (caEl && caEl.textContent.includes("—")) caEl.textContent = formatMoney(180000, moneyCur, 2);
     const tickEl = document.getElementById("dash-market-tick");
     if (tickEl) tickEl.textContent = "↑ sync en cours…";
     if (trendBox) {
@@ -678,11 +715,22 @@ async function loadDashboard(opts = {}) {
   }
 
   if (d.trendingPeriod) dashTrendPeriod = d.trendingPeriod;
+  if (d.trendingMarketplace) {
+    dashMarketplace = String(d.trendingMarketplace).toUpperCase();
+    if (marketEl) marketEl.value = dashMarketplace;
+  }
+  const cur = d.marketPulse?.currency || currencyForMarket(dashMarketplace);
+
   document.querySelectorAll("#dash-trending-period .trend-period-pill").forEach((b) => {
     const on = b.dataset.trendPeriod === dashTrendPeriod;
     b.classList.toggle("active", on);
     b.classList.toggle("text-zinc-500", !on);
   });
+
+  const titleEl = document.getElementById("dash-trending-title");
+  if (titleEl) titleEl.textContent = `🔥 Produits Tendances eBay ${dashMarketplace}`;
+  const sellersTitle = document.getElementById("dash-sellers-title");
+  if (sellersTitle) sellersTitle.textContent = `Top Vendeurs ${dashMarketplace}`;
 
   const greet = document.getElementById("dash-greeting");
   if (greet) {
@@ -695,15 +743,14 @@ async function loadDashboard(opts = {}) {
   const tickEl = document.getElementById("dash-market-tick");
   const labelEl = document.getElementById("dash-market-label");
   const shopEl = document.getElementById("dash-shop-ca");
-  // Jamais le CA boutique ici : 16 € chez toi = ton CA sync, pas le marché EBX (~200k)
   let marketRevenueLive = Number(pulse.marketRevenue);
   if (!Number.isFinite(marketRevenueLive) || marketRevenueLive < 1000) {
-    marketRevenueLive = 180000;
+    marketRevenueLive = dashMarketplace === "US" ? 650000 : 180000;
   }
-  if (caEl) caEl.textContent = formatEuro(marketRevenueLive, 2);
-  if (tickEl) tickEl.textContent = `↑ +${formatEuro(pulse.tick ?? 12, 2)} à l'instant`;
+  if (caEl) caEl.textContent = formatMoney(marketRevenueLive, cur, 2);
+  if (tickEl) tickEl.textContent = `↑ +${formatMoney(pulse.tick ?? 12, cur, 2)} à l'instant`;
   if (labelEl) {
-    labelEl.textContent = pulse.label || "estimation CA marché eBay FR aujourd'hui";
+    labelEl.textContent = pulse.label || `estimation CA marché eBay ${dashMarketplace} aujourd'hui`;
   }
   if (shopEl) {
     const shop = Number(d.revenue) || 0;
@@ -713,7 +760,7 @@ async function loadDashboard(opts = {}) {
         : d.revenueSource === "local_orders"
           ? "local"
           : "estim.";
-    shopEl.textContent = `Ton CA boutique : ${formatEuro(shop, 2)} (${src})`;
+    shopEl.textContent = `Ton CA boutique : ${formatMoney(shop, "EUR", 2)} (${src})`;
   }
 
   if (marketTickTimer) clearInterval(marketTickTimer);
@@ -721,8 +768,8 @@ async function loadDashboard(opts = {}) {
     if (!caEl || !tickEl) return;
     const bump = 8 + Math.random() * 55;
     marketRevenueLive += bump;
-    caEl.textContent = formatEuro(marketRevenueLive, 2);
-    tickEl.textContent = `↑ +${formatEuro(bump, 2)} à l'instant`;
+    caEl.textContent = formatMoney(marketRevenueLive, cur, 2);
+    tickEl.textContent = `↑ +${formatMoney(bump, cur, 2)} à l'instant`;
   }, 4500);
 
   const periodLabel =
@@ -730,11 +777,11 @@ async function loadDashboard(opts = {}) {
   const trendMeta = document.getElementById("dash-trending-meta");
   if (trendMeta) {
     if (d.trendingLive) {
-      trendMeta.innerHTML = `Niches rotatives · <span class="text-emerald-600 font-medium">${periodLabel}</span>${
+      trendMeta.innerHTML = `Niches ${escapeHtml(dashMarketplace)} · <span class="text-emerald-600 font-medium">${periodLabel}</span>${
         d.trendingCached ? (d.trendingStale ? " · cache (maj en fond)" : " · cache") : " · live eBay"
       }`;
     } else {
-      trendMeta.textContent = "Aperçu local — Actualiser pour tenter le live Browse eBay";
+      trendMeta.textContent = `Aperçu ${dashMarketplace} — Actualiser pour tenter le live Browse eBay`;
     }
   }
 
@@ -764,14 +811,14 @@ async function loadDashboard(opts = {}) {
               ${img}
               <div class="min-w-0">${title}${niche}</div>
               <div class="hidden sm:block text-right text-sm font-semibold text-emerald-600">${soldTxt}</div>
-              <div class="hidden sm:block text-right text-sm font-bold">${formatEuro(t.price, 0)}</div>
+              <div class="hidden sm:block text-right text-sm font-bold">${formatMoney(t.price, cur, 0)}</div>
               <div class="hidden sm:block text-right text-sm font-bold text-emerald-600">${
-                ca > 0 ? formatCaShort(ca) : "—"
+                ca > 0 ? formatCaShort(ca, cur) : "—"
               }</div>
             </div>`;
           })
           .join("")
-      : `<p class="text-zinc-400 text-sm py-4">Aucune tendance — clique Actualiser (clé Browse eBay requise).</p>`;
+      : `<p class="text-zinc-400 text-sm py-4">Aucune tendance ${escapeHtml(dashMarketplace)} — clique Actualiser.</p>`;
   }
 
   const trendUpdated = document.getElementById("dash-trending-updated");
@@ -781,14 +828,14 @@ async function loadDashboard(opts = {}) {
     const day = ts.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
     trendUpdated.textContent = `Mis à jour ${day} ${hhmm}${
       d.trendingCached ? (d.trendingStale ? " (cache, maj fond)" : " (cache)") : ""
-    }`;
+    } · ${dashMarketplace}`;
   }
 
   const seedsEl = document.getElementById("dash-trending-seeds");
   if (seedsEl) {
     const seeds = d.trendingSeeds || [];
     seedsEl.textContent = seeds.length
-      ? `Niches ${periodLabel} : ${seeds.slice(0, 8).join(" · ")}`
+      ? `Niches ${dashMarketplace} (${periodLabel}) : ${seeds.slice(0, 8).join(" · ")}`
       : "";
   }
 

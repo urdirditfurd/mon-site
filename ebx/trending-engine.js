@@ -1,5 +1,5 @@
 /**
- * Moteur tendances eBay FR — jour / semaine / mois.
+ * Moteur tendances eBay multi-marché (FR / US / DE / GB).
  * Browse API + enrichissement ventes + cache disque + rotation niches.
  *
  * eBay ne fournit pas de « top ventes officielles » en API publique :
@@ -8,7 +8,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { browseSearch, enrichBrowseItems } = require("./ebay-browse");
+const { browseSearch, enrichBrowseItems, normalizeMarketCode } = require("./ebay-browse");
 const { scanHazardous } = require("./business-engine");
 
 const CACHE_PATH = path.join(__dirname, "data", "trending-cache.json");
@@ -38,9 +38,8 @@ const TREND_BLOCK_BRANDS = [
   "airpods pro",
 ];
 
-/** Pool large de niches dropshipping-friendly FR (rotation jour/semaine). */
-const NICHE_POOL = [
-  // High-tech / mobile (générique, sans marque contrefaite)
+/** Pool niches FR. */
+const NICHE_POOL_FR = [
   "coque silicone transparent smartphone",
   "verre trempé protection écran",
   "chargeur gan usb-c 65w",
@@ -49,7 +48,6 @@ const NICHE_POOL = [
   "powerbank 20000mah",
   "écouteurs bluetooth sans fil",
   "ring light led selfie",
-  // Maison / déco
   "bande led rgb wifi",
   "ruban led neon flexible",
   "organiseur tiroir cuisine",
@@ -57,47 +55,144 @@ const NICHE_POOL = [
   "lampe de chevet tactile",
   "diffuseur huile essentielle",
   "tapis de bain antidérapant",
-  // Beauté
   "eponge maquillage blender",
   "pinceaux maquillage set",
   "miroir led maquillage",
   "rouleau jade visage",
   "bandeau spa maquillage",
-  // Bricolage / réparation (hors hazmat)
   "colle b7000 telephone",
   "kit tournevis precision telephone",
   "ventouse ecran telephone",
   "pate thermique cpu",
-  // Bureau / setup
   "tapis de souris xxl",
   "support laptop aluminium",
   "organiseur cables bureau",
   "lampe bureau led clip",
   "repose poignet clavier",
-  // Sport / outdoor
   "bande elastique musculation",
   "gourde sport inox",
   "tapis yoga antidérapant",
   "corde à sauter vitesse",
-  // Auto
   "aspirateur voiture portable",
   "range documents voiture",
   "chargeur allume cigare usb",
-  // Animaux
   "jouet chat plume",
   "brosse chien autotoy",
   "gamelle anti glouton",
-  // Saisonnier (été / rentrée / hiver — toujours utiles)
   "ventilateur usb portable",
   "pochette etanche telephone",
   "chauffe main rechargeable",
   "guirlande lumineuse interieur",
 ];
 
-/** Boost saisonnier selon mois (1–12). */
-function seasonalBoosts(month) {
+/** Pool niches US / GB (anglais). */
+const NICHE_POOL_EN = [
+  "clear silicone phone case",
+  "tempered glass screen protector",
+  "gan 65w usb-c charger",
+  "braided usb c cable 6ft",
+  "magnetic car phone mount",
+  "power bank 20000mah",
+  "wireless bluetooth earbuds",
+  "led ring light selfie",
+  "rgb led strip lights wifi",
+  "neon led rope light",
+  "kitchen drawer organizer",
+  "adhesive wall hooks heavy duty",
+  "touch bedside lamp",
+  "essential oil diffuser",
+  "non slip bath mat",
+  "makeup sponge blender",
+  "makeup brush set",
+  "led makeup mirror",
+  "jade roller face",
+  "spa headband makeup",
+  "b7000 glue phone repair",
+  "precision screwdriver kit phone",
+  "phone screen suction cup",
+  "cpu thermal paste",
+  "xxl gaming mouse pad",
+  "aluminum laptop stand",
+  "desk cable organizer",
+  "led desk lamp clip",
+  "keyboard wrist rest",
+  "resistance bands set",
+  "stainless steel water bottle",
+  "non slip yoga mat",
+  "speed jump rope",
+  "portable car vacuum",
+  "car document holder",
+  "cigarette lighter usb charger",
+  "cat feather toy",
+  "dog self cleaning brush",
+  "slow feeder dog bowl",
+  "portable usb fan",
+  "waterproof phone pouch",
+  "rechargeable hand warmer",
+  "indoor fairy string lights",
+];
+
+/** Pool niches DE. */
+const NICHE_POOL_DE = [
+  "silikon handyhülle transparent",
+  "panzerglas displayschutz",
+  "gan 65w usb-c ladegerät",
+  "usb c kabel geflochten 2m",
+  "magnetische handyhalterung auto",
+  "powerbank 20000mah",
+  "bluetooth kopfhörer kabellos",
+  "led ringlicht selfie",
+  "rgb led streifen wifi",
+  "neon led lichtschlauch",
+  "schubladen organizer küche",
+  "klebehaken wand stark",
+  "nachttischlampe touch",
+  "duftöl diffuser",
+  "badematte rutschfest",
+  "makeup schwamm blender",
+  "makeup pinsel set",
+  "led schminkspiegel",
+  "jade roller gesicht",
+  "spa haarband makeup",
+  "b7000 kleber handy reparatur",
+  "feinmechanik schraubendreher set",
+  "display saugnapf handy",
+  "wärmeleitpaste cpu",
+  "xxl gaming mauspad",
+  "laptop ständer aluminium",
+  "kabel organizer schreibtisch",
+  "led schreibtischlampe klemme",
+  "tastatur handgelenkauflage",
+  "fitnessbänder set",
+  "edelstahl trinkflasche",
+  "yoga matte rutschfest",
+  "springseil speed",
+  "auto staubsauger tragbar",
+  "auto dokumentenmappe",
+  "zigarettenanzünder usb ladegerät",
+  "katzen spielzeug feder",
+  "hunde bürste selbstreinigend",
+  "anti schling napf hund",
+  "usb ventilator tragbar",
+  "wasserdichte handyhülle strand",
+  "wiederaufladbarer handwärmer",
+  "lichterkette innen",
+];
+
+const NICHE_POOL = NICHE_POOL_FR;
+
+function nichePoolForMarket(marketplace = "FR") {
+  const m = normalizeMarketCode(marketplace);
+  if (m === "US" || m === "GB") return NICHE_POOL_EN;
+  if (m === "DE") return NICHE_POOL_DE;
+  return NICHE_POOL_FR;
+}
+
+/** Boost saisonnier selon mois (1–12) — clés alignées sur le pool actif. */
+function seasonalBoosts(month, marketplace = "FR") {
   const m = Number(month) || new Date().getMonth() + 1;
-  const map = {
+  const market = normalizeMarketCode(marketplace);
+  const fr = {
     1: ["chauffe main rechargeable", "organiseur tiroir cuisine", "lampe de chevet tactile"],
     2: ["rouleau jade visage", "miroir led maquillage", "diffuseur huile essentielle"],
     3: ["tapis yoga antidérapant", "bande elastique musculation", "gourde sport inox"],
@@ -111,6 +206,35 @@ function seasonalBoosts(month) {
     11: ["bande led rgb wifi", "ring light led selfie", "powerbank 20000mah"],
     12: ["guirlande lumineuse interieur", "lampe de chevet tactile", "powerbank 20000mah"],
   };
+  const en = {
+    1: ["rechargeable hand warmer", "kitchen drawer organizer", "touch bedside lamp"],
+    2: ["jade roller face", "led makeup mirror", "essential oil diffuser"],
+    3: ["non slip yoga mat", "resistance bands set", "stainless steel water bottle"],
+    4: ["portable car vacuum", "waterproof phone pouch", "indoor fairy string lights"],
+    5: ["portable usb fan", "rgb led strip lights wifi", "led ring light selfie"],
+    6: ["portable usb fan", "waterproof phone pouch", "neon led rope light"],
+    7: ["portable usb fan", "waterproof phone pouch", "stainless steel water bottle"],
+    8: ["clear silicone phone case", "tempered glass screen protector", "braided usb c cable 6ft"],
+    9: ["aluminum laptop stand", "xxl gaming mouse pad", "desk cable organizer"],
+    10: ["led desk lamp clip", "essential oil diffuser", "indoor fairy string lights"],
+    11: ["rgb led strip lights wifi", "led ring light selfie", "power bank 20000mah"],
+    12: ["indoor fairy string lights", "touch bedside lamp", "power bank 20000mah"],
+  };
+  const de = {
+    1: ["wiederaufladbarer handwärmer", "schubladen organizer küche", "nachttischlampe touch"],
+    2: ["jade roller gesicht", "led schminkspiegel", "duftöl diffuser"],
+    3: ["yoga matte rutschfest", "fitnessbänder set", "edelstahl trinkflasche"],
+    4: ["auto staubsauger tragbar", "wasserdichte handyhülle strand", "lichterkette innen"],
+    5: ["usb ventilator tragbar", "rgb led streifen wifi", "led ringlicht selfie"],
+    6: ["usb ventilator tragbar", "wasserdichte handyhülle strand", "neon led lichtschlauch"],
+    7: ["usb ventilator tragbar", "wasserdichte handyhülle strand", "edelstahl trinkflasche"],
+    8: ["silikon handyhülle transparent", "panzerglas displayschutz", "usb c kabel geflochten 2m"],
+    9: ["laptop ständer aluminium", "xxl gaming mauspad", "kabel organizer schreibtisch"],
+    10: ["led schreibtischlampe klemme", "duftöl diffuser", "lichterkette innen"],
+    11: ["rgb led streifen wifi", "led ringlicht selfie", "powerbank 20000mah"],
+    12: ["lichterkette innen", "nachttischlampe touch", "powerbank 20000mah"],
+  };
+  const map = market === "DE" ? de : market === "US" || market === "GB" ? en : fr;
   return map[m] || [];
 }
 
@@ -156,30 +280,29 @@ function ttlMs(period) {
   return 24 * 60 * 60 * 1000; // 24 h
 }
 
-function seedsForPeriod(period, now = new Date()) {
+function seedsForPeriod(period, now = new Date(), marketplace = "FR") {
+  const market = normalizeMarketCode(marketplace);
   const dayOfYear = Math.floor(
     (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
       Date.UTC(now.getFullYear(), 0, 0)) /
       86400000
   );
-  const seasonal = seasonalBoosts(now.getMonth() + 1);
-  const pool = [...seasonal, ...NICHE_POOL.filter((n) => !seasonal.includes(n))];
+  const nichePool = nichePoolForMarket(market);
+  const seasonal = seasonalBoosts(now.getMonth() + 1, market);
+  const pool = [...seasonal, ...nichePool.filter((n) => !seasonal.includes(n))];
 
   // Rotation stable : chaque jour décale la fenêtre dans le pool
   const start = dayOfYear % Math.max(1, pool.length);
   const rotated = pool.slice(start).concat(pool.slice(0, start));
 
   if (period === "day") {
-    // 6 niches du jour (fraîcheur)
     return rotated.slice(0, 6);
   }
   if (period === "week") {
-    // 10 niches (mix semaine = jour + voisins)
     const weekOffset = Math.floor(dayOfYear / 7) % pool.length;
     const weekRot = pool.slice(weekOffset).concat(pool.slice(0, weekOffset));
     return [...new Set([...rotated.slice(0, 4), ...weekRot.slice(0, 8)])].slice(0, 10);
   }
-  // mois : large couverture
   return [...new Set([...seasonal, ...rotated.slice(0, 14)])].slice(0, 14);
 }
 
@@ -222,22 +345,26 @@ function cacheEntryToResult(hit, period, limit, { stale = false } = {}) {
 
 /** Snapshot cache immédiat (même expiré) — pour ne jamais bloquer le dashboard. */
 function peekTrendingCache({ marketplace = "FR", period = "day", limit = 12 } = {}) {
-  const key = `${marketplace}:${periodKey(period)}`;
+  const market = normalizeMarketCode(marketplace);
+  const key = `${market}:${periodKey(period)}`;
   const hit = loadTrendCache()[key];
   if (!hit?.items?.length) return null;
   const fresh = Date.now() - Number(hit.fetchedAt || 0) < ttlMs(period);
-  return cacheEntryToResult(hit, period, limit, { stale: !fresh });
+  const result = cacheEntryToResult(hit, period, limit, { stale: !fresh });
+  result.marketplace = market;
+  return result;
 }
 
 const _refreshInFlight = new Map();
 
 function scheduleTrendingRefresh(opts = {}) {
-  const marketplace = opts.marketplace || "FR";
+  const marketplace = normalizeMarketCode(opts.marketplace || "FR");
   const period = opts.period || "day";
   const key = `${marketplace}:${periodKey(period)}`;
   if (_refreshInFlight.has(key)) return _refreshInFlight.get(key);
   const p = fetchTrendingProducts({
     ...opts,
+    marketplace,
     force: true,
     fast: false,
     maxMs: 45000,
@@ -279,6 +406,7 @@ async function fetchTrendingProducts({
   preferCache = false,
 } = {}) {
   const now = new Date();
+  marketplace = normalizeMarketCode(marketplace);
   const key = `${marketplace}:${periodKey(period, now)}`;
   const cache = loadTrendCache();
   const hit = cache[key];
@@ -290,18 +418,22 @@ async function fetchTrendingProducts({
     hit.items.length >= 3 &&
     Date.now() - Number(hit.fetchedAt || 0) < ttlMs(period)
   ) {
-    return cacheEntryToResult(hit, period, limit, { stale: false });
+    const r = cacheEntryToResult(hit, period, limit, { stale: false });
+    r.marketplace = marketplace;
+    return r;
   }
 
   if (preferCache && hit?.items?.length) {
     if (!force) scheduleTrendingRefresh({ marketplace, period, limit });
-    return cacheEntryToResult(hit, period, limit, {
+    const r = cacheEntryToResult(hit, period, limit, {
       stale: Date.now() - Number(hit.fetchedAt || 0) >= ttlMs(period),
     });
+    r.marketplace = marketplace;
+    return r;
   }
 
   const livePromise = (async () => {
-    const seeds = seedsForPeriod(period, now).slice(0, fast ? 4 : undefined);
+    const seeds = seedsForPeriod(period, now, marketplace).slice(0, fast ? 4 : undefined);
     const perSeed = fast ? 2 : period === "day" ? 3 : period === "week" ? 3 : 2;
     const all = [];
     let apiOk = false;
@@ -377,7 +509,7 @@ async function fetchTrendingProducts({
       uniq.push({
         rank: uniq.length + 1,
         title: p.title,
-        category: p.seed || "eBay FR",
+        category: p.seed || `eBay ${marketplace}`,
         price: p.price || 0,
         wasPrice: p.wasPrice || null,
         sold: p.sold || 0,
@@ -395,7 +527,7 @@ async function fetchTrendingProducts({
     }
 
     const algo =
-      `Niches rotatives ${period} (${seeds.length}) → Browse eBay FR` +
+      `Niches rotatives ${period} (${seeds.length}) → Browse eBay ${marketplace}` +
       (fast ? " (mode rapide)" : " → fiche item (estimatedSoldQuantity)") +
       `. Exclut VeRO/hazmat. Cache ${Math.round(ttlMs(period) / 3600000)}h.`;
 
@@ -405,6 +537,7 @@ async function fetchTrendingProducts({
       cached: false,
       stale: false,
       period,
+      marketplace,
       seeds,
       updatedAt: now.toISOString(),
       source: apiOk ? (fast ? "eBay Browse fast" : "eBay Browse + item detail") : "empty",
@@ -442,10 +575,11 @@ async function fetchTrendingProducts({
 }
 
 function getCachedTrendingMeta(marketplace = "FR") {
+  const market = normalizeMarketCode(marketplace);
   const cache = loadTrendCache();
   const out = {};
   for (const period of ["day", "week", "month"]) {
-    const key = `${marketplace}:${periodKey(period)}`;
+    const key = `${market}:${periodKey(period)}`;
     const hit = cache[key];
     out[period] = hit
       ? {
@@ -467,6 +601,11 @@ module.exports = {
   periodKey,
   isBlockedTrendTitle,
   getCachedTrendingMeta,
+  nichePoolForMarket,
+  normalizeMarketCode,
   NICHE_POOL,
+  NICHE_POOL_FR,
+  NICHE_POOL_EN,
+  NICHE_POOL_DE,
   TREND_BLOCK_BRANDS,
 };

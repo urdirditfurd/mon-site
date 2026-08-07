@@ -630,23 +630,26 @@ app.get("/api/dashboard", async (_req, res) => {
     // Tendances : cache d'abord, live rapide (max ~3.5s), jamais bloquer le reste du dashboard
     let trending = [];
     let rankingsLive = false;
-    let trendingMeta = { period: "day", seeds: [], algo: null, cached: false };
+    let trendingMeta = { period: "day", seeds: [], algo: null, cached: false, marketplace: "FR" };
+    const dashMarketRaw = String(_req.query?.marketplace || "FR");
     try {
       const {
         fetchTrendingProducts,
         peekTrendingCache,
         scheduleTrendingRefresh,
         seedsForPeriod,
+        normalizeMarketCode,
       } = require("./trending-engine");
+      const marketplace = normalizeMarketCode(dashMarketRaw);
       const dashPeriod = String(_req.query?.trendPeriod || "day").toLowerCase();
       const period = ["day", "week", "month"].includes(dashPeriod) ? dashPeriod : "day";
       const force = String(_req.query?.refresh || "") === "1";
 
-      let trend = peekTrendingCache({ marketplace: "FR", period, limit: 10 });
+      let trend = peekTrendingCache({ marketplace, period, limit: 10 });
       if (!trend || force) {
         try {
           trend = await fetchTrendingProducts({
-            marketplace: "FR",
+            marketplace,
             period,
             force,
             limit: 10,
@@ -656,11 +659,11 @@ app.get("/api/dashboard", async (_req, res) => {
           });
         } catch (err) {
           console.warn("[EBX] dashboard trending live:", err.message);
-          trend = peekTrendingCache({ marketplace: "FR", period, limit: 10 }) || trend;
+          trend = peekTrendingCache({ marketplace, period, limit: 10 }) || trend;
         }
       } else {
         // Cache hit → enrichissement complet en fond
-        scheduleTrendingRefresh({ marketplace: "FR", period, limit: 12 });
+        scheduleTrendingRefresh({ marketplace, period, limit: 12 });
       }
 
       if (trend?.items?.length) {
@@ -675,12 +678,14 @@ app.get("/api/dashboard", async (_req, res) => {
             category: it.category,
             ca: it.ca,
             period: it.period || period,
+            currency: it.currency || null,
           })
         );
         rankingsLive = !!trend.live && trending.length > 0;
         trendingMeta = {
           period,
-          seeds: trend.seeds?.length ? trend.seeds : seedsForPeriod(period),
+          marketplace,
+          seeds: trend.seeds?.length ? trend.seeds : seedsForPeriod(period, new Date(), marketplace),
           algo: trend.algo || null,
           cached: !!trend.cached,
           stale: !!trend.stale,
@@ -689,13 +694,19 @@ app.get("/api/dashboard", async (_req, res) => {
         };
       } else {
         trendingMeta.period = period;
-        trendingMeta.seeds = seedsForPeriod(period);
+        trendingMeta.marketplace = marketplace;
+        trendingMeta.seeds = seedsForPeriod(period, new Date(), marketplace);
       }
     } catch (err) {
       console.warn("[EBX] dashboard trending:", err.message);
     }
+    const dashMarket =
+      trendingMeta.marketplace ||
+      String(dashMarketRaw || "FR")
+        .toUpperCase()
+        .replace(/^EBAY_/, "");
     if (!trending.length) {
-      trending = getRankings("FR").slice(0, 8).map((p) =>
+      trending = getRankings(dashMarket).slice(0, 8).map((p) =>
         withProductImage({
           title: p.title,
           price: p.price,
@@ -713,8 +724,8 @@ app.get("/api/dashboard", async (_req, res) => {
       const v = nicheVisual(n.name);
       return { ...n, icon: n.icon || v.icon, image: v.image, color: v.color };
     });
-    const topSellers = getTopSellers("FR");
-    const marketPulse = getMarketPulse(trending);
+    const topSellers = getTopSellers(dashMarket);
+    const marketPulse = getMarketPulse(trending, new Date(), dashMarket);
     const savOpen = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived").length;
     if (savOpen > 0) {
       pilotage.unshift({
@@ -762,6 +773,7 @@ app.get("/api/dashboard", async (_req, res) => {
         trendingLive: rankingsLive,
         trendingUpdatedAt: trendingMeta.updatedAt || new Date().toISOString(),
         trendingPeriod: trendingMeta.period || "day",
+        trendingMarketplace: trendingMeta.marketplace || dashMarket || "FR",
         trendingCached: !!trendingMeta.cached,
         trendingStale: !!trendingMeta.stale,
         trendingSeeds: trendingMeta.seeds || [],

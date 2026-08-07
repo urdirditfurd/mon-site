@@ -521,31 +521,45 @@ function getTopSellers(marketplace = "FR") {
  * une estimation cohérente (progression journée + échantillon tendances),
  * pas le CA de TA boutique (celui-ci reste dans `revenue`).
  */
-function getMarketPulse(trending = [], now = new Date()) {
+function getMarketPulse(trending = [], now = new Date(), marketplace = "FR") {
+  const market = String(marketplace || "FR")
+    .toUpperCase()
+    .replace(/^EBAY_/, "");
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const secondsToday = Math.max(0, (now - startOfDay) / 1000);
   const daySeed = now.getFullYear() * 372 + (now.getMonth() + 1) * 31 + now.getDate();
-  // Cible journalière FR simulée dans la même fourchette qu'EBX (~280k–400k fin de journée)
-  const dailyTarget = 280000 + (daySeed % 120000);
-  // Monte dans la journée (~25% dès le matin → ~100% le soir)
+  // Cibles GMV ticker (estimations UX, pas API officielle)
+  const targets = {
+    FR: 280000,
+    DE: 320000,
+    GB: 250000,
+    US: 900000,
+  };
+  const base = targets[market] || targets.FR;
+  const dailyTarget = base + (daySeed % Math.round(base * 0.4));
   const progress = Math.min(0.98, 0.25 + 0.75 * (secondsToday / 86400));
   const sampleBoost = (trending || []).reduce((s, t) => {
     const price = Number(t.price) || 0;
     const sold = Number(t.sold) || 0;
-    // Contribution faible des tops (évite d'exploser / d'effondrer le ticker)
     return s + Math.min(8000, price * Math.min(sold, 200) * 0.002);
   }, 0);
-  // Micro-variation minute pour que deux refreshs ne soient pas identiques
   const jitter = ((now.getMinutes() * 37 + now.getSeconds()) % 2000) / 100;
   const marketRevenue = Number((dailyTarget * progress + sampleBoost + jitter).toFixed(2));
-  // Tick « à l'instant » : quelques € à dizaines d'€ (comme EBX ~+40 €)
   const tick = Number((8 + ((now.getSeconds() * 13 + now.getMilliseconds()) % 7000) / 100).toFixed(2));
+  const currency = market === "US" || market === "GB" ? (market === "US" ? "USD" : "GBP") : "EUR";
+  const labels = {
+    FR: "estimation CA marché eBay FR aujourd'hui",
+    DE: "Schätzung eBay DE Marktumsatz heute",
+    GB: "estimated eBay UK market GMV today",
+    US: "estimated eBay US market GMV today",
+  };
   return {
     marketRevenue,
     tick,
-    marketplace: "FR",
-    source: "estimate_fr",
-    label: "estimation CA marché eBay FR aujourd'hui",
+    marketplace: market,
+    currency,
+    source: `estimate_${market.toLowerCase()}`,
+    label: labels[market] || labels.FR,
     note: "Pas une API eBay officielle — ticker estimé (parité UX EBX). Ton CA boutique est séparé.",
   };
 }

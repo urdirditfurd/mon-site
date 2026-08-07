@@ -53,7 +53,33 @@ async function getAppToken({ production = true } = {}) {
 }
 
 function marketplaceId(code = "FR") {
-  return code === "US" || code === "United States" ? "EBAY_US" : "EBAY_FR";
+  const c = String(code || "FR")
+    .toUpperCase()
+    .replace(/^EBAY_/, "")
+    .trim();
+  switch (c) {
+    case "US":
+    case "UNITED STATES":
+      return "EBAY_US";
+    case "DE":
+    case "GERMANY":
+    case "DEUTSCHLAND":
+      return "EBAY_DE";
+    case "GB":
+    case "UK":
+    case "UNITED KINGDOM":
+      return "EBAY_GB";
+    case "FR":
+    case "FRANCE":
+      return "EBAY_FR";
+    default:
+      return "EBAY_FR";
+  }
+}
+
+function normalizeMarketCode(code = "FR") {
+  const id = marketplaceId(code);
+  return id.replace(/^EBAY_/, "");
 }
 
 /** Prix courant + barré éventuel depuis un item Browse. */
@@ -315,4 +341,5 @@ module.exports = {
   browseItem,
   enrichBrowseItems,
   marketplaceId,
+  normalizeMarketCode,
 };
