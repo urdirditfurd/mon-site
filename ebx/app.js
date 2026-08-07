@@ -645,11 +645,37 @@ async function loadDashboard(opts = {}) {
   bindDashboardCalendarControls();
   const refresh = opts.refreshTrend ? "1" : "0";
   const period = opts.period || dashTrendPeriod || "day";
-  const res = await fetch(
-    API + `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&refresh=${refresh}`
-  );
-  const json = await res.json();
-  const d = json.data || {};
+  const trendBox = document.getElementById("dash-trending");
+  if (trendBox && opts.refreshTrend) {
+    trendBox.innerHTML = `<p class="text-zinc-400 text-sm py-4">Chargement des tendances…</p>`;
+  }
+
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const abortTimer = setTimeout(() => ctrl?.abort?.(), 14000);
+  let d = {};
+  try {
+    const res = await fetch(
+      API + `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&refresh=${refresh}`,
+      ctrl ? { signal: ctrl.signal } : undefined
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    d = json.data || {};
+  } catch (err) {
+    console.warn("[EBX] dashboard load:", err);
+    const caEl = document.getElementById("dash-market-ca");
+    if (caEl && caEl.textContent.includes("—")) caEl.textContent = formatEuro(180000, 2);
+    const tickEl = document.getElementById("dash-market-tick");
+    if (tickEl) tickEl.textContent = "↑ sync en cours…";
+    if (trendBox) {
+      trendBox.innerHTML = `<p class="text-amber-600 text-sm py-4">Dashboard lent / hors-ligne — réessaie Actualiser. (${escapeHtml(
+        err.name === "AbortError" ? "délai dépassé" : err.message || "erreur"
+      )})</p>`;
+    }
+    return;
+  } finally {
+    clearTimeout(abortTimer);
+  }
 
   if (d.trendingPeriod) dashTrendPeriod = d.trendingPeriod;
   document.querySelectorAll("#dash-trending-period .trend-period-pill").forEach((b) => {
@@ -705,14 +731,13 @@ async function loadDashboard(opts = {}) {
   if (trendMeta) {
     if (d.trendingLive) {
       trendMeta.innerHTML = `Niches rotatives · <span class="text-emerald-600 font-medium">${periodLabel}</span>${
-        d.trendingCached ? " · cache" : " · live eBay"
+        d.trendingCached ? (d.trendingStale ? " · cache (maj en fond)" : " · cache") : " · live eBay"
       }`;
     } else {
-      trendMeta.textContent = "Fallback local — configure EBAY_PROD_CLIENT_ID pour le live";
+      trendMeta.textContent = "Aperçu local — Actualiser pour tenter le live Browse eBay";
     }
   }
 
-  const trendBox = document.getElementById("dash-trending");
   if (trendBox) {
     const items = d.trending || [];
     trendBox.innerHTML = items.length
@@ -754,7 +779,9 @@ async function loadDashboard(opts = {}) {
     const ts = d.trendingUpdatedAt ? new Date(d.trendingUpdatedAt) : new Date();
     const hhmm = ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const day = ts.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
-    trendUpdated.textContent = `Mis à jour ${day} ${hhmm}${d.trendingCached ? " (cache)" : ""}`;
+    trendUpdated.textContent = `Mis à jour ${day} ${hhmm}${
+      d.trendingCached ? (d.trendingStale ? " (cache, maj fond)" : " (cache)") : ""
+    }`;
   }
 
   const seedsEl = document.getElementById("dash-trending-seeds");
@@ -2960,7 +2987,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

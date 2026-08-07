@@ -24,5 +24,8 @@ assert.ok(/^day-/.test(periodKey("day")));
 assert.ok(/^week-/.test(periodKey("week")));
 assert.ok(/^month-/.test(periodKey("month")));
 
+const { peekTrendingCache } = require("../trending-engine");
+assert.strictEqual(peekTrendingCache({ period: "day" }), null, "pas de cache au départ OK");
+
 console.log("OK trending-engine verify");
 console.log("  day niches:", dayA.join(" | "));

@@ -591,7 +591,11 @@ app.get("/api/dashboard", async (_req, res) => {
     try {
       const { isProduction, getSellerIdentity } = require("./ebay-api");
       ebayEnv = isProduction() ? "production" : "sandbox";
-      seller = await getSellerIdentity();
+      // Ne bloque pas le dashboard si GetUser est lent
+      seller = await Promise.race([
+        getSellerIdentity(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("seller-timeout")), 2500)),
+      ]);
     } catch (_) {}
     const publishedToday = listings.filter((l) => l.published_at).length;
     const pilotage = buildPilotageFeed({
@@ -623,43 +627,70 @@ app.get("/api/dashboard", async (_req, res) => {
       });
     }
 
-    // Tendances jour/semaine (cache + niches rotatives) — plus les 3 seeds figés
+    // Tendances : cache d'abord, live rapide (max ~3.5s), jamais bloquer le reste du dashboard
     let trending = [];
     let rankingsLive = false;
     let trendingMeta = { period: "day", seeds: [], algo: null, cached: false };
     try {
-      const { fetchTrendingProducts } = require("./trending-engine");
+      const {
+        fetchTrendingProducts,
+        peekTrendingCache,
+        scheduleTrendingRefresh,
+        seedsForPeriod,
+      } = require("./trending-engine");
       const dashPeriod = String(_req.query?.trendPeriod || "day").toLowerCase();
       const period = ["day", "week", "month"].includes(dashPeriod) ? dashPeriod : "day";
       const force = String(_req.query?.refresh || "") === "1";
-      const trend = await fetchTrendingProducts({
-        marketplace: "FR",
-        period,
-        force,
-        limit: 10,
-      });
-      trending = (trend.items || []).map((it) =>
-        withProductImage({
-          title: it.title,
-          price: it.price || 0,
-          sold: Number(it.sold) > 0 ? Number(it.sold) : 0,
-          soldEstimated: !!it.soldEstimated,
-          url: it.url,
-          image: it.image || null,
-          category: it.category,
-          ca: it.ca,
-          period: it.period || period,
-        })
-      );
-      rankingsLive = !!trend.live && trending.length > 0;
-      trendingMeta = {
-        period,
-        seeds: trend.seeds || [],
-        algo: trend.algo || null,
-        cached: !!trend.cached,
-        source: trend.source || null,
-        updatedAt: trend.updatedAt || null,
-      };
+
+      let trend = peekTrendingCache({ marketplace: "FR", period, limit: 10 });
+      if (!trend || force) {
+        try {
+          trend = await fetchTrendingProducts({
+            marketplace: "FR",
+            period,
+            force,
+            limit: 10,
+            fast: true,
+            maxMs: force ? 8000 : 3500,
+            preferCache: !force,
+          });
+        } catch (err) {
+          console.warn("[EBX] dashboard trending live:", err.message);
+          trend = peekTrendingCache({ marketplace: "FR", period, limit: 10 }) || trend;
+        }
+      } else {
+        // Cache hit → enrichissement complet en fond
+        scheduleTrendingRefresh({ marketplace: "FR", period, limit: 12 });
+      }
+
+      if (trend?.items?.length) {
+        trending = trend.items.map((it) =>
+          withProductImage({
+            title: it.title,
+            price: it.price || 0,
+            sold: Number(it.sold) > 0 ? Number(it.sold) : 0,
+            soldEstimated: !!it.soldEstimated,
+            url: it.url,
+            image: it.image || null,
+            category: it.category,
+            ca: it.ca,
+            period: it.period || period,
+          })
+        );
+        rankingsLive = !!trend.live && trending.length > 0;
+        trendingMeta = {
+          period,
+          seeds: trend.seeds?.length ? trend.seeds : seedsForPeriod(period),
+          algo: trend.algo || null,
+          cached: !!trend.cached,
+          stale: !!trend.stale,
+          source: trend.source || null,
+          updatedAt: trend.updatedAt || null,
+        };
+      } else {
+        trendingMeta.period = period;
+        trendingMeta.seeds = seedsForPeriod(period);
+      }
     } catch (err) {
       console.warn("[EBX] dashboard trending:", err.message);
     }
@@ -732,6 +763,7 @@ app.get("/api/dashboard", async (_req, res) => {
         trendingUpdatedAt: trendingMeta.updatedAt || new Date().toISOString(),
         trendingPeriod: trendingMeta.period || "day",
         trendingCached: !!trendingMeta.cached,
+        trendingStale: !!trendingMeta.stale,
         trendingSeeds: trendingMeta.seeds || [],
         trendingAlgo: trendingMeta.algo || null,
         trendingSource: trendingMeta.source || null,
@@ -799,24 +831,35 @@ function formatShipAddress(order) {
 
 app.get("/api/trending", async (req, res) => {
   try {
-    const { fetchTrendingProducts, getCachedTrendingMeta } = require("./trending-engine");
+    const { fetchTrendingProducts, getCachedTrendingMeta, peekTrendingCache } = require("./trending-engine");
     const marketplace = req.query.marketplace || "FR";
     const period = ["day", "week", "month"].includes(String(req.query.period || ""))
       ? String(req.query.period)
       : "day";
     const force = String(req.query.refresh || req.query.force || "") === "1";
-    const trend = await fetchTrendingProducts({
-      marketplace,
-      period,
-      force,
-      limit: Number(req.query.limit) || 12,
-    });
+    const fast = String(req.query.fast || "") !== "0";
+    let trend;
+    try {
+      trend = await fetchTrendingProducts({
+        marketplace,
+        period,
+        force,
+        limit: Number(req.query.limit) || 12,
+        fast: force ? false : fast,
+        maxMs: force ? 20000 : 6000,
+        preferCache: !force,
+      });
+    } catch (err) {
+      trend = peekTrendingCache({ marketplace, period, limit: 12 });
+      if (!trend) throw err;
+    }
     const data = enrichItemsImages(trend.items || []);
     return res.json({
       success: true,
       data,
       live: !!trend.live,
       cached: !!trend.cached,
+      stale: !!trend.stale,
       period: trend.period,
       seeds: trend.seeds || [],
       source: trend.source,
@@ -838,14 +881,22 @@ app.get("/api/rankings", async (req, res) => {
   const algoFallback =
     "Niches rotatives FR → Browse eBay → ventes via fiche item (estimatedSoldQuantity). Pas de sold inventé.";
   try {
-    const { fetchTrendingProducts } = require("./trending-engine");
-    const trend = await fetchTrendingProducts({
-      marketplace,
-      period,
-      force,
-      limit: 12,
-    });
-    if (trend.items?.length) {
+    const { fetchTrendingProducts, peekTrendingCache } = require("./trending-engine");
+    let trend;
+    try {
+      trend = await fetchTrendingProducts({
+        marketplace,
+        period,
+        force,
+        limit: 12,
+        fast: !force,
+        maxMs: force ? 25000 : 8000,
+        preferCache: !force,
+      });
+    } catch (_) {
+      trend = peekTrendingCache({ marketplace, period, limit: 12 });
+    }
+    if (trend?.items?.length) {
       const data = enrichItemsImages(
         trend.items.map((p, i) => ({
           ...p,
@@ -858,6 +909,7 @@ app.get("/api/rankings", async (req, res) => {
         data,
         live: !!trend.live,
         cached: !!trend.cached,
+        stale: !!trend.stale,
         period,
         seeds: trend.seeds || [],
         source: trend.source || "trending-engine",

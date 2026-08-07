@@ -206,49 +206,120 @@ function scoreItem(it, period) {
   return ca + sold * 3 + (it.relevance || 0) * 5;
 }
 
+function cacheEntryToResult(hit, period, limit, { stale = false } = {}) {
+  return {
+    items: (hit.items || []).slice(0, limit),
+    live: !!hit.live,
+    cached: true,
+    stale: !!stale,
+    period,
+    seeds: hit.seeds || [],
+    updatedAt: hit.updatedAt || new Date(hit.fetchedAt).toISOString(),
+    source: stale ? "cache-stale" : hit.source || "cache",
+    algo: hit.algo,
+  };
+}
+
+/** Snapshot cache immédiat (même expiré) — pour ne jamais bloquer le dashboard. */
+function peekTrendingCache({ marketplace = "FR", period = "day", limit = 12 } = {}) {
+  const key = `${marketplace}:${periodKey(period)}`;
+  const hit = loadTrendCache()[key];
+  if (!hit?.items?.length) return null;
+  const fresh = Date.now() - Number(hit.fetchedAt || 0) < ttlMs(period);
+  return cacheEntryToResult(hit, period, limit, { stale: !fresh });
+}
+
+const _refreshInFlight = new Map();
+
+function scheduleTrendingRefresh(opts = {}) {
+  const marketplace = opts.marketplace || "FR";
+  const period = opts.period || "day";
+  const key = `${marketplace}:${periodKey(period)}`;
+  if (_refreshInFlight.has(key)) return _refreshInFlight.get(key);
+  const p = fetchTrendingProducts({
+    ...opts,
+    force: true,
+    fast: false,
+    maxMs: 45000,
+  })
+    .catch((err) => {
+      console.warn("[EBX] trending background refresh:", err.message);
+      return null;
+    })
+    .finally(() => _refreshInFlight.delete(key));
+  _refreshInFlight.set(key, p);
+  return p;
+}
+
+function withTimeout(promise, ms, label = "timeout") {
+  if (!ms || ms <= 0) return promise;
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label)), ms);
+    }),
+  ]);
+}
+
 /**
  * Récupère / rafraîchit les tendances pour une période.
+ * @param {object} opts
+ * @param {boolean} [opts.fast] — skip enrich item (rapide, pour dashboard)
+ * @param {number} [opts.maxMs] — coupe le live après N ms et renvoie cache/stale/vide
+ * @param {boolean} [opts.preferCache] — renvoie cache frais sans recall eBay
  */
 async function fetchTrendingProducts({
   marketplace = "FR",
   period = "day",
   force = false,
   limit = 12,
+  fast = false,
+  maxMs = 0,
+  preferCache = false,
 } = {}) {
   const now = new Date();
   const key = `${marketplace}:${periodKey(period, now)}`;
   const cache = loadTrendCache();
   const hit = cache[key];
+
   if (
     !force &&
     hit &&
     Array.isArray(hit.items) &&
-    hit.items.length >= 4 &&
+    hit.items.length >= 3 &&
     Date.now() - Number(hit.fetchedAt || 0) < ttlMs(period)
   ) {
-    return {
-      items: hit.items.slice(0, limit),
-      live: !!hit.live,
-      cached: true,
-      period,
-      seeds: hit.seeds || [],
-      updatedAt: hit.updatedAt || new Date(hit.fetchedAt).toISOString(),
-      source: hit.source || "cache",
-      algo: hit.algo,
-    };
+    return cacheEntryToResult(hit, period, limit, { stale: false });
   }
 
-  const seeds = seedsForPeriod(period, now);
-  const perSeed = period === "day" ? 3 : period === "week" ? 3 : 2;
-  const all = [];
-  let apiOk = false;
-  let source = "browse";
+  if (preferCache && hit?.items?.length) {
+    if (!force) scheduleTrendingRefresh({ marketplace, period, limit });
+    return cacheEntryToResult(hit, period, limit, {
+      stale: Date.now() - Number(hit.fetchedAt || 0) >= ttlMs(period),
+    });
+  }
 
-  for (const q of seeds) {
-    try {
-      const r = await browseSearch(q, { marketplace, limit: perSeed });
+  const livePromise = (async () => {
+    const seeds = seedsForPeriod(period, now).slice(0, fast ? 4 : undefined);
+    const perSeed = fast ? 2 : period === "day" ? 3 : period === "week" ? 3 : 2;
+    const all = [];
+    let apiOk = false;
+
+    // Parallèle (évite 6× latence séquentielle qui bloque le dashboard)
+    const settled = await Promise.allSettled(
+      seeds.map((q) => browseSearch(q, { marketplace, limit: perSeed }))
+    );
+    settled.forEach((res, i) => {
+      const q = seeds[i];
+      if (res.status !== "fulfilled") {
+        console.warn(
+          `[EBX] trending seed « ${q} »: ${res.reason?.message?.slice?.(0, 80) || res.reason}`
+        );
+        return;
+      }
       apiOk = true;
-      (r.items || []).forEach((it, idx) => {
+      (res.value.items || []).forEach((it, idx) => {
         if (isBlockedTrendTitle(it.title)) return;
         all.push({
           ...it,
@@ -258,106 +329,116 @@ async function fetchTrendingProducts({
           relevance: perSeed - idx,
         });
       });
-    } catch (err) {
-      console.warn(`[EBX] trending seed « ${q} »: ${err.message?.slice?.(0, 80) || err}`);
-    }
-  }
-
-  // Dédup avant enrich
-  const seen = new Set();
-  const candidates = [];
-  for (const p of all) {
-    const k = String(p.itemId || p.title || "")
-      .slice(0, 56)
-      .toLowerCase();
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    candidates.push(p);
-    if (candidates.length >= 28) break;
-  }
-
-  let enriched = candidates;
-  if (candidates.length) {
-    try {
-      enriched = await enrichBrowseItems(candidates, {
-        marketplace,
-        limit: Math.min(18, candidates.length),
-      });
-    } catch (e) {
-      console.warn("[EBX] trending enrich:", e.message);
-    }
-  }
-
-  // Re-filtre après enrich + score
-  const scored = enriched
-    .filter((p) => p.title && !isBlockedTrendTitle(p.title))
-    .map((p) => ({
-      ...p,
-      sold: Number(p.sold) > 0 ? Number(p.sold) : 0,
-      price: Number(p.price) > 0 ? Number(p.price) : 0,
-      _score: scoreItem(p, period),
-    }))
-    .sort((a, b) => b._score - a._score);
-
-  const uniq = [];
-  const titleSeen = new Set();
-  for (const p of scored) {
-    const tk = String(p.title || "")
-      .slice(0, 42)
-      .toLowerCase();
-    if (titleSeen.has(tk)) continue;
-    titleSeen.add(tk);
-    const ca = Number(((Number(p.price) || 0) * (Number(p.sold) || 0)).toFixed(0));
-    uniq.push({
-      rank: uniq.length + 1,
-      title: p.title,
-      category: p.seed || "eBay FR",
-      price: p.price || 0,
-      wasPrice: p.wasPrice || null,
-      sold: p.sold || 0,
-      soldEstimated: !!p.soldEstimated && !(p.sold > 0),
-      ca,
-      marketplace,
-      url: p.url || null,
-      image: p.image || null,
-      itemId: p.itemId || null,
-      live: apiOk,
-      period,
-      trend: uniq.length % 3 === 0 ? "up" : uniq.length % 3 === 1 ? "stable" : "down",
     });
-    if (uniq.length >= Math.max(limit, 12)) break;
-  }
 
-  const algo =
-    `Niches rotatives ${period} (${seeds.length}) → Browse eBay FR → fiche item ` +
-    `(estimatedSoldQuantity). Exclut marques VeRO / hazmat. Cache ${Math.round(ttlMs(period) / 3600000)}h.`;
-
-  const payload = {
-    items: uniq,
-    live: apiOk && uniq.length > 0,
-    cached: false,
-    period,
-    seeds,
-    updatedAt: now.toISOString(),
-    source: apiOk ? "eBay Browse + item detail" : "empty",
-    algo,
-  };
-
-  if (uniq.length >= 3) {
-    cache[key] = {
-      ...payload,
-      fetchedAt: Date.now(),
-      source: payload.source,
-    };
-    // Purge vieilles clés (> 40 jours)
-    const cutoff = Date.now() - 40 * 86400000;
-    for (const [k, v] of Object.entries(cache)) {
-      if (Number(v?.fetchedAt || 0) < cutoff) delete cache[k];
+    const seen = new Set();
+    const candidates = [];
+    for (const p of all) {
+      const k = String(p.itemId || p.title || "")
+        .slice(0, 56)
+        .toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      candidates.push(p);
+      if (candidates.length >= (fast ? 12 : 28)) break;
     }
-    saveTrendCache(cache);
-  }
 
-  return payload;
+    let enriched = candidates;
+    if (!fast && candidates.length) {
+      try {
+        enriched = await enrichBrowseItems(candidates, {
+          marketplace,
+          limit: Math.min(12, candidates.length),
+        });
+      } catch (e) {
+        console.warn("[EBX] trending enrich:", e.message);
+      }
+    }
+
+    const scored = enriched
+      .filter((p) => p.title && !isBlockedTrendTitle(p.title))
+      .map((p) => ({
+        ...p,
+        sold: Number(p.sold) > 0 ? Number(p.sold) : 0,
+        price: Number(p.price) > 0 ? Number(p.price) : 0,
+        _score: scoreItem(p, period),
+      }))
+      .sort((a, b) => b._score - a._score);
+
+    const uniq = [];
+    const titleSeen = new Set();
+    for (const p of scored) {
+      const tk = String(p.title || "")
+        .slice(0, 42)
+        .toLowerCase();
+      if (titleSeen.has(tk)) continue;
+      titleSeen.add(tk);
+      const ca = Number(((Number(p.price) || 0) * (Number(p.sold) || 0)).toFixed(0));
+      uniq.push({
+        rank: uniq.length + 1,
+        title: p.title,
+        category: p.seed || "eBay FR",
+        price: p.price || 0,
+        wasPrice: p.wasPrice || null,
+        sold: p.sold || 0,
+        soldEstimated: !!p.soldEstimated && !(p.sold > 0),
+        ca,
+        marketplace,
+        url: p.url || null,
+        image: p.image || null,
+        itemId: p.itemId || null,
+        live: apiOk,
+        period,
+        trend: uniq.length % 3 === 0 ? "up" : uniq.length % 3 === 1 ? "stable" : "down",
+      });
+      if (uniq.length >= Math.max(limit, 12)) break;
+    }
+
+    const algo =
+      `Niches rotatives ${period} (${seeds.length}) → Browse eBay FR` +
+      (fast ? " (mode rapide)" : " → fiche item (estimatedSoldQuantity)") +
+      `. Exclut VeRO/hazmat. Cache ${Math.round(ttlMs(period) / 3600000)}h.`;
+
+    const payload = {
+      items: uniq,
+      live: apiOk && uniq.length > 0,
+      cached: false,
+      stale: false,
+      period,
+      seeds,
+      updatedAt: now.toISOString(),
+      source: apiOk ? (fast ? "eBay Browse fast" : "eBay Browse + item detail") : "empty",
+      algo,
+    };
+
+    if (uniq.length >= 3) {
+      const next = loadTrendCache();
+      next[key] = { ...payload, fetchedAt: Date.now(), source: payload.source };
+      const cutoff = Date.now() - 40 * 86400000;
+      for (const [k, v] of Object.entries(next)) {
+        if (Number(v?.fetchedAt || 0) < cutoff) delete next[k];
+      }
+      saveTrendCache(next);
+    }
+
+    return payload;
+  })();
+
+  try {
+    return await withTimeout(livePromise, maxMs, "trending-timeout");
+  } catch (err) {
+    if (hit?.items?.length) {
+      console.warn(`[EBX] trending timeout/fail → cache: ${err.message}`);
+      scheduleTrendingRefresh({ marketplace, period, limit });
+      return cacheEntryToResult(hit, period, limit, { stale: true });
+    }
+    // Pas de cache : laisse le live finir en fond, renvoie vide pour fallback mock UI
+    if (/timeout/i.test(err.message)) {
+      livePromise.catch(() => {});
+      scheduleTrendingRefresh({ marketplace, period, limit });
+    }
+    throw err;
+  }
 }
 
 function getCachedTrendingMeta(marketplace = "FR") {
@@ -380,6 +461,8 @@ function getCachedTrendingMeta(marketplace = "FR") {
 
 module.exports = {
   fetchTrendingProducts,
+  peekTrendingCache,
+  scheduleTrendingRefresh,
   seedsForPeriod,
   periodKey,
   isBlockedTrendTitle,
