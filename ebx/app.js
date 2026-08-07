@@ -1714,7 +1714,7 @@ async function processAutoOrderQueue() {
 let manualListingId = null;
 
 function setManualStep(doneUpTo) {
-  const order = ["scan", "extract", "ai", "publish"];
+  const order = ["scan", "extract", "ai", "save"];
   const idx = order.indexOf(doneUpTo);
   document.querySelectorAll("#manual-steps [data-step]").forEach((el) => {
     const i = order.indexOf(el.dataset.step);
@@ -1739,11 +1739,11 @@ async function runManualImport() {
   const pct = document.getElementById("manual-pct");
   const label = document.getElementById("manual-status-label");
   const ready = document.getElementById("manual-ready");
-  const pubBtn = document.getElementById("manual-publish-btn");
+  const saveBtn = document.getElementById("manual-save-btn");
   btn.disabled = true;
   wrap.classList.remove("hidden");
   ready.classList.add("hidden");
-  pubBtn.classList.add("hidden");
+  if (saveBtn) saveBtn.classList.add("hidden");
   manualListingId = null;
   list.innerHTML = "";
   const addCheck = (t) => {
@@ -1792,6 +1792,7 @@ async function runManualImport() {
     const costGuess = price / 1.8;
     const marginEst = price > 0 ? Math.round(((price - costGuess) / price) * 100) : 0;
     addCheck(`Marge estimée : ${marginEst}%`);
+    addCheck("Enregistré dans Mes Listings (brouillon)");
 
     manualListingId = json.data?.id;
     const review = document.getElementById("manual-review");
@@ -1806,26 +1807,6 @@ async function runManualImport() {
       seoEl.oninput = () => {
         if (lenEl) lenEl.textContent = String(seoEl.value.length);
       };
-      // Suggestions variations LED vs générique
-      const v1 = document.getElementById("manual-var-v1");
-      const v2 = document.getElementById("manual-var-v2");
-      const aspect = document.getElementById("manual-var-aspect");
-      const t = `${title} ${orig}`.toLowerCase();
-      if (v1 && v2) {
-        if (/led|bande|strip|n[eé]on|chaud|froid|kelvin/i.test(t)) {
-          if (aspect) aspect.value = "Couleur";
-          v1.value = "Blanc chaud";
-          v2.value = "Blanc froid";
-        } else if (/coque|case|silicone/i.test(t)) {
-          if (aspect) aspect.value = "Couleur";
-          v1.value = "Noir";
-          v2.value = "Transparent";
-        } else if (/cable|câble|usb|hdmi/i.test(t)) {
-          if (aspect) aspect.value = "Longueur";
-          v1.value = "1 m";
-          v2.value = "2 m";
-        }
-      }
     }
     if (lenEl) lenEl.textContent = String(title.length);
     if (thumbs) {
@@ -1843,11 +1824,13 @@ async function runManualImport() {
         : `<span class="text-xs text-zinc-400">Pas d'image — vérifie l'URL</span>`;
     }
 
-    label.textContent = `Prêt à publier — ${price.toFixed(2)} € (80%)`;
+    bar.style.width = "100%";
+    pct.textContent = "100%";
+    setManualStep("save");
+    label.textContent = `Importé — ${price.toFixed(2)} €`;
     ready.classList.remove("hidden");
-    ready.textContent = `Listing discret prêt — titre réécrit — ${price.toFixed(2)} €`;
-    pubBtn.classList.remove("hidden");
-    setManualStep("ai");
+    ready.textContent = `Listing #${manualListingId || "?"} prêt dans Mes Listings — ${price.toFixed(2)} € (non publié sur eBay)`;
+    if (saveBtn) saveBtn.classList.remove("hidden");
   } catch (err) {
     label.textContent = "Erreur";
     alert(err.message);
@@ -1856,54 +1839,46 @@ async function runManualImport() {
   }
 }
 
-async function publishManualListing() {
+/** Sauvegarde le titre édité puis ouvre Mes Listings (pas de publish eBay). */
+async function saveManualListing() {
   if (!manualListingId) return alert("Importe d'abord un produit");
+  const saveBtn = document.getElementById("manual-save-btn");
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Enregistrement…";
+  }
   try {
     const seoEl = document.getElementById("manual-seo-title");
     if (seoEl?.value.trim()) {
-      await fetch(API + "/api/listings/" + manualListingId, {
+      const res = await fetch(API + "/api/listings/" + manualListingId, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seo_title: seoEl.value.trim() }),
       });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.success === false) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
     }
-    // Défaut: publish simple (évite 25002 Couleur). Variations seulement si case cochée.
-    const varEnabled = document.getElementById("manual-var-enabled")?.checked === true;
-    const aspect = document.getElementById("manual-var-aspect")?.value.trim() || "Couleur";
-    const v1 = document.getElementById("manual-var-v1")?.value.trim() || "Blanc chaud";
-    const v2 = document.getElementById("manual-var-v2")?.value.trim() || "Blanc froid";
-    setManualStep("publish");
+    setManualStep("save");
+    document.getElementById("manual-status-label").textContent = "Dans Mes Listings";
     document.getElementById("manual-bar").style.width = "100%";
     document.getElementById("manual-pct").textContent = "100%";
-    const res = await fetch(API + "/api/publish-to-ebay/" + manualListingId, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        variations: {
-          enabled: varEnabled,
-          aspect,
-          values: [v1, v2].filter(Boolean),
-        },
-      }),
-    });
-    let json = {};
-    try {
-      json = await res.json();
-    } catch (_) {
-      throw new Error(`Réponse serveur invalide (HTTP ${res.status})`);
-    }
-    if (!json.success) throw new Error(extractPublishErrorMessage(json, `HTTP ${res.status}`));
-    document.getElementById("manual-status-label").textContent = "Publié";
-    const vars = (json.data?.variations?.values || []).join(" / ");
-    alert(
-      "Publié sur eBay — listingId: " +
-        (json.data?.listingId || "ok") +
-        (vars ? `\nVariations: ${vars}` : "")
-    );
     navigate("listings");
   } catch (err) {
-    showPublishError(err.message || "Erreur publication");
+    alert(err.message || "Impossible d'enregistrer le listing");
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Enregistrer dans Mes Listings";
+    }
   }
+}
+
+/** @deprecated — publication eBay uniquement depuis Mes Listings */
+async function publishManualListing() {
+  alert("La publication eBay se fait depuis Mes Listings (bouton Publier), pas depuis l'Import Manuel.");
+  navigate("listings");
 }
 
 function countRealImagesHint(html) {
@@ -2987,7 +2962,7 @@ loadDashboard();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

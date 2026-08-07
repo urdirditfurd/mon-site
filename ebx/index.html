@@ -525,7 +525,7 @@
               <div class="flex items-center gap-2" data-step="scan"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">1</span> Scan produit</div>
               <div class="flex items-center gap-2" data-step="extract"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">2</span> Extraction</div>
               <div class="flex items-center gap-2" data-step="ai"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">3</span> Optimisation IA</div>
-              <div class="flex items-center gap-2" data-step="publish"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">4</span> Publication</div>
+              <div class="flex items-center gap-2" data-step="save"><span class="step-dot w-6 h-6 rounded-full bg-zinc-200 text-center leading-6">4</span> Mes Listings</div>
             </div>
             <div>
               <div class="flex justify-between text-sm mb-1"><span id="manual-status-label" class="font-semibold">En cours…</span><span id="manual-pct" class="text-zinc-400">0%</span></div>
@@ -534,7 +534,7 @@
             <ul id="manual-checklist" class="text-sm space-y-1.5"></ul>
             <div id="manual-ready" class="hidden rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-800 px-4 py-3 text-sm font-medium"></div>
             <div id="manual-review" class="hidden space-y-3 border-t border-zinc-100 pt-4">
-              <p class="text-xs text-zinc-500">Mode discret — titre réécrit (pas le titre Ali/Amazon). Tu peux encore l’éditer avant publication.</p>
+              <p class="text-xs text-zinc-500">Mode discret — titre réécrit. Tu peux l’éditer puis enregistrer dans <strong>Mes Listings</strong> (pas de publication eBay ici).</p>
               <div>
                 <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Titre fournisseur (original)</label>
                 <p id="manual-orig-title" class="text-xs text-zinc-400 line-through mt-0.5"></p>
@@ -544,38 +544,14 @@
                 <input id="manual-seo-title" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm font-medium" maxlength="80" />
                 <p class="text-[10px] text-zinc-400 mt-1"><span id="manual-title-len">0</span>/80</p>
               </div>
-              <div class="rounded-xl border border-[#d4d4f0] bg-lunar-50 p-3 space-y-2">
-                <div class="flex items-center justify-between gap-2">
-                  <label class="text-sm font-semibold text-ink-900 flex items-center gap-2">
-                    <input id="manual-var-enabled" type="checkbox" class="toggle" />
-                    Variations eBay (optionnel)
-                  </label>
-                  <span class="text-[10px] text-zinc-400">Seulement si l’attribut est autorisé par la catégorie</span>
-                </div>
-                <div class="grid sm:grid-cols-3 gap-2">
-                  <div>
-                    <label class="text-[10px] text-zinc-400">Attribut</label>
-                    <input id="manual-var-aspect" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Couleur" />
-                  </div>
-                  <div>
-                    <label class="text-[10px] text-zinc-400">Variante 1</label>
-                    <input id="manual-var-v1" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Blanc chaud" />
-                  </div>
-                  <div>
-                    <label class="text-[10px] text-zinc-400">Variante 2</label>
-                    <input id="manual-var-v2" class="w-full mt-1 px-2 py-1.5 rounded-lg border text-sm" value="Blanc froid" />
-                  </div>
-                </div>
-                <p class="text-[11px] text-zinc-500">Marque = Sans marque · EAN = Ne s'applique pas (auto). Pour LED : laisse Blanc chaud / Blanc froid.</p>
-              </div>
               <div>
                 <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Aperçu images (ordre modifié pour plus de discrétion)</label>
                 <div id="manual-thumbs" class="flex gap-2 flex-wrap mt-2"></div>
               </div>
             </div>
-            <div class="flex gap-2">
-              <button onclick="publishManualListing()" id="manual-publish-btn" class="btn-primary hidden">Publier sur eBay</button>
-              <button onclick="navigate('listings')" class="text-sm px-3 py-2 border rounded-xl">Voir Mes Listings</button>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" onclick="saveManualListing()" id="manual-save-btn" class="btn-primary hidden">Enregistrer dans Mes Listings</button>
+              <button type="button" onclick="navigate('listings')" class="text-sm px-3 py-2 border rounded-xl">Voir Mes Listings</button>
             </div>
           </div>
         </div>
