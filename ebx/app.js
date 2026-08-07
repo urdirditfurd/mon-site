@@ -286,7 +286,8 @@ let titleTab = "keywords";
 let selectedKeywords = [];
 let kwPageIdx = 0;
 const KW_PER_PAGE = 8;
-let rankingsPeriod = "month";
+let rankingsPeriod = "day";
+let dashTrendPeriod = "day";
 let competitorPeriod = "month";
 let lastCompetitor = null;
 let lastDesc = null;
@@ -356,6 +357,19 @@ document.getElementById("rankings-period")?.addEventListener("click", (e) => {
   document.querySelectorAll("#rankings-period .period-pill").forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
   loadRankings();
+});
+
+document.getElementById("dash-trending-period")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-trend-period]");
+  if (!btn) return;
+  dashTrendPeriod = btn.dataset.trendPeriod;
+  document.querySelectorAll("#dash-trending-period .trend-period-pill").forEach((b) => {
+    b.classList.remove("active");
+    b.classList.add("text-zinc-500");
+  });
+  btn.classList.add("active");
+  btn.classList.remove("text-zinc-500");
+  loadDashboard({ refreshTrend: false });
 });
 
 document.getElementById("sniper-tabs")?.addEventListener("click", (e) => {
@@ -627,11 +641,22 @@ function renderDashCalendar() {
   renderCalCountdown(focus);
 }
 
-async function loadDashboard() {
+async function loadDashboard(opts = {}) {
   bindDashboardCalendarControls();
-  const res = await fetch(API + "/api/dashboard");
+  const refresh = opts.refreshTrend ? "1" : "0";
+  const period = opts.period || dashTrendPeriod || "day";
+  const res = await fetch(
+    API + `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&refresh=${refresh}`
+  );
   const json = await res.json();
   const d = json.data || {};
+
+  if (d.trendingPeriod) dashTrendPeriod = d.trendingPeriod;
+  document.querySelectorAll("#dash-trending-period .trend-period-pill").forEach((b) => {
+    const on = b.dataset.trendPeriod === dashTrendPeriod;
+    b.classList.toggle("active", on);
+    b.classList.toggle("text-zinc-500", !on);
+  });
 
   const greet = document.getElementById("dash-greeting");
   if (greet) {
@@ -674,11 +699,17 @@ async function loadDashboard() {
     tickEl.textContent = `↑ +${formatEuro(bump, 2)} à l'instant`;
   }, 4500);
 
+  const periodLabel =
+    dashTrendPeriod === "week" ? "cette semaine" : dashTrendPeriod === "month" ? "ce mois" : "aujourd'hui";
   const trendMeta = document.getElementById("dash-trending-meta");
   if (trendMeta) {
-    trendMeta.innerHTML = d.trendingLive
-      ? `Top ventes du marché — <span class="text-emerald-600 font-medium">Données en temps réel</span>`
-      : "Top ventes du marché — Seed / fallback";
+    if (d.trendingLive) {
+      trendMeta.innerHTML = `Niches rotatives · <span class="text-emerald-600 font-medium">${periodLabel}</span>${
+        d.trendingCached ? " · cache" : " · live eBay"
+      }`;
+    } else {
+      trendMeta.textContent = "Fallback local — configure EBAY_PROD_CLIENT_ID pour le live";
+    }
   }
 
   const trendBox = document.getElementById("dash-trending");
@@ -686,35 +717,52 @@ async function loadDashboard() {
     const items = d.trending || [];
     trendBox.innerHTML = items.length
       ? items
-          .slice(0, 8)
+          .slice(0, 10)
           .map((t, i) => {
             const ca = t.ca != null ? t.ca : Math.round((Number(t.price) || 0) * (Number(t.sold) || 0));
             const img = productThumbHtml(t.image, t.title, "w-10 h-10");
+            const soldRaw = Number(t.sold) || 0;
+            const soldTxt =
+              soldRaw > 0 ? `${soldRaw}${t.soldEstimated ? "~" : ""}` : "—";
             const title = t.url
               ? `<a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="font-medium text-[#4452a8] hover:underline line-clamp-2 leading-snug">${escapeHtml(
                   t.title
                 )}</a>`
               : `<p class="font-medium text-ink-900 line-clamp-2 leading-snug">${escapeHtml(t.title)}</p>`;
+            const niche = t.category
+              ? `<p class="text-[10px] text-zinc-400 truncate mt-0.5">${escapeHtml(t.category)}</p>`
+              : "";
             return `<div class="grid grid-cols-[2rem_2.5rem_1fr] sm:grid-cols-[2rem_2.5rem_1fr_3.5rem_3.5rem_3.5rem] gap-2 items-center py-2.5 px-1 hover:bg-lunar-50 rounded-lg">
               <span class="w-7 h-7 rounded-md border border-[#6d7ddf]/40 text-[#4452a8] text-xs font-bold flex items-center justify-center">${
                 i + 1
               }</span>
               ${img}
-              <div class="min-w-0">${title}</div>
-              <div class="hidden sm:block text-right text-sm font-semibold text-emerald-600">${t.sold || "—"}</div>
+              <div class="min-w-0">${title}${niche}</div>
+              <div class="hidden sm:block text-right text-sm font-semibold text-emerald-600">${soldTxt}</div>
               <div class="hidden sm:block text-right text-sm font-bold">${formatEuro(t.price, 0)}</div>
-              <div class="hidden sm:block text-right text-sm font-bold text-emerald-600">${formatCaShort(ca)}</div>
+              <div class="hidden sm:block text-right text-sm font-bold text-emerald-600">${
+                ca > 0 ? formatCaShort(ca) : "—"
+              }</div>
             </div>`;
           })
           .join("")
-      : `<p class="text-zinc-400 text-sm py-4">Aucune tendance.</p>`;
+      : `<p class="text-zinc-400 text-sm py-4">Aucune tendance — clique Actualiser (clé Browse eBay requise).</p>`;
   }
 
   const trendUpdated = document.getElementById("dash-trending-updated");
   if (trendUpdated) {
     const ts = d.trendingUpdatedAt ? new Date(d.trendingUpdatedAt) : new Date();
     const hhmm = ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    trendUpdated.textContent = `Mis à jour ${hhmm}`;
+    const day = ts.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+    trendUpdated.textContent = `Mis à jour ${day} ${hhmm}${d.trendingCached ? " (cache)" : ""}`;
+  }
+
+  const seedsEl = document.getElementById("dash-trending-seeds");
+  if (seedsEl) {
+    const seeds = d.trendingSeeds || [];
+    seedsEl.textContent = seeds.length
+      ? `Niches ${periodLabel} : ${seeds.slice(0, 8).join(" · ")}`
+      : "";
   }
 
   const nicheBox = document.getElementById("dash-niches");
@@ -838,19 +886,41 @@ async function loadAnalytics() {
 }
 
 function periodFactor(period) {
+  // Conservé pour l’UI compétiteurs uniquement (pas les classements tendances)
   if (period === "day") return 0.05;
   if (period === "week") return 0.28;
   return 1;
 }
 
+async function refreshDashboardTrending() {
+  const btn = document.querySelector('button[onclick="refreshDashboardTrending()"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "…";
+  }
+  try {
+    await loadDashboard({ refreshTrend: true, period: dashTrendPeriod });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Actualiser";
+    }
+  }
+}
+
 async function loadRankings() {
-  const res = await fetch(API + `/api/rankings?period=${rankingsPeriod}`);
+  const res = await fetch(
+    API + `/api/rankings?period=${encodeURIComponent(rankingsPeriod)}&refresh=0`
+  );
   const json = await res.json();
-  const factor = periodFactor(rankingsPeriod);
   const src = document.getElementById("rankings-source");
+  const periodLabel =
+    rankingsPeriod === "day" ? "jour" : rankingsPeriod === "week" ? "semaine" : "mois";
   if (src) {
     src.innerHTML = json.live
-      ? `<span class="inline-flex items-center gap-1.5"><span class="text-[10px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span> ${escapeHtml(json.source || "eBay")}</span>`
+      ? `<span class="inline-flex items-center gap-1.5"><span class="text-[10px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span> ${escapeHtml(
+          json.source || "eBay"
+        )} · ${periodLabel}${json.cached ? " · cache" : ""}</span>`
       : "Fallback local (ajoutez EBAY_PROD_CLIENT_ID pour le live)";
   }
   const algoEl = document.getElementById("rankings-algo");
@@ -862,10 +932,11 @@ async function loadRankings() {
       const rawSold = Number(p.sold) || 0;
       const soldLabel =
         rawSold > 0
-          ? `${Math.max(1, Math.round(rawSold * factor))} vendus${p.soldEstimated ? " (estim.)" : ""}`
+          ? `${rawSold} vendus${p.soldEstimated ? " (estim.)" : ""}`
           : "Ventes n/a";
       const price = Number(p.price || 0);
       const was = Number(p.wasPrice) > price ? Number(p.wasPrice) : null;
+      const ca = p.ca != null ? Number(p.ca) : Math.round(price * rawSold);
       const img = productThumbHtml(p.image, p.title, "w-14 h-14");
       const rankClass = rank <= 3 ? `rank-${rank}` : "text-zinc-400";
       const href = p.url || "#";
@@ -880,6 +951,7 @@ async function loadRankings() {
           <p class="text-sm text-emerald-600 font-medium">${soldLabel}</p>
           <p class="text-sm font-semibold">${price > 0 ? price.toFixed(2) + " €" : "—"}</p>
           ${was ? `<p class="text-xs text-zinc-400 line-through">${was.toFixed(2)} €</p>` : ""}
+          <p class="text-[11px] text-zinc-400">CA ${ca > 0 ? formatCaShort(ca) : "—"}</p>
         </div>
       </a>`;
     })

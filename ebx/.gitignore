@@ -5,3 +5,4 @@ node_modules/
 *.db-wal
 env.example
 data/images/
+data/trending-cache.json
