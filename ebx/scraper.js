@@ -1466,6 +1466,8 @@ function enrichProductListingCopy(product = {}) {
 function isRealProductImage(src) {
   if (!src || typeof src !== "string") return false;
   const u = src.trim();
+  // Cache local EBX
+  if (/^\/media\/[a-z0-9._-]+\.(jpg|jpeg|png|webp|gif)$/i.test(u)) return true;
   if (!/^https?:\/\//i.test(u)) return false;
   if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel|lorem\.picsum/i.test(u)) {
     return false;

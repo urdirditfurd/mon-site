@@ -180,6 +180,18 @@ function insertListingSafe({ seoTitle, html, price, keywords = "", sourceUrl = "
   return { id: Number(result.lastInsertRowid), duplicate: false };
 }
 
+/** Insert + cache images locales (async). */
+async function insertListingWithImageCache(opts) {
+  const result = insertListingSafe(opts);
+  try {
+    const row = getListingById.get(result.id);
+    if (row) await localizeListingImages(row);
+  } catch (err) {
+    console.warn(`[EBX] cache images listing #${result.id}:`, err.message);
+  }
+  return result;
+}
+
 const insertCompetitor = db.prepare(
   "INSERT INTO competitor_history (seller_name, payload) VALUES (?, ?)"
 );
@@ -406,7 +418,43 @@ function supplierKeyFromName(nameOrUrl = "") {
 }
 
 app.use(express.json({ limit: "2mb" }));
+
+// Images produit cachées localement (publish EPS sans dépendre d'Ali/Amazon)
+const { ensureCacheDir, localizeHtmlImages, CACHE_DIR } = require("./image-cache");
+ensureCacheDir();
+app.use("/media", express.static(CACHE_DIR, { maxAge: "7d", fallthrough: true }));
+
 app.use(express.static(path.join(__dirname)));
+
+/**
+ * Télécharge les images distantes du listing vers /media et réécrit le HTML.
+ * À appeler avant publish (et idéalement à l'import).
+ */
+async function localizeListingImages(listing) {
+  if (!listing?.id) return listing;
+  const html = String(listing.html_description || "");
+  if (!html || !/<img\b/i.test(html)) return listing;
+  // Déjà 100% local ?
+  const remote = (html.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi) || []).filter(
+    (t) => !/ebayimg\.com|ebaystatic\.com/i.test(t)
+  );
+  if (!remote.length && /\/media\//i.test(html)) return listing;
+
+  console.log(`[EBX] Cache images listing #${listing.id}…`);
+  const result = await localizeHtmlImages(html);
+  if (result.cached > 0 && result.html !== html) {
+    updateListingHtml.run(result.html, listing.id);
+    console.log(
+      `[EBX] Listing #${listing.id}: ${result.cached} image(s) en cache local` +
+        (result.failed ? `, ${result.failed} échec(s)` : "")
+    );
+    return { ...listing, html_description: result.html };
+  }
+  if (result.failed && !result.cached) {
+    console.warn(`[EBX] Listing #${listing.id}: impossible de cacher les images (${result.failed} échec(s))`);
+  }
+  return listing;
+}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1843,7 +1891,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           "#6d7ddf"
         );
 
-        const result = insertListingSafe({
+        const result = await insertListingWithImageCache({
           seoTitle: title,
           html,
           price: sellPrice,
@@ -2020,7 +2068,7 @@ app.post("/api/generate-listing", async (req, res) => {
     if (listing.product) listing.product.title = stripSupplierProvenance(listing.product.title || listing.seo_title);
     listing.html_description = sanitizeListingHtml(listing.html_description || "");
 
-    const result = insertListingSafe({
+    const result = await insertListingWithImageCache({
       seoTitle: listing.seo_title || "",
       html: listing.html_description || "",
       price: listing.suggested_price || 0,
@@ -2028,9 +2076,15 @@ app.post("/api/generate-listing", async (req, res) => {
       sourceUrl: productUrl || "",
     });
 
+    const saved = getListingById.get(result.id);
     return res.json({
       success: true,
-      data: { ...listing, id: result.id, duplicate: result.duplicate || false },
+      data: {
+        ...listing,
+        ...(saved || {}),
+        id: result.id,
+        duplicate: result.duplicate || false,
+      },
     });
   } catch (err) {
     console.error("[EBX] Erreur génération :", err);
@@ -2157,7 +2211,7 @@ const updateListingHtml = db.prepare("UPDATE listings SET html_description = ? W
 const updateListingTitle = db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?");
 const updateListingPrice = db.prepare("UPDATE listings SET suggested_price = ? WHERE id = ?");
 
-app.patch("/api/listings/:id", (req, res) => {
+app.patch("/api/listings/:id", async (req, res) => {
   try {
     const listing = getListingById.get(req.params.id);
     if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
@@ -2172,8 +2226,15 @@ app.patch("/api/listings/:id", (req, res) => {
       listing.seo_title = title;
     }
     if (html_description != null) {
-      updateListingHtml.run(String(html_description), listing.id);
-      listing.html_description = html_description;
+      let html = String(html_description);
+      try {
+        const localized = await localizeHtmlImages(html);
+        if (localized.cached > 0) html = localized.html;
+      } catch (e) {
+        console.warn("[EBX] localize on PATCH:", e.message);
+      }
+      updateListingHtml.run(html, listing.id);
+      listing.html_description = html;
     }
     if (suggested_price != null && suggested_price !== "") {
       const price = Number(suggested_price);
@@ -2191,51 +2252,53 @@ app.patch("/api/listings/:id", (req, res) => {
 
 /**
  * Si le HTML n'a plus d'images (scrub picsum / IA), re-scrape source_url et réinjecte.
+ * Puis cache local /media pour le publish EPS.
  */
 async function ensureListingImages(listing) {
-  if (countRealImagesInHtml(listing.html_description) > 0) {
-    return listing;
+  let current = listing;
+  if (countRealImagesInHtml(current.html_description) <= 0) {
+    const sourceUrl = String(current.source_url || "").trim();
+    if (!sourceUrl) {
+      throw new Error(
+        "Aucune image produit dans le listing HTML et pas de source_url. " +
+          "Régénère via Description Builder (URL Amazon/eBay) ou Auto-Snipe, puis republie."
+      );
+    }
+
+    console.log(`[EBX] Listing #${current.id} sans image — re-scrape ${sourceUrl.slice(0, 70)}…`);
+    const scraped = await scrapeProduct(sourceUrl);
+    const images = (scraped.images || []).filter(isRealProductImage);
+    if (!images.length) {
+      throw new Error(
+        "Impossible de récupérer des images depuis la source. " +
+          "Ouvre Description Builder avec une URL produit qui a des photos, sauvegarde, puis publie."
+      );
+    }
+
+    const html = injectProductImagesIntoHtml(current.html_description, images);
+    if (countRealImagesInHtml(html) === 0) {
+      const rebuilt = buildHtmlFromProduct(
+        {
+          title: current.seo_title || scraped.title,
+          images,
+          bullets: scraped.bullets || [],
+          description: scraped.description || current.seo_title,
+          price: current.suggested_price,
+          source: scraped.source || "repair",
+        },
+        "#667eea"
+      );
+      updateListingHtml.run(rebuilt, current.id);
+      current = { ...current, html_description: rebuilt };
+    } else {
+      updateListingHtml.run(html, current.id);
+      console.log(`[EBX] Listing #${current.id} : ${images.length} image(s) réinjectée(s)`);
+      current = { ...current, html_description: html };
+    }
   }
 
-  const sourceUrl = String(listing.source_url || "").trim();
-  if (!sourceUrl) {
-    throw new Error(
-      "Aucune image produit dans le listing HTML et pas de source_url. " +
-        "Régénère via Description Builder (URL Amazon/eBay) ou Auto-Snipe, puis republie."
-    );
-  }
-
-  console.log(`[EBX] Listing #${listing.id} sans image — re-scrape ${sourceUrl.slice(0, 70)}…`);
-  const scraped = await scrapeProduct(sourceUrl);
-  const images = (scraped.images || []).filter(isRealProductImage);
-  if (!images.length) {
-    throw new Error(
-      "Impossible de récupérer des images depuis la source. " +
-        "Ouvre Description Builder avec une URL produit qui a des photos, sauvegarde, puis publie."
-    );
-  }
-
-  const html = injectProductImagesIntoHtml(listing.html_description, images);
-  if (countRealImagesInHtml(html) === 0) {
-    // Fallback : reconstruit un HTML propre avec images
-    const rebuilt = buildHtmlFromProduct(
-      {
-        title: listing.seo_title || scraped.title,
-        images,
-        bullets: scraped.bullets || [],
-        description: scraped.description || listing.seo_title,
-        price: listing.suggested_price,
-        source: scraped.source || "repair",
-      },
-      "#667eea"
-    );
-    updateListingHtml.run(rebuilt, listing.id);
-    return { ...listing, html_description: rebuilt };
-  }
-
-  updateListingHtml.run(html, listing.id);
-  console.log(`[EBX] Listing #${listing.id} : ${images.length} image(s) réinjectée(s)`);
-  return { ...listing, html_description: html };
+  // Toujours tenter le cache local avant publish
+  return localizeListingImages(current);
 }
 
 app.post("/api/listings/scrub-why", (_req, res) => {

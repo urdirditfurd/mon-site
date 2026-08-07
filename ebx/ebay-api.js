@@ -667,57 +667,27 @@ function extractImageUrls(html) {
   let m;
   while ((m = re.exec(String(html || "")))) {
     const src = m[1];
-    if (!/^https?:\/\//i.test(src)) continue;
+    // http(s) distants OU cache local /media/
+    if (!/^https?:\/\//i.test(src) && !/^\/media\//i.test(src)) continue;
     if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel/i.test(src)) continue;
     if (!urls.includes(src)) urls.push(src);
   }
   return urls;
 }
 
-function refererForImageUrl(imageUrl) {
-  const u = String(imageUrl || "").toLowerCase();
-  if (/alicdn\.com|aliexpress\.|ae01\.alicdn/i.test(u)) return "https://www.aliexpress.com/";
-  if (/cdiscount\.|cdscdn\.|octopia/i.test(u)) return "https://www.cdiscount.com/";
-  if (/media-amazon\.|ssl-images-amazon\.|amazon\./i.test(u)) return "https://www.amazon.fr/";
-  if (/ebayimg\.|ebaystatic\./i.test(u)) return "https://www.ebay.fr/";
-  try {
-    const host = new URL(imageUrl).origin;
-    return host + "/";
-  } catch {
-    return "https://www.google.com/";
-  }
-}
-
 async function downloadImageBuffer(imageUrl) {
-  const referer = refererForImageUrl(imageUrl);
-  const res = await fetch(imageUrl, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-      Referer: referer,
-      "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-    },
-    redirect: "follow",
-  });
-  if (!res.ok) throw new Error(`download image HTTP ${res.status}`);
-  const contentType = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
-  if (!/^image\//i.test(contentType) && !/octet-stream/i.test(contentType)) {
-    throw new Error(`pas une image (${contentType})`);
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length < 500) throw new Error("image trop petite");
-  if (buf.length > 12 * 1024 * 1024) throw new Error("image trop lourde (>12MB)");
-  return { buf, contentType: /^image\//i.test(contentType) ? contentType : "image/jpeg" };
+  const { loadImageBuffer } = require("./image-cache");
+  const hit = await loadImageBuffer(imageUrl);
+  return { buf: hit.buf, contentType: hit.contentType };
 }
 
 /**
  * Héberge une image sur eBay Picture Services (EPS) — corrige "Gallery picture".
- * Amazon bloque souvent eBay → on télécharge nous-mêmes puis on upload en binaire.
+ * Source : cache local /media ou téléchargement robuste (Ali/Amazon).
  */
 async function uploadImageToEbayEps(token, imageUrl, index = 0) {
   const { buf, contentType } = await downloadImageBuffer(imageUrl);
-  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+  const ext = contentType.includes("png") ? "png" : contentType.includes("gif") ? "gif" : "jpg";
   const boundary = `----EBX${Date.now()}${index}`;
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -782,13 +752,25 @@ async function uploadImageToEbayEps(token, imageUrl, index = 0) {
 /** Convertit les URLs Amazon/etc. en URLs hébergées eBay (EPS). */
 async function hostImagesForGallery(token, sourceUrls) {
   const hosted = [];
+  const { cacheRemoteImage, isMediaUrl } = require("./image-cache");
+
   for (let i = 0; i < Math.min(sourceUrls.length, 8); i++) {
-    const src = sourceUrls[i];
+    let src = sourceUrls[i];
     try {
       // Déjà hébergée chez eBay
       if (/ebayimg\.com|ebaystatic\.com/i.test(src)) {
         hosted.push(src);
         continue;
+      }
+      // Force le passage par le cache local (évite Ali/Amazon bloqués au publish)
+      if (!isMediaUrl(src)) {
+        try {
+          const cached = await cacheRemoteImage(src);
+          src = cached.publicPath;
+          console.log(`[EBX] Image cache ${i + 1}: ${cached.filename}`);
+        } catch (cacheErr) {
+          console.warn(`[EBX] Image cache ${i + 1} fail, essai direct: ${cacheErr.message}`);
+        }
       }
       const eps = await uploadImageToEbayEps(token, src, i);
       console.log(`[EBX] Image EPS ${i + 1}/${sourceUrls.length}: OK`);
@@ -816,8 +798,8 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
     if (!imageUrls.length) {
       throw new Error(
         "Impossible d'héberger les images sur eBay (Gallery / EPS). " +
-          "Cause fréquente : images AliExpress/Amazon bloquées. " +
-          "Réimporte le produit, vérifie que les photos s'affichent dans Modifier, puis republie."
+          "Les CDN AliExpress/Amazon ont refusé le téléchargement. " +
+          "Réimporte le produit (les images seront cachées en local /media), vérifie Modifier, puis republie."
       );
     }
   }
