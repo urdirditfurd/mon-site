@@ -3,6 +3,15 @@
  * Anti-ban, VeRO, SEO scoring, pilotage.
  */
 
+const {
+  normalizeListingLang,
+  titleHooksFor,
+  titleNewWord,
+  titleQualityTail,
+  titleFallback,
+  titleShipHook,
+} = require("./listing-i18n");
+
 /** Marques / termes VeRO fréquents (liste locale extensible). */
 const VERO_BRANDS = [
   "nike",
@@ -168,23 +177,25 @@ function scoreSeoTitle(title, keywords = []) {
   };
 }
 
-function buildAiTitle(productName, keywords = []) {
-  return rewriteEbayTitle(productName, keywords);
+function buildAiTitle(productName, keywords = [], opts = {}) {
+  return rewriteEbayTitle(productName, keywords, opts);
 }
 
 /**
  * Titre eBay « discret » : ne copie pas le titre fournisseur mot pour mot.
- * Réordonne les mots-clés, retire bruit Ali/Amazon, ajoute hooks FR.
+ * Réordonne les mots-clés, retire bruit Ali/Amazon, ajoute hooks (FR/EN/DE).
  */
-function rewriteEbayTitle(productName, keywords = []) {
-  let raw = String(productName || "Produit")
+function rewriteEbayTitle(productName, keywords = [], opts = {}) {
+  const language = normalizeListingLang(opts.language || opts.lang || "fr");
+
+  let raw = String(productName || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit"))
     .replace(/[\u4e00-\u9fff]+/g, " ") // chinois
     .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/gi, " ")
     .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship|ebay)\b/gi, " ")
     .replace(/\b[A-Z]{0,3}\d{5,}\b/g, " ") // codes SKU
     .replace(/\([^)]*type[^)]*\)/gi, " ") // (type TPE/TPR) etc.
     .replace(/[|【】\[\]{}()]/g, " ")
-    .replace(/\b(garanti|garantie|authentique|authenticité|réplique|replica)\b/gi, " ")
+    .replace(/\b(garanti|garantie|authentique|authenticité|réplique|replica|warranty|garantie)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -204,6 +215,12 @@ function rewriteEbayTitle(productName, keywords = []) {
     "type",
     "tpe",
     "tpr",
+    "und",
+    "mit",
+    "für",
+    "der",
+    "die",
+    "das",
   ]);
   const tokens = raw
     .split(/\s+/)
@@ -217,33 +234,34 @@ function rewriteEbayTitle(productName, keywords = []) {
     .filter((k) => !raw.toLowerCase().includes(k.toLowerCase()))
     .slice(0, 3);
 
-  // Structure différente du titre source : type + usage + bénéfice
-  const hooks = ["Compatible", "Pratique", "Compact", "Universal", "Premium"];
+  const hooks = titleHooksFor(language);
   const hook = hooks[tokens.join("").length % hooks.length];
   const core = tokens.slice(0, 6).join(" ");
-  // Évite d'ajouter "Livraison rapide" / extras bruyants si le titre FR est déjà riche
-  const looksFrProduct = /[àâäéèêëïîôùûüç]/i.test(raw) || /jouet|anti-stress|souple|coque|chargeur/i.test(raw);
-  const tail = looksFrProduct ? "" : extras.length ? extras.join(" ") : "Livraison rapide";
-  let title = `${hook} ${core} ${tail} Neuf`.replace(/\s+/g, " ").trim();
+  const newWord = titleNewWord(language);
+  const looksLocalProduct =
+    language === "fr"
+      ? /[àâäéèêëïîôùûüç]/i.test(raw) || /jouet|anti-stress|souple|coque|chargeur/i.test(raw)
+      : language === "de"
+        ? /[äöüß]/i.test(raw) || /handy|ladegerät|hülle/i.test(raw)
+        : tokens.length >= 4;
+  const tail = looksLocalProduct ? "" : extras.length ? extras.join(" ") : titleShipHook(language);
+  let title = `${hook} ${core} ${tail} ${newWord}`.replace(/\s+/g, " ").trim();
 
-  // Titres FR longs : version courte orientée bénéfice (style EBX)
-  if (looksFrProduct && tokens.length >= 3) {
+  if (looksLocalProduct && tokens.length >= 3) {
     const shortCore = tokens.slice(0, 5).join(" ");
-    title = `${shortCore} Neuf`.replace(/\s+/g, " ").trim();
+    title = `${shortCore} ${newWord}`.replace(/\s+/g, " ").trim();
     if (title.length < 28) title = `${hook} ${title}`;
   }
 
-  // Si trop proche du titre brut, force un reorder
   const sim = similarityRatio(raw.toLowerCase(), title.toLowerCase());
   if (sim > 0.72 && tokens.length > 3) {
     const rotated = [...tokens.slice(2), ...tokens.slice(0, 2)];
-    title = `${rotated.slice(0, 6).join(" ")} Qualité Neuf`.replace(/\s+/g, " ").trim();
+    title = `${rotated.slice(0, 6).join(" ")} ${titleQualityTail(language)}`.replace(/\s+/g, " ").trim();
   }
 
   if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
-  // Sécurité : pas de parenthèse ouverte résiduelle
   title = title.replace(/\([^)]*$/g, " ").replace(/\s{2,}/g, " ").trim();
-  return title || "Produit Compatible Qualité Premium Neuf".slice(0, 80);
+  return title || titleFallback(language).slice(0, 80);
 }
 
 function similarityRatio(a, b) {
@@ -259,7 +277,8 @@ function similarityRatio(a, b) {
  * Prépare un listing discret : titre réécrit + galerie réordonnée
  * (évite de coller photo #1 + titre Ali à l'identique).
  */
-function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
+function prepareDiscreetListing(scraped = {}, { marginMult = 1.8, language = "fr" } = {}) {
+  const lang = normalizeListingLang(language);
   const bullets = scraped.bullets || [];
   // Mots-clés courts uniquement (évite d'injecter des phrases de bénéfices dans le titre)
   const kwFromBullets = bullets
@@ -276,7 +295,7 @@ function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
     )
     .slice(0, 4);
   const originalTitle = scraped.title || "Produit";
-  const seoTitle = rewriteEbayTitle(originalTitle, kwFromBullets);
+  const seoTitle = rewriteEbayTitle(originalTitle, kwFromBullets, { language: lang });
   const images = discreetImageOrder(scraped.images || []);
   const product = {
     ...scraped,
@@ -288,6 +307,7 @@ function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
     benefits: scraped.benefits || bullets,
     specs: scraped.specs || {},
     short_pitch: scraped.short_pitch || scraped.description || "",
+    language: lang,
   };
   const cost = Number(scraped.price) || 0;
   return {
@@ -298,6 +318,7 @@ function prepareDiscreetListing(scraped = {}, { marginMult = 1.8 } = {}) {
     images,
     source: scraped.source,
     product,
+    language: lang,
     discreet: true,
     title_rewritten: seoTitle.toLowerCase() !== String(originalTitle).toLowerCase().slice(0, 80),
   };

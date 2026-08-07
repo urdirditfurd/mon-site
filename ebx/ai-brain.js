@@ -13,6 +13,7 @@
 
 const OpenAI = require("openai");
 const { jsonrepair } = require("jsonrepair");
+const { normalizeListingLang, getListingUi, languageLabel } = require("./listing-i18n");
 
 const LOCAL_LLM_URL = process.env.LOCAL_LLM_URL || "http://localhost:1234/v1";
 
@@ -87,17 +88,45 @@ function cleanAndParseJSON(responseText) {
 /**
  * Génère un listing eBay complet via le LLM local.
  */
-async function generateListing(productName, rawKeywords) {
-  const userPrompt = `Génère un listing eBay optimisé pour ce produit :
+async function generateListing(productName, rawKeywords, options = {}) {
+  const language = normalizeListingLang(options.language || options.lang || "fr");
+  const L = getListingUi(language);
+  const langName = L.aiLangName;
+  const systemByLang = {
+    fr: SYSTEM_PROMPT,
+    en: SYSTEM_PROMPT.replace(/français/gi, "English")
+      .replace(/eBay FR/g, "eBay EN/US")
+      .replace(/Compatible \/ Compact \/ Pratique \/ Neuf \/ Qualité/g, "Compatible / Compact / Practical / New / Quality"),
+    de: SYSTEM_PROMPT.replace(/français/gi, "Deutsch")
+      .replace(/eBay FR/g, "eBay DE")
+      .replace(/Compatible \/ Compact \/ Pratique \/ Neuf \/ Qualité/g, "Kompatibel / Kompakt / Praktisch / Neu / Qualität"),
+  };
+  const userPrompt =
+    language === "en"
+      ? `Generate an optimized eBay listing for this product:
+Name: ${productName}
+Keywords: ${rawKeywords}
+Target language: English
+
+Reply ONLY with the JSON, nothing else.`
+      : language === "de"
+        ? `Erstelle eine optimierte eBay-Anzeige für dieses Produkt:
+Name: ${productName}
+Keywords: ${rawKeywords}
+Zielsprache: Deutsch
+
+Antworte NUR mit dem JSON, sonst nichts.`
+        : `Génère un listing eBay optimisé pour ce produit :
 Nom : ${productName}
 Mots-clés : ${rawKeywords}
+Langue cible : ${langName}
 
 Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
 
   const completion = await client.chat.completions.create({
     model: "local-model",
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemByLang[language] || SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
     temperature: 0.7,
@@ -105,7 +134,8 @@ Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
   });
 
   const rawContent = completion.choices[0].message.content;
-  return cleanAndParseJSON(rawContent);
+  const parsed = cleanAndParseJSON(rawContent);
+  return { ...parsed, language, language_label: languageLabel(language) };
 }
 
 /**
@@ -156,9 +186,14 @@ Réponds UNIQUEMENT en JSON:
 /**
  * Enrichit un listing à partir des infos produit scrapées (titre, bullets, specs).
  * Retourne du JSON structuré — le HTML est reconstruit côté template (pas de HTML IA).
+ * @param {object} product
+ * @param {{ language?: string, lang?: string }} [options]
  */
-async function generateProductCopy(product = {}) {
-  const title = String(product.title || product.originalTitle || "Produit").slice(0, 160);
+async function generateProductCopy(product = {}, options = {}) {
+  const language = normalizeListingLang(options.language || options.lang || product.language || "fr");
+  const L = getListingUi(language);
+  const fallbackName = language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit";
+  const title = String(product.title || product.originalTitle || fallbackName).slice(0, 160);
   const bullets = (product.bullets || []).slice(0, 8).join(" | ");
   const specs = product.specs
     ? Object.entries(product.specs)
@@ -168,10 +203,13 @@ async function generateProductCopy(product = {}) {
     : "";
   const desc = String(product.description || "").slice(0, 500);
 
-  const system = `Tu es un rédacteur eBay FR. Réponds UNIQUEMENT en JSON valide.
+  const langRules = {
+    fr: {
+      system: `Tu es un rédacteur eBay FR. Réponds UNIQUEMENT en JSON valide.
 Objectif: décrire le VRAI produit (attributs physiques / usage), pas le service vendeur.
+Tout le contenu texte doit être en français.
 INTERDICTION: AliExpress, Amazon, Cdiscount, eBay, "potentiel de marge", "Source :", "demande eBay".
-Titre SEO max 80 caractères, français français, ordre de mots différent du titre fournisseur.
+Titre SEO max 80 caractères, keywords français, ordre de mots différent du titre fournisseur.
 
 Format:
 {
@@ -181,22 +219,78 @@ Format:
   "benefits": ["6 bénéfices produit concrets"],
   "specs": {"Matériau":"...","Dimensions":"...","Type":"...","État":"Neuf"},
   "suggested_price": number
-}`;
-
-  const user = `Produit scrapé:
+}`,
+      user: `Produit scrapé:
 Titre: ${title}
 Description: ${desc}
 Bullets: ${bullets}
 Specs: ${specs}
 Prix fournisseur: ${product.price ?? "n/a"}
+Langue cible: français
 
-Génère 3 sections (matière/design/usage si pertinent), 6 bénéfices et un tableau specs réalistes déduits du produit.`;
+Génère 3 sections (matière/design/usage si pertinent), 6 bénéfices et un tableau specs réalistes — entièrement en français.`,
+    },
+    en: {
+      system: `You are an eBay listing copywriter. Reply ONLY with valid JSON.
+Goal: describe the REAL product (physical attributes / use), not seller service.
+All text content must be in English.
+FORBIDDEN: AliExpress, Amazon, Cdiscount, eBay, "margin potential", "Source :".
+SEO title max 80 characters, English keywords, word order DIFFERENT from supplier title.
+
+Format:
+{
+  "seo_title": "string",
+  "short_pitch": "1 catchy sentence",
+  "sections": [{"heading":"string","body":"2-3 sentences"}],
+  "benefits": ["6 concrete product benefits"],
+  "specs": {"Material":"...","Dimensions":"...","Type":"...","Condition":"New"},
+  "suggested_price": number
+}`,
+      user: `Scraped product:
+Title: ${title}
+Description: ${desc}
+Bullets: ${bullets}
+Specs: ${specs}
+Supplier price: ${product.price ?? "n/a"}
+Target language: English
+
+Generate 3 sections (material/design/use if relevant), 6 benefits and a realistic specs table — entirely in English.`,
+    },
+    de: {
+      system: `Du bist ein eBay-Anzeigentexter. Antworte NUR mit gültigem JSON.
+Ziel: das ECHTE Produkt beschreiben (physische Attribute / Nutzung), nicht den Verkäuferservice.
+Alle Textinhalte müssen auf Deutsch sein.
+VERBOTEN: AliExpress, Amazon, Cdiscount, eBay, "Margenpotenzial", "Source :".
+SEO-Titel max. 80 Zeichen, deutsche Keywords, andere Wortreihenfolge als der Lieferantentitel.
+
+Format:
+{
+  "seo_title": "string",
+  "short_pitch": "1 einprägsamer Satz",
+  "sections": [{"heading":"string","body":"2-3 Sätze"}],
+  "benefits": ["6 konkrete Produktvorteile"],
+  "specs": {"Material":"...","Abmessungen":"...","Typ":"...","Zustand":"Neu"},
+  "suggested_price": number
+}`,
+      user: `Gescraptes Produkt:
+Titel: ${title}
+Beschreibung: ${desc}
+Bullets: ${bullets}
+Specs: ${specs}
+Lieferantenpreis: ${product.price ?? "n/a"}
+Zielsprache: Deutsch
+
+Erstelle 3 Abschnitte (Material/Design/Nutzung falls relevant), 6 Vorteile und eine realistische Specs-Tabelle — vollständig auf Deutsch.`,
+    },
+  };
+
+  const pack = langRules[language] || langRules.fr;
 
   const completion = await client.chat.completions.create({
     model: "local-model",
     messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
+      { role: "system", content: pack.system },
+      { role: "user", content: pack.user },
     ],
     temperature: 0.55,
     max_tokens: 1600,
@@ -204,7 +298,12 @@ Génère 3 sections (matière/design/usage si pertinent), 6 bénéfices et un ta
 
   const parsed = cleanAndParseJSON(completion.choices[0].message.content);
   if (parsed._parse_error) throw new Error("Product copy LLM parse fail");
-  return parsed;
+  return {
+    ...parsed,
+    language,
+    language_label: languageLabel(language),
+    market_hint: L.aiMarket,
+  };
 }
 
 module.exports = { generateListing, cleanAndParseJSON, generateSavReply, generateProductCopy };

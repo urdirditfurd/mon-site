@@ -59,6 +59,7 @@ const {
 } = require("./mock-data");
 const { generateListing, generateSavReply, generateProductCopy } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
+const { normalizeListingLang, languageLabel } = require("./listing-i18n");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2034,7 +2035,9 @@ app.post("/api/auto-snipe", async (req, res) => {
 });
 
 app.post("/api/generate-listing", async (req, res) => {
-  const { productName, rawKeywords, productUrl, themeColor } = req.body || {};
+  const { productName, rawKeywords, productUrl, themeColor, language: rawLang, lang } = req.body || {};
+  const language = normalizeListingLang(rawLang || lang || "fr");
+  const langOpts = { language };
 
   try {
     let listing;
@@ -2049,16 +2052,19 @@ app.post("/api/generate-listing", async (req, res) => {
         scraped.bullets = (scraped.bullets || [])
           .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
           .filter((b) => b && !/^source\s*:/i.test(b));
-        const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8 });
+        const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8, language });
         discreet.seo_title = stripSupplierProvenance(discreet.seo_title);
         if (discreet.product) {
           discreet.product.title = stripSupplierProvenance(discreet.product.title);
           discreet.product.description = cleanMarketingCopy(discreet.product.description || "");
+          discreet.product.language = language;
         }
         listing = {
           ...discreet,
+          language,
+          language_label: languageLabel(language),
           html_description: sanitizeListingHtml(
-            buildHtmlFromProduct(discreet.product, themeColor || "#667eea")
+            buildHtmlFromProduct(discreet.product, themeColor || "#667eea", langOpts)
           ),
           source: scraped.source,
           live: true,
@@ -2070,9 +2076,11 @@ app.post("/api/generate-listing", async (req, res) => {
         listing.scrape_error = scrapeErr.message;
         listing.original_title = stripSupplierProvenance(listing.product_name || listing.seo_title);
         listing.seo_title = stripSupplierProvenance(
-          rewriteEbayTitle(listing.seo_title || listing.product_name || "Produit")
+          rewriteEbayTitle(listing.seo_title || listing.product_name || "Produit", [], langOpts)
         );
         listing.title_rewritten = true;
+        listing.language = language;
+        listing.language_label = languageLabel(language);
         listing.product = {
           title: listing.seo_title,
           originalTitle: listing.original_title,
@@ -2082,9 +2090,10 @@ app.post("/api/generate-listing", async (req, res) => {
           price: listing.suggested_price,
           source: "fallback",
           url: productUrl,
+          language,
         };
         listing.html_description = sanitizeListingHtml(
-          buildHtmlFromProduct(listing.product, themeColor || "#667eea")
+          buildHtmlFromProduct(listing.product, themeColor || "#667eea", langOpts)
         );
       }
 
@@ -2095,37 +2104,46 @@ app.post("/api/generate-listing", async (req, res) => {
           title: listing.original_title || listing.product_name || listing.seo_title,
           originalTitle: listing.original_title || scraped?.title,
           images: listing.images || scraped?.images || [],
+          language,
         };
-        const aiPromise = generateProductCopy(baseProduct);
+        const aiPromise = generateProductCopy(baseProduct, langOpts);
         const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), 14000));
         const ai = await Promise.race([aiPromise, timeout]);
         if (ai && !ai._parse_error) {
           const aiTitle = stripSupplierProvenance(
-            rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title)
+            rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title, [], langOpts)
           );
           const aiSections = Array.isArray(ai.sections) ? ai.sections.filter((s) => s?.body) : [];
           const aiBenefits = Array.isArray(ai.benefits) ? ai.benefits.filter(Boolean) : [];
-          const product = enrichProductListingCopy({
-            ...baseProduct,
-            title: aiTitle,
-            originalTitle: listing.original_title || baseProduct.title,
-            description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
-            short_pitch: cleanMarketingCopy(ai.short_pitch || baseProduct.short_pitch || ""),
-            sections: aiSections.length ? aiSections : baseProduct.sections,
-            benefits: aiBenefits.length ? aiBenefits : baseProduct.benefits,
-            bullets: aiBenefits.length ? aiBenefits : baseProduct.bullets,
-            specs:
-              ai.specs && typeof ai.specs === "object"
-                ? { ...(baseProduct.specs || {}), ...ai.specs }
-                : baseProduct.specs,
-            price: baseProduct.price || scraped?.price,
-            source: baseProduct.source || scraped?.source,
-          });
+          const product = enrichProductListingCopy(
+            {
+              ...baseProduct,
+              title: aiTitle,
+              originalTitle: listing.original_title || baseProduct.title,
+              description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
+              short_pitch: cleanMarketingCopy(ai.short_pitch || baseProduct.short_pitch || ""),
+              sections: aiSections.length ? aiSections : baseProduct.sections,
+              benefits: aiBenefits.length ? aiBenefits : baseProduct.benefits,
+              bullets: aiBenefits.length ? aiBenefits : baseProduct.bullets,
+              specs:
+                ai.specs && typeof ai.specs === "object"
+                  ? { ...(baseProduct.specs || {}), ...ai.specs }
+                  : baseProduct.specs,
+              price: baseProduct.price || scraped?.price,
+              source: baseProduct.source || scraped?.source,
+              language,
+            },
+            langOpts
+          );
           listing = {
             ...listing,
             seo_title: aiTitle,
             product_name: aiTitle,
-            html_description: sanitizeListingHtml(buildHtmlFromProduct(product, themeColor || "#667eea")),
+            language,
+            language_label: languageLabel(language),
+            html_description: sanitizeListingHtml(
+              buildHtmlFromProduct(product, themeColor || "#667eea", langOpts)
+            ),
             suggested_price: ai.suggested_price || listing.suggested_price,
             ai_enriched: true,
             title_rewritten: true,
@@ -2139,17 +2157,24 @@ app.post("/api/generate-listing", async (req, res) => {
 
       // Garantit sections/bénéfices même sans LLM
       if (listing.product) {
-        listing.product = enrichProductListingCopy({
-          ...listing.product,
-          originalTitle: listing.original_title || listing.product.originalTitle || listing.product.title,
-          images: listing.images || listing.product.images || [],
-        });
+        listing.product = enrichProductListingCopy(
+          {
+            ...listing.product,
+            originalTitle: listing.original_title || listing.product.originalTitle || listing.product.title,
+            images: listing.images || listing.product.images || [],
+            language,
+          },
+          langOpts
+        );
         listing.html_description = sanitizeListingHtml(
-          buildHtmlFromProduct(listing.product, themeColor || "#667eea")
+          buildHtmlFromProduct(listing.product, themeColor || "#667eea", langOpts)
         );
         listing.images = listing.product.images || listing.images;
+        listing.language = language;
+        listing.language_label = languageLabel(language);
         listing.enrichment = {
           version: "desc-v2",
+          language,
           sections: (listing.product.sections || []).length,
           benefits: (listing.product.benefits || []).length,
           specs: Object.keys(listing.product.specs || {}).length,
@@ -2159,14 +2184,18 @@ app.post("/api/generate-listing", async (req, res) => {
       }
     } else {
       if (!productName) return res.status(400).json({ error: "productName ou productUrl requis" });
-      listing = await generateListing(productName, rawKeywords || "");
+      listing = await generateListing(productName, rawKeywords || "", langOpts);
       listing.seo_title = stripSupplierProvenance(listing.seo_title || productName);
       listing.html_description = sanitizeListingHtml(listing.html_description || "");
+      listing.language = language;
+      listing.language_label = languageLabel(language);
     }
 
     listing.seo_title = stripSupplierProvenance(listing.seo_title || "");
     listing.product_name = stripSupplierProvenance(listing.product_name || listing.seo_title);
     if (listing.product) listing.product.title = stripSupplierProvenance(listing.product.title || listing.seo_title);
+    listing.language = language;
+    listing.language_label = languageLabel(language);
     listing.html_description = sanitizeListingHtml(listing.html_description || "");
 
     const result = await insertListingWithImageCache({
@@ -2184,6 +2213,8 @@ app.post("/api/generate-listing", async (req, res) => {
         ...listing,
         ...(saved || {}),
         id: result.id,
+        language,
+        language_label: languageLabel(language),
         duplicate: result.duplicate || false,
       },
     });
@@ -2201,18 +2232,24 @@ app.post("/api/generate-listing", async (req, res) => {
 
 app.post("/api/rebuild-description", (req, res) => {
   try {
-    const { product, themeColor = "#667eea" } = req.body || {};
+    const { product, themeColor = "#667eea", language: rawLang, lang } = req.body || {};
     if (!product) return res.status(400).json({ success: false, error: "product requis" });
-    const cleanedProduct = enrichProductListingCopy({
-      ...product,
-      title: stripSupplierProvenance(product.title),
-      originalTitle: product.originalTitle || product.original_title || product.title,
-      description: cleanMarketingCopy(product.description || ""),
-      bullets: (product.bullets || [])
-        .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
-        .filter((b) => b && !/^source\s*:/i.test(b)),
-    });
-    const html = sanitizeListingHtml(buildHtmlFromProduct(cleanedProduct, themeColor));
+    const language = normalizeListingLang(rawLang || lang || product.language || "fr");
+    const langOpts = { language };
+    const cleanedProduct = enrichProductListingCopy(
+      {
+        ...product,
+        title: stripSupplierProvenance(product.title),
+        originalTitle: product.originalTitle || product.original_title || product.title,
+        description: cleanMarketingCopy(product.description || ""),
+        bullets: (product.bullets || [])
+          .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
+          .filter((b) => b && !/^source\s*:/i.test(b)),
+        language,
+      },
+      langOpts
+    );
+    const html = sanitizeListingHtml(buildHtmlFromProduct(cleanedProduct, themeColor, langOpts));
     res.json({
       success: true,
       data: {
@@ -2222,9 +2259,12 @@ app.post("/api/rebuild-description", (req, res) => {
         images: cleanedProduct.images || [],
         source: cleanedProduct.source || "generic",
         product: cleanedProduct,
+        language,
+        language_label: languageLabel(language),
         live: true,
         enrichment: {
           version: "desc-v2",
+          language,
           sections: (cleanedProduct.sections || []).length,
           benefits: (cleanedProduct.benefits || []).length,
           specs: Object.keys(cleanedProduct.specs || {}).length,

@@ -1779,6 +1779,8 @@ function setManualStep(doneUpTo) {
 async function runManualImport() {
   const url = document.getElementById("manual-url")?.value.trim();
   if (!url) return alert("Colle une URL fournisseur");
+  const language = document.getElementById("manual-language")?.value || "fr";
+  const langLabels = { fr: "Français", en: "Anglais", de: "Allemand" };
   const btn = document.getElementById("manual-btn");
   const wrap = document.getElementById("manual-progress");
   const list = document.getElementById("manual-checklist");
@@ -1802,6 +1804,7 @@ async function runManualImport() {
     pct.textContent = "20%";
     setManualStep("scan");
     addCheck("Analyse de l'URL…");
+    addCheck(`Langue de l'annonce : ${langLabels[language] || language}`);
     await new Promise((r) => setTimeout(r, 300));
     addCheck(`Plateforme détectée : ${/amazon/i.test(url) ? "Amazon" : /cdiscount/i.test(url) ? "Cdiscount" : "AliExpress"}`);
 
@@ -1812,7 +1815,7 @@ async function runManualImport() {
     const res = await fetch(API + "/api/generate-listing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productUrl: url, themeColor }),
+      body: JSON.stringify({ productUrl: url, themeColor, language }),
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || "Import échoué");
@@ -1828,13 +1831,14 @@ async function runManualImport() {
     const title = json.data?.seo_title || "";
     const orig = json.data?.original_title || json.data?.product_name || "";
     const price = Number(json.data?.suggested_price || 0);
+    const usedLang = json.data?.language_label || langLabels[json.data?.language] || langLabels[language];
     addCheck(
       json.data?.title_rewritten
         ? "Titre réécrit (discret) — différent du fournisseur"
         : "Titre optimisé"
     );
     addCheck(`Titre eBay : ${title.length} caractères`);
-    addCheck("Description HTML générée");
+    addCheck(`Description HTML générée (${usedLang})`);
     addCheck(`Prix de vente suggéré : ${price.toFixed(2)} €`);
     const costGuess = price / 1.8;
     const marginEst = price > 0 ? Math.round(((price - costGuess) / price) * 100) : 0;
@@ -1876,7 +1880,7 @@ async function runManualImport() {
     setManualStep("save");
     label.textContent = `Importé — ${price.toFixed(2)} €`;
     ready.classList.remove("hidden");
-    ready.textContent = `Listing #${manualListingId || "?"} prêt dans Mes Listings — ${price.toFixed(2)} € (non publié sur eBay)`;
+    ready.textContent = `Listing #${manualListingId || "?"} prêt dans Mes Listings — ${usedLang} — ${price.toFixed(2)} € (non publié sur eBay)`;
     if (saveBtn) saveBtn.classList.remove("hidden");
   } catch (err) {
     label.textContent = "Erreur";

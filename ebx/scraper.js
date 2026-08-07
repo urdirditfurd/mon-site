@@ -7,6 +7,7 @@ const cheerio = require("cheerio");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
+const { normalizeListingLang, getListingUi, localizeSpecsObject } = require("./listing-i18n");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1274,9 +1275,14 @@ async function scrapeProduct(url) {
 /**
  * Enrichit un produit scrapé avec sections, bénéfices et specs utilisables
  * dans le Description Builder (sans noms de marketplace / marge).
+ * @param {object} product
+ * @param {{ language?: string }} [opts]
  */
-function enrichProductListingCopy(product = {}) {
-  const title = cleanText(product.title || "Produit");
+function enrichProductListingCopy(product = {}, opts = {}) {
+  const language = normalizeListingLang(opts.language || product.language || "fr");
+  const L = getListingUi(language);
+
+  const title = cleanText(product.title || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit"));
   // Inclut originalTitle / description pour détecter la catégorie même après réécriture SEO
   const t = `${title} ${product.originalTitle || product.original_title || ""} ${product.description || ""} ${
     product.short_pitch || ""
@@ -1296,117 +1302,189 @@ function enrichProductListingCopy(product = {}) {
     existingSpecs.Materiau,
     /silicone/i.test(t) && "Silicone",
     /tpe|tpr|thermoplastic/i.test(t) && "TPE / TPR",
-    /pu\b|polyurethane|mousse/i.test(t) && "Mousse PU",
-    /coton|cotton/i.test(t) && "Coton",
-    /abs\b|plastique|plastic/i.test(t) && "Plastique",
-    /métal|metal|alu|acier|steel/i.test(t) && "Métal",
-    /bois|wood/i.test(t) && "Bois"
+    /pu\b|polyurethane|mousse|foam/i.test(t) && (language === "de" ? "PU-Schaum" : language === "en" ? "PU foam" : "Mousse PU"),
+    /coton|cotton/i.test(t) && (language === "de" ? "Baumwolle" : language === "en" ? "Cotton" : "Coton"),
+    /abs\b|plastique|plastic|kunststoff/i.test(t) &&
+      (language === "de" ? "Kunststoff" : language === "en" ? "Plastic" : "Plastique"),
+    /métal|metal|alu|acier|steel|metall/i.test(t) && (language === "de" ? "Metall" : language === "en" ? "Metal" : "Métal"),
+    /bois|wood|holz/i.test(t) && (language === "de" ? "Holz" : language === "en" ? "Wood" : "Bois")
   );
   const dimMatch =
     title.match(/(\d+[.,]?\d*)\s*[x×*]\s*(\d+[.,]?\d*)\s*[x×*]?\s*(\d+[.,]?\d*)?\s*(cm|mm)/i) ||
     title.match(/(\d+[.,]?\d*)\s*(cm|mm)\b/i);
-  let dimensions = existingSpecs.Dimensions || existingSpecs.Size || existingSpecs.Taille || "";
+  let dimensions = existingSpecs.Dimensions || existingSpecs.Size || existingSpecs.Taille || existingSpecs.Abmessungen || "";
   if (!dimensions && dimMatch) {
     dimensions = dimMatch[0].replace(/\*/g, "×").replace(/,/g, ".");
   }
-  const weight = existingSpecs.Poids || existingSpecs.Weight || "";
+  const weight = existingSpecs.Poids || existingSpecs.Weight || existingSpecs.Gewicht || "";
   const age = existingSpecs["Recommend Age"] || existingSpecs.Âge || existingSpecs.Age || "";
-  if (/14\+/.test(String(existingSpecs["Recommend Age"] || "")) && !age) {
-    /* keep */
-  }
 
   const isFidget = /fidget|squishy|anti-?stress|décompression|decompression|squeeze|anxiety|souple|élastique|elastique|beurre|butter|fromage|cheese/i.test(
     t
   );
-  const isLed = /led|rgb|lumière|lumiere|neopixel|ws2812/i.test(t);
-  const isPhone = /coque|iphone|samsung|chargeur|cable|câble|usb|magsafe/i.test(t);
+  const isLed = /led|rgb|lumière|lumiere|neopixel|ws2812|licht/i.test(t);
+  const isPhone = /coque|iphone|samsung|chargeur|cable|câble|usb|magsafe|phone case|handyhülle|ladegerät/i.test(t);
 
   const specs = {
-    État: "Neuf",
-    Marque: existingSpecs.Brand || existingSpecs["Brand Name"] || existingSpecs.Marque || "Sans marque / générique",
+    [L.conditionLabel]: L.conditionNew,
+    [L.brandLabel]:
+      existingSpecs.Brand || existingSpecs["Brand Name"] || existingSpecs.Marque || existingSpecs.Marke || L.unbranded,
     ...existingSpecs,
   };
-  if (material) specs.Matériau = specs.Matériau || material;
-  if (dimensions) specs.Dimensions = specs.Dimensions || dimensions;
+  if (material) specs[L.materialLabel] = specs[L.materialLabel] || specs.Matériau || material;
+  if (dimensions) specs[L.dimsLabel] = specs[L.dimsLabel] || specs.Dimensions || dimensions;
   if (weight) specs.Poids = specs.Poids || weight;
   if (age || existingSpecs["Recommend Age"]) {
     specs["Âge recommandé"] = age || existingSpecs["Recommend Age"];
   }
   if (isFidget) {
-    specs.Type = specs.Type && !/crystal soil/i.test(String(specs.Type)) ? specs.Type : "Jouet anti-stress / fidget";
-    specs.Usage = specs.Usage || "Soulagement du stress, focus, manipulation sensorielle";
-    if (!specs.Matériau) specs.Matériau = "Matière souple élastique (type TPE/TPR)";
-    // Normalise dimensions floues héritées
-    if (!specs.Dimensions || /format compact/i.test(String(specs.Dimensions))) {
-      specs.Dimensions = "Environ 12–15 cm";
+    specs[L.typeLabel] =
+      specs[L.typeLabel] && !/crystal soil/i.test(String(specs[L.typeLabel] || specs.Type || ""))
+        ? specs[L.typeLabel] || specs.Type
+        : language === "de"
+          ? "Anti-Stress / Fidget Spielzeug"
+          : language === "en"
+            ? "Stress relief / fidget toy"
+            : "Jouet anti-stress / fidget";
+    specs[L.usageLabel] =
+      specs[L.usageLabel] ||
+      specs.Usage ||
+      (language === "de"
+        ? "Stressabbau, Fokus, sensorische Manipulation"
+        : language === "en"
+          ? "Stress relief, focus, sensory play"
+          : "Soulagement du stress, focus, manipulation sensorielle");
+    if (!specs[L.materialLabel] && !specs.Matériau) {
+      specs[L.materialLabel] =
+        language === "de"
+          ? "Weiches elastisches Material (TPE/TPR)"
+          : language === "en"
+            ? "Soft elastic material (TPE/TPR)"
+            : "Matière souple élastique (type TPE/TPR)";
     }
-    specs["Sans BPA"] = specs["Sans BPA"] || "Matériaux non toxiques (non comestible)";
+    if (!specs[L.dimsLabel] || /format compact/i.test(String(specs[L.dimsLabel] || specs.Dimensions || ""))) {
+      specs[L.dimsLabel] =
+        language === "de" ? "Ca. 12–15 cm" : language === "en" ? "Approx. 12–15 cm" : "Environ 12–15 cm";
+    }
   } else if (isLed) {
-    specs.Type = specs.Type || "Éclairage LED";
+    specs[L.typeLabel] =
+      specs[L.typeLabel] ||
+      specs.Type ||
+      (language === "de" ? "LED-Beleuchtung" : language === "en" ? "LED lighting" : "Éclairage LED");
   } else if (isPhone) {
-    specs.Type = specs.Type || "Accessoire mobile";
+    specs[L.typeLabel] =
+      specs[L.typeLabel] ||
+      specs.Type ||
+      (language === "de" ? "Handy-Zubehör" : language === "en" ? "Mobile accessory" : "Accessoire mobile");
   }
-  // Nettoie specs bruyantes Ali
   delete specs.Choice;
   delete specs["High-concerned chemical"];
   if (/crystal soil/i.test(String(specs.Type || ""))) delete specs.Type;
-  if (/^none$/i.test(String(specs.Marque || ""))) specs.Marque = "Sans marque / générique";
+  if (/^none$/i.test(String(specs.Marque || ""))) specs[L.brandLabel] = L.unbranded;
   if (/^none$/i.test(String(specs["Brand Name"] || ""))) delete specs["Brand Name"];
   if (/^none$/i.test(String(specs.Brand || ""))) delete specs.Brand;
-  // Déduplique Brand Name / Marque
-  if (specs["Brand Name"] && specs.Marque) delete specs["Brand Name"];
+  if (specs["Brand Name"] && (specs.Marque || specs[L.brandLabel])) delete specs["Brand Name"];
   if (specs["Recommend Age"] && specs["Âge recommandé"]) delete specs["Recommend Age"];
   if (/mainland china/i.test(String(specs.Origin || ""))) {
-    specs.Origine = "Import";
+    specs.Origine = language === "de" ? "Import" : language === "en" ? "Import" : "Import";
     delete specs.Origin;
   }
+
+  const localizedSpecs = localizeSpecsObject(specs, language);
 
   const shortPitchRaw =
     product.short_pitch ||
     product.description ||
     (isFidget
-      ? "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
-      : `Découvrez ${title.slice(0, 90)} — sélectionné pour sa qualité et son usage quotidien.`);
+      ? language === "de"
+        ? "Weiches Anti-Stress-Spielzeug zum Drücken und Dehnen — lustiges Design, ideal zum Entspannen im Alltag."
+        : language === "en"
+          ? "Soft stress-relief toy to squeeze and stretch — fun design, ideal to unwind every day."
+          : "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
+      : L.shortPitchFallback(title));
   let shortPitch = cleanMarketingCopy(shortPitchRaw);
   if (!shortPitch || shortPitch.length < 40 || /trouvez plus|find more|transport maritime/i.test(shortPitch)) {
     shortPitch = isFidget
-      ? "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
-      : `Découvrez ${stripSupplierProvenance(title).slice(0, 90)} — qualité et usage quotidien.`;
+      ? language === "de"
+        ? "Weiches Anti-Stress-Spielzeug zum Drücken und Dehnen — lustiges Design für den Alltag."
+        : language === "en"
+          ? "Soft stress-relief toy to squeeze and stretch — fun everyday design."
+          : "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
+      : L.shortPitchFallback(stripSupplierProvenance(title));
   }
 
   let sections = Array.isArray(product.sections) ? product.sections.filter((s) => s?.body) : [];
   if (!sections.length) {
     if (isFidget) {
-      sections = [
-        {
-          heading: "Matière souple et résistante",
-          body: `${specs.Matériau || "Matière élastique"} agréable au toucher, conçue pour être pressée, étirée et remodelée sans se déchirer facilement. Retour lent à la forme pour une sensation satisfaisante.`,
-        },
-        {
-          heading: "Design amusant et réaliste",
-          body: /beurre|butter|fromage|cheese/i.test(t)
-            ? "Forme inspirée d'un bâton de beurre / fromage : look décalé, parfait pour le bureau, la maison ou un cadeau original."
-            : "Design soigné et original qui attire l'œil tout en restant discret à manipuler.",
-        },
-        {
-          heading: "Soulagement du stress au quotidien",
-          body: "Idéal pour canaliser le stress, améliorer la concentration ou simplement s'occuper les mains — silencieux, portable et prêt à l'emploi.",
-        },
-      ];
+      const mat =
+        localizedSpecs[L.materialLabel] ||
+        material ||
+        (language === "de" ? "Elastisches Material" : language === "en" ? "Elastic material" : "Matière élastique");
+      sections =
+        language === "en"
+          ? [
+              {
+                heading: "Soft and durable material",
+                body: `${mat} feels pleasant to the touch, designed to be pressed, stretched and reshaped without tearing easily. Slow return for a satisfying feel.`,
+              },
+              {
+                heading: "Fun, realistic design",
+                body: /beurre|butter|fromage|cheese/i.test(t)
+                  ? "Butter / cheese stick inspired shape: quirky look, perfect for desk, home or a fun gift."
+                  : "Careful, original design that catches the eye while staying discreet to handle.",
+              },
+              {
+                heading: "Everyday stress relief",
+                body: "Ideal to channel stress, improve focus or keep your hands busy — quiet, portable and ready to use.",
+              },
+            ]
+          : language === "de"
+            ? [
+                {
+                  heading: "Weiches und widerstandsfähiges Material",
+                  body: `${mat} angenehm anzufassen, zum Drücken, Dehnen und Umformen ohne leichtes Reißen. Langsames Zurückfedern für ein befriedigendes Gefühl.`,
+                },
+                {
+                  heading: "Lustiges, realistisches Design",
+                  body: /beurre|butter|fromage|cheese/i.test(t)
+                    ? "Form inspiriert von Butter-/Käseportion: verspielter Look für Büro, Zuhause oder als Geschenk."
+                    : "Sorgfältiges, originales Design, das auffällt und dennoch dezent zu handhaben ist.",
+                },
+                {
+                  heading: "Stressabbau im Alltag",
+                  body: "Ideal zum Stressabbau, für mehr Fokus oder einfach zum Beschäftigen der Hände — leise, tragbar und sofort einsatzbereit.",
+                },
+              ]
+            : [
+                {
+                  heading: "Matière souple et résistante",
+                  body: `${mat} agréable au toucher, conçue pour être pressée, étirée et remodelée sans se déchirer facilement. Retour lent à la forme pour une sensation satisfaisante.`,
+                },
+                {
+                  heading: "Design amusant et réaliste",
+                  body: /beurre|butter|fromage|cheese/i.test(t)
+                    ? "Forme inspirée d'un bâton de beurre / fromage : look décalé, parfait pour le bureau, la maison ou un cadeau original."
+                    : "Design soigné et original qui attire l'œil tout en restant discret à manipuler.",
+                },
+                {
+                  heading: "Soulagement du stress au quotidien",
+                  body: "Idéal pour canaliser le stress, améliorer la concentration ou simplement s'occuper les mains — silencieux, portable et prêt à l'emploi.",
+                },
+              ];
     } else {
       const desc = cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 500 }) || "");
       sections = [
         {
-          heading: "Description du produit",
-          body: desc || `${title} — produit neuf, prêt à l'emploi, pensé pour un usage quotidien fiable.`,
+          heading: L.sectionDesc,
+          body: desc || L.sectionDescBody(title),
         },
         {
-          heading: "Points forts",
-          body: bullets.slice(0, 3).join(" · ") || "Finition soignée, utilisation simple, excellent rapport qualité-prix.",
+          heading: L.sectionPros,
+          body: bullets.slice(0, 3).join(" · ") || L.sectionProsBody,
         },
         {
-          heading: "Pourquoi l'adopter",
-          body: "Sélectionné pour sa praticité et sa demande : une solution concrète, livrée soigneusement.",
+          heading: L.sectionWhy,
+          body: L.sectionWhyBody,
         },
       ];
     }
@@ -1415,31 +1493,55 @@ function enrichProductListingCopy(product = {}) {
   let benefits = [...(product.benefits || [])].map((b) => cleanText(b)).filter(Boolean);
   if (!benefits.length) {
     if (isFidget) {
-      const matLabel = material || specs.Matériau || "Matière souple élastique";
-      benefits = [
-        `${matLabel} — durable et agréable au toucher`,
-        specs.Dimensions ? `Taille compacte : ${specs.Dimensions}` : "Format compact et portable",
-        "Texture agréable, retour lent (slow-rise)",
-        "Aide à réduire le stress et l'anxiété",
-        "Surface lavable à l'eau, hygiénique",
-        "Cadeau original (ados / adultes) — non comestible",
-      ];
+      const matLabel = material || localizedSpecs[L.materialLabel] || L.materialLabel;
+      benefits =
+        language === "en"
+          ? [
+              `${matLabel} — durable and pleasant to the touch`,
+              localizedSpecs[L.dimsLabel]
+                ? `Compact size: ${localizedSpecs[L.dimsLabel]}`
+                : "Compact and portable format",
+              "Pleasant texture, slow-rise feel",
+              "Helps reduce stress and anxiety",
+              "Washable surface, hygienic",
+              "Original gift (teens / adults) — not edible",
+            ]
+          : language === "de"
+            ? [
+                `${matLabel} — langlebig und angenehm anzufassen`,
+                localizedSpecs[L.dimsLabel]
+                  ? `Kompakte Größe: ${localizedSpecs[L.dimsLabel]}`
+                  : "Kompaktes, tragbares Format",
+                "Angenehme Textur, langsames Zurückfedern",
+                "Hilft, Stress und Unruhe zu reduzieren",
+                "Abwaschbare Oberfläche, hygienisch",
+                "Originelles Geschenk (Teens / Erwachsene) — nicht essbar",
+              ]
+            : [
+                `${matLabel} — durable et agréable au toucher`,
+                localizedSpecs[L.dimsLabel] || specs.Dimensions
+                  ? `Taille compacte : ${localizedSpecs[L.dimsLabel] || specs.Dimensions}`
+                  : "Format compact et portable",
+                "Texture agréable, retour lent (slow-rise)",
+                "Aide à réduire le stress et l'anxiété",
+                "Surface lavable à l'eau, hygiénique",
+                "Cadeau original (ados / adultes) — non comestible",
+              ];
     } else {
       benefits = bullets.slice(0, 6);
       if (benefits.length < 3) {
         benefits = [
           ...benefits,
-          material ? `Matériau : ${material}` : "Matériaux sélectionnés",
-          "Produit neuf, prêt à l'emploi",
-          "Idéal pour un usage quotidien",
-          "Expédition soignée",
+          material ? L.benefitMaterial(material) : L.benefitMaterials,
+          L.benefitNew,
+          L.benefitDaily,
+          L.benefitShip,
         ].filter(Boolean);
       }
     }
   }
   benefits = [...new Set(benefits)].slice(0, 8);
 
-  // Bullets = bénéfices si scrape pauvre
   const mergedBullets = bullets.length >= 3 ? bullets.slice(0, 8) : benefits.slice(0, 8);
 
   let description = cleanMarketingCopy(product.description || "");
@@ -1459,7 +1561,8 @@ function enrichProductListingCopy(product = {}) {
     bullets: mergedBullets,
     benefits,
     sections,
-    specs,
+    specs: localizedSpecs,
+    language,
   };
 }
 
@@ -2672,11 +2775,15 @@ async function findCheapestSupplier(
   return { best: any[0] || uniq.find((p) => p.url) || null, candidates: any.length ? any : uniq.slice(0, 8), compared: 0 };
 }
 
-function buildHtmlFromProduct(product, themeColor = "#667eea") {
-  const enriched = enrichProductListingCopy(product || {});
+function buildHtmlFromProduct(product, themeColor = "#667eea", opts = {}) {
+  const language = normalizeListingLang(opts.language || product?.language || "fr");
+  const L = getListingUi(language);
+  const enriched = enrichProductListingCopy(product || {}, { language });
   const imgs = (enriched.images || []).filter(isRealProductImage).slice(0, 8);
 
-  const placeholder = `<div style="background:#f4f4f5;border-radius:14px;padding:48px 16px;text-align:center;color:#71717a;font-size:13px;">Image produit à ajouter</div>`;
+  const placeholder = `<div style="background:#f4f4f5;border-radius:14px;padding:48px 16px;text-align:center;color:#71717a;font-size:13px;">${escapeHtml(
+    L.imagePlaceholder
+  )}</div>`;
   const imgTag = (src, maxH = 280) =>
     `<img src="${escapeHtml(src)}" alt="${escapeHtml(enriched.title)}" style="width:100%;border-radius:14px;max-height:${maxH}px;object-fit:cover;" />`;
 
@@ -2684,7 +2791,7 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
   const shortPitch =
     cleanMarketingCopy(enriched.short_pitch || "") ||
     cleanMarketingCopy(sanitizeReadableText(enriched.description, { maxLen: 220 })) ||
-    "Produit sélectionné pour sa qualité et son usage quotidien.";
+    L.shortPitchFallback(displayTitle);
 
   const sections = (enriched.sections || []).slice(0, 3);
   const sectionHtml = sections
@@ -2716,9 +2823,9 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     .slice(0, 8);
   const bulletHtml = benefitItems.length
     ? benefitItems.map((b) => `<li style="margin:0 0 6px;">✔ ${escapeHtml(b)}</li>`).join("")
-    : `<li style="margin:0 0 6px;">✔ Produit neuf, prêt à l'emploi</li>
-       <li style="margin:0 0 6px;">✔ Qualité sélectionnée</li>
-       <li style="margin:0 0 6px;">✔ Expédition soignée</li>`;
+    : `<li style="margin:0 0 6px;">✔ ${escapeHtml(L.defaultBenefit1)}</li>
+       <li style="margin:0 0 6px;">✔ ${escapeHtml(L.defaultBenefit2)}</li>
+       <li style="margin:0 0 6px;">✔ ${escapeHtml(L.defaultBenefit3)}</li>`;
 
   const specs = enriched.specs && typeof enriched.specs === "object" ? enriched.specs : {};
   const specRows = Object.entries(specs)
@@ -2743,12 +2850,12 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
     </div>`
       : "";
 
-  const rawHtml = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;">
+  const rawHtml = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:100%;color:#1a1a2e;background:#fff;" lang="${language}">
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:16px;padding:26px 20px;text-align:center;color:#fff;margin-bottom:18px;">
     <div style="display:inline-flex;gap:8px;margin-bottom:10px;">
-      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Premium</span>
-      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Neuf</span>
-      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">Qualité</span>
+      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">${escapeHtml(L.badgePremium)}</span>
+      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">${escapeHtml(L.badgeNew)}</span>
+      <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:11px;">${escapeHtml(L.badgeQuality)}</span>
     </div>
     <h1 style="font-size:20px;margin:0 0 8px;line-height:1.35;">${escapeHtml(displayTitle)}</h1>
     <p style="font-size:13px;opacity:.9;margin:0;">${escapeHtml(shortPitch.slice(0, 160))}</p>
@@ -2757,43 +2864,43 @@ function buildHtmlFromProduct(product, themeColor = "#667eea") {
   <div style="margin-bottom:16px;">${hero}</div>
 
   <div style="margin-bottom:8px;">
-    <h2 style="font-size:15px;margin:0 0 12px;color:${themeColor};">Découvrez le produit</h2>
+    <h2 style="font-size:15px;margin:0 0 12px;color:${themeColor};">${escapeHtml(L.discover)}</h2>
     ${sectionHtml || `<p style="font-size:13px;line-height:1.75;color:#444;">${escapeHtml(shortPitch)}</p>`}
   </div>
 
   ${galleryExtra}
 
   <div style="background:#fafafe;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #eee;">
-    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">Pourquoi ce produit ?</h2>
+    <h2 style="font-size:15px;margin:0 0 10px;color:${themeColor};">${escapeHtml(L.why)}</h2>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">✦</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Qualité</p></div>
-      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">🛡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Fiabilité</p></div>
-      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">⚡</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">Praticité</p></div>
+      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">✦</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">${escapeHtml(L.whyQuality)}</p></div>
+      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">✦</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">${escapeHtml(L.whyPractical)}</p></div>
+      <div style="background:#fff;border-radius:10px;padding:12px;text-align:center;border:1px solid #f0f0f5;"><div style="font-size:18px;">✦</div><p style="font-size:11px;font-weight:600;margin:4px 0 0;">${escapeHtml(L.whyReady)}</p></div>
     </div>
   </div>
 
   <div style="margin-bottom:16px;">
-    <h2 style="font-size:15px;margin:0 0 8px;color:${themeColor};">Bénéfices produit</h2>
+    <h2 style="font-size:15px;margin:0 0 8px;color:${themeColor};">${escapeHtml(L.benefits)}</h2>
     <ul style="margin:0;padding-left:18px;font-size:13px;color:#444;line-height:1.6;">${bulletHtml}</ul>
   </div>
 
   <div style="border-radius:12px;border:1px solid #e8e8f0;overflow:hidden;margin-bottom:16px;">
-    <div style="background:${themeColor};color:#fff;padding:10px 16px;font-size:13px;font-weight:600;">Caractéristiques techniques</div>
+    <div style="background:${themeColor};color:#fff;padding:10px 16px;font-size:13px;font-weight:600;">${escapeHtml(L.specs)}</div>
     <div style="padding:12px 16px;font-size:12px;color:#555;line-height:1.6;">
-      ${specRows || `<div><strong>État :</strong> Neuf</div>`}
+      ${specRows || `<div><strong>${escapeHtml(L.conditionLabel)} :</strong> ${escapeHtml(L.conditionNew)}</div>`}
     </div>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Contenu</p><p style="font-size:11px;color:#666;margin:0;">Article comme sur les photos</p></div>
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Sélection</p><p style="font-size:11px;color:#666;margin:0;">Produit vérifié avant envoi</p></div>
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Retours</p><p style="font-size:11px;color:#666;margin:0;">Selon conditions de l'annonce</p></div>
-    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">Support</p><p style="font-size:11px;color:#666;margin:0;">Réponse rapide</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">${escapeHtml(L.content)}</p><p style="font-size:11px;color:#666;margin:0;">${escapeHtml(L.contentBody)}</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">${escapeHtml(L.selection)}</p><p style="font-size:11px;color:#666;margin:0;">${escapeHtml(L.selectionBody)}</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">${escapeHtml(L.returns)}</p><p style="font-size:11px;color:#666;margin:0;">${escapeHtml(L.returnsBody)}</p></div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;"><p style="font-size:12px;font-weight:700;margin:0 0 4px;">${escapeHtml(L.support)}</p><p style="font-size:11px;color:#666;margin:0;">${escapeHtml(L.supportBody)}</p></div>
   </div>
 
   <div style="background:linear-gradient(135deg,${themeColor} 0%,#1e1b4b 100%);border-radius:12px;padding:18px;text-align:center;color:#fff;">
-    <p style="font-size:15px;font-weight:700;margin:0 0 4px;">Commandez maintenant</p>
-    <p style="font-size:11px;opacity:.85;margin:0;">Retours selon l’annonce • Support réactif • Expédition soignée</p>
+    <p style="font-size:15px;font-weight:700;margin:0 0 4px;">${escapeHtml(L.cta)}</p>
+    <p style="font-size:11px;opacity:.85;margin:0;">${escapeHtml(L.ctaSub)}</p>
   </div>
 </div>`;
   return sanitizeListingHtml(rawHtml);
