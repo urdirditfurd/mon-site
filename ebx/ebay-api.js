@@ -461,11 +461,18 @@ function extractEbayPolicyBlockReason(errOrText) {
   if (params["0"] || params["1"]) {
     const plain = decodeEbayHtmlEntities(params["0"] || params["1"]);
     if (plain && plain.length > 20) {
+      const imageHint = /image|photo|picture|galerie|gallery|miniature|vignette/i.test(plain + raw)
+        ? `\n\nAstuce images : eBay refuse les miniatures (ex. 40×40 / $_1). Réimporte le produit avec de vraies photos ≥ 400px.`
+        : `\n\nSi le motif est flou : (1) produit interdit (slime/hazmat), (2) photos miniatures, (3) VeRO/marque.`;
       return {
         code: "POLICY_BLOCK",
         policyCode: code || null,
         policyUrl,
-        message: `⛔ eBay refuse cette annonce (règlement)\n\n${plain}`,
+        message:
+          `⛔ eBay refuse cette annonce (règlement)\n\n${plain}` +
+          (code ? `\n\nCode policy : ${code}` : "") +
+          (policyUrl ? `\nLien : ${policyUrl}` : "") +
+          imageHint,
       };
     }
   }
@@ -662,14 +669,14 @@ async function ensureInventoryLocation(token) {
 }
 
 function extractImageUrls(html) {
+  const { isUsableProductImageUrl, isMediaUrl } = require("./image-cache");
   const urls = [];
   const re = /<img[^>]+src=["']([^"']+)["']/gi;
   let m;
   while ((m = re.exec(String(html || "")))) {
     const src = m[1];
-    // http(s) distants OU cache local /media/
     if (!/^https?:\/\//i.test(src) && !/^\/media\//i.test(src)) continue;
-    if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel/i.test(src)) continue;
+    if (!isUsableProductImageUrl(src) && !isMediaUrl(src)) continue;
     if (!urls.includes(src)) urls.push(src);
   }
   return urls;
@@ -752,26 +759,41 @@ async function uploadImageToEbayEps(token, imageUrl, index = 0) {
 /** Convertit les URLs Amazon/etc. en URLs hébergées eBay (EPS). */
 async function hostImagesForGallery(token, sourceUrls) {
   const hosted = [];
-  const { cacheRemoteImage, isMediaUrl } = require("./image-cache");
+  const {
+    cacheRemoteImage,
+    isMediaUrl,
+    isUsableProductImageUrl,
+    isTinyOrPlaceholderImageUrl,
+    loadImageBuffer,
+  } = require("./image-cache");
 
   for (let i = 0; i < Math.min(sourceUrls.length, 8); i++) {
     let src = sourceUrls[i];
     try {
-      // Déjà hébergée chez eBay
-      if (/ebayimg\.com|ebaystatic\.com/i.test(src)) {
-        hosted.push(src);
+      if (isTinyOrPlaceholderImageUrl(src)) {
+        console.warn(`[EBX] Image ${i + 1} skip: miniature eBay/placeholder`);
         continue;
       }
-      // Force le passage par le cache local (évite Ali/Amazon bloqués au publish)
+      if (!isMediaUrl(src) && !isUsableProductImageUrl(src)) {
+        console.warn(`[EBX] Image ${i + 1} skip: URL non utilisable`);
+        continue;
+      }
+
+      // Jamais passer une URL ebayimg « en l’état » : revalide taille via cache/EPS
       if (!isMediaUrl(src)) {
         try {
           const cached = await cacheRemoteImage(src);
           src = cached.publicPath;
-          console.log(`[EBX] Image cache ${i + 1}: ${cached.filename}`);
+          console.log(`[EBX] Image cache ${i + 1}: ${cached.filename} (${cached.buf.length} o)`);
         } catch (cacheErr) {
-          console.warn(`[EBX] Image cache ${i + 1} fail, essai direct: ${cacheErr.message}`);
+          console.warn(`[EBX] Image cache ${i + 1} fail: ${cacheErr.message}`);
+          continue;
         }
+      } else {
+        // Revalide media local (rejette anciens 40×40)
+        await loadImageBuffer(src);
       }
+
       const eps = await uploadImageToEbayEps(token, src, i);
       console.log(`[EBX] Image EPS ${i + 1}/${sourceUrls.length}: OK`);
       hosted.push(eps);
@@ -797,9 +819,12 @@ async function createOrReplaceInventoryItem(token, sku, listing, aspects = {}, o
     imageUrls = await hostImagesForGallery(token, sourceImages);
     if (!imageUrls.length) {
       throw new Error(
-        "Impossible d'héberger les images sur eBay (Gallery / EPS). " +
-          "Les CDN AliExpress/Amazon ont refusé le téléchargement. " +
-          "Réimporte le produit (les images seront cachées en local /media), vérifie Modifier, puis republie."
+        "Impossible d'héberger les images sur eBay (Gallery / EPS).\n\n" +
+          "Cause fréquente : miniatures eBay (40×40 / $_1) ou CDN Ali/Amazon bloqués.\n" +
+          "Que faire :\n" +
+          "1) Réimporte le produit depuis AliExpress/Amazon (vraies photos ≥ 400px)\n" +
+          "2) Ouvre Modifier → vérifie que les photos ne sont pas des pastilles floues\n" +
+          "3) Republie (les images valides iront en /media puis EPS)"
       );
     }
   }

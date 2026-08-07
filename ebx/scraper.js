@@ -1472,6 +1472,16 @@ function isRealProductImage(src) {
   if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel|lorem\.picsum/i.test(u)) {
     return false;
   }
+  // Miniatures eBay (40×40, $_1, s-l64…) — refusées par Gallery / règlement photo
+  try {
+    const { isTinyOrPlaceholderImageUrl } = require("./image-cache");
+    if (isTinyOrPlaceholderImageUrl(u)) return false;
+  } catch (_) {
+    if (/ebayimg\.com.*\$_(?:0|1|2)\./i.test(u) || /ebayimg\.com.*s-l(?:64|96|140)/i.test(u)) {
+      return false;
+    }
+    if (/\/s\/NDBYNDA=/i.test(u)) return false;
+  }
   return true;
 }
 

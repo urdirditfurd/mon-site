@@ -434,19 +434,35 @@ async function localizeListingImages(listing) {
   if (!listing?.id) return listing;
   const html = String(listing.html_description || "");
   if (!html || !/<img\b/i.test(html)) return listing;
-  // Déjà 100% local ?
-  const remote = (html.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi) || []).filter(
-    (t) => !/ebayimg\.com|ebaystatic\.com/i.test(t)
+
+  const { isTinyOrPlaceholderImageUrl } = require("./image-cache");
+  const imgSrcs = [];
+  const reSrc = /<img[^>]+src=["']([^"']+)["']/gi;
+  let mm;
+  while ((mm = reSrc.exec(html))) imgSrcs.push(mm[1]);
+  const hasTinyEbay = imgSrcs.some((s) => isTinyOrPlaceholderImageUrl(s));
+  const remoteNonEbay = imgSrcs.filter(
+    (s) => /^https?:\/\//i.test(s) && !/ebayimg\.com|ebaystatic\.com/i.test(s)
   );
-  if (!remote.length && /\/media\//i.test(html)) return listing;
+
+  // Déjà 100% local et sans miniatures → skip
+  if (!remoteNonEbay.length && !hasTinyEbay && imgSrcs.every((s) => /^\/media\//i.test(s))) {
+    return listing;
+  }
+  // Rien à faire si seulement de « bonnes » ebayimg déjà OK et pas de remote — quand même
+  // revalider si hasTinyEbay ; sinon si tout est ebayimg non-tiny on laisse (publish re-uploade EPS)
+  if (!remoteNonEbay.length && !hasTinyEbay && imgSrcs.every((s) => /ebayimg\.com|ebaystatic\.com|\/media\//i.test(s))) {
+    // Force quand même un passage cache pour media-iser (stabilité) si ebayimg présent
+    if (!imgSrcs.some((s) => /ebayimg\.com|ebaystatic\.com/i.test(s))) return listing;
+  }
 
   console.log(`[EBX] Cache images listing #${listing.id}…`);
   const result = await localizeHtmlImages(html);
-  if (result.cached > 0 && result.html !== html) {
+  if ((result.cached > 0 || result.failed > 0) && result.html !== html) {
     updateListingHtml.run(result.html, listing.id);
     console.log(
       `[EBX] Listing #${listing.id}: ${result.cached} image(s) en cache local` +
-        (result.failed ? `, ${result.failed} échec(s)` : "")
+        (result.failed ? `, ${result.failed} retirée(s)/échec(s)` : "")
     );
     return { ...listing, html_description: result.html };
   }
@@ -2401,6 +2417,21 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
       });
     }
     listing = await ensureListingImages(listing);
+    const usableImgs = countRealImagesInHtml(listing.html_description || "");
+    if (usableImgs <= 0) {
+      return res.status(400).json({
+        success: false,
+        code: "NO_USABLE_IMAGES",
+        error:
+          "⛔ Aucune photo utilisable pour eBay\n\n" +
+          "Les images de cette annonce sont des miniatures (ex. 40×40 / $_1) ou ont été refusées.\n\n" +
+          "Que faire :\n" +
+          "1) Réimporte le produit depuis AliExpress / Amazon (photos produit réelles)\n" +
+          "2) Dans Modifier, vérifie que les photos sont nettes et ≥ 400px\n" +
+          "3) Republie\n\n" +
+          "Note : une vignette ebayimg.com déjà trop petite ne peut PAS être agrandie.",
+      });
+    }
     const {
       isProduction,
       getSellerIdentity,

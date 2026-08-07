@@ -41,6 +41,106 @@ function sniffImageType(buf) {
   return null;
 }
 
+/** eBay Gallery : éviter miniatures (ex. 40×40 / 953 octets). */
+const MIN_IMAGE_BYTES = 8 * 1024;
+const MIN_IMAGE_EDGE = 400;
+
+/** Lit largeur/hauteur JPEG/PNG/GIF/WebP (best-effort). */
+function readImageDimensions(buf) {
+  if (!buf || buf.length < 24) return null;
+  // PNG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  // GIF
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
+  }
+  // WebP VP8X / VP8 / VP8L
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
+    const chunk = buf.toString("ascii", 12, 16);
+    if (chunk === "VP8X" && buf.length >= 30) {
+      const w = 1 + buf[24] + (buf[25] << 8) + (buf[26] << 16);
+      const h = 1 + buf[27] + (buf[28] << 8) + (buf[29] << 16);
+      return { width: w, height: h };
+    }
+    if (chunk === "VP8 " && buf.length >= 30) {
+      return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+    }
+    if (chunk === "VP8L" && buf.length >= 25) {
+      const b = buf.readUInt32LE(21);
+      return { width: (b & 0x3fff) + 1, height: ((b >> 14) & 0x3fff) + 1 };
+    }
+  }
+  // JPEG — chercher SOF0/SOF2
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i < buf.length - 8) {
+      if (buf[i] !== 0xff) {
+        i += 1;
+        continue;
+      }
+      const marker = buf[i + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const len = buf.readUInt16BE(i + 2);
+      if (
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf)
+      ) {
+        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + len;
+    }
+  }
+  return null;
+}
+
+/**
+ * Détecte les miniatures eBay inutilisables (path 40×40, $_1, s-l64…).
+ * Exemple : …/s/NDBYNDA=/z/…/$_1.JPG → NDBYNDA= = "40x40".
+ */
+function isTinyOrPlaceholderImageUrl(imageUrl) {
+  const u = String(imageUrl || "");
+  if (!u) return true;
+  if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel/i.test(u)) {
+    return true;
+  }
+  if (!/ebayimg\.com|ebaystatic\.com/i.test(u)) return false;
+
+  // Suffixes vignette eBay
+  if (/\$\_(?:0|1|2|3|4|14)\./i.test(u)) return true;
+  if (/s-l(?:64|96|140|225|250|300)(?:\.|_)/i.test(u)) return true;
+  if (/\/thumbs?\//i.test(u)) return true;
+
+  // /s/<base64 size>/ — ex. NDBYNDA= → 40x40
+  const sm = u.match(/\/s\/([A-Za-z0-9+/_-]{4,24})=?\//);
+  if (sm) {
+    try {
+      let b64 = sm[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      const decoded = Buffer.from(b64, "base64").toString("utf8");
+      const dm = decoded.match(/(\d+)\s*[x×]\s*(\d+)/i);
+      if (dm) {
+        const w = Number(dm[1]);
+        const h = Number(dm[2]);
+        if (w > 0 && h > 0 && (w < MIN_IMAGE_EDGE || h < MIN_IMAGE_EDGE)) return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+function isUsableProductImageUrl(imageUrl) {
+  const u = String(imageUrl || "").trim();
+  if (!u) return false;
+  if (isMediaUrl(u)) return true;
+  if (!/^https?:\/\//i.test(u)) return false;
+  if (isTinyOrPlaceholderImageUrl(u)) return false;
+  return true;
+}
+
 /** Convertit WebP → PNG via Chrome (playwright-core) pour eBay EPS. */
 async function convertWebpToPng(webpBuf) {
   let chromium;
@@ -174,6 +274,19 @@ function candidateImageUrls(imageUrl) {
   push(raw.replace(/\._UL\d+_\./gi, "."));
   push(raw.replace(/\._SL\d+_\./gi, "."));
 
+  // eBay : tenter les tailles gallery (souvent inutile si source = 40×40 native)
+  if (/ebayimg\.com/i.test(raw)) {
+    push(raw.replace(/\$_\d+\./i, "$_57."));
+    push(raw.replace(/\$_\d+\./i, "$_10."));
+    push(raw.replace(/s-l\d+/gi, "s-l1600"));
+    push(raw.replace(/s-l\d+/gi, "s-l500"));
+    const idm = raw.match(/\/[zg]\/([A-Za-z0-9~_-]{5,})\//i) || raw.match(/\/([A-Za-z0-9~_-]{10,})\//);
+    if (idm) {
+      push(`https://i.ebayimg.com/images/g/${idm[1]}/s-l1600.jpg`);
+      push(`https://i.ebayimg.com/images/g/${idm[1]}/s-l500.jpg`);
+    }
+  }
+
   if (/\.webp(?:\?|$)/i.test(raw)) {
     push(raw.replace(/\.webp/gi, ".jpg"));
     push(raw.replace(/\.webp/gi, ".png"));
@@ -292,12 +405,20 @@ async function fetchImageOnce(imageUrl, referer) {
 }
 
 function validateImageBuffer(buf, contentType) {
-  if (!buf || buf.length < 500) throw new Error("image trop petite");
+  if (!buf || buf.length < MIN_IMAGE_BYTES) {
+    throw new Error(`image trop petite (${buf ? buf.length : 0} o, min ${MIN_IMAGE_BYTES} o)`);
+  }
   if (buf.length > 12 * 1024 * 1024) throw new Error("image trop lourde (>12MB)");
   const sniffed = sniffImageType(buf);
   const ct = sniffed || contentType || "image/jpeg";
   if (!sniffed && contentType && !/^image\//i.test(contentType) && !/octet-stream/i.test(contentType)) {
     throw new Error(`pas une image (${contentType})`);
+  }
+  const dims = readImageDimensions(buf);
+  if (dims && (dims.width < MIN_IMAGE_EDGE || dims.height < MIN_IMAGE_EDGE)) {
+    throw new Error(
+      `image trop petite (${dims.width}×${dims.height}, min ${MIN_IMAGE_EDGE}px) — miniature refusée par eBay`
+    );
   }
   return sniffed || (/^image\//i.test(ct) ? ct : "image/jpeg");
 }
@@ -311,12 +432,12 @@ async function cacheRemoteImage(imageUrl) {
   const src = String(imageUrl || "").trim();
   if (!src) throw new Error("URL image vide");
 
-  // Déjà local
+  // Déjà local — revalide taille (évite anciens caches 40×40)
   if (isMediaUrl(src)) {
     const localPath = resolveLocalMediaPath(src);
     if (!localPath) throw new Error(`media manquant: ${src}`);
     const buf = fs.readFileSync(localPath);
-    const contentType = sniffImageType(buf) || "image/jpeg";
+    const contentType = validateImageBuffer(buf, sniffImageType(buf) || "image/jpeg");
     return {
       filename: path.basename(localPath),
       publicPath: publicMediaPath(path.basename(localPath)),
@@ -327,7 +448,11 @@ async function cacheRemoteImage(imageUrl) {
     };
   }
 
-  // eBay EPS déjà OK — on peut aussi cacher pour stabilité
+  // Miniatures eBay connues : inutile d’espérer un upscale
+  if (isTinyOrPlaceholderImageUrl(src)) {
+    throw new Error("miniature eBay / placeholder refusée (trop petite pour Gallery)");
+  }
+
   const candidates = candidateImageUrls(src);
   const referers = referersFor(src);
   let lastErr = "download fail";
@@ -435,15 +560,30 @@ async function localizeHtmlImages(html, { onProgress } = {}) {
   for (let i = 0; i < found.length; i++) {
     const src = found[i];
     if (/picsum\.photos|placeholder\.com|via\.placeholder|placehold\.it|lorempixel/i.test(src)) {
+      map[src] = null; // retirer du HTML
+      failed += 1;
       continue;
     }
-    // Déjà media local
+    if (isTinyOrPlaceholderImageUrl(src)) {
+      console.warn(`[EBX] miniature refusée (retirée): ${src.slice(0, 100)}`);
+      map[src] = null;
+      failed += 1;
+      continue;
+    }
+    // Déjà media local valide
     if (isMediaUrl(src) && resolveLocalMediaPath(src)) {
-      map[src] = src.startsWith("/media/") ? src : publicMediaPath(mediaFilenameFromUrl(src));
-      cached += 1;
+      try {
+        const buf = fs.readFileSync(resolveLocalMediaPath(src));
+        validateImageBuffer(buf, sniffImageType(buf) || "image/jpeg");
+        map[src] = src.startsWith("/media/") ? src : publicMediaPath(mediaFilenameFromUrl(src));
+        cached += 1;
+      } catch (err) {
+        console.warn(`[EBX] media local trop petit, retiré: ${err.message}`);
+        map[src] = null;
+        failed += 1;
+      }
       continue;
     }
-    // eBay EPS : pas besoin de recacher pour l’affichage, mais utile hors-ligne
     if (/^https?:\/\//i.test(src)) {
       try {
         const hit = await cacheRemoteImage(src);
@@ -452,6 +592,7 @@ async function localizeHtmlImages(html, { onProgress } = {}) {
         if (typeof onProgress === "function") onProgress({ index: i + 1, total: found.length, src, ok: true });
       } catch (err) {
         failed += 1;
+        map[src] = null; // ne laisse pas une miniature eBay dans le HTML
         console.warn(`[EBX] cache image skip: ${err.message} | ${src.slice(0, 90)}`);
         if (typeof onProgress === "function") onProgress({ index: i + 1, total: found.length, src, ok: false });
       }
@@ -460,6 +601,15 @@ async function localizeHtmlImages(html, { onProgress } = {}) {
 
   let out = raw;
   for (const [from, to] of Object.entries(map)) {
+    if (to == null) {
+      // Supprime la balise <img> entière
+      const reImg = new RegExp(
+        `<img\\b[^>]*?\\bsrc=["']${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`,
+        "gi"
+      );
+      out = out.replace(reImg, "");
+      continue;
+    }
     if (from === to) continue;
     out = out.split(from).join(to);
   }
@@ -482,6 +632,8 @@ function extractAllImageSrcs(html) {
 
 module.exports = {
   CACHE_DIR,
+  MIN_IMAGE_BYTES,
+  MIN_IMAGE_EDGE,
   ensureCacheDir,
   cacheRemoteImage,
   loadImageBuffer,
@@ -492,4 +644,8 @@ module.exports = {
   publicMediaPath,
   candidateImageUrls,
   ensureEpsCompatibleBuffer,
+  validateImageBuffer,
+  readImageDimensions,
+  isTinyOrPlaceholderImageUrl,
+  isUsableProductImageUrl,
 };
