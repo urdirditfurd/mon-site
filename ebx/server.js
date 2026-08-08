@@ -59,7 +59,7 @@ const {
 } = require("./mock-data");
 const { generateListing, generateSavReply, generateProductCopy } = require("./ai-brain");
 const { publishToEbay } = require("./ebay-api");
-const { normalizeListingLang, languageLabel } = require("./listing-i18n");
+const { normalizeListingLang, languageLabel, copyMatchesLanguage } = require("./listing-i18n");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2098,7 +2098,7 @@ app.post("/api/auto-snipe", async (req, res) => {
 app.post("/api/generate-listing", async (req, res) => {
   const { productName, rawKeywords, productUrl, themeColor, language: rawLang, lang } = req.body || {};
   const language = normalizeListingLang(rawLang || lang || "fr");
-  const langOpts = { language };
+  const langOpts = { language, forceLanguage: language === "en" || language === "de" };
 
   try {
     let listing;
@@ -2174,18 +2174,28 @@ app.post("/api/generate-listing", async (req, res) => {
           const aiTitle = stripSupplierProvenance(
             rewriteEbayTitle(ai.seo_title || listing.seo_title || baseProduct.title, [], langOpts)
           );
-          const aiSections = Array.isArray(ai.sections) ? ai.sections.filter((s) => s?.body) : [];
-          const aiBenefits = Array.isArray(ai.benefits) ? ai.benefits.filter(Boolean) : [];
+          const aiPitch = cleanMarketingCopy(ai.short_pitch || "");
+          const aiPitchOk = aiPitch && copyMatchesLanguage(aiPitch, language);
+          const aiSections = Array.isArray(ai.sections)
+            ? ai.sections.filter(
+                (s) => s?.body && copyMatchesLanguage(`${s.heading || ""} ${s.body}`, language)
+              )
+            : [];
+          const aiBenefits = Array.isArray(ai.benefits)
+            ? ai.benefits.filter((b) => b && copyMatchesLanguage(String(b), language))
+            : [];
+          // Si le LLM a répondu dans la mauvaise langue, on laisse enrichProductListingCopy
+          // reconstruire les templates EN/DE (forceLanguage).
           const product = enrichProductListingCopy(
             {
               ...baseProduct,
               title: aiTitle,
               originalTitle: listing.original_title || baseProduct.title,
-              description: cleanMarketingCopy(ai.short_pitch || baseProduct.description || ""),
-              short_pitch: cleanMarketingCopy(ai.short_pitch || baseProduct.short_pitch || ""),
-              sections: aiSections.length ? aiSections : baseProduct.sections,
-              benefits: aiBenefits.length ? aiBenefits : baseProduct.benefits,
-              bullets: aiBenefits.length ? aiBenefits : baseProduct.bullets,
+              description: aiPitchOk ? aiPitch : "",
+              short_pitch: aiPitchOk ? aiPitch : "",
+              sections: aiSections,
+              benefits: aiBenefits,
+              bullets: aiBenefits.length ? aiBenefits : [],
               specs:
                 ai.specs && typeof ai.specs === "object"
                   ? { ...(baseProduct.specs || {}), ...ai.specs }
@@ -2296,7 +2306,7 @@ app.post("/api/rebuild-description", (req, res) => {
     const { product, themeColor = "#667eea", language: rawLang, lang } = req.body || {};
     if (!product) return res.status(400).json({ success: false, error: "product requis" });
     const language = normalizeListingLang(rawLang || lang || product.language || "fr");
-    const langOpts = { language };
+    const langOpts = { language, forceLanguage: language === "en" || language === "de" };
     const cleanedProduct = enrichProductListingCopy(
       {
         ...product,

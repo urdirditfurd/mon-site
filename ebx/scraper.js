@@ -7,7 +7,7 @@ const cheerio = require("cheerio");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const { normalizeListingLang, getListingUi, localizeSpecsObject } = require("./listing-i18n");
+const { normalizeListingLang, getListingUi, localizeSpecsObject, copyMatchesLanguage } = require("./listing-i18n");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1392,28 +1392,47 @@ function enrichProductListingCopy(product = {}, opts = {}) {
 
   const localizedSpecs = localizeSpecsObject(specs, language);
 
-  const shortPitchRaw =
-    product.short_pitch ||
-    product.description ||
-    (isFidget
-      ? language === "de"
-        ? "Weiches Anti-Stress-Spielzeug zum Drücken und Dehnen — lustiges Design, ideal zum Entspannen im Alltag."
-        : language === "en"
-          ? "Soft stress-relief toy to squeeze and stretch — fun design, ideal to unwind every day."
-          : "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
-      : L.shortPitchFallback(title));
-  let shortPitch = cleanMarketingCopy(shortPitchRaw);
-  if (!shortPitch || shortPitch.length < 40 || /trouvez plus|find more|transport maritime/i.test(shortPitch)) {
-    shortPitch = isFidget
-      ? language === "de"
-        ? "Weiches Anti-Stress-Spielzeug zum Drücken und Dehnen — lustiges Design für den Alltag."
-        : language === "en"
-          ? "Soft stress-relief toy to squeeze and stretch — fun everyday design."
-          : "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien."
-      : L.shortPitchFallback(stripSupplierProvenance(title));
+  // EN/DE : ne pas réutiliser la description fournisseur (souvent FR/EN) — forcer les templates.
+  // FR : on garde le scrape s'il est déjà en français et de bonne qualité.
+  const forceLocalized =
+    language === "en" ||
+    language === "de" ||
+    opts.forceLanguage === true ||
+    (Boolean(opts.language) &&
+      !copyMatchesLanguage(
+        `${product.short_pitch || ""} ${product.description || ""} ${(product.sections || [])
+          .map((s) => s?.body || "")
+          .join(" ")}`,
+        language
+      ));
+
+  const fidgetPitch =
+    language === "de"
+      ? "Weiches Anti-Stress-Spielzeug zum Drücken und Dehnen — lustiges Design, ideal zum Entspannen im Alltag."
+      : language === "en"
+        ? "Soft stress-relief toy to squeeze and stretch — fun design, ideal to unwind every day."
+        : "Jouet anti-stress souple à presser et étirer — design amusant, idéal pour relâcher la tension au quotidien.";
+
+  let shortPitch = "";
+  if (!forceLocalized) {
+    shortPitch = cleanMarketingCopy(product.short_pitch || product.description || "");
+  }
+  if (
+    !shortPitch ||
+    shortPitch.length < 40 ||
+    forceLocalized ||
+    /trouvez plus|find more|transport maritime/i.test(shortPitch) ||
+    !copyMatchesLanguage(shortPitch, language)
+  ) {
+    shortPitch = isFidget ? fidgetPitch : L.shortPitchFallback(stripSupplierProvenance(title));
   }
 
-  let sections = Array.isArray(product.sections) ? product.sections.filter((s) => s?.body) : [];
+  let sections = [];
+  if (!forceLocalized && Array.isArray(product.sections)) {
+    sections = product.sections.filter(
+      (s) => s?.body && copyMatchesLanguage(`${s.heading || ""} ${s.body}`, language)
+    );
+  }
   if (!sections.length) {
     if (isFidget) {
       const mat =
@@ -1472,7 +1491,10 @@ function enrichProductListingCopy(product = {}, opts = {}) {
                 },
               ];
     } else {
-      const desc = cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 500 }) || "");
+      // Ne pas coller la description fournisseur brute si elle n'est pas dans la langue cible
+      const descRaw = cleanMarketingCopy(sanitizeReadableText(product.description, { maxLen: 500 }) || "");
+      const desc =
+        !forceLocalized && descRaw && copyMatchesLanguage(descRaw, language) ? descRaw : "";
       sections = [
         {
           heading: L.sectionDesc,
@@ -1480,7 +1502,10 @@ function enrichProductListingCopy(product = {}, opts = {}) {
         },
         {
           heading: L.sectionPros,
-          body: bullets.slice(0, 3).join(" · ") || L.sectionProsBody,
+          body:
+            !forceLocalized && bullets.length
+              ? bullets.slice(0, 3).join(" · ")
+              : L.sectionProsBody,
         },
         {
           heading: L.sectionWhy,
@@ -1490,7 +1515,12 @@ function enrichProductListingCopy(product = {}, opts = {}) {
     }
   }
 
-  let benefits = [...(product.benefits || [])].map((b) => cleanText(b)).filter(Boolean);
+  let benefits = [];
+  if (!forceLocalized && Array.isArray(product.benefits)) {
+    benefits = product.benefits
+      .map((b) => cleanText(b))
+      .filter((b) => b && copyMatchesLanguage(b, language));
+  }
   if (!benefits.length) {
     if (isFidget) {
       const matLabel = material || localizedSpecs[L.materialLabel] || L.materialLabel;
@@ -1528,7 +1558,10 @@ function enrichProductListingCopy(product = {}, opts = {}) {
                 "Cadeau original (ados / adultes) — non comestible",
               ];
     } else {
-      benefits = bullets.slice(0, 6);
+      const localizedBullets = bullets
+        .map((b) => cleanText(b))
+        .filter((b) => b && (!forceLocalized || copyMatchesLanguage(b, language)));
+      benefits = localizedBullets.slice(0, 6);
       if (benefits.length < 3) {
         benefits = [
           ...benefits,
@@ -1542,12 +1575,18 @@ function enrichProductListingCopy(product = {}, opts = {}) {
   }
   benefits = [...new Set(benefits)].slice(0, 8);
 
-  const mergedBullets = bullets.length >= 3 ? bullets.slice(0, 8) : benefits.slice(0, 8);
+  let mergedBullets = benefits.slice(0, 8);
+  if (!forceLocalized && bullets.length >= 3) {
+    const filtered = bullets.filter((b) => copyMatchesLanguage(b, language) || language === "fr").slice(0, 8);
+    if (filtered.length >= 3) mergedBullets = filtered;
+  }
 
-  let description = cleanMarketingCopy(product.description || "");
+  let description = forceLocalized ? "" : cleanMarketingCopy(product.description || "");
   if (
     !description ||
     description.length < 50 ||
+    forceLocalized ||
+    !copyMatchesLanguage(description, language) ||
     /trouvez plus|find more|sur pour|achetez |transport maritime|free shipping|10000\d{3}/i.test(description)
   ) {
     description = sections.map((s) => s.body).filter(Boolean).join(" ") || shortPitch;
@@ -1558,7 +1597,7 @@ function enrichProductListingCopy(product = {}, opts = {}) {
     title,
     short_pitch: shortPitch,
     description,
-    bullets: mergedBullets,
+    bullets: mergedBullets.length ? mergedBullets : benefits.slice(0, 8),
     benefits,
     sections,
     specs: localizedSpecs,

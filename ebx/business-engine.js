@@ -10,6 +10,7 @@ const {
   titleQualityTail,
   titleFallback,
   titleShipHook,
+  localizeTitleTokens,
 } = require("./listing-i18n");
 
 /** Marques / termes VeRO fréquents (liste locale extensible). */
@@ -261,6 +262,8 @@ function rewriteEbayTitle(productName, keywords = [], opts = {}) {
 
   if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
   title = title.replace(/\([^)]*$/g, " ").replace(/\s{2,}/g, " ").trim();
+  title = localizeTitleTokens(title, language);
+  if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
   return title || titleFallback(language).slice(0, 80);
 }
 
@@ -303,10 +306,12 @@ function prepareDiscreetListing(scraped = {}, { marginMult = 1.8, language = "fr
     originalTitle,
     images,
     bullets,
-    sections: scraped.sections || [],
-    benefits: scraped.benefits || bullets,
+    sections: lang === "fr" ? scraped.sections || [] : [],
+    benefits: lang === "fr" ? scraped.benefits || bullets : [],
     specs: scraped.specs || {},
-    short_pitch: scraped.short_pitch || scraped.description || "",
+    // EN/DE : ne pas coller la description fournisseur (sera regénérée en templates)
+    short_pitch: lang === "fr" ? scraped.short_pitch || scraped.description || "" : "",
+    description: lang === "fr" ? scraped.description || "" : scraped.description || "",
     language: lang,
   };
   const cost = Number(scraped.price) || 0;

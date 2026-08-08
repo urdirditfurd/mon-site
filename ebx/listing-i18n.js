@@ -261,6 +261,155 @@ function languageLabel(lang) {
   return "Français";
 }
 
+/**
+ * Heuristique : le texte ressemble-t-il à la langue cible ?
+ * Utilisé pour éviter de garder une description FR/EN quand on demande DE.
+ */
+function copyMatchesLanguage(text, lang) {
+  const s = String(text || "").trim();
+  if (s.length < 12) return false;
+  const L = normalizeListingLang(lang);
+  const hasFrChars = /[àâäéèêëïîôùûüç]/i.test(s);
+  const hasDeChars = /[äöüß]/i.test(s);
+  const hasFr =
+    hasFrChars ||
+    /\b(le|la|les|des|une|pour|avec|dans|neuf|livraison|produit|qualité|découvrez|commande[rz]?|matière|idéal|souple|quotidien)\b/i.test(
+      s
+    );
+  const hasDe =
+    hasDeChars ||
+    /\b(und|mit|für|nicht|oder|qualität|versand|neu|produkt|entdecken|bestellen|sofort|gebrauch|widerstand|angenehm|gedrückt|dehnen|spielzeug|jetzt)\b/i.test(
+      s
+    );
+  const hasEn =
+    /\b(the|and|with|for|this|product|shipping|quality|discover|order|ready|everyday|soft|stretch|designed|pleasant|without)\b/i.test(
+      s
+    );
+
+  if (L === "de") {
+    if (hasDeChars || hasDe) return true;
+    if (hasFr || hasEn) return false;
+    return false;
+  }
+  if (L === "en") {
+    if (hasFrChars || hasDeChars) return false;
+    if (hasFr && !hasEn) return false;
+    if (hasDe && !hasEn) return false;
+    if (hasEn) return true;
+    // Titres produit EN sans mots-outils : OK si pas de FR/DE fort
+    return !hasFr && !hasDe;
+  }
+  // fr
+  if (hasFrChars || hasFr) return true;
+  if (hasDeChars || hasDe) return false;
+  return true;
+}
+
+/** Lexique titre eBay courant FR/EN → langue cible (garde les noms de marque/modèle). */
+const TITLE_LEXICON = {
+  en: {
+    neuf: "New",
+    nouveau: "New",
+    nouvelle: "New",
+    livraison: "Shipping",
+    rapide: "Fast",
+    compatible: "Compatible",
+    pratique: "Practical",
+    compact: "Compact",
+    premium: "Premium",
+    qualité: "Quality",
+    jouet: "Toy",
+    "anti-stress": "Stress-relief",
+    antistress: "Stress-relief",
+    souple: "Soft",
+    coque: "Case",
+    chargeur: "Charger",
+    câble: "Cable",
+    cable: "Cable",
+    sans: "Without",
+    fil: "Wire",
+    universel: "Universal",
+    étanche: "Waterproof",
+    etanche: "Waterproof",
+  },
+  de: {
+    neuf: "Neu",
+    new: "Neu",
+    nouveau: "Neu",
+    nouvelle: "Neu",
+    livraison: "Versand",
+    shipping: "Versand",
+    rapide: "Schnell",
+    fast: "Schnell",
+    compatible: "Kompatibel",
+    practical: "Praktisch",
+    pratique: "Praktisch",
+    compact: "Kompakt",
+    premium: "Premium",
+    quality: "Qualität",
+    qualité: "Qualität",
+    toy: "Spielzeug",
+    jouet: "Spielzeug",
+    balle: "Ball",
+    ball: "Ball",
+    "anti-stress": "Anti-Stress",
+    antistress: "Anti-Stress",
+    "stress-relief": "Anti-Stress",
+    soft: "Weich",
+    souple: "Weich",
+    case: "Hülle",
+    coque: "Hülle",
+    charger: "Ladegerät",
+    chargeur: "Ladegerät",
+    cable: "Kabel",
+    câble: "Kabel",
+    wireless: "Kabellos",
+    portable: "Tragbar",
+    universal: "Universal",
+    universel: "Universal",
+    waterproof: "Wasserdicht",
+    étanche: "Wasserdicht",
+    etanche: "Wasserdicht",
+    fidget: "Fidget",
+    squeeze: "Quetsch",
+    silicone: "Silikon",
+    plastic: "Kunststoff",
+    plastique: "Kunststoff",
+    metal: "Metall",
+    métal: "Metall",
+    wood: "Holz",
+    bois: "Holz",
+    cotton: "Baumwolle",
+    coton: "Baumwolle",
+    led: "LED",
+    set: "Set",
+    pack: "Pack",
+    idéal: "Ideal",
+    ideal: "Ideal",
+  },
+};
+
+function localizeTitleTokens(title, lang) {
+  const L = normalizeListingLang(lang);
+  if (L === "fr") return String(title || "");
+  const map = TITLE_LEXICON[L] || {};
+  return String(title || "")
+    .split(/\s+/)
+    .map((tok) => {
+      const clean = tok.replace(/[^a-zA-ZÀ-ÿÄÖÜäöüß0-9+-]/g, "");
+      const key = clean.toLowerCase();
+      if (!key || !map[key]) return tok;
+      const localized = map[key];
+      // Preserve trailing punctuation from original token
+      const suffix = tok.slice(clean.length);
+      const prefix = tok.slice(0, tok.indexOf(clean) === -1 ? 0 : tok.indexOf(clean));
+      return `${prefix}${localized}${suffix}`;
+    })
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 module.exports = {
   normalizeListingLang,
   getListingUi,
@@ -272,4 +421,6 @@ module.exports = {
   localizeSpecKey,
   localizeSpecsObject,
   languageLabel,
+  copyMatchesLanguage,
+  localizeTitleTokens,
 };
