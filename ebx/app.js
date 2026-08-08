@@ -1313,6 +1313,7 @@ async function loadOrders() {
         </tr>`;
     })
     .join("") || `<tr><td colspan="7" class="p-8 text-center text-zinc-300">Aucune commande — clique « Sync ventes eBay ».</td></tr>`;
+  refreshNotifications(true);
 }
 
 function selectedOrderIds() {
@@ -1617,6 +1618,7 @@ async function syncEbayOrders() {
     alert(msg);
     loadOrders();
     refreshBotStatus();
+    refreshNotifications(true);
     if (document.getElementById("page-dashboard")?.classList.contains("active")) loadDashboard();
   } catch (err) {
     alert("Sync ventes: " + err.message);
@@ -1939,6 +1941,142 @@ function countRealImagesHint(html) {
 
 let savSelectedId = null;
 let savCache = [];
+let notifCache = null;
+let notifPollTimer = null;
+let notifLastTotal = null;
+
+function formatNotifWhen(raw) {
+  if (!raw) return "";
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return String(raw).slice(0, 16);
+  const ageH = Math.round((Date.now() - dt.getTime()) / 3600000);
+  if (ageH < 1) return "à l'instant";
+  if (ageH < 48) return `il y a ${ageH}h`;
+  return `il y a ${Math.round(ageH / 24)}j`;
+}
+
+function setNavCount(id, count) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const n = Number(count) || 0;
+  el.textContent = n > 99 ? "99+" : String(n);
+  el.classList.toggle("is-on", n > 0);
+  el.setAttribute("aria-hidden", n > 0 ? "false" : "true");
+}
+
+function applyNotificationBadges(data) {
+  const messages = Number(data?.messages?.open || 0);
+  const sales = Number(data?.sales?.pending || 0);
+  const total = Number(data?.total || messages + sales);
+  setNavCount("nav-badge-sav", messages);
+  setNavCount("nav-badge-orders", sales);
+  document.querySelectorAll(".nav-static-new").forEach((el) => {
+    const forPage = el.getAttribute("data-for");
+    const hide =
+      (forPage === "sav" && messages > 0) || (forPage === "auto-order" && sales > 0);
+    el.classList.toggle("hidden", hide);
+  });
+  const dot = document.getElementById("notif-bell-dot");
+  if (dot) {
+    dot.textContent = total > 99 ? "99+" : String(total);
+    dot.classList.toggle("is-on", total > 0);
+  }
+  const summary = document.getElementById("notif-summary");
+  if (summary) {
+    if (total === 0) summary.textContent = "Rien en attente";
+    else {
+      const parts = [];
+      if (messages) parts.push(`${messages} message${messages > 1 ? "s" : ""}`);
+      if (sales) parts.push(`${sales} vente${sales > 1 ? "s" : ""}`);
+      summary.textContent = parts.join(" · ");
+    }
+  }
+  const list = document.getElementById("notif-list");
+  if (list) {
+    const items = data?.items || [];
+    list.innerHTML = items.length
+      ? items
+          .map((it) => {
+            const kind = it.type === "sale" ? "Vente" : "Message";
+            const kindCls =
+              it.type === "sale"
+                ? "bg-emerald-50 text-emerald-700"
+                : it.status === "escalated"
+                  ? "bg-amber-50 text-amber-800"
+                  : "bg-[#eef0fb] text-[#4452a8]";
+            return `<button type="button" class="notif-item w-full text-left px-4 py-3" onclick="navigateFromNotif('${escapeHtml(
+              it.page
+            )}')">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${kindCls}">${kind}</span>
+                <span class="text-[10px] text-zinc-400">${escapeHtml(formatNotifWhen(it.at))}</span>
+              </div>
+              <p class="text-sm font-medium mt-1 truncate">${escapeHtml(it.title)}</p>
+              <p class="text-[11px] text-zinc-400 mt-0.5 truncate">${escapeHtml(it.detail)}</p>
+            </button>`;
+          })
+          .join("")
+      : `<p class="px-4 py-8 text-sm text-zinc-400 text-center">Aucun message ni vente en attente.</p>`;
+  }
+}
+
+async function refreshNotifications(force = false) {
+  try {
+    const res = await fetch(API + "/api/notifications");
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Notifications indisponibles");
+    const data = json.data || {};
+    const total = Number(data.total || 0);
+    if (
+      force !== true &&
+      notifLastTotal != null &&
+      total > notifLastTotal &&
+      document.getElementById("page-sav") &&
+      !document.getElementById("page-sav").classList.contains("active")
+    ) {
+      const delta = total - notifLastTotal;
+      const bot = document.getElementById("bot-status");
+      if (bot) {
+        bot.textContent = `+${delta} notif.`;
+        bot.classList.add("ring-2", "ring-red-300");
+        setTimeout(() => bot.classList.remove("ring-2", "ring-red-300"), 4000);
+      }
+    }
+    notifLastTotal = total;
+    notifCache = data;
+    applyNotificationBadges(data);
+    return data;
+  } catch (err) {
+    console.warn("[EBX] notifications:", err.message);
+    return null;
+  }
+}
+
+function toggleNotificationsPanel(force) {
+  const panel = document.getElementById("notif-panel");
+  if (!panel) return;
+  const open = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !open);
+  if (open) refreshNotifications(true);
+}
+
+function navigateFromNotif(page) {
+  toggleNotificationsPanel(false);
+  navigate(page);
+}
+
+function startNotificationsPolling() {
+  if (notifPollTimer) clearInterval(notifPollTimer);
+  refreshNotifications(true);
+  notifPollTimer = setInterval(() => refreshNotifications(false), 45000);
+}
+
+document.addEventListener("click", (e) => {
+  const wrap = document.getElementById("notif-wrap");
+  const panel = document.getElementById("notif-panel");
+  if (!wrap || !panel || panel.classList.contains("hidden")) return;
+  if (!wrap.contains(e.target)) panel.classList.add("hidden");
+});
 
 async function loadSav() {
   try {
@@ -1978,6 +2116,7 @@ async function loadSav() {
     if (savSelectedId && savCache.some((x) => x.id === savSelectedId)) {
       selectSav(savSelectedId);
     }
+    refreshNotifications(true);
   } catch (err) {
     alert("SAV: " + err.message);
   }
@@ -3010,10 +3149,11 @@ async function loadSetupStatus() {
 
 checkHealth();
 loadDashboard();
+startNotificationsPolling();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

@@ -82,6 +82,65 @@
       border-radius: 999px;
       font-weight: 600;
     }
+    .nav-count {
+      display: none;
+      margin-left: auto;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 18px;
+      text-align: center;
+    }
+    .nav-count.is-on { display: inline-block; }
+    .notif-bell {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid #d4d4f0;
+      background: #fff;
+      color: #4452a8;
+      cursor: pointer;
+    }
+    .notif-bell:hover { background: #eef0fb; }
+    .notif-bell-dot {
+      display: none;
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 16px;
+      text-align: center;
+    }
+    .notif-bell-dot.is-on { display: inline-block; }
+    .notif-panel {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 8px);
+      width: min(360px, calc(100vw - 2rem));
+      background: #fff;
+      border: 1px solid #d4d4f0;
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(36, 43, 82, 0.14);
+      z-index: 40;
+      overflow: hidden;
+    }
+    .notif-item:hover { background: #f6f7fd; }
     .console { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.55; }
     .console .ok { color: #4ade80; }
     .console .warn { color: #fbbf24; }
@@ -214,10 +273,10 @@
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Outils</p>
         <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper <span class="ml-auto badge-pro">Pro</span></a>
         <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Mes Listings</a>
-        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span class="ml-auto badge-new">New</span></a>
+        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span id="nav-badge-orders" class="nav-count" aria-hidden="true">0</span><span class="ml-auto badge-new nav-static-new" data-for="auto-order">New</span></a>
         <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Title Builder</a>
         <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Description Builder</a>
-        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">SAV <span class="ml-auto badge-new">New</span></a>
+        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">SAV <span id="nav-badge-sav" class="nav-count" aria-hidden="true">0</span><span class="ml-auto badge-new nav-static-new" data-for="sav">New</span></a>
       </div>
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Compte</p>
@@ -239,6 +298,29 @@
         <p id="page-subtitle" class="text-sm text-zinc-400">Ce qui se passe en temps réel sur eBay</p>
       </div>
       <div class="flex items-center gap-2 flex-wrap justify-end">
+        <div class="relative" id="notif-wrap">
+          <button type="button" id="notif-bell" class="notif-bell" onclick="toggleNotificationsPanel()" title="Notifications SAV & ventes" aria-label="Notifications">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 01-3.46 0"></path>
+            </svg>
+            <span id="notif-bell-dot" class="notif-bell-dot">0</span>
+          </button>
+          <div id="notif-panel" class="notif-panel hidden">
+            <div class="px-4 py-3 border-b border-[#e8e8f6] flex items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-semibold text-ink-900">Notifications</p>
+                <p class="text-[11px] text-zinc-400" id="notif-summary">Messages & ventes</p>
+              </div>
+              <button type="button" onclick="refreshNotifications(true)" class="text-[11px] font-medium text-[#4452a8] hover:underline">Rafraîchir</button>
+            </div>
+            <div id="notif-list" class="max-h-80 overflow-auto divide-y divide-zinc-50"></div>
+            <div class="px-4 py-2.5 border-t border-[#e8e8f6] flex gap-3 text-[11px]">
+              <button type="button" onclick="navigateFromNotif('sav')" class="font-semibold text-[#4452a8] hover:underline">Ouvrir SAV</button>
+              <button type="button" onclick="navigateFromNotif('auto-order')" class="font-semibold text-[#4452a8] hover:underline">Ouvrir ventes</button>
+            </div>
+          </div>
+        </div>
         <span id="bot-status" class="text-xs bg-[#6d7ddf]/15 text-[#4452a8] px-2.5 py-1 rounded-full font-semibold">Bot …</span>
         <span id="api-status" class="text-xs bg-zinc-100 text-zinc-400 px-2.5 py-1 rounded-full font-medium">● Vérification...</span>
       </div>

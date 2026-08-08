@@ -1475,6 +1475,67 @@ app.get("/api/sav", (_req, res) => {
   }
 });
 
+/** Compteurs messages SAV + ventes à traiter (pour badges / cloche hors pages). */
+app.get("/api/notifications", (_req, res) => {
+  try {
+    const messages = listSavMessages.all();
+    const openMessages = messages.filter((m) => m.status !== "sent" && m.status !== "archived");
+    const newMessages = openMessages.filter((m) => m.status === "new" || !m.status);
+    const escalated = openMessages.filter((m) => m.status === "escalated" || m.escalate);
+    const drafts = openMessages.filter((m) => m.status === "draft");
+
+    const ebayOrders = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref));
+    const pendingSales = ebayOrders.filter((o) => o.status === "pending");
+
+    const items = [];
+    for (const m of openMessages.slice(0, 8)) {
+      items.push({
+        type: "message",
+        id: m.id,
+        title: m.subject || "(sans sujet)",
+        detail: `${m.sender || "Acheteur"}${m.item_title ? " · " + m.item_title : ""}`,
+        status: m.status || "new",
+        page: "sav",
+        at: m.received_at || m.updated_at || m.created_at || "",
+      });
+    }
+    for (const o of pendingSales.slice(0, 8)) {
+      items.push({
+        type: "sale",
+        id: o.order_ref,
+        title: o.product || "Vente eBay",
+        detail: `${Number(o.amount || 0).toFixed(2)} € · ${o.order_ref}`,
+        status: o.status,
+        page: "auto-order",
+        at: o.created_at || "",
+      });
+    }
+    items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+    const messagesCount = openMessages.length;
+    const salesCount = pendingSales.length;
+    res.json({
+      success: true,
+      data: {
+        messages: {
+          open: messagesCount,
+          new: newMessages.length,
+          escalated: escalated.length,
+          draft: drafts.length,
+        },
+        sales: {
+          pending: salesCount,
+        },
+        total: messagesCount + salesCount,
+        items: items.slice(0, 12),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post("/api/sav/sync", async (_req, res) => {
   try {
     let fetched = 0;
