@@ -160,10 +160,10 @@ const UI = {
     selectionBody: "Vor dem Versand geprüft",
     returns: "Rückgaben",
     returnsBody: "Gemäß Angebotsbedingungen",
-    support: "Support",
+    support: "Kundenservice",
     supportBody: "Schnelle Antwort",
     cta: "Jetzt bestellen",
-    ctaSub: "Rückgaben laut Angebot • Reaktiver Support • Sorgfältiger Versand",
+    ctaSub: "Rückgaben laut Angebot • Reaktiver Kundenservice • Sorgfältiger Versand",
     imagePlaceholder: "Produktbild hinzufügen",
     productAlt: "Produkt",
     unbranded: "Ohne Marke / generisch",
@@ -237,17 +237,18 @@ function localizeSpecKey(key, lang) {
 
 function localizeSpecsObject(specs, lang) {
   const L = normalizeListingLang(lang);
-  if (L === "fr" || !specs || typeof specs !== "object") return specs || {};
+  if (!specs || typeof specs !== "object") return specs || {};
   const out = {};
   for (const [k, v] of Object.entries(specs)) {
-    out[localizeSpecKey(k, L)] = v;
+    const key = L === "fr" ? k : localizeSpecKey(k, L);
+    out[key] = L === "fr" ? v : localizeValue(v, L);
   }
   // Common value swaps
   for (const [k, v] of Object.entries(out)) {
-    if (/^(État|Condition|Zustand)$/i.test(k) && /neuf/i.test(String(v))) {
-      out[k] = L === "de" ? "Neu" : "New";
+    if (/^(État|Condition|Zustand)$/i.test(k) && /neuf|new|neu/i.test(String(v))) {
+      out[k] = L === "de" ? "Neu" : L === "en" ? "New" : "Neuf";
     }
-    if (/^(Marque|Brand|Marke)$/i.test(k) && /sans marque|unbranded/i.test(String(v))) {
+    if (/^(Marque|Brand|Marke)$/i.test(k) && /sans marque|unbranded|ohne marke/i.test(String(v))) {
       out[k] = getListingUi(L).unbranded;
     }
   }
@@ -331,6 +332,21 @@ const TITLE_LEXICON = {
     universel: "Universal",
     étanche: "Waterproof",
     etanche: "Waterproof",
+    protection: "Protection",
+    antichoc: "Shockproof",
+    léger: "Lightweight",
+    leger: "Lightweight",
+    fin: "Slim",
+    fine: "Slim",
+    ultra: "Ultra",
+    téléphone: "Phone",
+    telephone: "Phone",
+    ordinateur: "Laptop",
+    maison: "Home",
+    bureau: "Office",
+    silicone: "Silicone",
+    design: "Design",
+    portable: "Portable",
   },
   de: {
     neuf: "Neu",
@@ -341,10 +357,13 @@ const TITLE_LEXICON = {
     shipping: "Versand",
     rapide: "Schnell",
     fast: "Schnell",
+    schnell: "Schnell",
     compatible: "Kompatibel",
+    kompatibel: "Kompatibel",
     practical: "Praktisch",
     pratique: "Praktisch",
     compact: "Kompakt",
+    kompakt: "Kompakt",
     premium: "Premium",
     quality: "Qualität",
     qualité: "Qualität",
@@ -357,14 +376,18 @@ const TITLE_LEXICON = {
     "stress-relief": "Anti-Stress",
     soft: "Weich",
     souple: "Weich",
+    weich: "Weich",
     case: "Hülle",
     coque: "Hülle",
+    hülle: "Hülle",
+    huelle: "Hülle",
     charger: "Ladegerät",
     chargeur: "Ladegerät",
     cable: "Kabel",
     câble: "Kabel",
     wireless: "Kabellos",
     portable: "Tragbar",
+    tragbar: "Tragbar",
     universal: "Universal",
     universel: "Universal",
     waterproof: "Wasserdicht",
@@ -373,6 +396,7 @@ const TITLE_LEXICON = {
     fidget: "Fidget",
     squeeze: "Quetsch",
     silicone: "Silikon",
+    silikon: "Silikon",
     plastic: "Kunststoff",
     plastique: "Kunststoff",
     metal: "Metall",
@@ -386,28 +410,254 @@ const TITLE_LEXICON = {
     pack: "Pack",
     idéal: "Ideal",
     ideal: "Ideal",
+    lampe: "Lampe",
+    lamp: "Lampe",
+    bureau: "Büro",
+    office: "Büro",
+    desk: "Schreibtisch",
+    rechargeable: "Aufladbar",
+    aufladbar: "Aufladbar",
+    rgb: "RGB",
+    maison: "Zuhause",
+    home: "Zuhause",
+    light: "Licht",
+    lumière: "Licht",
+    lumiere: "Licht",
+    protection: "Schutz",
+    antichoc: "Stoßfest",
+    shockproof: "Stoßfest",
+    "anti-choc": "Stoßfest",
+    choc: "Stoß",
+    léger: "Leicht",
+    leger: "Leicht",
+    lightweight: "Leicht",
+    light: "Leicht",
+    fin: "Dünn",
+    fine: "Dünn",
+    slim: "Dünn",
+    ultra: "Ultra",
+    téléphone: "Handy",
+    telephone: "Handy",
+    phone: "Handy",
+    handy: "Handy",
+    ordinateur: "Laptop",
+    laptop: "Laptop",
+    computer: "Computer",
+    maison: "Zuhause",
+    home: "Zuhause",
+    bureau: "Büro",
+    office: "Büro",
+    design: "Design",
+    washable: "Abwaschbar",
+    abwaschbar: "Abwaschbar",
+    elastic: "Elastisch",
+    elastisch: "Elastisch",
+    butter: "Butter",
+    foam: "Schaum",
+    mousse: "Schaum",
+    emploi: "Einsatz",
+    lemploi: "Einsatzbereit",
+    pret: "Bereit",
+    prêt: "Bereit",
+    ready: "Bereit",
+    usage: "Nutzung",
+    quotidien: "Alltag",
+    everyday: "Alltag",
+    daily: "Alltag",
+    qualité: "Qualität",
+    product: "Produkt",
+    produit: "Produkt",
+    cover: "Hülle",
+    screen: "Display",
+    écran: "Display",
+    ecran: "Display",
+    power: "Power",
+    bank: "Bank",
+    wireless: "Kabellos",
+    sans: "Ohne",
+    without: "Ohne",
+    fil: "Kabel",
+    wire: "Kabel",
+    pour: "",
+    avec: "",
+    dans: "",
+    und: "",
+    for: "",
+    with: "",
+    the: "",
+    and: "",
+    une: "",
+    des: "",
+    les: "",
+    der: "",
+    die: "",
+    das: "",
+    aux: "",
+    sur: "",
+    de: "",
+    du: "",
+    et: "",
+    a: "",
+    à: "",
+    l: "",
+    d: "",
   },
 };
+
+/** Expressions multi-mots avant découpage token. */
+const TITLE_PHRASES = {
+  en: [
+    [/pr[eê]t\s+[àa]\s+l['']?emploi/gi, "Ready to use"],
+    [/anti[-\s]?choc/gi, "Shockproof"],
+    [/anti[-\s]?stress/gi, "Stress-relief"],
+    [/livraison\s+rapide/gi, "Fast shipping"],
+    [/ultra\s+fine?/gi, "Ultra slim"],
+    [/sans\s+fil/gi, "Wireless"],
+  ],
+  de: [
+    [/pr[eê]t\s+[àa]\s+l['']?emploi/gi, "Sofort einsatzbereit"],
+    [/ready\s+to\s+use/gi, "Sofort einsatzbereit"],
+    [/anti[-\s]?choc/gi, "Stoßfest"],
+    [/shock\s*proof/gi, "Stoßfest"],
+    [/anti[-\s]?stress/gi, "Anti-Stress"],
+    [/stress[-\s]?relief/gi, "Anti-Stress"],
+    [/livraison\s+rapide/gi, "Schneller Versand"],
+    [/fast\s+shipping/gi, "Schneller Versand"],
+    [/ultra\s+fine?/gi, "Ultra dünn"],
+    [/ultra\s+slim/gi, "Ultra dünn"],
+    [/sans\s+fil/gi, "Kabellos"],
+    [/charge\s+rapide/gi, "Schnellladen"],
+    [/fast\s+charg(?:e|ing)/gi, "Schnellladen"],
+    [/usage\s+quotidien/gi, "Alltagsnutzung"],
+    [/everyday\s+use/gi, "Alltagsnutzung"],
+    [/qualit[eé]\s+premium/gi, "Premium Qualität"],
+    [/premium\s+quality/gi, "Premium Qualität"],
+    [/matière\s+souple/gi, "Weiches Material"],
+    [/soft\s+material/gi, "Weiches Material"],
+    [/protection\s+anti[-\s]?choc/gi, "Stoßschutz"],
+    [/sans\s+fil/gi, "Kabellos"],
+    [/rechargeable/gi, "Aufladbar"],
+    [/lampe\s+led/gi, "LED-Lampe"],
+    [/led\s+lampe/gi, "LED-Lampe"],
+    [/led\s+desk\s+lamp/gi, "LED-Schreibtischlampe"],
+  ],
+};
+
+const VALUE_LEXICON = {
+  en: {
+    silicone: "Silicone",
+    silikon: "Silicone",
+    plastique: "Plastic",
+    plastic: "Plastic",
+    métal: "Metal",
+    metal: "Metal",
+    bois: "Wood",
+    wood: "Wood",
+    coton: "Cotton",
+    cotton: "Cotton",
+    neuf: "New",
+    neu: "New",
+    "mousse pu": "PU foam",
+    "pu-schaum": "PU foam",
+  },
+  de: {
+    silicone: "Silikon",
+    silikon: "Silikon",
+    plastic: "Kunststoff",
+    plastique: "Kunststoff",
+    metal: "Metall",
+    métal: "Metall",
+    wood: "Holz",
+    bois: "Holz",
+    cotton: "Baumwolle",
+    coton: "Baumwolle",
+    new: "Neu",
+    neuf: "Neu",
+    "pu foam": "PU-Schaum",
+    "mousse pu": "PU-Schaum",
+  },
+};
+
+function applyTitlePhrases(text, lang) {
+  const L = normalizeListingLang(lang);
+  let out = String(text || "");
+  for (const [re, repl] of TITLE_PHRASES[L] || []) {
+    out = out.replace(re, repl);
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
+function localizeValue(value, lang) {
+  const L = normalizeListingLang(lang);
+  if (L === "fr") return value;
+  const map = VALUE_LEXICON[L] || {};
+  const raw = String(value || "").trim();
+  if (!raw) return raw;
+  const hit = map[raw.toLowerCase()];
+  if (hit) return hit;
+  // Token-level fallback
+  return localizeTitleTokens(raw, L);
+}
 
 function localizeTitleTokens(title, lang) {
   const L = normalizeListingLang(lang);
   if (L === "fr") return String(title || "");
+  let out = applyTitlePhrases(title, L);
   const map = TITLE_LEXICON[L] || {};
-  return String(title || "")
+  out = out
     .split(/\s+/)
     .map((tok) => {
       const clean = tok.replace(/[^a-zA-ZÀ-ÿÄÖÜäöüß0-9+-]/g, "");
-      const key = clean.toLowerCase();
-      if (!key || !map[key]) return tok;
-      const localized = map[key];
-      // Preserve trailing punctuation from original token
-      const suffix = tok.slice(clean.length);
-      const prefix = tok.slice(0, tok.indexOf(clean) === -1 ? 0 : tok.indexOf(clean));
-      return `${prefix}${localized}${suffix}`;
+      const key = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      // also try with accents preserved
+      const keyAcc = clean.toLowerCase();
+      if (!clean) return "";
+      if (Object.prototype.hasOwnProperty.call(map, keyAcc)) return map[keyAcc];
+      if (Object.prototype.hasOwnProperty.call(map, key)) return map[key];
+      // Drop leftover FR fragments when targeting DE/EN
+      if (L === "de" || L === "en") {
+        if (/^(lemploi|lemploi|l'|d'|qu|aux)$/i.test(clean)) return "";
+        if (/[àâäéèêëïîôùûüç]/i.test(clean) && !map[keyAcc] && !map[key]) {
+          // keep brand-like tokens with accents only if long; else drop unknown FR words
+          if (clean.length <= 6) return "";
+        }
+      }
+      return tok;
     })
+    .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+  return out;
+}
+
+/** Nettoyage agressif des résidus FR/EN hors langue cible (titres). */
+function scrubTitleForLanguage(title, lang) {
+  const L = normalizeListingLang(lang);
+  let out = localizeTitleTokens(title, L);
+  if (L === "de") {
+    out = out
+      .replace(/\b(pour|avec|dans|une|des|les|sur|aux|pret|prêt|emploi|lemploi|qualité|produit|découvrez|livraison|souple|léger|leger|chargeur|coque|pratique|rapide|neuf|nouveau|fine?)\b/gi, "")
+      .replace(/\b(for|with|the|and|soft|case|charger|fast|new|lightweight|washable|toy|ball|portable|compatible|compact|protection)\b/gi, (m) => {
+        const map = TITLE_LEXICON.de;
+        const k = m.toLowerCase();
+        return map[k] || "";
+      })
+      .replace(/\s+/g, " ")
+      .trim();
+    out = localizeTitleTokens(out, "de");
+  } else if (L === "en") {
+    out = out
+      .replace(/\b(pour|avec|dans|une|des|les|sur|aux|prêt|pret|emploi|lemploi|qualité|produit|découvrez|livraison|souple|léger|leger|chargeur|coque|pratique|rapide|neuf|nouveau)\b/gi, (m) => {
+        const map = TITLE_LEXICON.en;
+        const k = m.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return map[m.toLowerCase()] || map[k] || "";
+      })
+      .replace(/\s+/g, " ")
+      .trim();
+    out = localizeTitleTokens(out, "en");
+  }
+  return out.replace(/\s+/g, " ").trim();
 }
 
 module.exports = {
@@ -423,4 +673,7 @@ module.exports = {
   languageLabel,
   copyMatchesLanguage,
   localizeTitleTokens,
+  localizeValue,
+  scrubTitleForLanguage,
+  applyTitlePhrases,
 };

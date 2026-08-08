@@ -7,7 +7,14 @@ const cheerio = require("cheerio");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const { normalizeListingLang, getListingUi, localizeSpecsObject, copyMatchesLanguage } = require("./listing-i18n");
+const {
+  normalizeListingLang,
+  getListingUi,
+  localizeSpecsObject,
+  copyMatchesLanguage,
+  localizeValue,
+  scrubTitleForLanguage,
+} = require("./listing-i18n");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1282,7 +1289,10 @@ function enrichProductListingCopy(product = {}, opts = {}) {
   const language = normalizeListingLang(opts.language || product.language || "fr");
   const L = getListingUi(language);
 
-  const title = cleanText(product.title || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit"));
+  const title = scrubTitleForLanguage(
+    cleanText(product.title || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit")),
+    language
+  );
   // Inclut originalTitle / description pour détecter la catégorie même après réécriture SEO
   const t = `${title} ${product.originalTitle || product.original_title || ""} ${product.description || ""} ${
     product.short_pitch || ""
@@ -1300,10 +1310,11 @@ function enrichProductListingCopy(product = {}, opts = {}) {
     existingSpecs.Matériau,
     existingSpecs.Material,
     existingSpecs.Materiau,
-    /silicone/i.test(t) && "Silicone",
+    existingSpecs.Material,
+    /silicone|silikon/i.test(t) && (language === "de" ? "Silikon" : "Silicone"),
     /tpe|tpr|thermoplastic/i.test(t) && "TPE / TPR",
     /pu\b|polyurethane|mousse|foam/i.test(t) && (language === "de" ? "PU-Schaum" : language === "en" ? "PU foam" : "Mousse PU"),
-    /coton|cotton/i.test(t) && (language === "de" ? "Baumwolle" : language === "en" ? "Cotton" : "Coton"),
+    /coton|cotton|baumwolle/i.test(t) && (language === "de" ? "Baumwolle" : language === "en" ? "Cotton" : "Coton"),
     /abs\b|plastique|plastic|kunststoff/i.test(t) &&
       (language === "de" ? "Kunststoff" : language === "en" ? "Plastic" : "Plastique"),
     /métal|metal|alu|acier|steel|metall/i.test(t) && (language === "de" ? "Metall" : language === "en" ? "Metal" : "Métal"),
@@ -1565,7 +1576,7 @@ function enrichProductListingCopy(product = {}, opts = {}) {
       if (benefits.length < 3) {
         benefits = [
           ...benefits,
-          material ? L.benefitMaterial(material) : L.benefitMaterials,
+          material ? L.benefitMaterial(localizeValue(material, language)) : L.benefitMaterials,
           L.benefitNew,
           L.benefitDaily,
           L.benefitShip,

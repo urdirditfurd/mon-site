@@ -11,6 +11,8 @@ const {
   titleFallback,
   titleShipHook,
   localizeTitleTokens,
+  scrubTitleForLanguage,
+  applyTitlePhrases,
 } = require("./listing-i18n");
 
 /** Marques / termes VeRO fréquents (liste locale extensible). */
@@ -189,16 +191,21 @@ function buildAiTitle(productName, keywords = [], opts = {}) {
 function rewriteEbayTitle(productName, keywords = [], opts = {}) {
   const language = normalizeListingLang(opts.language || opts.lang || "fr");
 
-  let raw = String(productName || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit"))
+  let raw = applyTitlePhrases(
+    String(productName || (language === "de" ? "Produkt" : language === "en" ? "Product" : "Produit")),
+    language
+  )
     .replace(/[\u4e00-\u9fff]+/g, " ") // chinois
     .replace(/\s*[-–—|]\s*(AliExpress|Amazon|Cdiscount|eBay)\b.*$/gi, " ")
     .replace(/\b(aliexpress|amazon|cdiscount|wish|temu|dropship|ebay)\b/gi, " ")
     .replace(/\b[A-Z]{0,3}\d{5,}\b/g, " ") // codes SKU
     .replace(/\([^)]*type[^)]*\)/gi, " ") // (type TPE/TPR) etc.
-    .replace(/[|【】\[\]{}()]/g, " ")
-    .replace(/\b(garanti|garantie|authentique|authenticité|réplique|replica|warranty|garantie)\b/gi, " ")
+    .replace(/[|【】\[\]{}()']/g, " ")
+    .replace(/\b(garanti|garantie|authentique|authenticité|réplique|replica|warranty)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  raw = scrubTitleForLanguage(raw, language);
 
   const stop = new Set([
     "for",
@@ -222,6 +229,25 @@ function rewriteEbayTitle(productName, keywords = [], opts = {}) {
     "der",
     "die",
     "das",
+    "pour",
+    "avec",
+    "dans",
+    "une",
+    "des",
+    "les",
+    "sur",
+    "aux",
+    "de",
+    "du",
+    "et",
+    "a",
+    "à",
+    "l",
+    "d",
+    "lemploi",
+    "emploi",
+    "pret",
+    "prêt",
   ]);
   const tokens = raw
     .split(/\s+/)
@@ -230,7 +256,7 @@ function rewriteEbayTitle(productName, keywords = [], opts = {}) {
     .slice(0, 12);
 
   const extras = (keywords || [])
-    .map((k) => String(k).trim())
+    .map((k) => scrubTitleForLanguage(String(k).trim(), language))
     .filter(Boolean)
     .filter((k) => !raw.toLowerCase().includes(k.toLowerCase()))
     .slice(0, 3);
@@ -243,7 +269,7 @@ function rewriteEbayTitle(productName, keywords = [], opts = {}) {
     language === "fr"
       ? /[àâäéèêëïîôùûüç]/i.test(raw) || /jouet|anti-stress|souple|coque|chargeur/i.test(raw)
       : language === "de"
-        ? /[äöüß]/i.test(raw) || /handy|ladegerät|hülle/i.test(raw)
+        ? /[äöüß]/i.test(raw) || /handy|ladegerät|hülle|stoßfest|silikon|spielzeug/i.test(raw)
         : tokens.length >= 4;
   const tail = looksLocalProduct ? "" : extras.length ? extras.join(" ") : titleShipHook(language);
   let title = `${hook} ${core} ${tail} ${newWord}`.replace(/\s+/g, " ").trim();
@@ -262,7 +288,12 @@ function rewriteEbayTitle(productName, keywords = [], opts = {}) {
 
   if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
   title = title.replace(/\([^)]*$/g, " ").replace(/\s{2,}/g, " ").trim();
-  title = localizeTitleTokens(title, language);
+  title = scrubTitleForLanguage(title, language);
+  // Évite doublons consécutifs (Kompatibel … Kompatibel)
+  title = title
+    .split(/\s+/)
+    .filter((w, i, arr) => i === 0 || w.toLowerCase() !== arr[i - 1].toLowerCase())
+    .join(" ");
   if (title.length > 80) title = title.slice(0, 80).replace(/\s+\S*$/, "").trim();
   return title || titleFallback(language).slice(0, 80);
 }
