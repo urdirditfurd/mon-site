@@ -1476,61 +1476,149 @@ app.get("/api/sav", (_req, res) => {
 });
 
 /** Compteurs messages SAV + ventes à traiter (pour badges / cloche hors pages). */
+function getNotifReadMap() {
+  try {
+    const raw = getSetting.get("notif_read")?.value;
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveNotifReadMap(map) {
+  upsertSetting.run("notif_read", JSON.stringify(map || {}));
+}
+
+function notifKey(type, id) {
+  return `${type}:${id}`;
+}
+
+function buildNotificationsPayload() {
+  const readMap = getNotifReadMap();
+  const messages = listSavMessages.all();
+  const openMessages = messages.filter((m) => m.status !== "sent" && m.status !== "archived");
+  const ebayOrders = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref));
+  const pendingSales = ebayOrders.filter((o) => o.status === "pending");
+
+  // Purge des clés lues obsolètes (messages partis / commandes plus pending)
+  const liveKeys = new Set([
+    ...openMessages.map((m) => notifKey("message", m.id)),
+    ...pendingSales.map((o) => notifKey("sale", o.order_ref)),
+  ]);
+  let pruned = false;
+  for (const k of Object.keys(readMap)) {
+    if (!liveKeys.has(k)) {
+      delete readMap[k];
+      pruned = true;
+    }
+  }
+  if (pruned) saveNotifReadMap(readMap);
+
+  const unreadMessages = openMessages.filter((m) => !readMap[notifKey("message", m.id)]);
+  const unreadSales = pendingSales.filter((o) => !readMap[notifKey("sale", o.order_ref)]);
+
+  const items = [];
+  for (const m of unreadMessages.slice(0, 8)) {
+    items.push({
+      type: "message",
+      id: m.id,
+      key: notifKey("message", m.id),
+      title: m.subject || "(sans sujet)",
+      detail: `${m.sender || "Acheteur"}${m.item_title ? " · " + m.item_title : ""}`,
+      status: m.status || "new",
+      page: "sav",
+      at: m.received_at || m.updated_at || m.created_at || "",
+      unread: true,
+    });
+  }
+  for (const o of unreadSales.slice(0, 8)) {
+    items.push({
+      type: "sale",
+      id: o.order_ref,
+      key: notifKey("sale", o.order_ref),
+      title: o.product || "Vente eBay",
+      detail: `${Number(o.amount || 0).toFixed(2)} € · ${o.order_ref}`,
+      status: o.status,
+      page: "auto-order",
+      at: o.created_at || "",
+      unread: true,
+    });
+  }
+  items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+  const messagesCount = unreadMessages.length;
+  const salesCount = unreadSales.length;
+  return {
+    messages: {
+      open: openMessages.length,
+      unread: messagesCount,
+      new: unreadMessages.filter((m) => m.status === "new" || !m.status).length,
+      escalated: unreadMessages.filter((m) => m.status === "escalated" || m.escalate).length,
+      draft: unreadMessages.filter((m) => m.status === "draft").length,
+    },
+    sales: {
+      pending: pendingSales.length,
+      unread: salesCount,
+    },
+    total: messagesCount + salesCount,
+    items: items.slice(0, 12),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function markNotificationsRead({ keys = [], types = [], all = false } = {}) {
+  const readMap = getNotifReadMap();
+  const now = new Date().toISOString();
+  const messages = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived");
+  const pendingSales = getOrders
+    .all()
+    .filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending");
+
+  const mark = (key) => {
+    if (key) readMap[key] = now;
+  };
+
+  if (all) {
+    for (const m of messages) mark(notifKey("message", m.id));
+    for (const o of pendingSales) mark(notifKey("sale", o.order_ref));
+  } else {
+    const typeSet = new Set((types || []).map(String));
+    if (typeSet.has("message") || typeSet.has("messages") || typeSet.has("sav")) {
+      for (const m of messages) mark(notifKey("message", m.id));
+    }
+    if (typeSet.has("sale") || typeSet.has("sales") || typeSet.has("auto-order") || typeSet.has("orders")) {
+      for (const o of pendingSales) mark(notifKey("sale", o.order_ref));
+    }
+    for (const k of keys || []) {
+      const key = String(k || "").trim();
+      if (key) mark(key);
+    }
+  }
+
+  saveNotifReadMap(readMap);
+  return buildNotificationsPayload();
+}
+
 app.get("/api/notifications", (_req, res) => {
   try {
-    const messages = listSavMessages.all();
-    const openMessages = messages.filter((m) => m.status !== "sent" && m.status !== "archived");
-    const newMessages = openMessages.filter((m) => m.status === "new" || !m.status);
-    const escalated = openMessages.filter((m) => m.status === "escalated" || m.escalate);
-    const drafts = openMessages.filter((m) => m.status === "draft");
+    res.json({ success: true, data: buildNotificationsPayload() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-    const ebayOrders = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref));
-    const pendingSales = ebayOrders.filter((o) => o.status === "pending");
-
-    const items = [];
-    for (const m of openMessages.slice(0, 8)) {
-      items.push({
-        type: "message",
-        id: m.id,
-        title: m.subject || "(sans sujet)",
-        detail: `${m.sender || "Acheteur"}${m.item_title ? " · " + m.item_title : ""}`,
-        status: m.status || "new",
-        page: "sav",
-        at: m.received_at || m.updated_at || m.created_at || "",
-      });
-    }
-    for (const o of pendingSales.slice(0, 8)) {
-      items.push({
-        type: "sale",
-        id: o.order_ref,
-        title: o.product || "Vente eBay",
-        detail: `${Number(o.amount || 0).toFixed(2)} € · ${o.order_ref}`,
-        status: o.status,
-        page: "auto-order",
-        at: o.created_at || "",
-      });
-    }
-    items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
-
-    const messagesCount = openMessages.length;
-    const salesCount = pendingSales.length;
-    res.json({
-      success: true,
-      data: {
-        messages: {
-          open: messagesCount,
-          new: newMessages.length,
-          escalated: escalated.length,
-          draft: drafts.length,
-        },
-        sales: {
-          pending: salesCount,
-        },
-        total: messagesCount + salesCount,
-        items: items.slice(0, 12),
-        updatedAt: new Date().toISOString(),
-      },
+/** Marque des notifications comme lues → le badge disparaît. */
+app.post("/api/notifications/read", (req, res) => {
+  try {
+    const { keys, types, all, type } = req.body || {};
+    const typeList = Array.isArray(types) ? types : type ? [type] : [];
+    const data = markNotificationsRead({
+      keys: Array.isArray(keys) ? keys : keys ? [keys] : [],
+      types: typeList,
+      all: Boolean(all),
     });
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -312,7 +312,10 @@
                 <p class="text-sm font-semibold text-ink-900">Notifications</p>
                 <p class="text-[11px] text-zinc-400" id="notif-summary">Messages & ventes</p>
               </div>
-              <button type="button" onclick="refreshNotifications(true)" class="text-[11px] font-medium text-[#4452a8] hover:underline">Rafraîchir</button>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="markAllNotificationsRead()" class="text-[11px] font-medium text-zinc-500 hover:underline">Tout lu</button>
+                <button type="button" onclick="refreshNotifications(true)" class="text-[11px] font-medium text-[#4452a8] hover:underline">Rafraîchir</button>
+              </div>
             </div>
             <div id="notif-list" class="max-h-80 overflow-auto divide-y divide-zinc-50"></div>
             <div class="px-4 py-2.5 border-t border-[#e8e8f6] flex gap-3 text-[11px]">

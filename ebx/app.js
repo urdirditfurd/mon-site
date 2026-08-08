@@ -338,9 +338,13 @@ function navigate(page) {
   if (page === "auto-order") {
     loadSupplierConfig();
     loadOrders();
+    markNotificationsRead({ types: ["sale"] });
   }
   if (page === "listings") loadListings();
-  if (page === "sav") loadSav();
+  if (page === "sav") {
+    loadSav();
+    markNotificationsRead({ types: ["message"] });
+  }
   if (page === "settings") loadSettings();
 }
 
@@ -1313,7 +1317,7 @@ async function loadOrders() {
         </tr>`;
     })
     .join("") || `<tr><td colspan="7" class="p-8 text-center text-zinc-300">Aucune commande — clique « Sync ventes eBay ».</td></tr>`;
-  refreshNotifications(true);
+  await markNotificationsRead({ types: ["sale"] });
 }
 
 function selectedOrderIds() {
@@ -1965,8 +1969,8 @@ function setNavCount(id, count) {
 }
 
 function applyNotificationBadges(data) {
-  const messages = Number(data?.messages?.open || 0);
-  const sales = Number(data?.sales?.pending || 0);
+  const messages = Number(data?.messages?.unread ?? data?.messages?.open ?? 0);
+  const sales = Number(data?.sales?.unread ?? data?.sales?.pending ?? 0);
   const total = Number(data?.total || messages + sales);
   setNavCount("nav-badge-sav", messages);
   setNavCount("nav-badge-orders", sales);
@@ -1983,12 +1987,12 @@ function applyNotificationBadges(data) {
   }
   const summary = document.getElementById("notif-summary");
   if (summary) {
-    if (total === 0) summary.textContent = "Rien en attente";
+    if (total === 0) summary.textContent = "Rien de nouveau";
     else {
       const parts = [];
       if (messages) parts.push(`${messages} message${messages > 1 ? "s" : ""}`);
       if (sales) parts.push(`${sales} vente${sales > 1 ? "s" : ""}`);
-      summary.textContent = parts.join(" · ");
+      summary.textContent = parts.join(" · ") + " non lu" + (total > 1 ? "s" : "");
     }
   }
   const list = document.getElementById("notif-list");
@@ -2004,9 +2008,9 @@ function applyNotificationBadges(data) {
                 : it.status === "escalated"
                   ? "bg-amber-50 text-amber-800"
                   : "bg-[#eef0fb] text-[#4452a8]";
-            return `<button type="button" class="notif-item w-full text-left px-4 py-3" onclick="navigateFromNotif('${escapeHtml(
-              it.page
-            )}')">
+            const key = escapeHtml(it.key || `${it.type}:${it.id}`);
+            const page = escapeHtml(it.page || "sav");
+            return `<button type="button" class="notif-item w-full text-left px-4 py-3" data-notif-key="${key}" onclick="openNotificationItem('${key}', '${page}')">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${kindCls}">${kind}</span>
                 <span class="text-[10px] text-zinc-400">${escapeHtml(formatNotifWhen(it.at))}</span>
@@ -2016,8 +2020,37 @@ function applyNotificationBadges(data) {
             </button>`;
           })
           .join("")
-      : `<p class="px-4 py-8 text-sm text-zinc-400 text-center">Aucun message ni vente en attente.</p>`;
+      : `<p class="px-4 py-8 text-sm text-zinc-400 text-center">Aucune notification non lue.</p>`;
   }
+}
+
+async function markNotificationsRead(opts = {}) {
+  try {
+    const res = await fetch(API + "/api/notifications/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Impossible de marquer comme lu");
+    notifCache = json.data || {};
+    notifLastTotal = Number(notifCache.total || 0);
+    applyNotificationBadges(notifCache);
+    return notifCache;
+  } catch (err) {
+    console.warn("[EBX] mark read:", err.message);
+    return null;
+  }
+}
+
+async function openNotificationItem(key, page) {
+  await markNotificationsRead({ keys: [key] });
+  toggleNotificationsPanel(false);
+  navigate(page);
+}
+
+async function markAllNotificationsRead() {
+  await markNotificationsRead({ all: true });
 }
 
 async function refreshNotifications(force = false) {
@@ -2052,12 +2085,47 @@ async function refreshNotifications(force = false) {
   }
 }
 
-function toggleNotificationsPanel(force) {
+async function toggleNotificationsPanel(force) {
   const panel = document.getElementById("notif-panel");
   if (!panel) return;
   const open = typeof force === "boolean" ? force : panel.classList.contains("hidden");
   panel.classList.toggle("hidden", !open);
-  if (open) refreshNotifications(true);
+  if (open) {
+    const data = await refreshNotifications(true);
+    const snapshot = [...(data?.items || [])];
+    if ((data?.total || 0) > 0) {
+      // Badge disparaît dès la consultation ; on garde la liste affichée pour cette ouverture
+      await markNotificationsRead({ all: true });
+      if (snapshot.length) {
+        const list = document.getElementById("notif-list");
+        const summary = document.getElementById("notif-summary");
+        if (summary) summary.textContent = "Consulté — badge effacé";
+        if (list) {
+          list.innerHTML = snapshot
+            .map((it) => {
+              const kind = it.type === "sale" ? "Vente" : "Message";
+              const kindCls =
+                it.type === "sale"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : it.status === "escalated"
+                    ? "bg-amber-50 text-amber-800"
+                    : "bg-[#eef0fb] text-[#4452a8]";
+              const key = escapeHtml(it.key || `${it.type}:${it.id}`);
+              const page = escapeHtml(it.page || "sav");
+              return `<button type="button" class="notif-item w-full text-left px-4 py-3" data-notif-key="${key}" onclick="openNotificationItem('${key}', '${page}')">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${kindCls}">${kind}</span>
+                  <span class="text-[10px] text-zinc-400">${escapeHtml(formatNotifWhen(it.at))}</span>
+                </div>
+                <p class="text-sm font-medium mt-1 truncate">${escapeHtml(it.title)}</p>
+                <p class="text-[11px] text-zinc-400 mt-0.5 truncate">${escapeHtml(it.detail)}</p>
+              </button>`;
+            })
+            .join("");
+        }
+      }
+    }
+  }
 }
 
 function navigateFromNotif(page) {
@@ -2116,7 +2184,7 @@ async function loadSav() {
     if (savSelectedId && savCache.some((x) => x.id === savSelectedId)) {
       selectSav(savSelectedId);
     }
-    refreshNotifications(true);
+    await markNotificationsRead({ types: ["message"] });
   } catch (err) {
     alert("SAV: " + err.message);
   }
@@ -3153,7 +3221,7 @@ startNotificationsPolling();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 
