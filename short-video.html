@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Short Video — Passerelle YouTube + TikTok</title>
+  <link rel="icon" href="favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="short-video.css">
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+  <header class="top">
+    <a class="brand" href="/">ClipForge</a>
+    <nav>
+      <a href="/studio">Studio</a>
+      <a href="/short-video" aria-current="page">Short Video</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <p class="eyebrow">Passerelle dual publish</p>
+      <h1>Short Video</h1>
+      <p class="lede">Connecte YouTube et TikTok, dépose ta vidéo générée (fichier ou lien), publie le même Short sur les deux plateformes en un clic.</p>
+    </section>
+
+    <section class="grid">
+      <article class="card" id="youtubeCard">
+        <div class="card-head">
+          <h2>YouTube</h2>
+          <span class="badge" id="youtubeBadge">Déconnecté</span>
+        </div>
+        <p class="meta" id="youtubeMeta">Non connecté</p>
+        <div class="actions">
+          <a class="btn primary" id="youtubeConnectBtn" href="/api/short-video/youtube/connect">Connecter YouTube</a>
+          <button type="button" class="btn ghost" id="youtubeDisconnectBtn" hidden>Déconnecter</button>
+        </div>
+        <p class="hint">OAuth Google requis : `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` + YouTube Data API v3.</p>
+      </article>
+
+      <article class="card" id="tiktokCard">
+        <div class="card-head">
+          <h2>TikTok</h2>
+          <span class="badge" id="tiktokBadge">Déconnecté</span>
+        </div>
+        <p class="meta" id="tiktokMeta">Non connecté</p>
+        <div class="actions">
+          <a class="btn primary" id="tiktokConnectBtn" href="/api/short-video/tiktok/connect">Connecter TikTok</a>
+          <button type="button" class="btn ghost" id="tiktokDisconnectBtn" hidden>Déconnecter</button>
+        </div>
+        <details class="manual">
+          <summary>Ou coller accessToken + openId</summary>
+          <label>
+            Access token
+            <input id="tiktokAccessToken" type="password" autocomplete="off" placeholder="act.xxx">
+          </label>
+          <label>
+            Open ID
+            <input id="tiktokOpenId" type="text" autocomplete="off" placeholder="••••">
+          </label>
+          <button type="button" class="btn secondary" id="tiktokManualSaveBtn">Enregistrer TikTok</button>
+        </details>
+        <p class="hint">OAuth TikTok : `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` (scopes video.upload + video.publish).</p>
+      </article>
+    </section>
+
+    <section class="card publish-card">
+      <h2>Publier un Short</h2>
+      <form id="publishForm">
+        <div class="source-row">
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="videoFile" accept="video/mp4,video/webm,video/quicktime,.mp4,.mov,.webm" hidden>
+            <strong id="dropLabel">Déposer la vidéo générée</strong>
+            <span>MP4 / MOV / WEBM — ou utilise un lien ci-dessous</span>
+          </label>
+          <label class="field">
+            Lien vidéo (URL directe ou page)
+            <input type="url" id="videoUrl" placeholder="https://…/video.mp4">
+          </label>
+        </div>
+
+        <div class="fields-2">
+          <label class="field">
+            Titre
+            <input type="text" id="title" maxlength="100" required placeholder="Lettre A — Alphabet avec Lulu">
+          </label>
+          <label class="field">
+            Hashtags
+            <input type="text" id="hashtags" placeholder="alphabet enfants apprendre shorts">
+          </label>
+        </div>
+
+        <label class="field">
+          Description YouTube
+          <textarea id="description" rows="3" placeholder="Apprends la lettre A en 30 secondes."></textarea>
+        </label>
+
+        <div class="fields-3">
+          <label class="check">
+            <input type="checkbox" id="publishYoutube" checked>
+            Publier YouTube Shorts
+          </label>
+          <label class="check">
+            <input type="checkbox" id="publishTiktok" checked>
+            Publier TikTok
+          </label>
+          <label class="check">
+            <input type="checkbox" id="madeForKids" checked>
+            Contenu pour enfants (YouTube)
+          </label>
+        </div>
+
+        <div class="fields-2">
+          <label class="field">
+            Visibilité YouTube
+            <select id="youtubePrivacy">
+              <option value="public" selected>Public</option>
+              <option value="unlisted">Non répertorié</option>
+              <option value="private">Privé</option>
+            </select>
+          </label>
+          <label class="field">
+            Confidentialité TikTok
+            <select id="tiktokPrivacy">
+              <option value="PUBLIC_TO_EVERYONE" selected>Public</option>
+              <option value="MUTUAL_FOLLOW_FRIENDS">Amis</option>
+              <option value="FOLLOWER_OF_CREATOR">Abonnés</option>
+              <option value="SELF_ONLY">Moi uniquement</option>
+            </select>
+          </label>
+        </div>
+
+        <button type="submit" class="btn publish" id="publishBtn">Publier sur YouTube + TikTok</button>
+      </form>
+
+      <div class="toast" id="toast" hidden></div>
+      <pre class="results" id="results" hidden></pre>
+    </section>
+
+    <section class="card help">
+      <h2>Setup rapide</h2>
+      <ol>
+        <li>Sur ton serveur, définis <code>PUBLIC_BASE_URL</code> (ex. https://ton-domaine.com).</li>
+        <li>Google Cloud → OAuth client → redirect : <code>/api/short-video/youtube/callback</code>.</li>
+        <li>TikTok Developers → redirect : <code>/api/short-video/tiktok/callback</code>.</li>
+        <li>Génère ta vidéo (KidsStoryteller), télécharge le MP4, publie ici.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script src="short-video.js"></script>
+</body>
+</html>
