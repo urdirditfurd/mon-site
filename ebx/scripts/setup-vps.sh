@@ -55,11 +55,19 @@ if [[ ! -f .env ]]; then
   if [[ -z "$AUTH_PASS" ]]; then
     AUTH_PASS="$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-16)"
   fi
+  SESSION_SECRET="$(openssl rand -hex 24)"
   sed -i "s/^EBX_BASIC_AUTH_USER=.*/EBX_BASIC_AUTH_USER=${AUTH_USER}/" .env
   sed -i "s/^EBX_BASIC_AUTH_PASS=.*/EBX_BASIC_AUTH_PASS=${AUTH_PASS}/" .env
+  sed -i "s/^EBX_MULTIUSER=.*/EBX_MULTIUSER=1/" .env
+  sed -i "s/^EBX_SESSION_SECRET=.*/EBX_SESSION_SECRET=${SESSION_SECRET}/" .env
+  if [[ -n "$DOMAIN" ]]; then
+    sed -i "s|^EBX_PUBLIC_URL=.*|EBX_PUBLIC_URL=https://${DOMAIN}|" .env
+  fi
   echo ""
-  echo ">>> Mot de passe généré (note-le) : ${AUTH_USER} / ${AUTH_PASS}"
-  echo ">>> Complète ensuite les clés eBay dans ${APP_DIR}/ebx/.env"
+  echo ">>> Mot de passe Basic Auth (gate serveur) : ${AUTH_USER} / ${AUTH_PASS}"
+  echo ">>> Puis chaque visiteur crée son compte EBX et clique « Connecter mon eBay »"
+  echo ">>> RuName eBay doit pointer vers : https://${DOMAIN:-IP}/api/oauth/ebay/callback"
+  echo ">>> Complète EBAY_PROD_CLIENT_ID/SECRET + EBAY_RU_NAME_PROD dans ${APP_DIR}/ebx/.env"
 fi
 
 pm2 delete ebx >/dev/null 2>&1 || true

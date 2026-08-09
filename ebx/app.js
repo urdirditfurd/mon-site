@@ -1,5 +1,9 @@
 const API = window.location.origin;
 let themeColor = "#6d7ddf";
+let authMode = "login";
+let webUser = null;
+let webEbay = null;
+let multiuserEnabled = true;
 const DESC_QUICK = ["#6d7ddf", "#242b52", "#22c55e", "#ef4444"];
 const DESC_PALETTE = [
   "#6d7ddf", "#4452a8", "#242b52", "#1e1b4b", "#e6e6fa", "#c7d2fe",
@@ -2333,11 +2337,24 @@ async function sendSavSelected(force) {
 
 async function loadAccounts() {
   const box = document.getElementById("accounts-list");
+  const oauthStatus = document.getElementById("oauth-status");
   if (!box) return;
   try {
-    const res = await fetch(API + "/api/accounts");
+    const res = await fetch(API + "/api/accounts", { credentials: "same-origin" });
     const json = await res.json();
+    if (res.status === 401) {
+      showAuthGate(true);
+      return;
+    }
     const rows = json.data || [];
+    const active = rows.find((a) => a.is_active) || rows[0];
+    if (oauthStatus) {
+      oauthStatus.textContent = active
+        ? `Statut : lié à ${active.user_id || active.label} (${active.env})`
+        : "Statut : non connecté — clique « Connecter mon eBay »";
+    }
+    const sideEbay = document.getElementById("sidebar-ebay-status");
+    if (sideEbay) sideEbay.textContent = active ? `eBay : ${active.user_id || active.label}` : "eBay non lié";
     box.innerHTML = rows.length
       ? rows
           .map(
@@ -2359,9 +2376,117 @@ async function loadAccounts() {
           </div>`
           )
           .join("")
-      : `<p class="text-zinc-400 text-xs">Aucun compte multi enregistré — utilise le .env ou ajoute un token ci-dessus.</p>`;
+      : `<p class="text-zinc-400 text-xs">Aucun compte eBay lié — utilise « Connecter mon eBay » ci-dessus.</p>`;
   } catch (_) {
     box.innerHTML = "";
+  }
+}
+
+async function connectEbayOAuth() {
+  try {
+    const marketplace = document.getElementById("oauth-market")?.value || "EBAY_FR";
+    const env = document.getElementById("oauth-env")?.value || "production";
+    const res = await fetch(
+      `${API}/api/oauth/ebay/start?marketplace=${encodeURIComponent(marketplace)}&env=${encodeURIComponent(env)}`,
+      { credentials: "same-origin" }
+    );
+    const json = await res.json();
+    if (res.status === 401 || json.authRequired) {
+      showAuthGate(true);
+      return;
+    }
+    if (!json.success || !json.url) throw new Error(json.error || "OAuth indisponible");
+    window.location.href = json.url;
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function showAuthGate(show) {
+  const gate = document.getElementById("auth-gate");
+  if (!gate) return;
+  gate.classList.toggle("hidden", !show);
+  gate.classList.toggle("flex", !!show);
+}
+
+function setAuthTab(mode) {
+  authMode = mode === "register" ? "register" : "login";
+  const loginBtn = document.getElementById("auth-tab-login");
+  const regBtn = document.getElementById("auth-tab-register");
+  if (loginBtn && regBtn) {
+    loginBtn.className =
+      "flex-1 px-3 py-1.5 rounded-md " +
+      (authMode === "login" ? "bg-[#6d7ddf] text-white font-medium" : "text-zinc-500");
+    regBtn.className =
+      "flex-1 px-3 py-1.5 rounded-md " +
+      (authMode === "register" ? "bg-[#6d7ddf] text-white font-medium" : "text-zinc-500");
+  }
+  const submit = document.getElementById("auth-submit");
+  if (submit) submit.textContent = authMode === "register" ? "Créer mon compte" : "Se connecter";
+}
+
+async function submitAuth() {
+  const email = document.getElementById("auth-email")?.value.trim();
+  const password = document.getElementById("auth-password")?.value || "";
+  const errEl = document.getElementById("auth-error");
+  if (errEl) {
+    errEl.classList.add("hidden");
+    errEl.textContent = "";
+  }
+  try {
+    const res = await fetch(API + "/api/auth/" + (authMode === "register" ? "register" : "login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ email, password }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Auth échouée");
+    await ensureWebSession();
+    showAuthGate(false);
+    loadDashboard();
+    loadAccounts();
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message;
+      errEl.classList.remove("hidden");
+    } else alert(err.message);
+  }
+}
+
+async function logoutWebUser() {
+  await fetch(API + "/api/auth/logout", { method: "POST", credentials: "same-origin" });
+  webUser = null;
+  webEbay = null;
+  if (multiuserEnabled) showAuthGate(true);
+}
+
+async function ensureWebSession() {
+  try {
+    const res = await fetch(API + "/api/auth/me", { credentials: "same-origin" });
+    const json = await res.json();
+    multiuserEnabled = json.multiuser !== false;
+    webUser = json.user || null;
+    webEbay = json.ebay || null;
+    const emailEl = document.getElementById("sidebar-user-email");
+    if (emailEl) emailEl.textContent = webUser?.email || "Mon compte";
+    const sideEbay = document.getElementById("sidebar-ebay-status");
+    if (sideEbay) {
+      sideEbay.textContent = webEbay?.userId ? `eBay : ${webEbay.userId}` : "eBay non lié";
+    }
+    const oauthStatus = document.getElementById("oauth-status");
+    if (oauthStatus && webEbay) {
+      oauthStatus.textContent = `Statut : lié à ${webEbay.userId || webEbay.label} (${webEbay.env})`;
+    }
+    if (multiuserEnabled && !webUser) {
+      showAuthGate(true);
+      return false;
+    }
+    showAuthGate(false);
+    return true;
+  } catch (_) {
+    if (multiuserEnabled) showAuthGate(true);
+    return false;
   }
 }
 
@@ -3216,8 +3341,16 @@ async function loadSetupStatus() {
 }
 
 checkHealth();
-loadDashboard();
-startNotificationsPolling();
+(async () => {
+  document.getElementById("auth-tab-login")?.addEventListener("click", () => setAuthTab("login"));
+  document.getElementById("auth-tab-register")?.addEventListener("click", () => setAuthTab("register"));
+  setAuthTab("login");
+  const ok = await ensureWebSession();
+  if (ok) {
+    loadDashboard();
+    startNotificationsPolling();
+  }
+})();
 
 
 // Expose handlers for onclick + bind as backup

@@ -250,6 +250,32 @@
   </style>
 </head>
 <body class="bg-lunar-200 text-zinc-800 min-h-screen flex">
+  <!-- Gate multi-user : inscription / connexion avant le dashboard -->
+  <div id="auth-gate" class="fixed inset-0 z-[80] hidden items-center justify-center bg-[#1a1f3d]/92 p-4">
+    <div class="bg-white rounded-2xl border border-[#d4d4f0] shadow-2xl w-full max-w-md p-6 space-y-4">
+      <div>
+        <h1 class="text-2xl font-bold text-ink-900 tracking-tight">EBX</h1>
+        <p class="text-sm text-zinc-500 mt-1">Crée un compte, puis connecte <strong>ton</strong> eBay pour publier et sync.</p>
+      </div>
+      <div class="flex bg-zinc-100 rounded-lg p-1 text-sm">
+        <button type="button" id="auth-tab-login" class="flex-1 px-3 py-1.5 rounded-md bg-[#6d7ddf] text-white font-medium">Connexion</button>
+        <button type="button" id="auth-tab-register" class="flex-1 px-3 py-1.5 rounded-md text-zinc-500">Inscription</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Email</label>
+          <input id="auth-email" type="email" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="toi@email.com" />
+        </div>
+        <div>
+          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Mot de passe</label>
+          <input id="auth-password" type="password" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="8 caractères min." />
+        </div>
+        <p id="auth-error" class="text-sm text-red-600 hidden"></p>
+        <button type="button" id="auth-submit" onclick="submitAuth()" class="btn-primary w-full">Continuer</button>
+      </div>
+    </div>
+  </div>
+
   <aside class="w-64 bg-ink-900 text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-white/5">
     <div class="p-5 border-b border-white/5 flex items-start justify-between gap-2">
       <div>
@@ -286,8 +312,12 @@
     <div class="p-3 border-t border-white/5">
       <div class="account-plan-card flex items-center gap-3">
         <div class="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center text-sm font-bold">E</div>
-        <div><p class="text-sm font-medium text-white">Mon compte</p><p class="text-xs text-white/80">Plan Business</p></div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium text-white truncate" id="sidebar-user-email">Mon compte</p>
+          <p class="text-xs text-white/80" id="sidebar-ebay-status">eBay non lié</p>
+        </div>
       </div>
+      <button type="button" onclick="logoutWebUser()" class="mt-2 w-full text-[11px] text-white/70 hover:text-white underline">Déconnexion</button>
     </div>
   </aside>
 
@@ -974,8 +1004,34 @@
         </div>
 
         <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
-          <h3 class="font-semibold text-lg">Comptes eBay (multi)</h3>
-          <p class="text-sm text-zinc-400">Ajoute plusieurs refresh tokens Prod — active celui qui publie. Marché FR / US / DE / GB.</p>
+          <h3 class="font-semibold text-lg">Connecter mon eBay</h3>
+          <p class="text-sm text-zinc-400">Chaque utilisateur lie <strong>son</strong> compte vendeur eBay. L’app EBX (clés serveur) reste la tienne ; l’OAuth donne accès à leur boutique.</p>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Marché</label>
+              <select id="oauth-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm">
+                <option value="EBAY_FR">France (EBAY_FR)</option>
+                <option value="EBAY_DE">Allemagne (EBAY_DE)</option>
+                <option value="EBAY_GB">Royaume-Uni (EBAY_GB)</option>
+                <option value="EBAY_US">États-Unis (EBAY_US)</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Environnement</label>
+              <select id="oauth-env" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm">
+                <option value="production">Production (réel)</option>
+                <option value="sandbox">Sandbox (test)</option>
+              </select>
+            </div>
+          </div>
+          <button type="button" onclick="connectEbayOAuth()" class="btn-primary">Connecter mon eBay</button>
+          <p id="oauth-status" class="text-sm text-zinc-500">Statut : non connecté</p>
+          <p class="text-[11px] text-zinc-400">Côté VPS : dans developer.ebay.com → ta RuName doit pointer vers<br><code class="bg-zinc-100 px-1 rounded">https://TON-DOMAINE/api/oauth/ebay/callback</code></p>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Comptes eBay liés</h3>
+          <p class="text-sm text-zinc-400">Comptes OAuth de cet utilisateur — active celui qui publie.</p>
           <div class="grid gap-2 sm:grid-cols-2">
             <input id="acc-label" class="px-3 py-2 rounded-xl border text-sm" placeholder="Label (ex. Boutique FR)" />
             <select id="acc-market" class="px-3 py-2 rounded-xl border text-sm">
@@ -985,8 +1041,8 @@
               <option value="EBAY_GB">EBAY_GB</option>
             </select>
           </div>
-          <textarea id="acc-token" class="w-full h-24 px-3 py-2 rounded-xl border text-sm font-mono" placeholder="EBAY_REFRESH_TOKEN_PROD (colle le token)"></textarea>
-          <button onclick="addEbayAccount()" class="btn-primary">Ajouter le compte</button>
+          <textarea id="acc-token" class="w-full h-24 px-3 py-2 rounded-xl border text-sm font-mono" placeholder="Option avancée : coller un refresh token"></textarea>
+          <button onclick="addEbayAccount()" class="text-sm px-3 py-2 border rounded-xl">Ajouter via token</button>
           <div id="accounts-list" class="space-y-2 text-sm"></div>
         </div>
       </section>

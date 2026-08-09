@@ -58,8 +58,15 @@ const {
   getAutoOrders,
 } = require("./mock-data");
 const { generateListing, generateSavReply, generateProductCopy } = require("./ai-brain");
-const { publishToEbay } = require("./ebay-api");
+const { publishToEbay, runWithSeller, clearTokenCache, getSellerIdentity } = require("./ebay-api");
 const { normalizeListingLang, languageLabel, copyMatchesLanguage } = require("./listing-i18n");
+const {
+  createWebAuth,
+  publicBaseUrl,
+  signOAuthState,
+  verifyOAuthState,
+} = require("./web-auth");
+const { cleanEnvToken } = require("./load-env");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -212,19 +219,57 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+const ebayAccountCols = db.prepare("PRAGMA table_info(ebay_accounts)").all().map((c) => c.name);
+if (!ebayAccountCols.includes("owner_user_id")) {
+  db.exec("ALTER TABLE ebay_accounts ADD COLUMN owner_user_id INTEGER");
+}
+if (!ebayAccountCols.includes("fulfillment_policy_id")) {
+  db.exec("ALTER TABLE ebay_accounts ADD COLUMN fulfillment_policy_id TEXT DEFAULT ''");
+}
+if (!ebayAccountCols.includes("payment_policy_id")) {
+  db.exec("ALTER TABLE ebay_accounts ADD COLUMN payment_policy_id TEXT DEFAULT ''");
+}
+if (!ebayAccountCols.includes("return_policy_id")) {
+  db.exec("ALTER TABLE ebay_accounts ADD COLUMN return_policy_id TEXT DEFAULT ''");
+}
+
+const webAuth = createWebAuth(db);
+const MULTIUSER =
+  String(process.env.EBX_MULTIUSER || "1").trim() !== "0" &&
+  String(process.env.EBX_MULTIUSER || "1").toLowerCase() !== "false";
+const OAUTH_STATE_SECRET =
+  String(process.env.EBX_SESSION_SECRET || process.env.EBX_BASIC_AUTH_PASS || "ebx-oauth-secret").trim();
+
 const listEbayAccounts = db.prepare(
-  "SELECT id, label, user_id, env, marketplace, is_active, created_at FROM ebay_accounts ORDER BY is_active DESC, id DESC"
+  "SELECT id, label, user_id, env, marketplace, is_active, owner_user_id, created_at FROM ebay_accounts ORDER BY is_active DESC, id DESC"
+);
+const listEbayAccountsForOwner = db.prepare(
+  "SELECT id, label, user_id, env, marketplace, is_active, owner_user_id, created_at FROM ebay_accounts WHERE owner_user_id = ? ORDER BY is_active DESC, id DESC"
 );
 const insertEbayAccount = db.prepare(
-  `INSERT INTO ebay_accounts (label, user_id, refresh_token, env, marketplace, is_active)
-   VALUES (?, ?, ?, ?, ?, 0)`
+  `INSERT INTO ebay_accounts (label, user_id, refresh_token, env, marketplace, is_active, owner_user_id)
+   VALUES (?, ?, ?, ?, ?, 0, ?)`
 );
 const clearActiveAccounts = db.prepare("UPDATE ebay_accounts SET is_active = 0");
+const clearActiveAccountsForOwner = db.prepare(
+  "UPDATE ebay_accounts SET is_active = 0 WHERE owner_user_id = ?"
+);
 const activateEbayAccount = db.prepare("UPDATE ebay_accounts SET is_active = 1 WHERE id = ?");
 const getEbayAccountById = db.prepare("SELECT * FROM ebay_accounts WHERE id = ?");
 const deleteEbayAccount = db.prepare("DELETE FROM ebay_accounts WHERE id = ?");
 const getActiveEbayAccount = db.prepare(
   "SELECT * FROM ebay_accounts WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+);
+const getActiveEbayAccountForOwner = db.prepare(
+  "SELECT * FROM ebay_accounts WHERE is_active = 1 AND owner_user_id = ? ORDER BY id DESC LIMIT 1"
+);
+const findEbayAccountByOwnerAndSeller = db.prepare(
+  "SELECT * FROM ebay_accounts WHERE owner_user_id = ? AND user_id = ? LIMIT 1"
+);
+const updateEbayAccountRefresh = db.prepare(
+  `UPDATE ebay_accounts
+   SET refresh_token = ?, env = ?, marketplace = ?, label = ?, is_active = 1
+   WHERE id = ?`
 );
 const getCompetitorById = db.prepare("SELECT * FROM competitor_history WHERE id = ?");
 const deleteCompetitorById = db.prepare("DELETE FROM competitor_history WHERE id = ?");
@@ -442,6 +487,32 @@ function basicAuthMiddleware(req, res, next) {
   return res.status(401).send("Authentification requise");
 }
 app.use(basicAuthMiddleware);
+
+/** Session web + contexte vendeur eBay de l'utilisateur (multi-tenant). */
+app.use((req, res, next) => {
+  req.webUser = webAuth.userFromRequest(req);
+  let account = null;
+  if (req.webUser) {
+    account = getActiveEbayAccountForOwner.get(req.webUser.id) || null;
+  } else if (!MULTIUSER) {
+    account = getActiveEbayAccount.get() || null;
+  }
+  req.ebayAccount = account;
+  runWithSeller(account, () => next());
+});
+
+function requireWebUser(req, res, next) {
+  if (!MULTIUSER) return next();
+  if (req.webUser) return next();
+  // Pages HTML publiques pour login ; APIs protégées
+  if (req.path === "/" || req.path.endsWith(".html") || req.path.endsWith(".js") || req.path.endsWith(".css")) {
+    return next();
+  }
+  if (req.path.startsWith("/api/auth/") || req.path.startsWith("/api/oauth/")) return next();
+  if (req.path === "/api/health" || req.path === "/api/bot-status") return next();
+  return res.status(401).json({ success: false, error: "Connecte-toi pour continuer", authRequired: true });
+}
+app.use(requireWebUser);
 
 // Images produit cachées localement (publish EPS sans dépendre d'Ali/Amazon)
 const { ensureCacheDir, localizeHtmlImages, CACHE_DIR } = require("./image-cache");
@@ -3053,38 +3124,53 @@ app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
   }
 });
 
-app.get("/api/accounts", (_req, res) => {
-  res.json({ success: true, data: listEbayAccounts.all() });
+app.get("/api/accounts", (req, res) => {
+  try {
+    if (MULTIUSER && req.webUser) {
+      return res.json({ success: true, data: listEbayAccountsForOwner.all(req.webUser.id) });
+    }
+    res.json({ success: true, data: listEbayAccounts.all() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post("/api/accounts", async (req, res) => {
   try {
-    const { label, refreshToken, env: accEnv = "production", marketplace = "EBAY_US" } = req.body || {};
+    if (MULTIUSER && !req.webUser) {
+      return res.status(401).json({ success: false, error: "Connecte-toi d'abord", authRequired: true });
+    }
+    const { label, refreshToken, env: accEnv = "production", marketplace = "EBAY_FR" } = req.body || {};
     const token = String(refreshToken || "").trim();
     if (token.length < 40) {
       return res.status(400).json({ success: false, error: "refreshToken trop court" });
     }
-    // Probe user id with temporary env override
-    const prev = process.env.EBAY_REFRESH_TOKEN_PROD;
-    const prevEnv = process.env.EBAY_ENV;
-    process.env.EBAY_ENV = accEnv === "sandbox" ? "sandbox" : "production";
-    if (accEnv === "sandbox") process.env.EBAY_REFRESH_TOKEN = token;
-    else process.env.EBAY_REFRESH_TOKEN_PROD = token;
+    const accountProbe = {
+      id: 0,
+      refresh_token: token,
+      env: accEnv === "sandbox" ? "sandbox" : "production",
+      marketplace: marketplace || "EBAY_FR",
+    };
     let userId = "";
     try {
-      const { getSellerIdentity, clearTokenCache } = require("./ebay-api");
-      clearTokenCache();
-      const identity = await getSellerIdentity();
-      userId = identity.userId;
+      userId = await runWithSeller(accountProbe, async () => {
+        clearTokenCache();
+        const identity = await getSellerIdentity();
+        return identity.userId;
+      });
     } catch (e) {
-      if (prev !== undefined) process.env.EBAY_REFRESH_TOKEN_PROD = prev;
-      if (prevEnv !== undefined) process.env.EBAY_ENV = prevEnv;
       return res.status(400).json({ success: false, error: "Token invalide: " + e.message });
     }
-    if (prev !== undefined) process.env.EBAY_REFRESH_TOKEN_PROD = prev;
-    if (prevEnv !== undefined) process.env.EBAY_ENV = prevEnv;
 
-    insertEbayAccount.run(label || userId || "Compte", userId, token, accEnv, marketplace);
+    const ownerId = req.webUser ? req.webUser.id : null;
+    insertEbayAccount.run(
+      label || userId || "Compte",
+      userId,
+      token,
+      accountProbe.env,
+      accountProbe.marketplace,
+      ownerId
+    );
     res.json({ success: true, data: { userId } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -3095,20 +3181,16 @@ app.post("/api/accounts/:id/activate", (req, res) => {
   try {
     const row = getEbayAccountById.get(req.params.id);
     if (!row) return res.status(404).json({ success: false, error: "Compte introuvable" });
-    clearActiveAccounts.run();
-    activateEbayAccount.run(row.id);
-    if (row.env === "sandbox") {
-      process.env.EBAY_ENV = "sandbox";
-      process.env.EBAY_REFRESH_TOKEN = row.refresh_token;
-    } else {
-      process.env.EBAY_ENV = "production";
-      process.env.EBAY_REFRESH_TOKEN_PROD = row.refresh_token;
+    if (MULTIUSER && req.webUser && Number(row.owner_user_id) !== Number(req.webUser.id)) {
+      return res.status(403).json({ success: false, error: "Ce compte eBay ne t'appartient pas" });
     }
-    if (row.marketplace) process.env.EBAY_MARKETPLACE_ID = row.marketplace;
-    try {
-      const { clearTokenCache } = require("./ebay-api");
-      clearTokenCache();
-    } catch (_) {}
+    if (req.webUser) {
+      clearActiveAccountsForOwner.run(req.webUser.id);
+    } else {
+      clearActiveAccounts.run();
+    }
+    activateEbayAccount.run(row.id);
+    clearTokenCache();
     res.json({
       success: true,
       data: { id: row.id, userId: row.user_id, env: row.env, marketplace: row.marketplace },
@@ -3119,8 +3201,228 @@ app.post("/api/accounts/:id/activate", (req, res) => {
 });
 
 app.delete("/api/accounts/:id", (req, res) => {
-  deleteEbayAccount.run(req.params.id);
+  try {
+    const row = getEbayAccountById.get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: "Compte introuvable" });
+    if (MULTIUSER && req.webUser && Number(row.owner_user_id) !== Number(req.webUser.id)) {
+      return res.status(403).json({ success: false, error: "Ce compte eBay ne t'appartient pas" });
+    }
+    deleteEbayAccount.run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Auth web (inscription / login) — chaque user connecte ensuite SON eBay. */
+app.get("/api/auth/me", (req, res) => {
+  res.json({
+    success: true,
+    multiuser: MULTIUSER,
+    user: req.webUser || null,
+    ebay: req.ebayAccount
+      ? {
+          id: req.ebayAccount.id,
+          userId: req.ebayAccount.user_id,
+          label: req.ebayAccount.label,
+          env: req.ebayAccount.env,
+          marketplace: req.ebayAccount.marketplace,
+        }
+      : null,
+  });
+});
+
+app.post("/api/auth/register", (req, res) => {
+  try {
+    if (!MULTIUSER) return res.status(400).json({ success: false, error: "Mode multi-user désactivé" });
+    const user = webAuth.register(req.body?.email, req.body?.password);
+    const token = webAuth.createSession(user.id);
+    webAuth.setSessionCookie(res, token, { secure: String(req.headers["x-forwarded-proto"] || "").includes("https") });
+    res.json({ success: true, data: user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  try {
+    if (!MULTIUSER) return res.status(400).json({ success: false, error: "Mode multi-user désactivé" });
+    const user = webAuth.login(req.body?.email, req.body?.password);
+    const token = webAuth.createSession(user.id);
+    webAuth.setSessionCookie(res, token, { secure: String(req.headers["x-forwarded-proto"] || "").includes("https") });
+    res.json({ success: true, data: user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  webAuth.logout(req, res);
   res.json({ success: true });
+});
+
+const EBAY_OAUTH_SCOPES = [
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/sell.inventory",
+  "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+  "https://api.ebay.com/oauth/api_scope/sell.marketing",
+].join(" ");
+
+function ebayOAuthConfig(isProd) {
+  const clientId = cleanEnvToken(
+    isProd ? process.env.EBAY_PROD_CLIENT_ID || process.env.EBAY_CLIENT_ID : process.env.EBAY_CLIENT_ID
+  );
+  const clientSecret = cleanEnvToken(
+    isProd
+      ? process.env.EBAY_PROD_CLIENT_SECRET || process.env.EBAY_CLIENT_SECRET
+      : process.env.EBAY_CLIENT_SECRET
+  );
+  const ruName = cleanEnvToken(
+    isProd
+      ? process.env.EBAY_RU_NAME_PROD || process.env.EBAY_RU_NAME
+      : process.env.EBAY_RU_NAME || process.env.EBAY_REDIRECT_URI
+  );
+  const authUrl = isProd
+    ? process.env.EBAY_AUTH_URL_PROD || "https://api.ebay.com/identity/v1/oauth2/token"
+    : process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
+  const consentBase = isProd
+    ? "https://auth.ebay.com/oauth2/authorize"
+    : "https://auth.sandbox.ebay.com/oauth2/authorize";
+  return { clientId, clientSecret, ruName, authUrl, consentBase };
+}
+
+/** Démarre OAuth eBay navigateur pour l'utilisateur web connecté. */
+app.get("/api/oauth/ebay/start", (req, res) => {
+  try {
+    if (MULTIUSER && !req.webUser) {
+      return res.status(401).json({ success: false, error: "Connecte-toi d'abord", authRequired: true });
+    }
+    const isProd = String(req.query.env || "production").toLowerCase() !== "sandbox";
+    const marketplace = String(req.query.marketplace || "EBAY_FR").toUpperCase();
+    const cfg = ebayOAuthConfig(isProd);
+    if (!cfg.clientId || !cfg.clientSecret || !cfg.ruName) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "App eBay incomplète côté serveur : renseigne EBAY_PROD_CLIENT_ID/SECRET et EBAY_RU_NAME_PROD dans .env (RuName = URL de callback).",
+      });
+    }
+    const state = signOAuthState(
+      {
+        uid: req.webUser ? req.webUser.id : 0,
+        env: isProd ? "production" : "sandbox",
+        marketplace,
+        exp: Date.now() + 15 * 60 * 1000,
+      },
+      OAUTH_STATE_SECRET
+    );
+    const params = new URLSearchParams({
+      client_id: cfg.clientId,
+      response_type: "code",
+      redirect_uri: cfg.ruName,
+      scope: EBAY_OAUTH_SCOPES,
+      state,
+    });
+    res.json({ success: true, url: `${cfg.consentBase}?${params.toString()}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Callback OAuth eBay — à déclarer comme RuName / redirect URL dans developer.ebay.com */
+app.get("/api/oauth/ebay/callback", async (req, res) => {
+  const fail = (msg) => {
+    res.status(400).send(`<!doctype html><html><body style="font-family:sans-serif;padding:2rem"><h1>Connexion eBay échouée</h1><p>${String(msg).replace(/[<>&]/g, "")}</p><p><a href="/">Retour EBX</a></p></body></html>`);
+  };
+  try {
+    const code = String(req.query.code || "").trim();
+    const stateRaw = String(req.query.state || "").trim();
+    if (!code) return fail(req.query.error_description || req.query.error || "Code OAuth manquant");
+    const state = verifyOAuthState(stateRaw, OAUTH_STATE_SECRET);
+    if (!state) return fail("State OAuth invalide ou expiré — réessaie depuis Paramètres.");
+    if (MULTIUSER && (!req.webUser || Number(req.webUser.id) !== Number(state.uid))) {
+      return fail("Session web différente — reconnecte-toi à EBX puis relance Connecter eBay.");
+    }
+    const isProd = state.env !== "sandbox";
+    const cfg = ebayOAuthConfig(isProd);
+    const credentials = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
+    const tokenRes = await fetch(cfg.authUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: cfg.ruName,
+      }),
+    });
+    const tokenText = await tokenRes.text();
+    let tokenData;
+    try {
+      tokenData = JSON.parse(tokenText);
+    } catch (_) {
+      tokenData = {};
+    }
+    if (!tokenRes.ok || !tokenData.refresh_token) {
+      return fail(`Échange token échoué: ${tokenText.slice(0, 240)}`);
+    }
+    const refresh = String(tokenData.refresh_token);
+    const accountProbe = {
+      id: 0,
+      refresh_token: refresh,
+      env: isProd ? "production" : "sandbox",
+      marketplace: state.marketplace || "EBAY_FR",
+    };
+    let sellerUserId = "";
+    try {
+      sellerUserId = await runWithSeller(accountProbe, async () => {
+        clearTokenCache();
+        const identity = await getSellerIdentity();
+        return identity.userId || "";
+      });
+    } catch (e) {
+      // Token peut être OK même si GetUser échoue selon scopes
+      sellerUserId = "";
+      console.warn("[EBX] OAuth identity probe:", e.message);
+    }
+    const ownerId = req.webUser ? req.webUser.id : state.uid || null;
+    const label = sellerUserId || "Compte eBay";
+    if (ownerId && sellerUserId) {
+      const existing = findEbayAccountByOwnerAndSeller.get(ownerId, sellerUserId);
+      if (existing) {
+        if (ownerId) clearActiveAccountsForOwner.run(ownerId, ownerId);
+        else clearActiveAccounts.run();
+        updateEbayAccountRefresh.run(refresh, accountProbe.env, accountProbe.marketplace, label, existing.id);
+      } else {
+        if (ownerId) clearActiveAccountsForOwner.run(ownerId, ownerId);
+        else clearActiveAccounts.run();
+        const info = insertEbayAccount.run(label, sellerUserId, refresh, accountProbe.env, accountProbe.marketplace, ownerId);
+        activateEbayAccount.run(info.lastInsertRowid);
+      }
+    } else {
+      if (ownerId) clearActiveAccountsForOwner.run(ownerId, ownerId);
+      else clearActiveAccounts.run();
+      const info = insertEbayAccount.run(label, sellerUserId, refresh, accountProbe.env, accountProbe.marketplace, ownerId);
+      activateEbayAccount.run(info.lastInsertRowid);
+    }
+    clearTokenCache();
+    res.send(`<!doctype html><html><body style="font-family:sans-serif;padding:2rem;background:#f3f3fc">
+      <h1 style="color:#242b52">eBay connecté ✔</h1>
+      <p>Compte : <strong>${String(sellerUserId || "OK").replace(/[<>&]/g, "")}</strong> (${accountProbe.env})</p>
+      <p>Tu peux fermer cet onglet et revenir sur EBX — Paramètres.</p>
+      <script>setTimeout(function(){ location.href="/#settings"; }, 1200);</script>
+      <p><a href="/">Ouvrir EBX</a></p>
+    </body></html>`);
+  } catch (err) {
+    fail(err.message);
+  }
+});
+
+app.get("/api/accounts-DISABLED-PLACEHOLDER", (_req, res) => {
+  res.json({ success: true, data: listEbayAccounts.all() });
 });
 
 const server = app.listen(PORT, "0.0.0.0", () => {

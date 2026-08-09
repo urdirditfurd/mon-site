@@ -12,18 +12,34 @@
 
 const https = require("https");
 const { URL } = require("url");
+const { AsyncLocalStorage } = require("async_hooks");
 const { loadEbayEnv, cleanEnvToken } = require("./load-env");
 loadEbayEnv();
+
+/** Contexte vendeur par requête (compte eBay de l'utilisateur web connecté). */
+const sellerContext = new AsyncLocalStorage();
+
+function runWithSeller(account, fn) {
+  return sellerContext.run(account || null, fn);
+}
+
+function currentSeller() {
+  return sellerContext.getStore() || null;
+}
 
 function env(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
 }
 
 function isProduction() {
+  const seller = currentSeller();
+  if (seller?.env) return String(seller.env).toLowerCase() === "production";
   return env("EBAY_ENV", "sandbox").toLowerCase() === "production";
 }
 
 function ebayRefreshToken() {
+  const seller = currentSeller();
+  if (seller?.refresh_token) return cleanEnvToken(seller.refresh_token);
   // En production : uniquement le refresh Prod (jamais le token Sandbox).
   if (isProduction()) {
     return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
@@ -74,6 +90,8 @@ function ebayTradingUrl() {
 }
 
 function ebayFulfillmentPolicyId() {
+  const seller = currentSeller();
+  if (seller?.fulfillment_policy_id) return String(seller.fulfillment_policy_id);
   if (isProduction()) {
     return env("EBAY_FULFILLMENT_POLICY_ID_PROD") || env("EBAY_FULFILLMENT_POLICY_ID");
   }
@@ -81,6 +99,8 @@ function ebayFulfillmentPolicyId() {
 }
 
 function ebayPaymentPolicyId() {
+  const seller = currentSeller();
+  if (seller?.payment_policy_id) return String(seller.payment_policy_id);
   if (isProduction()) {
     return env("EBAY_PAYMENT_POLICY_ID_PROD") || env("EBAY_PAYMENT_POLICY_ID");
   }
@@ -88,15 +108,23 @@ function ebayPaymentPolicyId() {
 }
 
 function ebayReturnPolicyId() {
+  const seller = currentSeller();
+  if (seller?.return_policy_id) return String(seller.return_policy_id);
   if (isProduction()) {
     return env("EBAY_RETURN_POLICY_ID_PROD") || env("EBAY_RETURN_POLICY_ID");
   }
   return env("EBAY_RETURN_POLICY_ID");
 }
 
+function activeMarketplaceId() {
+  const seller = currentSeller();
+  if (seller?.marketplace) return String(seller.marketplace);
+  return env("EBAY_MARKETPLACE_ID", "EBAY_US");
+}
+
 function ebaySiteId() {
   // SiteID Trading API
-  switch (env("EBAY_MARKETPLACE_ID", "EBAY_US")) {
+  switch (activeMarketplaceId()) {
     case "EBAY_FR":
       return "71";
     case "EBAY_GB":
@@ -113,35 +141,44 @@ function ebaySiteId() {
   }
 }
 
-let cachedToken = null;
-let tokenExpiry = 0;
+const tokenCacheByKey = new Map();
+
+function tokenCacheKey() {
+  const seller = currentSeller();
+  if (seller?.id) return `acc:${seller.id}`;
+  return `env:${isProduction() ? "prod" : "sandbox"}`;
+}
 
 function clearTokenCache() {
-  cachedToken = null;
-  tokenExpiry = 0;
+  tokenCacheByKey.delete(tokenCacheKey());
 }
 
 function describeAuthState() {
+  const seller = currentSeller();
   return {
     env: isProduction() ? "production" : "sandbox",
     hasClientId: Boolean(ebayClientId()),
     hasClientSecret: Boolean(ebayClientSecret()),
     refreshLen: ebayRefreshToken().length,
     userLen: ebayUserToken().length,
+    sellerUserId: seller?.user_id || null,
+    accountId: seller?.id || null,
   };
 }
 
 /**
  * Obtient un access token.
  * Priorité :
- *   1. EBAY_REFRESH_TOKEN → access token auto (~18 mois, recommandé)
+ *   1. refresh token du compte eBay actif (utilisateur web) / .env
  *   2. EBAY_USER_TOKEN collé depuis le portail (~2h, dépannage uniquement)
  */
 async function getAccessToken() {
   loadEbayEnv();
 
-  if (cachedToken && Date.now() < tokenExpiry) {
-    return cachedToken;
+  const key = tokenCacheKey();
+  const cached = tokenCacheByKey.get(key);
+  if (cached && Date.now() < cached.expiry) {
+    return cached.token;
   }
 
   const refresh = ebayRefreshToken();
@@ -179,15 +216,17 @@ async function getAccessToken() {
       throw new Error(
         `eBay OAuth refresh failed (${res.status}): ${err}` +
           (isProduction()
-            ? "\n→ Vérifie EBAY_REFRESH_TOKEN_PROD + EBAY_PROD_CLIENT_ID/SECRET (guillemets droits)."
+            ? "\n→ Reconnecte ton compte eBay (Paramètres → Connecter eBay) ou vérifie EBAY_PROD_CLIENT_ID/SECRET."
             : "")
       );
     }
 
     const data = await res.json();
-    cachedToken = data.access_token;
-    tokenExpiry = Date.now() + (Number(data.expires_in || 7200) - 60) * 1000;
-    return cachedToken;
+    tokenCacheByKey.set(key, {
+      token: data.access_token,
+      expiry: Date.now() + (Number(data.expires_in || 7200) - 60) * 1000,
+    });
+    return data.access_token;
   }
 
   const userToken = ebayUserToken();
@@ -201,16 +240,16 @@ async function getAccessToken() {
       "Impossible d'obtenir un access token eBay.",
       `REFRESH_TOKEN=${state.refreshLen} car. | USER_TOKEN=${state.userLen} car.`,
       state.refreshLen === 0
-        ? "→ EBAY_REFRESH_TOKEN manquant dans .env — npm run oauth"
-        : "→ EBAY_REFRESH_TOKEN trop court — vérifie les guillemets / npm run oauth",
-      "Puis ARRÊTE le serveur et relance: node server.js",
+        ? "→ Connecte ton compte eBay dans Paramètres (ou EBAY_REFRESH_TOKEN dans .env)"
+        : "→ Token trop court — reconnecte eBay via Paramètres",
+      "Puis réessaie la publication / sync.",
     ].join("\n")
   );
 }
 
 function ebayMarketplaceLocale() {
   // Inventory Sandbox US exige en-US. Ne pas dériver de Windows FR.
-  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const market = activeMarketplaceId();
   switch (market) {
     case "EBAY_FR":
       return "fr-FR";
@@ -369,7 +408,7 @@ function parseDuplicateListingError(errOrText) {
     const m = text.match(/\((\d{9,16})\)/);
     if (m) existingId = m[1];
   }
-  const isFr = (process.env.EBAY_MARKETPLACE_ID || "").toUpperCase() === "EBAY_FR";
+  const isFr = (activeMarketplaceId() || "").toUpperCase() === "EBAY_FR";
   const host = isFr ? "https://www.ebay.fr" : "https://www.ebay.com";
   const link = existingId ? `${host}/itm/${existingId}` : null;
   return {
@@ -594,7 +633,7 @@ function sanitizeAspects(aspects) {
       .slice(0, 10);
     if (values.length) out[key] = values;
   }
-  const isFr = (process.env.EBAY_MARKETPLACE_ID || "").toUpperCase() === "EBAY_FR";
+  const isFr = (activeMarketplaceId() || "").toUpperCase() === "EBAY_FR";
   const defaultBrand = isFr ? "Sans marque" : "Unbranded";
   if (!out.Brand) out.Brand = [defaultBrand];
   // eBay FR exige souvent la clé localisée "Marque" (erreur 25002 si absente)
@@ -609,7 +648,7 @@ function isInventoryTransientError(status, text) {
 }
 
 async function ensureInventoryLocation(token) {
-  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const market = activeMarketplaceId();
   const isFr = market === "EBAY_FR";
   // Évite la clé "default" ; FR ≠ US (sinon shipping policy FR vs entrepôt US = erreurs)
   const key =
@@ -978,7 +1017,7 @@ function categoryTreeIdForMarketplace(marketplaceId) {
  * Suggère une catégorie feuille via Taxonomy API (évite erreur 25005 non-leaf).
  */
 async function suggestLeafCategoryId(token, title) {
-  const marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const marketplaceId = activeMarketplaceId();
   const treeId = categoryTreeIdForMarketplace(marketplaceId);
   const q = encodeURIComponent(String(title || "electronics").slice(0, 80));
   const url = `${ebayApiBase()}/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${q}`;
@@ -1028,7 +1067,7 @@ async function resolveCategoryId(token, title) {
  * Aspects requis + aspects autorisés en variations pour une catégorie.
  */
 async function fetchCategoryAspectMeta(token, categoryId) {
-  const marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const marketplaceId = activeMarketplaceId();
   const treeId = categoryTreeIdForMarketplace(marketplaceId);
   const url =
     `${ebayApiBase()}/commerce/taxonomy/v1/category_tree/${treeId}` +
@@ -1141,7 +1180,7 @@ function guessAspectValue(aspectName, title, allowedValues) {
 async function buildAspectsForCategory(token, categoryId, title) {
   const required = await fetchRequiredAspectNames(token, categoryId);
   const aspects = {};
-  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
+  const isFr = activeMarketplaceId() === "EBAY_FR";
 
   // Toujours renseigner Marque + identifiants (eBay les demande souvent)
   const brandVal = isFr ? "Sans marque" : "Unbranded";
@@ -1199,7 +1238,7 @@ async function resolveVariationsForCategory(token, categoryId, title, input = {}
     return { enabled: false, aspect: null, values: [] };
   }
 
-  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
+  const isFr = activeMarketplaceId() === "EBAY_FR";
   const meta = await fetchCategoryAspectMeta(token, categoryId);
   const allowed = meta.variationAspects || [];
   const wanted = String(input?.aspect || (isFr ? "Couleur" : "Color")).trim();
@@ -1245,7 +1284,7 @@ async function resolveVariationsForCategory(token, categoryId, title, input = {}
 function normalizeVariations(input, title) {
   // Legacy helper — prefer resolveVariationsForCategory at publish time
   if (input?.enabled === false) return { aspect: null, values: [], enabled: false };
-  const isFr = env("EBAY_MARKETPLACE_ID", "EBAY_US") === "EBAY_FR";
+  const isFr = activeMarketplaceId() === "EBAY_FR";
   const aspect = String(input?.aspect || (isFr ? "Couleur" : "Color")).trim() || (isFr ? "Couleur" : "Color");
   let values = (input?.values || []).map((v) => String(v).trim()).filter(Boolean);
   if (values.length < 2) values = defaultVariantValues(title);
@@ -1267,7 +1306,7 @@ async function publishByInventoryItemGroup(token, groupKey) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer/publish_by_inventory_item_group`;
   const body = {
     inventoryItemGroupKey: groupKey,
-    marketplaceId: env("EBAY_MARKETPLACE_ID", "EBAY_US"),
+    marketplaceId: activeMarketplaceId(),
   };
   const res = await ebayHttpsRequest("POST", url, { token, body, contentLanguage: true });
   const data = res.json();
@@ -1277,7 +1316,8 @@ async function publishByInventoryItemGroup(token, groupKey) {
   return { listingId: data.listingId, status: "published" };
 }
 
-function currencyForMarketplace(marketplaceId = env("EBAY_MARKETPLACE_ID", "EBAY_US")) {
+function currencyForMarketplace(marketplaceId = null) {
+  if (!marketplaceId) marketplaceId = activeMarketplaceId();
   switch (String(marketplaceId || "").toUpperCase()) {
     case "EBAY_GB":
       return "GBP";
@@ -1322,7 +1362,7 @@ async function fetchPolicyById(token, kind, policyId) {
  * Retourne des issues FR actionnables (peut bloquer avant l’appel publish).
  */
 async function diagnosePublishReadiness(token, { price } = {}) {
-  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const market = activeMarketplaceId();
   const currency = currencyForMarketplace(market);
   const issues = [];
   const warnings = [];
@@ -1444,7 +1484,7 @@ async function publishOffer(token, offerId) {
 
 async function createOffer(token, sku, listing, categoryId, merchantLocationKey, options = {}) {
   const url = `${ebayApiBase()}/sell/inventory/v1/offer`;
-  const market = env("EBAY_MARKETPLACE_ID", "EBAY_US");
+  const market = activeMarketplaceId();
   const currency = currencyForMarketplace(market);
   const quantity = Math.max(1, Number(options.quantity) || 1);
   const listingHtml = String(
@@ -2050,4 +2090,7 @@ module.exports = {
   diagnosePublishReadiness,
   fetchSellerPrivileges,
   currencyForMarketplace,
+  runWithSeller,
+  currentSeller,
+  activeMarketplaceId,
 };
