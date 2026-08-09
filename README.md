@@ -96,6 +96,17 @@ REDIS_URL=redis://127.0.0.1:6379 QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 npm run 
 
 Ouvrir ensuite:
 - **App**: `http://localhost:3000`
+- **Short Video** (publish YouTube + TikTok): `http://localhost:3000/short-video`
+
+### Passerelle Short Video
+
+Publie le même short sur YouTube et TikTok depuis `/short-video` (fichier ou lien).  
+Guide : [`docs/short-video.md`](docs/short-video.md)
+
+Variables utiles :
+- `PUBLIC_BASE_URL`
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+- `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` (ou tokens manuels dans l’UI)
 
 ## Utilisation
 

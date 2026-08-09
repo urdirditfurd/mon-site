@@ -14,8 +14,10 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
+const SHORT_VIDEO_HTML_PATH = path.join(ROOT_DIR, "short-video.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
+const { createShortVideoBridgeRouter } = require("./short-video-bridge");
 const { FAL_LIMITS, estimateFalJob, listFalModels, DEFAULT_FAL_MODEL } = require("./fal-limits");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
@@ -3894,12 +3896,20 @@ app.get("/studio", (_req, res) => {
   }
   return res.sendFile(VIDEO_FACTORY_HTML_PATH);
 });
+app.get("/short-video", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(SHORT_VIDEO_HTML_PATH)) {
+    return res.status(404).send("short-video.html introuvable");
+  }
+  return res.sendFile(SHORT_VIDEO_HTML_PATH);
+});
 
 ensureDirs()
   .then(async () => {
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     app.use("/api/sulphur", createSulphurVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
+    app.use("/api/short-video", createShortVideoBridgeRouter({ storageDir: STORAGE_DIR }));
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = resolveYtDlpAvailable();
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);
