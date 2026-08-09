@@ -420,6 +420,29 @@ function supplierKeyFromName(nameOrUrl = "") {
 
 app.use(express.json({ limit: "2mb" }));
 
+/** Auth HTTP basique optionnelle — OBLIGATOIRE si le VPS est public (EBX_BASIC_AUTH_USER + EBX_BASIC_AUTH_PASS). */
+function basicAuthMiddleware(req, res, next) {
+  const user = String(process.env.EBX_BASIC_AUTH_USER || "").trim();
+  const pass = String(process.env.EBX_BASIC_AUTH_PASS || "").trim();
+  if (!user || !pass) return next();
+
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Basic ")) {
+    try {
+      const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+      const idx = decoded.indexOf(":");
+      const u = idx >= 0 ? decoded.slice(0, idx) : decoded;
+      const p = idx >= 0 ? decoded.slice(idx + 1) : "";
+      if (u === user && p === pass) return next();
+    } catch (_) {
+      /* fallthrough */
+    }
+  }
+  res.set("WWW-Authenticate", 'Basic realm="EBX", charset="UTF-8"');
+  return res.status(401).send("Authentification requise");
+}
+app.use(basicAuthMiddleware);
+
 // Images produit cachées localement (publish EPS sans dépendre d'Ali/Amazon)
 const { ensureCacheDir, localizeHtmlImages, CACHE_DIR } = require("./image-cache");
 ensureCacheDir();
@@ -3100,13 +3123,18 @@ app.delete("/api/accounts/:id", (req, res) => {
   res.json({ success: true });
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   const { isProduction } = require("./ebay-api");
-  console.log(`⚡ EBX Server running on http://localhost:${PORT}`);
+  const authOn = Boolean(
+    String(process.env.EBX_BASIC_AUTH_USER || "").trim() &&
+      String(process.env.EBX_BASIC_AUTH_PASS || "").trim()
+  );
+  console.log(`⚡ EBX Server running on http://0.0.0.0:${PORT}`);
   console.log(`📝 Description Builder: desc-v2 (infos produit enrichies)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
   console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
+  console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
 });
 server.on("error", (err) => {
   if (err && err.code === "EADDRINUSE") {
