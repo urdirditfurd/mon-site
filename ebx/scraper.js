@@ -2859,6 +2859,7 @@ async function findCheapestSupplier(
   const byKey = new Map();
   for (const p of pools) {
     if (!p?.url) continue;
+    if (/cdiscount\.com\/[^?]*(?:\/r-|\/f-\d+-nav)/i.test(p.url)) continue;
     const key = String(p.url)
       .split("?")[0]
       .replace(/\/$/, "")
@@ -3312,6 +3313,7 @@ module.exports = {
   scrapeAliExpressSearch,
   scrapeCdiscountSearch,
   findCheapestSupplier,
+  fetchAliExpressPrice,
   searchViaBingRss,
   parsePrice,
   parseEbayCardPrice,
