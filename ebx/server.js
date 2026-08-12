@@ -2148,124 +2148,99 @@ app.post("/api/auto-snipe", async (req, res) => {
         }
         await antiBanDelay({ testMode, label: "target" });
 
-        // 2) Cascade 1 source (style EBX) — pas de course au « moins cher » multi-marketplaces
+        // 2) Mode auto = comparer Amazon / Ali / Cdiscount et prendre le MOINS CHER
         send({
           type: "log",
-          message: `[SOURCE] Recherche fournisseur (${source}) — cascade EBX…`,
+          message:
+            source === "auto"
+              ? `[SOURCE] Comparaison Amazon + AliExpress + Cdiscount — choix du moins cher…`
+              : `[SOURCE] Recherche fournisseur (${source})…`,
         });
         let supplier = null;
         const sourceLog = (m) => send({ type: "log", message: m });
 
-        if (source === "auto" || source === "amazon") {
-          try {
-            const amazonItems = await scrapeAmazonSearch(searchQ, { limit: 3, onLog: sourceLog });
-            const candItems = (amazonItems || [])
-              .filter((p) => p?.url && isSupplierProductUrl(p.url))
-              .map((p) => ({
-                title: p.title || searchQ,
-                url: p.url,
-                source: p.source || "amazon",
-                price: p.price ?? null,
-              }));
-            if (candItems.length) {
-              send({ type: "candidates", items: candItems });
-              for (const c of candItems) {
-                send({
-                  type: "log",
-                  message: `[LINK] ${c.source}: ${String(c.title).slice(0, 50)} → ${c.url}`,
-                });
-              }
-            }
-            supplier = pickFirstProduct(amazonItems);
-            if (supplier) {
-              supplier.source = supplier.source || "amazon";
+        const sourcesWanted =
+          source === "auto"
+            ? ["amazon", "aliexpress", "cdiscount"]
+            : source === "amazon"
+              ? ["amazon"]
+              : source === "aliexpress"
+                ? ["aliexpress"]
+                : source === "cdiscount"
+                  ? ["cdiscount"]
+                  : ["amazon", "aliexpress", "cdiscount"];
+
+        try {
+          const cmp = await findCheapestSupplier(searchQ, {
+            sources: sourcesWanted,
+            limit: 4,
+            onLog: sourceLog,
+          });
+          const cands = (cmp.candidates || [])
+            .filter((p) => p?.url)
+            .map((p) => ({
+              title: p.title || searchQ,
+              url: p.url,
+              source: String(p.source || "fournisseur").replace(/\+.*/, "") || "fournisseur",
+              price: p.price > 0 ? p.price : null,
+              rawSource: p.source,
+            }));
+          if (cands.length) {
+            // Afficher triés par prix (n/a en bas)
+            const sortedShow = [...cands].sort((a, b) => {
+              if (a.price > 0 && b.price > 0) return a.price - b.price;
+              if (a.price > 0) return -1;
+              if (b.price > 0) return 1;
+              return 0;
+            });
+            send({ type: "candidates", items: sortedShow });
+            for (const c of sortedShow.slice(0, 8)) {
               send({
                 type: "log",
-                message: `[SOURCE] Amazon: ${String(supplier.title || "").slice(0, 55)} → ${String(
-                  supplier.url || ""
-                ).slice(0, 90)}`,
+                message: `[LINK] ${c.source}${c.price > 0 ? ` ${Number(c.price).toFixed(2)}€` : " (prix n/a)"}: ${String(
+                  c.title
+                ).slice(0, 48)} → ${c.url}`,
               });
             }
-          } catch (e) {
-            send({ type: "log", message: `[WARN] Amazon: ${e.message}` });
           }
-        }
 
-        if (!supplier && source === "cdiscount") {
-          try {
-            const cdItems = await scrapeCdiscountSearch(searchQ, { limit: 3 });
-            supplier = pickFirstProduct(cdItems);
-          } catch (e) {
-            send({ type: "log", message: `[WARN] Cdiscount: ${e.message}` });
-          }
-          if (!supplier) {
+          const best = cmp.best;
+          if (best?.url && isSupplierProductUrl(best.url)) {
             supplier = {
-              title: searchQ,
-              url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
-              price: null,
-              source: "cdiscount",
+              title: best.title || searchQ,
+              url: best.url,
+              price: best.price > 0 ? best.price : null,
+              source: String(best.source || sourcesWanted[0]).replace(/\+.*/, ""),
+              image: best.image || null,
             };
-          } else {
-            supplier.source = supplier.source || "cdiscount";
-          }
-          send({
-            type: "log",
-            message: `[SOURCE] Cdiscount: ${String(supplier.title || "").slice(0, 55)}`,
-          });
-        }
-
-        if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
-          try {
-            if (source === "aliexpress" || source === "auto") {
-              const aliItems = await scrapeAliExpressSearch(searchQ, { limit: 3 });
-              const aliCands = (aliItems || [])
-                .filter((p) => p?.url && isSupplierProductUrl(p.url))
-                .map((p) => ({
-                  title: p.title || searchQ,
-                  url: p.url,
-                  source: p.source || "aliexpress",
-                  price: p.price ?? null,
-                }));
-              if (aliCands.length) {
-                send({ type: "candidates", items: aliCands });
-                for (const c of aliCands) {
-                  send({
-                    type: "log",
-                    message: `[LINK] ${c.source}: ${String(c.title).slice(0, 50)} → ${c.url}`,
-                  });
-                }
-              }
-              if (!supplier) supplier = pickFirstProduct(aliItems);
-            }
-          } catch (e) {
-            send({ type: "log", message: `[WARN] AliExpress: ${e.message}` });
-          }
-          if (!supplier) {
+            send({
+              type: "log",
+              message: `[BEST] Moins cher: ${supplier.source} ${
+                supplier.price > 0 ? Number(supplier.price).toFixed(2) + "€" : "prix à confirmer"
+              } — ${String(supplier.title).slice(0, 50)} → ${String(supplier.url).slice(0, 90)}` +
+                (cmp.compared ? ` (${cmp.compared} prix comparés)` : ""),
+            });
+          } else if (best?.url) {
             supplier = {
-              title: searchQ,
-              url: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ)}.html`,
-              price: null,
-              source: "aliexpress",
+              title: best.title || searchQ,
+              url: best.url,
+              price: best.price > 0 ? best.price : null,
+              source: String(best.source || "fournisseur").replace(/\+.*/, ""),
             };
-          } else {
-            supplier.source = supplier.source || "aliexpress";
           }
-          send({
-            type: "log",
-            message: `[SOURCE] AliExpress: ${String(supplier.title || "").slice(0, 55)} → ${String(
-              supplier.url || ""
-            ).slice(0, 90)}`,
-          });
+        } catch (e) {
+          send({ type: "log", message: `[WARN] Comparaison sources: ${e.message}` });
         }
 
+        // Fallback ultime si rien trouvé
         if (!supplier && source === "auto") {
           supplier = {
             title: searchQ,
-            url: `https://www.cdiscount.com/search/10/${encodeURIComponent(searchQ)}.html`,
+            url: `https://fr.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ.replace(/\s+/g, "-"))}.html`,
             price: null,
-            source: "cdiscount",
+            source: "aliexpress",
           };
-          send({ type: "log", message: `[SOURCE] Cdiscount fallback (page recherche)` });
+          send({ type: "log", message: `[SOURCE] Fallback page recherche AliExpress` });
         }
 
         if (!supplier) {
@@ -2276,7 +2251,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
-        // Toujours exposer le lien produit trouvé dans l'UI
+        // Toujours exposer le lien produit choisi
         if (supplier.url) {
           send({
             type: "candidate",
@@ -2319,9 +2294,13 @@ app.post("/api/auto-snipe", async (req, res) => {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
           }
         } else {
-          // Pages recherche (wholesale / search) — estimation style EBX officiel
+          // Pages recherche (wholesale / search) — estimation
           const hintPrice = Number(hint?.price) > 0 ? Number(hint.price) : 19.9;
-          const estMult = /cdiscount/i.test(String(supplier.source || "")) ? 0.45 : 0.35;
+          const estMult = /cdiscount/i.test(String(supplier.source || ""))
+            ? 0.45
+            : /aliexpress/i.test(String(supplier.source || ""))
+              ? 0.28
+              : 0.35;
           supplier.price = Number((hintPrice * estMult).toFixed(2));
           send({
             type: "log",
@@ -2334,7 +2313,7 @@ app.post("/api/auto-snipe", async (req, res) => {
           sanitizeProductPrice(supplier.price, supplier.title) ||
           null;
 
-        // Prix manquant sur la fiche → estimation depuis le signal eBay (ne bloque plus l'import)
+        // Prix manquant sur la fiche → estimation depuis le signal eBay
         if (!(cost > 0) || cost < 0.5 || cost > 500) {
           const hintPrice = Number(hint?.price) > 0 ? Number(hint.price) : 19.9;
           const estMult = /aliexpress/i.test(String(supplier.source || ""))
