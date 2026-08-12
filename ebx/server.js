@@ -344,6 +344,13 @@ const insertSavMessage = db.prepare(
     (message_id, item_id, item_title, sender, subject, body, status, draft, escalate, escalate_reason, confidence, reply_source, received_at)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+const updateSavInboxFields = db.prepare(
+  `UPDATE sav_messages
+   SET item_id = ?, item_title = ?, sender = ?, subject = ?, body = ?,
+       received_at = CASE WHEN ? != '' THEN ? ELSE received_at END,
+       updated_at = CURRENT_TIMESTAMP
+   WHERE message_id = ?`
+);
 const updateSavDraft = db.prepare(
   `UPDATE sav_messages
    SET draft = ?, escalate = ?, escalate_reason = ?, confidence = ?, reply_source = ?, status = ?, updated_at = CURRENT_TIMESTAMP
@@ -1634,7 +1641,7 @@ function buildNotificationsPayload() {
       title: o.product || "Vente eBay",
       detail: `${Number(o.amount || 0).toFixed(2)} € · ${o.order_ref}`,
       status: o.status,
-      page: "auto-order",
+      page: "settings",
       at: o.created_at || "",
       unread: true,
     });
@@ -1702,6 +1709,89 @@ app.get("/api/notifications", (_req, res) => {
   }
 });
 
+/** Assistant d'aide (FAQ locale + LLM optionnel). */
+const HELP_FAQ = [
+  {
+    keys: ["sniper", "auto-snipe", "snipe", "import"],
+    reply:
+      "Product Sniper cherche un signal eBay puis un produit Amazon / Ali / Cdiscount. Les liens trouvés s’affichent sous « Produits trouvés ». L’import va dans Mes Listings — tu publies ensuite manuellement.",
+  },
+  {
+    keys: ["prix", "skip", "manquant", "n/a"],
+    reply:
+      "Si le prix fournisseur n’est pas lu (captcha Amazon, Playwright manquant), EBX estime un coût et affiche quand même le lien produit. Sur Windows : installe Chrome + `npx playwright install`, ou utilise Import Manuel avec l’URL produit.",
+  },
+  {
+    keys: ["listing", "publier", "publication", "mes listings"],
+    reply:
+      "Dans Mes Listings : Modifier → vérifier titre/prix/images → Publier eBay. Le bouton Rafraîchir recharge la liste sans attendre le diagnostic OAuth.",
+  },
+  {
+    keys: ["notification", "sav", "message"],
+    reply:
+      "La page Notifications synchronise les messages eBay (GetMemberMessages). Utilise Sync eBay / Rafraîchir ; le badge se met à jour automatiquement.",
+  },
+  {
+    keys: ["ebay", "oauth", "connecter", "compte"],
+    reply:
+      "Paramètres → Connecter mon eBay (OAuth navigateur). Les comptes liés apparaissent en dessous — active celui qui publie.",
+  },
+  {
+    keys: ["auto-order", "commande", "fournisseur", "vente"],
+    reply:
+      "Auto-Order est dans Paramètres. Sync ventes eBay, puis Préparer commandes. Le bot prépare le checkout fournisseur ; tu valides le paiement.",
+  },
+  {
+    keys: ["langue", "allemand", "anglais", "manuel"],
+    reply:
+      "Import Manuel → choisis la langue (FR / EN / DE) avant d’importer. Titre et description sont adaptés à la langue.",
+  },
+];
+
+function answerHelpFaq(message) {
+  const q = String(message || "").toLowerCase();
+  if (!q.trim()) {
+    return "Pose une question sur EBX : sniper, listings, notifications, eBay, Auto-Order…";
+  }
+  let best = null;
+  let score = 0;
+  for (const item of HELP_FAQ) {
+    const hits = item.keys.filter((k) => q.includes(k)).length;
+    if (hits > score) {
+      score = hits;
+      best = item.reply;
+    }
+  }
+  if (best) return best;
+  return "Je peux t’aider sur : Product Sniper, Mes Listings, Notifications, connexion eBay, Auto-Order (Paramètres), Import Manuel. Reformule avec l’un de ces sujets.";
+}
+
+app.post("/api/help-chat", async (req, res) => {
+  try {
+    const message = String(req.body?.message || "").slice(0, 500);
+    let reply = answerHelpFaq(message);
+    let source = "faq";
+    try {
+      const { generateHelpReply } = require("./ai-brain");
+      if (typeof generateHelpReply === "function") {
+        const llm = await Promise.race([
+          generateHelpReply(message),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 2500)),
+        ]);
+        if (llm?.reply) {
+          reply = String(llm.reply).slice(0, 800);
+          source = "llm";
+        }
+      }
+    } catch (_) {
+      /* FAQ suffit */
+    }
+    res.json({ success: true, reply, source });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, reply: answerHelpFaq("") });
+  }
+});
+
 /** Marque des notifications comme lues → le badge disparaît. */
 app.post("/api/notifications/read", (req, res) => {
   try {
@@ -1722,6 +1812,7 @@ app.post("/api/sav/sync", async (_req, res) => {
   try {
     let fetched = 0;
     let created = 0;
+    let updated = 0;
     let live = false;
     let apiError = null;
     try {
@@ -1731,7 +1822,23 @@ app.post("/api/sav/sync", async (_req, res) => {
       fetched = messages.length;
       for (const m of messages) {
         const mid = String(m.messageId || `${m.itemId}-${m.sender}-${m.creationDate}`).slice(0, 80);
-        if (!mid || getSavByMessageId.get(mid)) continue;
+        if (!mid) continue;
+        const received = m.creationDate || "";
+        const existing = getSavByMessageId.get(mid);
+        if (existing) {
+          updateSavInboxFields.run(
+            m.itemId || existing.item_id || "",
+            m.itemTitle || existing.item_title || "",
+            m.sender || existing.sender || "",
+            m.subject || existing.subject || "",
+            m.body || existing.body || "",
+            received,
+            received,
+            mid
+          );
+          updated += 1;
+          continue;
+        }
         insertSavMessage.run(
           mid,
           m.itemId || "",
@@ -1745,7 +1852,7 @@ app.post("/api/sav/sync", async (_req, res) => {
           "",
           0,
           "",
-          m.creationDate || new Date().toISOString()
+          received || new Date().toISOString()
         );
         created += 1;
       }
@@ -1757,11 +1864,12 @@ app.post("/api/sav/sync", async (_req, res) => {
       success: true,
       fetched,
       created,
+      updated,
       live,
       apiError,
       note: live
         ? "Messages eBay synchronisés (Trading GetMemberMessages)."
-        : "API messages indisponible (scopes OAuth / compte) — démo locale chargée. " + (apiError || ""),
+        : "API messages indisponible (scopes OAuth / compte). " + (apiError || ""),
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -2058,6 +2166,23 @@ app.post("/api/auto-snipe", async (req, res) => {
         if (source === "auto" || source === "amazon") {
           try {
             const amazonItems = await scrapeAmazonSearch(searchQ, { limit: 3, onLog: sourceLog });
+            const candItems = (amazonItems || [])
+              .filter((p) => p?.url && isSupplierProductUrl(p.url))
+              .map((p) => ({
+                title: p.title || searchQ,
+                url: p.url,
+                source: p.source || "amazon",
+                price: p.price ?? null,
+              }));
+            if (candItems.length) {
+              send({ type: "candidates", items: candItems });
+              for (const c of candItems) {
+                send({
+                  type: "log",
+                  message: `[LINK] ${c.source}: ${String(c.title).slice(0, 50)} → ${c.url}`,
+                });
+              }
+            }
             supplier = pickFirstProduct(amazonItems);
             if (supplier) {
               supplier.source = supplier.source || "amazon";
@@ -2065,7 +2190,7 @@ app.post("/api/auto-snipe", async (req, res) => {
                 type: "log",
                 message: `[SOURCE] Amazon: ${String(supplier.title || "").slice(0, 55)} → ${String(
                   supplier.url || ""
-                ).slice(0, 70)}`,
+                ).slice(0, 90)}`,
               });
             }
           } catch (e) {
@@ -2098,9 +2223,26 @@ app.post("/api/auto-snipe", async (req, res) => {
 
         if (!supplier && (source === "auto" || source === "aliexpress" || source === "amazon")) {
           try {
-            if (source === "aliexpress") {
+            if (source === "aliexpress" || source === "auto") {
               const aliItems = await scrapeAliExpressSearch(searchQ, { limit: 3 });
-              supplier = pickFirstProduct(aliItems);
+              const aliCands = (aliItems || [])
+                .filter((p) => p?.url && isSupplierProductUrl(p.url))
+                .map((p) => ({
+                  title: p.title || searchQ,
+                  url: p.url,
+                  source: p.source || "aliexpress",
+                  price: p.price ?? null,
+                }));
+              if (aliCands.length) {
+                send({ type: "candidates", items: aliCands });
+                for (const c of aliCands) {
+                  send({
+                    type: "log",
+                    message: `[LINK] ${c.source}: ${String(c.title).slice(0, 50)} → ${c.url}`,
+                  });
+                }
+              }
+              if (!supplier) supplier = pickFirstProduct(aliItems);
             }
           } catch (e) {
             send({ type: "log", message: `[WARN] AliExpress: ${e.message}` });
@@ -2119,7 +2261,7 @@ app.post("/api/auto-snipe", async (req, res) => {
             type: "log",
             message: `[SOURCE] AliExpress: ${String(supplier.title || "").slice(0, 55)} → ${String(
               supplier.url || ""
-            ).slice(0, 70)}`,
+            ).slice(0, 90)}`,
           });
         }
 
@@ -2141,6 +2283,19 @@ app.post("/api/auto-snipe", async (req, res) => {
           continue;
         }
 
+        // Toujours exposer le lien produit trouvé dans l'UI
+        if (supplier.url) {
+          send({
+            type: "candidate",
+            item: {
+              title: supplier.title || searchQ,
+              url: supplier.url,
+              source: supplier.source || "fournisseur",
+              price: supplier.price ?? null,
+            },
+          });
+        }
+
         // 3) Import fiche produit (si URL produit réelle)
         let detail = null;
         if (isSupplierProductUrl(supplier.url)) {
@@ -2158,6 +2313,15 @@ app.post("/api/auto-snipe", async (req, res) => {
                 detail.price > 0 ? Number(detail.price).toFixed(2) + "€" : "n/a"
               })`,
             });
+            send({
+              type: "candidate",
+              item: {
+                title: detail.title || supplier.title || searchQ,
+                url: supplier.url,
+                source: detail.source || supplier.source || "fournisseur",
+                price: detail.price > 0 ? detail.price : supplier.price ?? null,
+              },
+            });
           } catch (e) {
             send({ type: "log", message: `[WARN] Détail produit: ${e.message}` });
           }
@@ -2168,24 +2332,28 @@ app.post("/api/auto-snipe", async (req, res) => {
           supplier.price = Number((hintPrice * estMult).toFixed(2));
           send({
             type: "log",
-            message: `[IMPORT] Page recherche fournisseur — coût estimé ${supplier.price}€ (style EBX). Pour un prix réel, colle une URL produit en Import Manuel.`,
+            message: `[IMPORT] Page recherche fournisseur — coût estimé ${supplier.price}€. Pour un prix réel, colle une URL produit en Import Manuel.`,
           });
         }
 
-        const cost =
+        let cost =
           sanitizeProductPrice(detail?.price, detail?.title || supplier.title) ||
           sanitizeProductPrice(supplier.price, supplier.title) ||
           null;
 
+        // Prix manquant sur la fiche → estimation depuis le signal eBay (ne bloque plus l'import)
         if (!(cost > 0) || cost < 0.5 || cost > 500) {
-          skipped += 1;
-          errors += 1;
+          const hintPrice = Number(hint?.price) > 0 ? Number(hint.price) : 19.9;
+          const estMult = /aliexpress/i.test(String(supplier.source || ""))
+            ? 0.28
+            : /cdiscount/i.test(String(supplier.source || ""))
+              ? 0.45
+              : 0.35;
+          cost = Number((hintPrice * estMult).toFixed(2));
           send({
             type: "log",
-            message: `[SKIP] Prix fournisseur manquant/invalide — change de Source ou Import Manuel avec URL produit`,
+            message: `[WARN] Prix fournisseur n/a — estimation ${cost}€ (signal eBay ${hintPrice}€). Lien produit affiché ci-dessus — vérifie en Import Manuel si besoin.`,
           });
-          send({ type: "stats", scanned, imported, listed, errors });
-          continue;
         }
 
         const sellPrice = Number((cost * (1 + Number(margin) / 100) * 1.35).toFixed(2));

@@ -184,6 +184,28 @@ Réponds UNIQUEMENT en JSON:
 }
 
 /**
+ * Réponse courte pour le chat d'aide produit (optionnel — le serveur a une FAQ).
+ */
+async function generateHelpReply(message = "") {
+  const completion = await client.chat.completions.create({
+    model: "local-model",
+    messages: [
+      {
+        role: "system",
+        content:
+          "Tu es l'assistant d'aide EBX (dropshipping eBay). Réponds en français, max 80 mots, concret. JSON uniquement: {\"reply\":\"...\"}",
+      },
+      { role: "user", content: String(message).slice(0, 400) },
+    ],
+    temperature: 0.3,
+    max_tokens: 256,
+  });
+  const parsed = cleanAndParseJSON(completion.choices[0].message.content);
+  if (parsed._parse_error || !parsed.reply) throw new Error("help LLM parse fail");
+  return { reply: String(parsed.reply).trim(), source: "llm" };
+}
+
+/**
  * Enrichit un listing à partir des infos produit scrapées (titre, bullets, specs).
  * Retourne du JSON structuré — le HTML est reconstruit côté template (pas de HTML IA).
  * @param {object} product
@@ -306,4 +328,10 @@ Erstelle 3 Abschnitte (Material/Design/Nutzung falls relevant), 6 Vorteile und e
   };
 }
 
-module.exports = { generateListing, cleanAndParseJSON, generateSavReply, generateProductCopy };
+module.exports = {
+  generateListing,
+  cleanAndParseJSON,
+  generateSavReply,
+  generateProductCopy,
+  generateHelpReply,
+};

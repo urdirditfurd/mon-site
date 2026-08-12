@@ -307,15 +307,13 @@ let editImageFits = [];
 const PAGE_META = {
   dashboard: ["Dashboard", "Ce qui se passe en temps réel sur eBay"],
   analytics: ["Analytics", "Performance et tendances"],
-  rankings: ["Classements", "Meilleures ventes eBay"],
   competitors: ["Compétiteurs", "Analysez n'importe quel vendeur eBay"],
-  sniper: ["Product Sniper", "Auto-Snipe — listing automatique"],
-  "auto-order": ["Auto-Order", "Commandes fournisseurs automatisées"],
-  listings: ["Mes Listings", "Historique des générations"],
+  sniper: ["Product Sniper", "Import fournisseur vers Mes Listings"],
+  listings: ["Mes Listings", "Annonces générées"],
   "title-builder": ["Title Builder", "Construisez un titre SEO eBay"],
   description: ["Description Builder", "Générez une description HTML en 1 clic"],
-  sav: ["SAV", "Messages eBay — brouillons IA & escalade"],
-  settings: ["Paramètres", "Configuration locale EBX"],
+  sav: ["Notifications", "Messages eBay"],
+  settings: ["Paramètres", "Compte, eBay & Auto-Order"],
 };
 
 function escapeHtml(str) {
@@ -326,7 +324,11 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-function navigate(page) {
+function navigate(page, opts = {}) {
+  if (page === "auto-order" || page === "rankings") {
+    opts = { ...opts, scrollTo: page === "auto-order" ? "auto-order" : opts.scrollTo };
+    page = "settings";
+  }
   document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
   document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
   document.getElementById("page-" + page)?.classList.add("active");
@@ -337,19 +339,23 @@ function navigate(page) {
 
   if (page === "dashboard") loadDashboard();
   if (page === "analytics") loadAnalytics();
-  if (page === "rankings") loadRankings();
   if (page === "competitors") loadCompetitorHistory();
-  if (page === "auto-order") {
-    loadSupplierConfig();
-    loadOrders();
-    markNotificationsRead({ types: ["sale"] });
-  }
   if (page === "listings") loadListings();
   if (page === "sav") {
     loadSav();
     markNotificationsRead({ types: ["message"] });
   }
-  if (page === "settings") loadSettings();
+  if (page === "settings") {
+    loadSettings();
+    loadSupplierConfig();
+    loadOrders();
+    markNotificationsRead({ types: ["sale"] });
+    if (opts.scrollTo === "auto-order") {
+      setTimeout(() => {
+        document.getElementById("settings-auto-order")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+    }
+  }
 }
 
 document.querySelectorAll(".nav-link").forEach((link) => {
@@ -357,15 +363,6 @@ document.querySelectorAll(".nav-link").forEach((link) => {
     e.preventDefault();
     navigate(link.dataset.page);
   });
-});
-
-document.getElementById("rankings-period")?.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-period]");
-  if (!btn) return;
-  rankingsPeriod = btn.dataset.period;
-  document.querySelectorAll("#rankings-period .period-pill").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  loadRankings();
 });
 
 document.getElementById("dash-trending-period")?.addEventListener("click", (e) => {
@@ -430,7 +427,8 @@ async function checkHealth() {
     const json = await res.json();
     el.className = "text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium";
     el.textContent = "● API connectée";
-    document.getElementById("settings-llm").textContent = json.llm_url || "—";
+    const llmEl = document.getElementById("settings-llm");
+    if (llmEl) llmEl.textContent = json.llm_url || "—";
     const mode = document.getElementById("settings-mode");
     if (mode) mode.textContent = json.mode || "live+fallback";
   } catch {
@@ -1222,8 +1220,13 @@ function colorizeLog(msg) {
 async function runSnipe() {
   const btn = document.getElementById("snipe-btn");
   const cons = document.getElementById("snipe-console");
+  const candWrap = document.getElementById("snipe-candidates");
+  const candList = document.getElementById("snipe-candidates-list");
   btn.disabled = true;
   cons.innerHTML = "";
+  if (candWrap) candWrap.classList.add("hidden");
+  if (candList) candList.innerHTML = "";
+  window.__snipeCandidates = [];
   document.getElementById("stat-scanned").textContent = "0";
   document.getElementById("stat-imported").textContent = "0";
   document.getElementById("stat-listed").textContent = "0";
@@ -1238,6 +1241,39 @@ async function runSnipe() {
     source: document.getElementById("snipe-source").value,
     autoList: false,
     testMode: false,
+  };
+
+  const renderCandidates = (items) => {
+    if (!candList || !Array.isArray(items) || !items.length) return;
+    const seen = new Set();
+    const uniq = [];
+    for (const c of items) {
+      const u = String(c.url || "");
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      uniq.push(c);
+    }
+    window.__snipeCandidates = uniq;
+    if (candWrap) candWrap.classList.remove("hidden");
+    candList.innerHTML = uniq
+      .map((c) => {
+        const src = escapeHtml(c.source || "fournisseur");
+        const title = escapeHtml(c.title || "Produit");
+        const url = escapeHtml(c.url || "#");
+        const price =
+          c.price != null && Number(c.price) > 0
+            ? `${Number(c.price).toFixed(2)} €`
+            : "prix n/a";
+        return `<a href="${url}" target="_blank" rel="noopener" class="block rounded-xl border border-[#d4d4f0] bg-[#f8f8ff] px-3 py-2.5 hover:border-[#6d7ddf] transition">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-[#4452a8]">${src}</span>
+            <span class="text-[11px] text-zinc-500">${escapeHtml(price)}</span>
+          </div>
+          <p class="text-sm font-medium mt-1 truncate">${title}</p>
+          <p class="text-[11px] text-[#6d7ddf] mt-0.5 truncate underline">${url}</p>
+        </a>`;
+      })
+      .join("");
   };
 
   const res = await fetch(API + "/api/auto-snipe", {
@@ -1264,6 +1300,12 @@ async function runSnipe() {
         if (ev.type === "log") {
           cons.innerHTML += colorizeLog(ev.message);
           cons.scrollTop = cons.scrollHeight;
+        }
+        if (ev.type === "candidate" && ev.item) {
+          renderCandidates([...(window.__snipeCandidates || []), ev.item]);
+        }
+        if (ev.type === "candidates" && Array.isArray(ev.items)) {
+          renderCandidates([...(window.__snipeCandidates || []), ...ev.items]);
         }
         if (ev.type === "stats" || ev.type === "done") {
           document.getElementById("stat-scanned").textContent = ev.scanned || 0;
@@ -1424,54 +1466,51 @@ async function copyShipAddress(id) {
   }
 }
 
-async function loadListings() {
-  const res = await fetch(API + "/api/listings");
-  const json = await res.json();
-  const rows = json.data || [];
-  let ebayEnv = "sandbox";
+async function loadListings(force = false) {
+  const btn = document.getElementById("listings-refresh-btn");
+  const tbody = document.getElementById("listings-body");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "…";
+  }
+  if (tbody && (force || !tbody.children.length)) {
+    tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-zinc-400">Chargement…</td></tr>`;
+  }
+
+  const listingsPromise = fetch(API + "/api/listings").then((r) => r.json());
+  const setupPromise = fetch(API + "/api/setup")
+    .then((r) => r.json())
+    .catch(() => null);
+
+  let json;
   try {
-    const setup = await (await fetch(API + "/api/setup")).json();
-    const d = setup.data || setup;
-    ebayEnv = d.ebayEnv || "sandbox";
-    const hint = document.getElementById("listings-publish-hint");
-    if (hint) {
-      const seller = d.seller?.userId ? ` Compte OAuth : ${d.seller.userId}.` : d.seller?.error ? ` (OAuth: ${d.seller.error})` : "";
-      if (ebayEnv === "production") {
-        if (!d.policiesProd || !d.refreshTokenProd) {
-          hint.classList.remove("hidden");
-          hint.className =
-            "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100";
-          hint.textContent =
-            "Mode PRODUCTION incomplet : il faut EBAY_REFRESH_TOKEN_PROD + policies *_PROD (npm run oauth:prod puis policies:prod)." +
-            seller;
-        } else {
-          hint.classList.remove("hidden");
-          hint.className =
-            "px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100";
-          hint.textContent =
-            "Mode PRODUCTION — publications sur ton vrai compte eBay." + seller;
-        }
-      } else {
-        hint.classList.remove("hidden");
-        hint.className =
-          "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100 font-medium";
-        hint.textContent =
-          "Mode SANDBOX — les annonces vont sur le compte TEST (testuser), PAS sur ton vrai eBay. Pour le réel : EBAY_ENV=production dans .env, redémarre le serveur." +
-          seller;
-      }
+    json = await listingsPromise;
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-red-500">${escapeHtml(err.message)}</td></tr>`;
     }
-  } catch (_) {}
-  window.__ebxPublishEnv = ebayEnv;
-  const allBtn = document.getElementById("listings-select-all");
-  if (allBtn) allBtn.checked = false;
-  updateListingsBulkBar();
-  document.getElementById("listings-body").innerHTML = rows.length
-    ? rows
-        .map((item) => {
-          const published = item.ebay_listing_id
-            ? `<div class="text-[11px] mt-1 ${
-                item.publish_env === "production" ? "text-emerald-600" : "text-amber-600"
-              }">
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Rafraîchir";
+    }
+    return;
+  }
+
+  const rows = json.data || [];
+  let ebayEnv = window.__ebxPublishEnv || "sandbox";
+
+  const renderRows = () => {
+    const allBtn = document.getElementById("listings-select-all");
+    if (allBtn) allBtn.checked = false;
+    updateListingsBulkBar();
+    if (!tbody) return;
+    tbody.innerHTML = rows.length
+      ? rows
+          .map((item) => {
+            const published = item.ebay_listing_id
+              ? `<div class="text-[11px] mt-1 ${
+                  item.publish_env === "production" ? "text-emerald-600" : "text-amber-600"
+                }">
                 ${item.publish_env === "production" ? "Prod" : "Sandbox"}:
                 <a class="underline" target="_blank" rel="noopener"
                    href="${
@@ -1482,29 +1521,27 @@ async function loadListings() {
                      item.ebay_listing_id
                    )}</a>
               </div>`
-            : `<div class="text-[11px] text-zinc-300 mt-1">Non publié</div>`;
-          const imgWarn =
-            !item.has_images && !item.ebay_listing_id
-              ? `<div class="text-[11px] text-rose-500 mt-1">Sans image — republier tentera de récupérer depuis la source</div>`
-              : "";
-          let varAspect = "";
-          let varValues = [];
-          try {
-            const vj = item.variations_json ? JSON.parse(item.variations_json) : null;
-            if (vj?.aspect) varAspect = vj.aspect;
-            if (Array.isArray(vj?.values)) varValues = vj.values;
-          } catch (_) {}
-          const variationsOk =
-            Boolean(item.variations_active) ||
-            (Boolean(item.ebay_listing_id) && varValues.length >= 2);
-          const varianteBadge = item.ebay_listing_id
-            ? variationsOk
-              ? `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold" title="Variations activées à la publication — tu pourras ajouter d'autres caractéristiques plus tard sur eBay${
-                  varAspect ? ` (${varAspect}: ${varValues.join(", ")})` : ""
-                }">Variante OK · active</span>`
-              : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 font-medium" title="Annonce sans variations détectées — republie pour activer les variantes eBay">Variante inactive</span>`
-            : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-50 text-zinc-400 font-medium" title="Les variations seront activées automatiquement à la publication eBay">Variante à activer</span>`;
-          return `
+              : `<div class="text-[11px] text-zinc-300 mt-1">Non publié</div>`;
+            const imgWarn =
+              !item.has_images && !item.ebay_listing_id
+                ? `<div class="text-[11px] text-rose-500 mt-1">Sans image — republier tentera de récupérer depuis la source</div>`
+                : "";
+            let varAspect = "";
+            let varValues = [];
+            try {
+              const vj = item.variations_json ? JSON.parse(item.variations_json) : null;
+              if (vj?.aspect) varAspect = vj.aspect;
+              if (Array.isArray(vj?.values)) varValues = vj.values;
+            } catch (_) {}
+            const variationsOk =
+              Boolean(item.variations_active) ||
+              (Boolean(item.ebay_listing_id) && varValues.length >= 2);
+            const varianteBadge = item.ebay_listing_id
+              ? variationsOk
+                ? `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold" title="Variations activées">Variante OK</span>`
+                : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 font-medium" title="Republie pour activer les variantes">Variante inactive</span>`
+              : `<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-50 text-zinc-400 font-medium">Variante à activer</span>`;
+            return `
       <tr class="border-b border-zinc-50" data-listing-id="${item.id}">
         <td class="p-3"><input type="checkbox" class="listing-check rounded border-zinc-300" value="${item.id}" onchange="updateListingsBulkBar()" /></td>
         <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
@@ -1523,9 +1560,49 @@ async function loadListings() {
           }
         </td>
       </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="5" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="5" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+  };
+
+  renderRows();
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "Rafraîchir";
+  }
+
+  setupPromise.then((setup) => {
+    if (!setup) return;
+    const d = setup.data || setup;
+    ebayEnv = d.ebayEnv || ebayEnv;
+    window.__ebxPublishEnv = ebayEnv;
+    const hint = document.getElementById("listings-publish-hint");
+    if (!hint) return;
+    const seller = d.seller?.userId
+      ? ` Compte OAuth : ${d.seller.userId}.`
+      : d.seller?.error
+        ? ` (OAuth: ${d.seller.error})`
+        : "";
+    if (ebayEnv === "production") {
+      if (!d.policiesProd || !d.refreshTokenProd) {
+        hint.classList.remove("hidden");
+        hint.className = "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100";
+        hint.textContent =
+          "Mode PRODUCTION incomplet : OAuth + policies Prod requis." + seller;
+      } else {
+        hint.classList.remove("hidden");
+        hint.className = "px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100";
+        hint.textContent = "Mode PRODUCTION — publications sur ton vrai compte eBay." + seller;
+      }
+    } else {
+      hint.classList.remove("hidden");
+      hint.className =
+        "px-5 py-3 text-xs bg-amber-50 text-amber-900 border-b border-amber-100 font-medium";
+      hint.textContent =
+        "Mode SANDBOX — les annonces vont sur le compte TEST. Pour le réel : EBAY_ENV=production." +
+        seller;
+    }
+  });
 }
 
 function selectedListingIds() {
@@ -1976,14 +2053,7 @@ function applyNotificationBadges(data) {
   const messages = Number(data?.messages?.unread ?? data?.messages?.open ?? 0);
   const sales = Number(data?.sales?.unread ?? data?.sales?.pending ?? 0);
   const total = Number(data?.total || messages + sales);
-  setNavCount("nav-badge-sav", messages);
-  setNavCount("nav-badge-orders", sales);
-  document.querySelectorAll(".nav-static-new").forEach((el) => {
-    const forPage = el.getAttribute("data-for");
-    const hide =
-      (forPage === "sav" && messages > 0) || (forPage === "auto-order" && sales > 0);
-    el.classList.toggle("hidden", hide);
-  });
+  setNavCount("nav-badge-sav", total);
   const dot = document.getElementById("notif-bell-dot");
   if (dot) {
     dot.textContent = total > 99 ? "99+" : String(total);
@@ -2013,7 +2083,7 @@ function applyNotificationBadges(data) {
                   ? "bg-amber-50 text-amber-800"
                   : "bg-[#eef0fb] text-[#4452a8]";
             const key = escapeHtml(it.key || `${it.type}:${it.id}`);
-            const page = escapeHtml(it.page || "sav");
+            const page = escapeHtml(it.page === "auto-order" ? "settings" : it.page || "sav");
             return `<button type="button" class="notif-item w-full text-left px-4 py-3" data-notif-key="${key}" onclick="openNotificationItem('${key}', '${page}')">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${kindCls}">${kind}</span>
@@ -2050,7 +2120,8 @@ async function markNotificationsRead(opts = {}) {
 async function openNotificationItem(key, page) {
   await markNotificationsRead({ keys: [key] });
   toggleNotificationsPanel(false);
-  navigate(page);
+  if (page === "settings" || page === "auto-order") navigate("settings", { scrollTo: "auto-order" });
+  else navigate(page || "sav");
 }
 
 async function markAllNotificationsRead() {
@@ -2059,6 +2130,12 @@ async function markAllNotificationsRead() {
 
 async function refreshNotifications(force = false) {
   try {
+    if (force === true || !window.__ebxLastSavSync || Date.now() - window.__ebxLastSavSync > 60000) {
+      try {
+        await fetch(API + "/api/sav/sync", { method: "POST" });
+        window.__ebxLastSavSync = Date.now();
+      } catch (_) {}
+    }
     const res = await fetch(API + "/api/notifications");
     const json = await res.json();
     if (!json.success) throw new Error(json.error || "Notifications indisponibles");
@@ -2134,7 +2211,8 @@ async function toggleNotificationsPanel(force) {
 
 function navigateFromNotif(page) {
   toggleNotificationsPanel(false);
-  navigate(page);
+  if (page === "settings" || page === "auto-order") navigate("settings", { scrollTo: "auto-order" });
+  else navigate(page);
 }
 
 function startNotificationsPolling() {
@@ -2264,12 +2342,14 @@ async function syncSavMessages() {
     const res = await fetch(API + "/api/sav/sync", { method: "POST" });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+    window.__ebxLastSavSync = Date.now();
     alert(
-      (json.live ? "Sync live: " : "Démo/fallback: ") +
-        `${json.fetched || 0} lu(s), ${json.created || 0} nouveau(x).\n` +
+      (json.live ? "Sync live: " : "API indisponible: ") +
+        `${json.fetched || 0} lu(s), ${json.created || 0} nouveau(x), ${json.updated || 0} mis à jour.\n` +
         (json.note || "")
     );
     await loadSav();
+    await refreshNotifications(false);
   } catch (err) {
     alert(err.message);
   }
@@ -2491,20 +2571,7 @@ async function ensureWebSession() {
 }
 
 async function addEbayAccount() {
-  const label = document.getElementById("acc-label")?.value.trim();
-  const marketplace = document.getElementById("acc-market")?.value || "EBAY_US";
-  const refreshToken = document.getElementById("acc-token")?.value.trim();
-  if (!refreshToken) return alert("Colle un refresh token");
-  const res = await fetch(API + "/api/accounts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ label, marketplace, refreshToken, env: "production" }),
-  });
-  const json = await res.json();
-  if (!json.success) return alert(json.error || "Erreur");
-  document.getElementById("acc-token").value = "";
-  alert("Compte ajouté: " + (json.data?.userId || "OK"));
-  loadAccounts();
+  alert("Utilise « Connecter mon eBay » (OAuth) pour lier un compte.");
 }
 
 async function activateEbayAccount(id) {
@@ -3248,13 +3315,11 @@ function loadSettings() {
   checkHealth();
   loadSetupStatus();
   loadAccounts();
+  loadSupplierConfig();
+  loadOrders();
 }
 
 async function loadSetupStatus() {
-  const box = document.getElementById("setup-checklist");
-  const sample = document.getElementById("setup-browse-sample");
-  if (!box) return;
-  box.innerHTML = `<p class="text-sm text-zinc-400">Vérification…</p>`;
   try {
     const res = await fetch(API + "/api/setup");
     const json = await res.json();
@@ -3278,10 +3343,9 @@ async function loadSetupStatus() {
       const cards = [
         ["eBay", d.seller?.ok, d.seller?.userId || "OAuth"],
         ["Browse API", d.browse?.ok, d.browse?.api || d.browse?.error || "—"],
-        ["Amazon", suppliers.amazon?.connected, suppliers.amazon?.enabled === false ? "Désactivé" : suppliers.amazon?.connected ? "Connecté" : "Non connecté"],
+        ["Amazon", suppliers.amazon?.connected, suppliers.amazon?.connected ? "Connecté" : "Non connecté"],
         ["AliExpress", suppliers.aliexpress?.connected, suppliers.aliexpress?.connected ? "Connecté" : "Extension / manuel"],
-        ["Cdiscount", suppliers.cdiscount?.connected || suppliers.cdiscount?.enabled, suppliers.cdiscount?.comingSoon ? "Bientôt" : suppliers.cdiscount?.connected ? "Connecté" : "Activé"],
-        ["LLM local", d.llm?.ok, d.llm?.ok ? "OK" : "Optionnel"],
+        ["Cdiscount", suppliers.cdiscount?.connected || suppliers.cdiscount?.enabled, suppliers.cdiscount?.connected ? "Connecté" : "Activé"],
       ];
       conn.innerHTML = cards
         .map(
@@ -3293,51 +3357,47 @@ async function loadSetupStatus() {
         )
         .join("");
     }
-
-    const pr = d.publishReady;
-    const prOk = pr?.ok === true;
-    const prDetail = prOk
-      ? `OK · retours ${pr.policies?.returnDays ?? "?"}j · ${pr.currency || ""} · qty/mois ${pr.privileges?.sellingLimit?.quantity ?? "n/a"}`
-      : (pr?.issues || []).slice(0, 2).join(" · ") || pr?.warnings?.[0] || "Vérifie policies / limites";
-
-    const rows = [
-      [
-        "Compte vendeur OAuth",
-        d.seller?.ok,
-        d.seller?.ok
-          ? d.seller.userId + (d.seller.email ? ` (${d.seller.email})` : "")
-          : d.seller?.error || "npm run oauth:prod",
-      ],
-      ["Publish eBay prêt (préflight)", prOk, prDetail],
-      ["Browse API (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "EBAY_PROD_*"],
-      ["Refresh token Production", d.refreshTokenProd, d.refreshTokenProd ? "OK" : "npm run oauth:prod"],
-      ["Policies Production", d.policiesProd, d.policiesProd ? "OK" : "npm run policies:prod"],
-      ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis"],
-    ];
-    box.innerHTML = rows
-      .map(
-        ([label, ok, detail]) =>
-          `<div class="flex items-start gap-3 p-3 rounded-xl border ${ok ? "bg-green-50 border-green-100" : "bg-amber-50 border-amber-100"}">
-            <span class="text-lg leading-none">${ok ? "✅" : "⚠️"}</span>
-            <div class="min-w-0"><p class="text-sm font-medium">${label}</p><p class="text-xs text-zinc-500">${escapeHtml(String(detail || ""))}</p></div>
-          </div>`
-      )
-      .join("");
-    if (sample) {
-      if (d.browse?.sample) {
-        sample.classList.remove("hidden");
-        sample.textContent = "Exemple live : " + d.browse.sample;
-      } else {
-        sample.classList.add("hidden");
-      }
-    }
-    const mode = document.getElementById("settings-mode");
-    if (mode) mode.textContent = d.browse?.ok ? "live browse-api" : "fallback / scrape";
     const darkChk = document.getElementById("settings-dark");
     if (darkChk) darkChk.checked = document.body.classList.contains("dark-mode");
   } catch (err) {
-    box.innerHTML = `<p class="text-sm text-red-500">Impossible de charger le statut : ${escapeHtml(err.message)}</p>`;
+    console.warn("[EBX] setup:", err.message);
   }
+}
+
+function toggleHelpChat(force) {
+  const panel = document.getElementById("help-chat-panel");
+  if (!panel) return;
+  const open = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !open);
+  if (open) document.getElementById("help-chat-input")?.focus();
+}
+
+async function sendHelpChat(event) {
+  if (event) event.preventDefault();
+  const input = document.getElementById("help-chat-input");
+  const box = document.getElementById("help-chat-messages");
+  const q = String(input?.value || "").trim();
+  if (!q || !box) return;
+  input.value = "";
+  box.innerHTML += `<div class="help-msg help-msg-user">${escapeHtml(q)}</div>`;
+  box.scrollTop = box.scrollHeight;
+  const pending = document.createElement("div");
+  pending.className = "help-msg help-msg-bot";
+  pending.textContent = "…";
+  box.appendChild(pending);
+  box.scrollTop = box.scrollHeight;
+  try {
+    const res = await fetch(API + "/api/help-chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: q }),
+    });
+    const json = await res.json();
+    pending.textContent = json.reply || json.error || "Pas de réponse.";
+  } catch (err) {
+    pending.textContent = "Erreur : " + err.message;
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 checkHealth();
@@ -3354,7 +3414,7 @@ checkHealth();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

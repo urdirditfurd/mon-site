@@ -146,6 +146,27 @@
     .console .warn { color: #fbbf24; }
     .console .err { color: #f87171; }
     .console .info { color: #94a3b8; }
+    .help-chat { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 70; }
+    .help-chat-toggle {
+      width: 52px; height: 52px; border-radius: 999px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #8e9be5, #4452a8); color: #fff; font-size: 1.35rem; font-weight: 700;
+      box-shadow: 0 12px 28px rgba(68, 82, 168, 0.35);
+    }
+    .help-chat-panel {
+      position: absolute; right: 0; bottom: 4rem; width: min(380px, calc(100vw - 2rem));
+      background: #fff; border: 1px solid #d4d4f0; border-radius: 1.25rem; overflow: hidden;
+      box-shadow: 0 20px 50px rgba(36, 43, 82, 0.18); display: flex; flex-direction: column; max-height: 70vh;
+    }
+    .help-chat-header {
+      background: linear-gradient(135deg, #4452a8, #6d7ddf); color: #fff;
+      padding: 0.9rem 1rem; display: flex; align-items: center; justify-content: space-between;
+    }
+    .help-chat-messages { padding: 0.9rem; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 0.55rem; background: #f8f8ff; }
+    .help-msg { max-width: 92%; padding: 0.65rem 0.8rem; border-radius: 0.9rem; font-size: 0.8125rem; line-height: 1.45; }
+    .help-msg-bot { align-self: flex-start; background: #fff; border: 1px solid #e4e4f5; color: #242b52; }
+    .help-msg-user { align-self: flex-end; background: #6d7ddf; color: #fff; }
+    .help-chat-form { display: flex; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid #e8e8f6; background: #fff; }
+    .help-chat-form input { flex: 1; border: 1px solid #d4d4f0; border-radius: 0.75rem; padding: 0.55rem 0.75rem; font-size: 0.8125rem; }
     .keyword-row:hover { background: #f0fdf4; }
     .period-pill.active { background: #16a34a; color: #fff; }
     .trend-period-pill.active { background: #6d7ddf; color: #fff; }
@@ -289,20 +310,15 @@
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Principal</p>
         <a href="#" data-page="dashboard" class="nav-link active flex items-center gap-2 px-3 py-2 rounded-lg font-medium">Dashboard</a>
         <a href="#" data-page="analytics" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Analytics</a>
-        <a href="#" data-page="rankings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Classements <span class="ml-auto badge-new">New</span></a>
-      </div>
-      <div>
-        <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Recherche</p>
         <a href="#" data-page="competitors" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Compétiteurs</a>
       </div>
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Outils</p>
-        <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper <span class="ml-auto badge-pro">Pro</span></a>
+        <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper</a>
         <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Mes Listings</a>
-        <a href="#" data-page="auto-order" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Order <span id="nav-badge-orders" class="nav-count" aria-hidden="true">0</span><span class="ml-auto badge-new nav-static-new" data-for="auto-order">New</span></a>
         <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Title Builder</a>
         <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Description Builder</a>
-        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">SAV <span id="nav-badge-sav" class="nav-count" aria-hidden="true">0</span><span class="ml-auto badge-new nav-static-new" data-for="sav">New</span></a>
+        <a href="#" data-page="sav" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Notifications <span id="nav-badge-sav" class="nav-count" aria-hidden="true">0</span></a>
       </div>
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Compte</p>
@@ -329,7 +345,7 @@
       </div>
       <div class="flex items-center gap-2 flex-wrap justify-end">
         <div class="relative" id="notif-wrap">
-          <button type="button" id="notif-bell" class="notif-bell" onclick="toggleNotificationsPanel()" title="Notifications SAV & ventes" aria-label="Notifications">
+          <button type="button" id="notif-bell" class="notif-bell" onclick="toggleNotificationsPanel()" title="Notifications" aria-label="Notifications">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
               <path d="M13.73 21a2 2 0 01-3.46 0"></path>
@@ -349,8 +365,8 @@
             </div>
             <div id="notif-list" class="max-h-80 overflow-auto divide-y divide-zinc-50"></div>
             <div class="px-4 py-2.5 border-t border-[#e8e8f6] flex gap-3 text-[11px]">
-              <button type="button" onclick="navigateFromNotif('sav')" class="font-semibold text-[#4452a8] hover:underline">Ouvrir SAV</button>
-              <button type="button" onclick="navigateFromNotif('auto-order')" class="font-semibold text-[#4452a8] hover:underline">Ouvrir ventes</button>
+              <button type="button" onclick="navigateFromNotif('sav')" class="font-semibold text-[#4452a8] hover:underline">Voir tout</button>
+              <button type="button" onclick="navigateFromNotif('settings')" class="font-semibold text-[#4452a8] hover:underline">Ventes / Auto-Order</button>
             </div>
           </div>
         </div>
@@ -454,11 +470,11 @@
             <div class="bg-white rounded-2xl border border-[#d4d4f0] p-4 shadow-sm">
               <h3 class="font-semibold text-sm mb-3">Actions rapides</h3>
               <div class="space-y-2.5">
-                <button type="button" onclick="navigate('rankings')" class="action-blue w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:brightness-95 transition">
+                <button type="button" onclick="navigate('sniper')" class="action-blue w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:brightness-95 transition">
                   <span class="w-10 h-10 rounded-xl bg-[#6d7ddf]/20 text-[#4452a8] flex items-center justify-center text-lg shrink-0">🔍</span>
                   <span>
-                    <span class="block text-sm font-semibold text-ink-900">Rechercher produits</span>
-                    <span class="block text-xs text-zinc-500">Trouver des produits gagnants</span>
+                    <span class="block text-sm font-semibold text-ink-900">Product Sniper</span>
+                    <span class="block text-xs text-zinc-500">Trouver &amp; importer un produit</span>
                   </span>
                 </button>
                 <button type="button" onclick="navigate('competitors')" class="action-violet w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:brightness-95 transition">
@@ -488,35 +504,10 @@
         </div>
       </section>
 
-      <!-- RANKINGS -->
-      <section id="page-rankings" class="page space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h3 class="font-semibold text-lg">Meilleures ventes</h3>
-            <p class="text-sm text-zinc-400" id="rankings-source">Classements eBay live</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <div class="flex bg-zinc-100 rounded-full p-1 text-xs font-medium" id="rankings-period">
-              <button data-period="day" class="period-pill active px-3 py-1.5 rounded-full">Jour</button>
-              <button data-period="week" class="period-pill px-3 py-1.5 rounded-full">Semaine</button>
-              <button data-period="month" class="period-pill px-3 py-1.5 rounded-full">Mois</button>
-            </div>
-            <button onclick="loadRankings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
-          </div>
-        </div>
-        <div class="bg-[#6d7ddf]/10 border border-[#6d7ddf]/25 rounded-2xl px-4 py-3 text-sm text-[#4452a8]" id="rankings-algo">
-          Algo : niches populaires via Browse eBay → prix/ventes issus de la fiche item (pas de fourchette max, pas de sold inventé).
-        </div>
-        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div id="rankings-list" class="divide-y divide-zinc-50"></div>
-        </div>
-      </section>
-
       <!-- COMPETITORS -->
       <section id="page-competitors" class="page space-y-6">
         <div class="bg-white rounded-2xl border border-zinc-200 p-6">
           <h3 class="font-semibold text-lg">Analysez vos concurrents</h3>
-          <p class="text-sm text-zinc-400 mb-4">Découvrez le chiffre d'affaires de n'importe quel vendeur eBay</p>
           <div class="flex gap-3">
             <select id="competitor-market" class="px-3 border border-zinc-200 rounded-xl bg-zinc-50 text-sm">
               <option value="FR">🇫🇷 FR</option>
@@ -548,19 +539,16 @@
           <div class="flex items-start justify-between gap-4">
             <div>
               <h3 class="text-xl font-bold">Auto-Snipe</h3>
-              <p class="text-sm text-zinc-400">Listing automatique 100% mains libres</p>
             </div>
             <button id="snipe-btn" onclick="runSnipe()" class="btn-primary shrink-0">Lancer Auto-Snipe</button>
           </div>
 
           <div>
-            <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Paramètres</p>
             <div class="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
               <div class="lg:col-span-2"><label class="text-xs text-zinc-500">Mot-clé / niche</label><input id="snipe-query" type="text" value="éponge maquillage" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
               <div>
                 <label class="text-xs text-zinc-500">Combien d’annonces</label>
                 <input id="snipe-count" type="number" min="1" max="100" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" />
-                <p class="text-[10px] text-zinc-400 mt-1">Nb de produits à importer/lister en 1 lancement (ex. 1 = une seule annonce)</p>
               </div>
               <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
               <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option><option>Germany</option><option>United Kingdom</option></select></div>
@@ -571,20 +559,16 @@
             </div>
           </div>
 
-          <div>
-            <p class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-3">Options</p>
-            <p class="text-[11px] text-zinc-500 leading-relaxed">
-              Auto-Snipe importe uniquement dans <strong class="text-zinc-700">Mes Listings</strong>
-              (pas de publication eBay automatique). Tu modifies / publies depuis Mes Listings.
-              Flux : signal eBay → cascade fournisseur. Sur Windows, garde Chrome installé pour Amazon.
-            </p>
-          </div>
-
           <div class="grid grid-cols-4 gap-3 text-center text-sm">
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-scanned" class="font-bold text-lg">0</div>Scannés</div>
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-imported" class="font-bold text-lg">0</div>Importés</div>
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-listed" class="font-bold text-lg">0</div>Listés</div>
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-errors" class="font-bold text-lg">0</div>Erreurs</div>
+          </div>
+
+          <div id="snipe-candidates" class="hidden space-y-2">
+            <h4 class="text-sm font-semibold text-ink-900">Produits trouvés</h4>
+            <div id="snipe-candidates-list" class="space-y-2"></div>
           </div>
 
           <div id="snipe-console" class="console bg-zinc-950 text-green-400 rounded-xl p-4 h-64 overflow-auto"></div>
@@ -680,87 +664,18 @@
         </div>
       </section>
 
-      <!-- AUTO ORDER -->
-      <section id="page-auto-order" class="page space-y-4">
-        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-5">
-          <div>
-            <h3 class="font-semibold text-lg">Auto-Order</h3>
-            <p class="text-sm text-zinc-400">Comme EBX : le bot prépare les commandes fournisseurs dès qu’une vente eBay arrive.</p>
-          </div>
-          <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
-            <span><strong>Mode Auto-Order</strong><br><span class="text-xs text-zinc-400">Le bot prépare les commandes fournisseurs dès qu’une vraie vente eBay arrive</span></span>
-            <input id="ao-mode" type="checkbox" class="toggle" onchange="saveAutoOrderSettings()" />
-          </label>
-          <div class="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label class="text-xs text-zinc-500">Max commandes / jour</label>
-              <input id="ao-max" type="number" min="1" max="200" value="50" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()" />
-            </div>
-            <div>
-              <label class="text-xs text-zinc-500">Mode AliExpress</label>
-              <select id="ao-ali-mode" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()">
-                <option value="chrome_extension">Extension Chrome</option>
-                <option value="manual">Manuel assisté</option>
-              </select>
-            </div>
-          </div>
-          <div class="space-y-3">
-            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur commande</span><input id="ao-notify-ok" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
-            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur erreur</span><input id="ao-notify-err" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
-            <label class="flex items-center justify-between gap-4 text-sm"><span>Traiter auto après Sync eBay</span><input id="ao-autosync" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
-          </div>
-          <p class="text-[11px] text-zinc-400">Paiement Ali/Amazon : pas d’API publique fiable. Le bot ouvre le checkout + copie l’adresse acheteur (Extension Chrome pour Ali). Tu valides le paiement.</p>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-4">
-          <h3 class="font-semibold">Fournisseurs</h3>
-          <div id="supplier-cards" class="grid sm:grid-cols-3 gap-3"></div>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
-          <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
-            <div>
-              <h3 class="font-semibold">Ventes eBay</h3>
-              <p class="text-sm text-zinc-400">Uniquement les commandes synchronisées depuis ton compte eBay</p>
-            </div>
-            <div class="flex gap-2 flex-wrap">
-              <button id="orders-bulk-delete" onclick="deleteSelectedOrders()" class="hidden text-sm px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-medium">Supprimer la sélection</button>
-              <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes eBay</button>
-              <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Préparer commandes fournisseurs</button>
-              <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
-            </div>
-          </div>
-          <div id="ao-bot-log" class="hidden px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100"></div>
-          <table class="w-full text-sm">
-            <thead class="text-left text-zinc-400 border-b">
-              <tr>
-                <th class="p-3 w-10"><input type="checkbox" id="orders-select-all" class="rounded border-zinc-300" onchange="toggleSelectAllOrders(this.checked)" title="Tout sélectionner" /></th>
-                <th class="p-3">ID</th>
-                <th class="p-3">Produit + adresse</th>
-                <th class="p-3">Fournisseur</th>
-                <th class="p-3">Montant</th>
-                <th class="p-3">Statut</th>
-                <th class="p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="orders-body"></tbody>
-          </table>
-        </div>
-      </section>
-
       <!-- LISTINGS -->
       <section id="page-listings" class="page">
         <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
           <div class="p-5 border-b flex flex-wrap justify-between items-center gap-3">
             <div>
               <h3 class="font-semibold">Mes Listings</h3>
-              <p class="text-sm text-zinc-400">Illimité · variantes eBay activées à la publish · fin d'annonce</p>
             </div>
             <div class="flex gap-2 flex-wrap">
               <button id="listings-bulk-delete" onclick="deleteSelectedListings()" class="hidden text-sm px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-medium">Supprimer la sélection</button>
               <button onclick="dedupeListings()" class="text-sm px-3 py-1.5 border rounded-lg">Nettoyer doublons</button>
               <button onclick="scrubListingImages()" class="text-sm px-3 py-1.5 border rounded-lg">Réparer images</button>
-              <button onclick="loadListings()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+              <button type="button" id="listings-refresh-btn" onclick="loadListings(true)" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
             </div>
           </div>
           <div id="listings-publish-hint" class="hidden px-5 py-3 text-xs bg-amber-50 text-amber-800 border-b border-amber-100"></div>
@@ -894,21 +809,19 @@
         </div>
       </section>
 
-      <!-- SAV -->
+      <!-- NOTIFICATIONS (messages eBay) -->
       <section id="page-sav" class="page space-y-4">
         <div class="bg-white rounded-2xl border border-zinc-200 p-5 space-y-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="font-semibold text-lg">SAV — messages eBay</h3>
-              <p class="text-sm text-zinc-400">Inbox + brouillons IA + escalade humaine (comme EBX ~80% auto)</p>
+              <h3 class="font-semibold text-lg">Notifications</h3>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button onclick="syncSavMessages()" class="text-sm px-3 py-1.5 border rounded-lg">Sync messages</button>
+              <button onclick="syncSavMessages()" class="text-sm px-3 py-1.5 border rounded-lg">Sync eBay</button>
               <button onclick="autoDraftAllSav()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Brouillons auto</button>
               <button onclick="loadSav()" class="text-sm px-3 py-1.5 border rounded-lg">Rafraîchir</button>
             </div>
           </div>
-          <p class="text-[11px] text-zinc-400">Sync utilise Trading GetMemberMessages. Tu peux supprimer les messages traités ou tests. La date eBay s’affiche pour mesurer le délai de réponse.</p>
         </div>
         <div class="grid lg:grid-cols-5 gap-4">
           <div class="lg:col-span-2 bg-white rounded-2xl border border-zinc-200 overflow-hidden">
@@ -967,7 +880,6 @@
 
         <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <h3 class="font-semibold text-lg">Thème</h3>
-          <p class="text-sm text-zinc-400">Mode clair / sombre — aussi via 🌙 / ☀️ en haut à gauche de la sidebar.</p>
           <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
             <span>Mode sombre</span>
             <input id="settings-dark" type="checkbox" class="toggle" onchange="toggleDarkMode(this.checked)" />
@@ -980,32 +892,7 @@
         </div>
 
         <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
-          <h3 class="font-semibold text-lg">Sécurité</h3>
-          <ul class="text-sm text-zinc-500 space-y-2 list-disc pl-5">
-            <li>Tokens OAuth stockés localement dans <code class="text-xs bg-zinc-100 px-1 rounded">ebx/.env</code> et la base SQLite.</li>
-            <li>Ne partage jamais ton refresh token. Rotation recommandée si exposé.</li>
-            <li>Publications uniquement via le compte eBay actif (multi-comptes ci-dessous).</li>
-          </ul>
-        </div>
-
-        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl opacity-70">
-          <h3 class="font-semibold text-lg">Facturation</h3>
-          <p class="text-sm text-zinc-400">Bientôt — suivi plan Business / quotas (placeholder).</p>
-        </div>
-
-        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
-          <h3 class="font-semibold text-lg">État technique</h3>
-          <div id="setup-checklist" class="space-y-2"></div>
-          <div class="grid sm:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">LLM local</p><code id="settings-llm" class="text-xs">...</code></div>
-            <div class="p-4 rounded-xl bg-zinc-50 border"><p class="text-xs text-zinc-400 mb-1">Mode API</p><span id="settings-mode">live+fallback</span></div>
-          </div>
-          <div id="setup-browse-sample" class="text-xs text-zinc-400 hidden"></div>
-        </div>
-
-        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <h3 class="font-semibold text-lg">Connecter mon eBay</h3>
-          <p class="text-sm text-zinc-400">Chaque utilisateur lie <strong>son</strong> compte vendeur eBay. L’app EBX (clés serveur) reste la tienne ; l’OAuth donne accès à leur boutique.</p>
           <div class="grid sm:grid-cols-2 gap-3">
             <div>
               <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Marché</label>
@@ -1026,28 +913,92 @@
           </div>
           <button type="button" onclick="connectEbayOAuth()" class="btn-primary">Connecter mon eBay</button>
           <p id="oauth-status" class="text-sm text-zinc-500">Statut : non connecté</p>
-          <p class="text-[11px] text-zinc-400">Côté VPS : dans developer.ebay.com → ta RuName doit pointer vers<br><code class="bg-zinc-100 px-1 rounded">https://TON-DOMAINE/api/oauth/ebay/callback</code></p>
         </div>
 
         <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <h3 class="font-semibold text-lg">Comptes eBay liés</h3>
-          <p class="text-sm text-zinc-400">Comptes OAuth de cet utilisateur — active celui qui publie.</p>
-          <div class="grid gap-2 sm:grid-cols-2">
-            <input id="acc-label" class="px-3 py-2 rounded-xl border text-sm" placeholder="Label (ex. Boutique FR)" />
-            <select id="acc-market" class="px-3 py-2 rounded-xl border text-sm">
-              <option value="EBAY_FR">EBAY_FR</option>
-              <option value="EBAY_US">EBAY_US</option>
-              <option value="EBAY_DE">EBAY_DE</option>
-              <option value="EBAY_GB">EBAY_GB</option>
-            </select>
-          </div>
-          <textarea id="acc-token" class="w-full h-24 px-3 py-2 rounded-xl border text-sm font-mono" placeholder="Option avancée : coller un refresh token"></textarea>
-          <button onclick="addEbayAccount()" class="text-sm px-3 py-2 border rounded-xl">Ajouter via token</button>
           <div id="accounts-list" class="space-y-2 text-sm"></div>
+        </div>
+
+        <div id="settings-auto-order" class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-5 max-w-5xl">
+          <h3 class="font-semibold text-lg">Auto-Order</h3>
+          <label class="flex items-center justify-between gap-4 text-sm p-4 rounded-xl bg-zinc-50 border">
+            <span><strong>Mode Auto-Order</strong></span>
+            <input id="ao-mode" type="checkbox" class="toggle" onchange="saveAutoOrderSettings()" />
+          </label>
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-zinc-500">Max commandes / jour</label>
+              <input id="ao-max" type="number" min="1" max="200" value="50" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()" />
+            </div>
+            <div>
+              <label class="text-xs text-zinc-500">Mode AliExpress</label>
+              <select id="ao-ali-mode" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoOrderSettings()">
+                <option value="chrome_extension">Extension Chrome</option>
+                <option value="manual">Manuel assisté</option>
+              </select>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur commande</span><input id="ao-notify-ok" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Notifier sur erreur</span><input id="ao-notify-err" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+            <label class="flex items-center justify-between gap-4 text-sm"><span>Traiter auto après Sync eBay</span><input id="ao-autosync" type="checkbox" class="toggle" checked onchange="saveAutoOrderSettings()" /></label>
+          </div>
+          <div>
+            <h4 class="font-medium text-sm mb-2">Fournisseurs</h4>
+            <div id="supplier-cards" class="grid sm:grid-cols-3 gap-3"></div>
+          </div>
+          <div class="rounded-xl border border-zinc-200 overflow-hidden">
+            <div class="p-4 border-b flex flex-wrap justify-between items-center gap-3">
+              <h4 class="font-medium text-sm">Ventes eBay</h4>
+              <div class="flex gap-2 flex-wrap">
+                <button id="orders-bulk-delete" onclick="deleteSelectedOrders()" class="hidden text-sm px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-medium">Supprimer la sélection</button>
+                <button onclick="syncEbayOrders()" class="text-sm px-3 py-1.5 border rounded-lg">Sync ventes</button>
+                <button onclick="processAutoOrderQueue()" class="btn-primary text-sm">Préparer commandes</button>
+                <button onclick="loadOrders()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+              </div>
+            </div>
+            <div id="ao-bot-log" class="hidden px-5 py-3 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100"></div>
+            <table class="w-full text-sm">
+              <thead class="text-left text-zinc-400 border-b">
+                <tr>
+                  <th class="p-3 w-10"><input type="checkbox" id="orders-select-all" class="rounded border-zinc-300" onchange="toggleSelectAllOrders(this.checked)" title="Tout sélectionner" /></th>
+                  <th class="p-3">ID</th>
+                  <th class="p-3">Produit + adresse</th>
+                  <th class="p-3">Fournisseur</th>
+                  <th class="p-3">Montant</th>
+                  <th class="p-3">Statut</th>
+                  <th class="p-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="orders-body"></tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>
   </main>
+
+  <!-- Aide IA -->
+  <div id="help-chat" class="help-chat">
+    <button type="button" id="help-chat-toggle" class="help-chat-toggle" onclick="toggleHelpChat()" aria-label="Aide IA">?</button>
+    <div id="help-chat-panel" class="help-chat-panel hidden">
+      <div class="help-chat-header">
+        <div>
+          <p class="font-semibold text-sm">Aide EBX</p>
+          <p class="text-[11px] text-white/70">Questions d’utilisation</p>
+        </div>
+        <button type="button" onclick="toggleHelpChat(false)" class="text-white/80 hover:text-white text-lg leading-none">&times;</button>
+      </div>
+      <div id="help-chat-messages" class="help-chat-messages">
+        <div class="help-msg help-msg-bot">Bonjour — pose ta question sur EBX (sniper, listings, eBay, notifications…).</div>
+      </div>
+      <form id="help-chat-form" class="help-chat-form" onsubmit="sendHelpChat(event)">
+        <input id="help-chat-input" type="text" placeholder="Ex. comment publier une annonce ?" autocomplete="off" />
+        <button type="submit" class="btn-primary text-sm shrink-0">Envoyer</button>
+      </form>
+    </div>
+  </div>
 
   <!-- Listing edit modal -->
   <div id="modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4" onclick="closeModalIfBackdrop(event)">
@@ -1149,6 +1100,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=photo-zoom-v1"></script>
+  <script src="app.js?v=help-ui-v2"></script>
 </body>
 </html>
