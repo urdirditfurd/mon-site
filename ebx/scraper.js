@@ -2788,9 +2788,33 @@ async function findCheapestSupplier(
   }
 
   const withPrice = uniq.filter((p) => p.url && p.price != null && p.price > 0);
-  // Moins cher d'abord ; confirme / carte marketplace avant hints Bing
+
+  // Pertinence vs requête (évite DDG Amazon hors-sujet : couverture, pull…)
+  const qTokens = String(query || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3);
+  const relevance = (p) => {
+    const t = String(p.title || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    if (!qTokens.length) return 1;
+    const hits = qTokens.filter((tok) => t.includes(tok)).length;
+    return hits / qTokens.length;
+  };
+  const isWeakSearchHint = (p) => /\+bing|\+ddg/i.test(String(p.source || "")) && !(p.priceConfirmed || p.priceFromMarketplaceCard);
+
+  // Moins cher d'abord ; confirme / carte marketplace avant hints Bing ; pertinence
   const priced = withPrice.sort((a, b) => {
-    const rank = (x) => (x.priceConfirmed ? 0 : x.priceFromMarketplaceCard ? 1 : 2);
+    const relA = relevance(a);
+    const relB = relevance(b);
+    // Exige au moins un token de la requête si possible
+    if (relA >= 0.5 && relB < 0.5) return -1;
+    if (relB >= 0.5 && relA < 0.5) return 1;
+    const rank = (x) => (x.priceConfirmed ? 0 : x.priceFromMarketplaceCard ? 1 : isWeakSearchHint(x) ? 3 : 2);
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
     return a.price - b.price;
   });
@@ -2799,6 +2823,7 @@ async function findCheapestSupplier(
   const noPrice = uniq
     .filter((p) => p.url && p.title && !(p.price > 0))
     .filter((p) => !/^cdiscount\.com$/i.test(p.title))
+    .filter((p) => relevance(p) >= 0.5 || qTokens.length === 0)
     .slice(0, 8);
 
   const merged = [];
@@ -2811,9 +2836,16 @@ async function findCheapestSupplier(
     if (merged.length >= 8) break;
   }
 
+  // Best = moins cher pertinent avec prix ; sinon Ali pertinent ; jamais un Amazon+DDG hors-sujet si mieux existe
+  let best = priced.find((p) => relevance(p) >= 0.5) || priced[0] || null;
+  if (!best) {
+    const aliFirst = merged.find((p) => /aliexpress/i.test(String(p.source || "")) && relevance(p) >= 0.5);
+    best = aliFirst || merged.find((p) => relevance(p) >= 0.5) || merged[0] || null;
+  }
+
   if (merged.length) {
     return {
-      best: priced[0] || merged[0],
+      best,
       candidates: merged,
       compared: priced.filter((p) => p.priceConfirmed || p.priceFromMarketplaceCard).length,
     };
@@ -2821,8 +2853,14 @@ async function findCheapestSupplier(
   // Sans prix : retourne quand même des candidats (le sniper essaiera de scraper)
   const any = uniq
     .filter((p) => p.url && p.title && p.title.length > 12 && !/^cdiscount\.com$/i.test(p.title))
+    .filter((p) => relevance(p) >= 0.5 || qTokens.length === 0)
     .slice(0, 8);
-  return { best: any[0] || uniq.find((p) => p.url) || null, candidates: any.length ? any : uniq.slice(0, 8), compared: 0 };
+  const anyList = any.length ? any : uniq.slice(0, 8);
+  return {
+    best: anyList.find((p) => /aliexpress/i.test(String(p.source || ""))) || anyList[0] || uniq.find((p) => p.url) || null,
+    candidates: anyList,
+    compared: 0,
+  };
 }
 
 function buildHtmlFromProduct(product, themeColor = "#667eea", opts = {}) {

@@ -2070,7 +2070,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe BUSINESS — Mode REEL | Import Mes Listings (pas de publish auto)`,
+      message: `[INIT] Auto-Snipe v3-CHEAPEST — Mode REEL | Compare Amazon+Ali+Cdiscount → moins cher | Import Mes Listings`,
     });
     send({
       type: "log",
