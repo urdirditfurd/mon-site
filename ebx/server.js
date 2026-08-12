@@ -234,10 +234,9 @@ if (!ebayAccountCols.includes("return_policy_id")) {
 }
 
 const webAuth = createWebAuth(db);
-/* Inscription / connexion désactivées pour le moment — réactiver avec EBX_MULTIUSER=1 */
-const MULTIUSER =
-  String(process.env.EBX_MULTIUSER || "0").trim() !== "0" &&
-  String(process.env.EBX_MULTIUSER || "0").toLowerCase() !== "false";
+/* Inscription / connexion DÉSACTIVÉES pour le moment (ignorer EBX_MULTIUSER).
+   Pour réactiver plus tard : remettre la lecture de process.env.EBX_MULTIUSER. */
+const MULTIUSER = false;
 const OAUTH_STATE_SECRET =
   String(process.env.EBX_SESSION_SECRET || process.env.EBX_BASIC_AUTH_PASS || "ebx-oauth-secret").trim();
 
@@ -510,15 +509,8 @@ app.use((req, res, next) => {
 });
 
 function requireWebUser(req, res, next) {
-  if (!MULTIUSER) return next();
-  if (req.webUser) return next();
-  // Pages HTML publiques pour login ; APIs protégées
-  if (req.path === "/" || req.path.endsWith(".html") || req.path.endsWith(".js") || req.path.endsWith(".css")) {
-    return next();
-  }
-  if (req.path.startsWith("/api/auth/") || req.path.startsWith("/api/oauth/")) return next();
-  if (req.path === "/api/health" || req.path === "/api/bot-status") return next();
-  return res.status(401).json({ success: false, error: "Connecte-toi pour continuer", authRequired: true });
+  // Auth web désactivée — accès libre aux APIs
+  return next();
 }
 app.use(requireWebUser);
 

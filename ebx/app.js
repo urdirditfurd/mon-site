@@ -699,9 +699,19 @@ async function loadDashboard(opts = {}) {
         `/api/dashboard?trendPeriod=${encodeURIComponent(period)}&marketplace=${encodeURIComponent(
           marketplace
         )}&refresh=${refresh}`,
-      ctrl ? { signal: ctrl.signal } : undefined
+      {
+        credentials: "same-origin",
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      }
     );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        res.status === 401
+          ? "HTTP 401 — redémarre le serveur (auth désactivée)"
+          : `HTTP ${res.status}${body ? ": " + body.slice(0, 80) : ""}`
+      );
+    }
     const json = await res.json();
     d = json.data || {};
   } catch (err) {
