@@ -367,6 +367,88 @@ function extractAliProductId(url = "") {
   return m ? m[1] : null;
 }
 
+const ALI_EUR_COOKIE =
+  "aep_usuc_f=site=fra&c_tp=EUR&region=FR&b_locale=fr_FR&ae_u_p_s=2; intl_locale=fr_FR";
+
+/**
+ * Résout un prix AliExpress (EUR) via mobile / fiche / Bing — même si la page PC est captcha.
+ */
+async function fetchAliExpressPrice(productIdOrUrl, titleHint = "") {
+  const id = /^\d{6,}$/.test(String(productIdOrUrl || ""))
+    ? String(productIdOrUrl)
+    : extractAliProductId(productIdOrUrl);
+  if (!id) return null;
+
+  const tryParseHtml = (html) => {
+    if (!html || html.length < 400) return null;
+    if (isBlockedSupplierHtml(html)) return null;
+    const emb = extractAliExpressEmbedded(html);
+    if (emb.price > 0) return sanitizeProductPrice(emb.price, titleHint || emb.title);
+    // data-spm / meta
+    const meta =
+      html.match(/itemprop=["']price["'][^>]*content=["']([\d.]+)["']/i) ||
+      html.match(/content=["']([\d.]+)["'][^>]*itemprop=["']price["']/i) ||
+      html.match(/"price"\s*:\s*"?([\d.]+)"?/i) ||
+      html.match(/data-price=["']([\d.,]+)["']/i);
+    if (meta) return sanitizeProductPrice(parsePrice(meta[1] + " €"), titleHint);
+    const nearEuro = html.match(/(\d+[.,]\d{2})\s*€/);
+    if (nearEuro) return sanitizeProductPrice(parsePrice(nearEuro[1] + " €"), titleHint);
+    return null;
+  };
+
+  const urls = [
+    `https://m.aliexpress.com/item/${id}.html`,
+    `https://www.aliexpress.com/item/${id}.html`,
+    `https://fr.aliexpress.com/item/${id}.html`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const { html } = await fetchHtmlResilient(url, {
+        preferChrome: false,
+        extraHeaders: {
+          Referer: "https://fr.aliexpress.com/",
+          "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+          Cookie: ALI_EUR_COOKIE,
+        },
+      });
+      const p = tryParseHtml(html);
+      if (p > 0) return p;
+    } catch (_) {}
+  }
+
+  // Jina reader sur la fiche mobile
+  try {
+    const via = await scrapeProductViaJina(`https://m.aliexpress.com/item/${id}.html`);
+    const p = sanitizeProductPrice(via?.price, titleHint || via?.title);
+    if (p > 0) return p;
+  } catch (_) {}
+
+  // Bing / DDG snippets autour de l'ID produit
+  try {
+    const resolved = await resolvePriceViaSearch(`https://fr.aliexpress.com/item/${id}.html`, titleHint);
+    if (resolved > 0) return resolved;
+  } catch (_) {}
+
+  try {
+    const hits = await searchViaDuckDuckGo(`${id} aliexpress € OR EUR OR prix`, {
+      limit: 8,
+      linkTest: (link) => link.includes(id) || /aliexpress/i.test(link),
+    });
+    const found = [];
+    for (const hit of hits) {
+      for (const p of extractAllPrices(`${hit.title || ""} ${hit.snippet || ""}`)) {
+        const ok = sanitizeProductPrice(p, titleHint || hit.title);
+        if (ok) found.push(ok);
+      }
+    }
+    const med = medianPrice(found);
+    if (med > 0) return med;
+  } catch (_) {}
+
+  return null;
+}
+
 /** Parse le JSON produit embarqué (runParams / imagePathList / props). */
 function extractAliExpressEmbedded(html = "") {
   const out = {
@@ -1147,8 +1229,18 @@ async function scrapeProduct(url) {
     let finalUrl;
     try {
       ({ html, finalUrl } = await fetchHtmlResilient(url, {
-        preferChrome: source === "amazon",
-        extraHeaders: { Referer: source === "amazon" ? "https://www.amazon.fr/" : undefined },
+        preferChrome: source === "amazon" || (source === "aliexpress" && process.platform === "win32"),
+        extraHeaders: {
+          Referer:
+            source === "amazon"
+              ? "https://www.amazon.fr/"
+              : source === "aliexpress"
+                ? "https://fr.aliexpress.com/"
+                : undefined,
+          ...(source === "aliexpress"
+            ? { Cookie: ALI_EUR_COOKIE, "Accept-Language": "fr-FR,fr;q=0.9" }
+            : {}),
+        },
       }));
     } catch (e) {
       throw e;
@@ -1186,10 +1278,19 @@ async function scrapeProduct(url) {
       // Prix manquant → résolution Bing (médiane, anti faux 8mm→8€)
       if (!(directProduct.price > 0)) {
         try {
-          const resolved = await resolvePriceViaSearch(url, directProduct.title);
-          if (resolved > 0) {
-            directProduct.price = resolved;
-            directProduct.price_resolved = true;
+          if (source === "aliexpress") {
+            const aliP = await fetchAliExpressPrice(url, directProduct.title);
+            if (aliP > 0) {
+              directProduct.price = aliP;
+              directProduct.price_resolved = true;
+            }
+          }
+          if (!(directProduct.price > 0)) {
+            const resolved = await resolvePriceViaSearch(url, directProduct.title);
+            if (resolved > 0) {
+              directProduct.price = resolved;
+              directProduct.price_resolved = true;
+            }
           }
         } catch (_) {}
       }
@@ -2429,7 +2530,20 @@ async function scrapeAliExpressSearch(query, { limit = 5 } = {}) {
           priceFromMarketplaceCard: true,
         });
       }
-      if (items.length) return items.slice(0, limit);
+      if (items.length) {
+        // Toujours résoudre les prix Ali (souvent absents du HTML recherche)
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].price > 0) continue;
+          try {
+            const p = await fetchAliExpressPrice(items[i].url, items[i].title);
+            if (p > 0) {
+              items[i].price = p;
+              items[i].priceConfirmed = true;
+            }
+          } catch (_) {}
+        }
+        return items.slice(0, limit);
+      }
     } catch (err) {
       console.warn("[aliexpress search direct]", err.message);
     }
@@ -2477,14 +2591,24 @@ async function scrapeAliExpressSearch(query, { limit = 5 } = {}) {
         }
       }
 
-      for (let i = 0; i < Math.min(items.length, 2); i++) {
-        if (items[i].price) continue;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].price > 0) continue;
         try {
-          const detail = await scrapeProduct(items[i].url);
-          if (detail.price) items[i].price = detail.price;
-          if (detail.title && detail.title.length > 8) items[i].title = detail.title;
-          if (detail.images?.[0]) items[i].image = detail.images[0];
+          const p = await fetchAliExpressPrice(items[i].url, items[i].title);
+          if (p > 0) {
+            items[i].price = p;
+            items[i].priceConfirmed = true;
+            continue;
+          }
         } catch (_) {}
+        if (i < 3) {
+          try {
+            const detail = await scrapeProduct(items[i].url);
+            if (detail.price) items[i].price = detail.price;
+            if (detail.title && detail.title.length > 8) items[i].title = detail.title;
+            if (detail.images?.[0]) items[i].image = detail.images[0];
+          } catch (_) {}
+        }
       }
 
       if (items.length) return items.slice(0, limit);
@@ -2500,13 +2624,24 @@ async function scrapeAliExpressSearch(query, { limit = 5 } = {}) {
       linkTest: (link) => /aliexpress\.[a-z.]+\/item\/\d+/i.test(link),
     });
     const items = ddg.map((i) => ({ ...i, source: "aliexpress+ddg" }));
-    for (let i = 0; i < Math.min(items.length, 2); i++) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].price > 0) continue;
       try {
-        const detail = await scrapeProduct(items[i].url);
-        if (detail.price) items[i].price = detail.price;
-        if (detail.title?.length > 8) items[i].title = detail.title;
-        if (detail.images?.[0]) items[i].image = detail.images[0];
+        const p = await fetchAliExpressPrice(items[i].url, items[i].title);
+        if (p > 0) {
+          items[i].price = p;
+          items[i].priceConfirmed = true;
+          continue;
+        }
       } catch (_) {}
+      if (i < 3) {
+        try {
+          const detail = await scrapeProduct(items[i].url);
+          if (detail.price) items[i].price = detail.price;
+          if (detail.title?.length > 8) items[i].title = detail.title;
+          if (detail.images?.[0]) items[i].image = detail.images[0];
+        } catch (_) {}
+      }
     }
     if (items.length) return items;
   } catch (err) {
@@ -2740,11 +2875,25 @@ async function findCheapestSupplier(
   }
   const uniq = [...byKey.values()];
 
-  // Enrichir les prix manquants (max 6 fiches) avant comparaison — seul le scrape page compte comme prix réel
-  const needPrice = uniq.filter((p) => p.url && (p.price == null || p.price <= 0)).slice(0, 6);
+  // Enrichir les prix manquants — AliExpress en priorité (souvent n/a sinon)
+  const needPrice = uniq
+    .filter((p) => p.url && (p.price == null || p.price <= 0))
+    .sort((a, b) => {
+      const ali = (x) => (/aliexpress/i.test(String(x.source || "")) || /aliexpress/i.test(String(x.url || "")) ? 0 : 1);
+      return ali(a) - ali(b);
+    })
+    .slice(0, 8);
   for (const item of needPrice) {
-    if (/wholesale-|\/search\/|SearchText=/i.test(item.url)) continue;
+    if (/wholesale-|\/search\/|SearchText=|\/r-/i.test(item.url)) continue;
     try {
+      if (/aliexpress/i.test(item.url) || /aliexpress/i.test(String(item.source || ""))) {
+        const p = await fetchAliExpressPrice(item.url, item.title);
+        if (p > 0) {
+          item.price = p;
+          item.priceConfirmed = true;
+          continue;
+        }
+      }
       const detail = await scrapeProduct(item.url);
       if (detail.price > 0) {
         item.price = detail.price;

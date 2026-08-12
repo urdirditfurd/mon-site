@@ -366,6 +366,8 @@ function isSupplierProductUrl(url) {
   const u = String(url || "");
   if (!u || /ebay\.(com|fr|de|co\.uk|it|es)\b/i.test(u)) return false;
   if (/wholesale-|\/w\/wholesale|\/search\/|SearchText=|\/s\?k=/i.test(u)) return false;
+  // Cdiscount pages catégorie / recherche (r-motclé.html) ≠ fiche produit
+  if (/cdiscount\.com\/[^?]*(?:\/r-|\/f-\d+-nav)/i.test(u)) return false;
   return /amazon\.[a-z.]+\/.*(dp|gp\/product)|aliexpress\.com\/item\/|cdiscount\.com\/.+\.html/i.test(u);
 }
 
@@ -2070,7 +2072,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v3-CHEAPEST — Mode REEL | Compare Amazon+Ali+Cdiscount → moins cher | Import Mes Listings`,
+      message: `[INIT] Auto-Snipe v3.1-CHEAPEST — Mode REEL | Prix Ali résolus | Compare → moins cher`,
     });
     send({
       type: "log",
