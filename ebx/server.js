@@ -2067,9 +2067,6 @@ app.post("/api/auto-snipe", async (req, res) => {
     return true;
   };
 
-  const pickFirstProduct = (items) =>
-    (items || []).find((p) => p?.url && isSupplierProductUrl(p.url)) || null;
-
   try {
     send({
       type: "log",
