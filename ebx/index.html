@@ -271,31 +271,8 @@
   </style>
 </head>
 <body class="bg-lunar-200 text-zinc-800 min-h-screen flex">
-  <!-- Gate multi-user : inscription / connexion avant le dashboard -->
-  <div id="auth-gate" class="fixed inset-0 z-[80] hidden items-center justify-center bg-[#1a1f3d]/92 p-4">
-    <div class="bg-white rounded-2xl border border-[#d4d4f0] shadow-2xl w-full max-w-md p-6 space-y-4">
-      <div>
-        <h1 class="text-2xl font-bold text-ink-900 tracking-tight">EBX</h1>
-        <p class="text-sm text-zinc-500 mt-1">Crée un compte, puis connecte <strong>ton</strong> eBay pour publier et sync.</p>
-      </div>
-      <div class="flex bg-zinc-100 rounded-lg p-1 text-sm">
-        <button type="button" id="auth-tab-login" class="flex-1 px-3 py-1.5 rounded-md bg-[#6d7ddf] text-white font-medium">Connexion</button>
-        <button type="button" id="auth-tab-register" class="flex-1 px-3 py-1.5 rounded-md text-zinc-500">Inscription</button>
-      </div>
-      <div class="space-y-3">
-        <div>
-          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Email</label>
-          <input id="auth-email" type="email" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="toi@email.com" />
-        </div>
-        <div>
-          <label class="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Mot de passe</label>
-          <input id="auth-password" type="password" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" placeholder="8 caractères min." />
-        </div>
-        <p id="auth-error" class="text-sm text-red-600 hidden"></p>
-        <button type="button" id="auth-submit" onclick="submitAuth()" class="btn-primary w-full">Continuer</button>
-      </div>
-    </div>
-  </div>
+  <!-- Gate auth désactivée pour le moment (EBX_MULTIUSER=0) -->
+  <div id="auth-gate" class="fixed inset-0 z-[80] hidden items-center justify-center bg-[#1a1f3d]/92 p-4" aria-hidden="true"></div>
 
   <aside class="w-64 bg-ink-900 text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-white/5">
     <div class="p-5 border-b border-white/5 flex items-start justify-between gap-2">
@@ -333,7 +310,7 @@
           <p class="text-xs text-white/80" id="sidebar-ebay-status">eBay non lié</p>
         </div>
       </div>
-      <button type="button" onclick="logoutWebUser()" class="mt-2 w-full text-[11px] text-white/70 hover:text-white underline">Déconnexion</button>
+      <button type="button" onclick="logoutWebUser()" class="mt-2 w-full text-[11px] text-white/70 hover:text-white underline hidden">Déconnexion</button>
     </div>
   </aside>
 
@@ -1100,6 +1077,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=help-ui-v2"></script>
+  <script src="app.js?v=no-auth-v1"></script>
 </body>
 </html>

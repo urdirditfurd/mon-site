@@ -234,9 +234,10 @@ if (!ebayAccountCols.includes("return_policy_id")) {
 }
 
 const webAuth = createWebAuth(db);
+/* Inscription / connexion désactivées pour le moment — réactiver avec EBX_MULTIUSER=1 */
 const MULTIUSER =
-  String(process.env.EBX_MULTIUSER || "1").trim() !== "0" &&
-  String(process.env.EBX_MULTIUSER || "1").toLowerCase() !== "false";
+  String(process.env.EBX_MULTIUSER || "0").trim() !== "0" &&
+  String(process.env.EBX_MULTIUSER || "0").toLowerCase() !== "false";
 const OAUTH_STATE_SECRET =
   String(process.env.EBX_SESSION_SECRET || process.env.EBX_BASIC_AUTH_PASS || "ebx-oauth-secret").trim();
 

@@ -3,7 +3,7 @@ let themeColor = "#6d7ddf";
 let authMode = "login";
 let webUser = null;
 let webEbay = null;
-let multiuserEnabled = true;
+let multiuserEnabled = false;
 const DESC_QUICK = ["#6d7ddf", "#242b52", "#22c55e", "#ef4444"];
 const DESC_PALETTE = [
   "#6d7ddf", "#4452a8", "#242b52", "#1e1b4b", "#e6e6fa", "#c7d2fe",
@@ -2423,7 +2423,7 @@ async function loadAccounts() {
     const res = await fetch(API + "/api/accounts", { credentials: "same-origin" });
     const json = await res.json();
     if (res.status === 401) {
-      showAuthGate(true);
+      box.innerHTML = `<p class="text-zinc-400 text-xs">Aucun compte eBay lié — utilise « Connecter mon eBay ».</p>`;
       return;
     }
     const rows = json.data || [];
@@ -2472,7 +2472,7 @@ async function connectEbayOAuth() {
     );
     const json = await res.json();
     if (res.status === 401 || json.authRequired) {
-      showAuthGate(true);
+      alert(json.error || "OAuth indisponible pour le moment.");
       return;
     }
     if (!json.success || !json.url) throw new Error(json.error || "OAuth indisponible");
@@ -2482,11 +2482,12 @@ async function connectEbayOAuth() {
   }
 }
 
-function showAuthGate(show) {
+function showAuthGate(_show) {
   const gate = document.getElementById("auth-gate");
   if (!gate) return;
-  gate.classList.toggle("hidden", !show);
-  gate.classList.toggle("flex", !!show);
+  // Inscription / connexion désactivées pour le moment
+  gate.classList.add("hidden");
+  gate.classList.remove("flex");
 }
 
 function setAuthTab(mode) {
@@ -2538,14 +2539,15 @@ async function logoutWebUser() {
   await fetch(API + "/api/auth/logout", { method: "POST", credentials: "same-origin" });
   webUser = null;
   webEbay = null;
-  if (multiuserEnabled) showAuthGate(true);
+  showAuthGate(false);
 }
 
 async function ensureWebSession() {
+  showAuthGate(false);
   try {
     const res = await fetch(API + "/api/auth/me", { credentials: "same-origin" });
     const json = await res.json();
-    multiuserEnabled = json.multiuser !== false;
+    multiuserEnabled = json.multiuser === true;
     webUser = json.user || null;
     webEbay = json.ebay || null;
     const emailEl = document.getElementById("sidebar-user-email");
@@ -2558,15 +2560,10 @@ async function ensureWebSession() {
     if (oauthStatus && webEbay) {
       oauthStatus.textContent = `Statut : lié à ${webEbay.userId || webEbay.label} (${webEbay.env})`;
     }
-    if (multiuserEnabled && !webUser) {
-      showAuthGate(true);
-      return false;
-    }
-    showAuthGate(false);
+    // Auth obligatoire désactivée pour le moment
     return true;
   } catch (_) {
-    if (multiuserEnabled) showAuthGate(true);
-    return false;
+    return true;
   }
 }
 
