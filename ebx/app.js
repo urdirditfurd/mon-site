@@ -1239,13 +1239,14 @@ async function runSnipe() {
   window.__snipeCandidates = [];
   document.getElementById("stat-scanned").textContent = "0";
   document.getElementById("stat-imported").textContent = "0";
-  document.getElementById("stat-listed").textContent = "0";
-  document.getElementById("stat-errors").textContent = "0";
+  const errEl = document.getElementById("stat-errors");
+  if (errEl) errEl.textContent = "0";
+  const listedEl = document.getElementById("stat-listed");
+  if (listedEl) listedEl.textContent = "0";
 
   const body = {
     query: document.getElementById("snipe-query")?.value || "gadgets",
-    count: Number(document.getElementById("snipe-count").value),
-    margin: Number(document.getElementById("snipe-margin").value),
+    count: 1,
     marketplace: document.getElementById("snipe-market").value,
     ticket: document.getElementById("snipe-ticket").value,
     source: document.getElementById("snipe-source").value,
@@ -1253,20 +1254,21 @@ async function runSnipe() {
     testMode: false,
   };
 
-  const renderCandidates = (items) => {
+  const renderCandidates = (items, replace = false) => {
     if (!candList || !Array.isArray(items) || !items.length) return;
     const seen = new Set();
+    const base = replace ? [] : window.__snipeCandidates || [];
     const uniq = [];
-    for (const c of items) {
+    for (const c of [...base, ...items]) {
       const u = String(c.url || "");
       if (!u || seen.has(u)) continue;
       seen.add(u);
       uniq.push(c);
     }
-    window.__snipeCandidates = uniq;
+    window.__snipeCandidates = uniq.slice(0, 3);
     if (candWrap) candWrap.classList.remove("hidden");
-    candList.innerHTML = uniq
-      .map((c) => {
+    candList.innerHTML = window.__snipeCandidates
+      .map((c, idx) => {
         const src = escapeHtml(c.source || "fournisseur");
         const title = escapeHtml(c.title || "Produit");
         const url = escapeHtml(c.url || "#");
@@ -1274,14 +1276,16 @@ async function runSnipe() {
           c.price != null && Number(c.price) > 0
             ? `${Number(c.price).toFixed(2)} €`
             : "prix n/a";
-        return `<a href="${url}" target="_blank" rel="noopener" class="block rounded-xl border border-[#d4d4f0] bg-[#f8f8ff] px-3 py-2.5 hover:border-[#6d7ddf] transition">
+        const safeUrl = String(c.url || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        return `<div class="rounded-xl border border-[#d4d4f0] bg-[#f8f8ff] px-3 py-2.5">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-[#4452a8]">${src}</span>
-            <span class="text-[11px] text-zinc-500">${escapeHtml(price)}</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-[#4452a8]">#${idx + 1} · ${src}</span>
+            <span class="text-sm font-semibold text-ink-900">${escapeHtml(price)}</span>
           </div>
-          <p class="text-sm font-medium mt-1 truncate">${title}</p>
-          <p class="text-[11px] text-[#6d7ddf] mt-0.5 truncate underline">${url}</p>
-        </a>`;
+          <p class="text-sm font-medium mt-1">${title}</p>
+          <a href="${url}" target="_blank" rel="noopener" class="text-[11px] text-[#6d7ddf] mt-0.5 block truncate underline">${url}</a>
+          <button type="button" onclick="importSnipeOffer('${safeUrl}', this)" class="mt-2 text-xs btn-primary px-3 py-1.5">Importer dans Mes Listings</button>
+        </div>`;
       })
       .join("");
   };
@@ -1311,22 +1315,44 @@ async function runSnipe() {
           cons.innerHTML += colorizeLog(ev.message);
           cons.scrollTop = cons.scrollHeight;
         }
-        if (ev.type === "candidate" && ev.item) {
-          renderCandidates([...(window.__snipeCandidates || []), ev.item]);
-        }
         if (ev.type === "candidates" && Array.isArray(ev.items)) {
-          renderCandidates([...(window.__snipeCandidates || []), ...ev.items]);
+          renderCandidates(ev.items, true);
         }
         if (ev.type === "stats" || ev.type === "done") {
-          document.getElementById("stat-scanned").textContent = ev.scanned || 0;
-          document.getElementById("stat-imported").textContent = ev.imported || 0;
-          document.getElementById("stat-listed").textContent = ev.listed || 0;
-          document.getElementById("stat-errors").textContent = ev.errors || 0;
+          document.getElementById("stat-scanned").textContent = ev.scanned || ev.offers || 0;
+          document.getElementById("stat-imported").textContent = ev.offers || (window.__snipeCandidates || []).length || 0;
+          if (errEl) errEl.textContent = ev.errors || 0;
         }
       } catch (_) {}
     }
   }
   btn.disabled = false;
+}
+
+async function importSnipeOffer(url, btn) {
+  if (!url) return;
+  const orig = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Import…";
+  }
+  try {
+    const res = await fetch(API + "/api/generate-listing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productUrl: url, themeColor: "#6d7ddf", language: "fr" }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Import échoué");
+    if (btn) btn.textContent = "Importé ✓";
+    alert("Importé dans Mes Listings" + (json.data?.id ? ` (id ${json.data.id})` : "") + ".");
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = orig || "Importer";
+    }
+    alert(err.message);
+  }
 }
 
 async function loadOrders() {
@@ -3421,7 +3447,7 @@ checkHealth();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

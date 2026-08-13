@@ -521,30 +521,35 @@
           </div>
 
           <div>
-            <div class="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div class="lg:col-span-2"><label class="text-xs text-zinc-500">Mot-clé / niche</label><input id="snipe-query" type="text" value="éponge maquillage" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div class="lg:col-span-2"><label class="text-xs text-zinc-500">Mot-clé / article</label><input id="snipe-query" type="text" value="poncho" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
               <div>
-                <label class="text-xs text-zinc-500">Combien d’annonces</label>
-                <input id="snipe-count" type="number" min="1" max="100" value="1" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" />
+                <label class="text-xs text-zinc-500">Marketplace</label>
+                <select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option><option>Germany</option><option>United Kingdom</option></select>
               </div>
-              <div><label class="text-xs text-zinc-500">Marge cible (%)</label><input id="snipe-margin" type="number" value="20" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" /></div>
-              <div><label class="text-xs text-zinc-500">Marketplace</label><select id="snipe-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option>France</option><option>United States</option><option>Germany</option><option>United Kingdom</option></select></div>
-              <div><label class="text-xs text-zinc-500">Ticket Size</label><select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="all">Tous les prix</option><option value="low">Low (0-30€)</option><option value="mid">Mid (30-100€)</option></select></div>
+              <div>
+                <label class="text-xs text-zinc-500">Ticket Size</label>
+                <select id="snipe-ticket" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm">
+                  <option value="all">Tous les prix</option>
+                  <option value="low">Low (0–30 €)</option>
+                  <option value="mid">Mid (30–100 €)</option>
+                </select>
+                <p class="text-[11px] text-zinc-400 mt-1">Fourchette de prix d’achat chez le fournisseur. Tous = aucun filtre. Low = articles ≤ 30 €. Mid = 30–100 €.</p>
+              </div>
             </div>
             <div class="grid md:grid-cols-2 gap-3 mt-3">
-              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="auto">Auto — moins cher (Amazon / Ali / Cdiscount)</option><option value="amazon">Amazon</option><option value="aliexpress">AliExpress</option><option value="cdiscount">Cdiscount</option></select></div>
+              <div><label class="text-xs text-zinc-500">Source</label><select id="snipe-source" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm"><option value="auto">Auto — 3 moins chers (Amazon / Ali / Cdiscount)</option><option value="amazon">Amazon</option><option value="aliexpress">AliExpress</option><option value="cdiscount">Cdiscount</option></select></div>
             </div>
           </div>
 
-          <div class="grid grid-cols-4 gap-3 text-center text-sm">
+          <div class="grid grid-cols-3 gap-3 text-center text-sm">
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-scanned" class="font-bold text-lg">0</div>Scannés</div>
-            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-imported" class="font-bold text-lg">0</div>Importés</div>
-            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-listed" class="font-bold text-lg">0</div>Listés</div>
+            <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-imported" class="font-bold text-lg">0</div>Offres</div>
             <div class="bg-zinc-50 rounded-xl p-3"><div id="stat-errors" class="font-bold text-lg">0</div>Erreurs</div>
           </div>
 
           <div id="snipe-candidates" class="hidden space-y-2">
-            <h4 class="text-sm font-semibold text-ink-900">Produits trouvés</h4>
+            <h4 class="text-sm font-semibold text-ink-900">3 offres les moins chères</h4>
             <div id="snipe-candidates-list" class="space-y-2"></div>
           </div>
 
@@ -1077,6 +1082,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-cheap-v3"></script>
+  <script src="app.js?v=snipe-v4.1"></script>
 </body>
 </html>
