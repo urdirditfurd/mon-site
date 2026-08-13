@@ -2069,7 +2069,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     progress(5, "Initialisation", "Auto-Snipe v4");
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v4.3 — 3 offres les moins chères (Amazon / Ali / Cdiscount) selon ton mot-clé`,
+      message: `[INIT] Auto-Snipe v4.4 — 1 meilleure offre par site (Amazon + Ali + Cdiscount) en parallèle`,
     });
     send({
       type: "log",
@@ -2195,11 +2195,9 @@ app.post("/api/auto-snipe", async (req, res) => {
         priceMin: 0,
         priceMax: 400,
       });
-      progress(85, "Classement des prix", `${cmp.compared || 0} prix comparé(s)`);
-      offers = (cmp.candidates || [])
+      progress(85, "Meilleure offre par site", `${cmp.compared || 0} prix comparé(s)`);
+      const mapped = (cmp.candidates || [])
         .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0 && p.price <= 400)
-        .sort((a, b) => a.price - b.price)
-        .slice(0, 3)
         .map((p) => ({
           title: p.title || searchQ,
           url: p.url,
@@ -2207,6 +2205,21 @@ app.post("/api/auto-snipe", async (req, res) => {
           price: p.price,
           image: p.image || null,
         }));
+      // Garde 1 fiche par marketplace (ne pas écraser Ali par un 2e Amazon)
+      const bySrc = new Map();
+      for (const o of mapped) {
+        const k = String(o.source || "").toLowerCase();
+        if (!bySrc.has(k) || o.price < bySrc.get(k).price) bySrc.set(k, o);
+      }
+      offers = [...bySrc.values()].sort((a, b) => a.price - b.price);
+      if (offers.length < 3) {
+        for (const o of mapped) {
+          if (offers.length >= 3) break;
+          if (offers.some((x) => x.url === o.url)) continue;
+          offers.push(o);
+        }
+        offers.sort((a, b) => a.price - b.price);
+      }
       scanned = Math.max(scanned, Number(cmp.compared) || 0, offers.length);
     } catch (e) {
       send({ type: "log", message: `[WARN] Comparaison sources: ${e.message}` });

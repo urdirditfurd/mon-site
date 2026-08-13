@@ -112,14 +112,46 @@ if (!topOk) {
   console.log("  got", top.map((p) => ({ price: p.price, source: p.source, title: String(p.title).slice(0, 40) })));
 }
 
-const onlyAli = rankSupplierOffers(
-  raw.filter((p) => /aliexpress/i.test(p.source)),
-  "poncho",
-  { limit: 3 }
-);
-const onlyAliOk = onlyAli.length >= 2 && onlyAli.every((p) => p.price < 30);
-console.log(`${onlyAliOk ? "OK" : "FAIL"}  ali-only corrected → ${onlyAli.map((p) => p.price).join(", ")}`);
-if (!onlyAliOk) failed += 1;
+const crowded = [
+  {
+    title: "Poncho Amazon A",
+    url: "https://www.amazon.fr/dp/B0AAAAAAA1",
+    price: 5.99,
+    source: "amazon",
+  },
+  {
+    title: "Poncho Amazon B",
+    url: "https://www.amazon.fr/dp/B0AAAAAAA2",
+    price: 6.49,
+    source: "amazon",
+  },
+  {
+    title: "Poncho Amazon C",
+    url: "https://www.amazon.fr/dp/B0AAAAAAA3",
+    price: 6.99,
+    source: "amazon",
+  },
+  {
+    title: "Poncho AliExpress épais",
+    url: "https://fr.aliexpress.com/item/1005011863385361.html",
+    price: 21.26,
+    source: "aliexpress",
+  },
+  {
+    title: "Poncho Cdiscount camping",
+    url: "https://www.cdiscount.com/sports/poncho-cd.html",
+    price: 12.5,
+    source: "cdiscount",
+  },
+];
+const mixed = rankSupplierOffers(crowded, "poncho", { limit: 3 });
+const mixedSrc = mixed.map((p) => p.source).sort().join(",");
+const mixedOk =
+  mixed.length === 3 &&
+  mixedSrc === "aliexpress,amazon,cdiscount" &&
+  mixed.find((p) => p.source === "amazon").price === 5.99;
+console.log(`${mixedOk ? "OK" : "FAIL"}  1 par site malgré 3 Amazon moins chers → ${mixed.map((p) => `${p.source}:${p.price}`).join(" | ")}`);
+if (!mixedOk) failed += 1;
 
 if (failed) {
   console.error(`\n${failed} échec(s)`);

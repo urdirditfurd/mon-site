@@ -419,9 +419,18 @@ function titleMatchesQuery(title, query) {
   });
 }
 
+function marketplaceOf(p) {
+  const s = `${p?.source || ""} ${p?.url || ""}`.toLowerCase();
+  if (/aliexpress/.test(s)) return "aliexpress";
+  if (/amazon/.test(s)) return "amazon";
+  if (/cdiscount/.test(s)) return "cdiscount";
+  return "";
+}
+
 /**
- * 3 offres les moins chères, pertinentes vs la requête (hors eBay).
- * Diversité : 1 moins cher par marketplace, puis comble jusqu'à `limit`.
+ * 1 meilleure offre par marketplace (Amazon / Ali / Cdiscount), triées par prix.
+ * On ne remplace jamais Ali/Cdiscount par un 2e Amazon moins cher.
+ * Si un site n'a rien, on complète avec d'autres fiches pour viser 3 cartes.
  */
 function rankSupplierOffers(items, query, { limit = 3, priceMin = 0, priceMax = Infinity } = {}) {
   const seen = new Set();
@@ -431,40 +440,50 @@ function rankSupplierOffers(items, query, { limit = 3, priceMin = 0, priceMax = 
     const key = String(p.url).split("?")[0].replace(/\/$/, "").toLowerCase();
     if (seen.has(key)) continue;
     if (!titleMatchesQuery(p.title, query)) continue;
-    const isAli = /aliexpress/i.test(String(p.source || "")) || /aliexpress/i.test(p.url);
+    const isAli = marketplaceOf(p) === "aliexpress";
     let price = Number(p.price);
     if (isAli) price = sanitizeAliExpressPrice(price, p.title) || 0;
     else price = sanitizeProductPrice(price, p.title) || 0;
     if (!(price > 0)) continue;
     if (price < priceMin || price > priceMax) continue;
-    // Hors plage dropship typique Auto-Snipe (centimes mal lus déjà corrigés)
     if (price > 400) continue;
     seen.add(key);
     filtered.push({
       ...p,
       price,
-      source: String(p.source || "fournisseur").replace(/\+.*/, "") || "fournisseur",
+      source: marketplaceOf(p) || String(p.source || "fournisseur").replace(/\+.*/, "") || "fournisseur",
     });
   }
   filtered.sort((a, b) => a.price - b.price);
 
   const max = Math.max(1, Number(limit) || 3);
+  const bySrc = { amazon: [], aliexpress: [], cdiscount: [] };
+  for (const p of filtered) {
+    const k = marketplaceOf(p);
+    if (k && bySrc[k]) bySrc[k].push(p);
+  }
+
   const picked = [];
   const pickedUrls = new Set();
   const take = (p) => {
-    if (!p?.url || picked.length >= max) return;
+    if (!p?.url || picked.length >= max) return false;
     const key = String(p.url).split("?")[0].toLowerCase();
-    if (pickedUrls.has(key)) return;
+    if (pickedUrls.has(key)) return false;
     pickedUrls.add(key);
     picked.push(p);
+    return true;
   };
-  for (const src of ["aliexpress", "amazon", "cdiscount"]) {
-    const hit = filtered.find((p) => String(p.source || p.url || "").toLowerCase().includes(src));
-    if (hit) take(hit);
+
+  // 1) meilleure fiche de chaque site (même si plus chère qu'un 2e Amazon)
+  for (const src of ["amazon", "aliexpress", "cdiscount"]) {
+    if (bySrc[src][0]) take(bySrc[src][0]);
   }
-  for (const p of filtered) {
-    if (picked.length >= max) break;
-    take(p);
+  // 2) si un site est vide, on complète pour viser 3
+  if (picked.length < Math.min(max, 3)) {
+    for (const p of filtered) {
+      if (picked.length >= Math.min(max, 3)) break;
+      take(p);
+    }
   }
   return picked.sort((a, b) => a.price - b.price);
 }
@@ -2889,9 +2908,18 @@ async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
 /**
  * Recherche Cdiscount — HTML direct puis Jina puis DuckDuckGo.
  */
-async function scrapeCdiscountSearch(query, { limit = 5 } = {}) {
+async function scrapeCdiscountSearch(query, { limit = 5, onLog = null } = {}) {
+  const log = (msg) => {
+    console.log(msg);
+    if (typeof onLog === "function") {
+      try {
+        onLog(msg);
+      } catch (_) {}
+    }
+  };
   const slug = encodeURIComponent(String(query || "").trim());
   const url = `https://www.cdiscount.com/search/10/${slug}.html#_his_`;
+  log(`[cdiscount] Recherche "${query}"…`);
 
   try {
     const { html, finalUrl } = await fetchHtml(url, {
@@ -2933,7 +2961,11 @@ async function scrapeCdiscountSearch(query, { limit = 5 } = {}) {
       uniq.push(it);
       if (uniq.length >= limit) break;
     }
-    if (uniq.length) return uniq;
+    if (uniq.length) {
+      log(`[cdiscount] ✓ ${uniq.length} résultat(s) HTML`);
+      return uniq;
+    }
+    log(`[cdiscount] HTML 0 fiche — fallback Jina/Bing`);
   } catch (err) {
     console.warn("[cdiscount search direct]", err.message);
   }
@@ -2995,108 +3027,66 @@ async function scrapeCdiscountSearch(query, { limit = 5 } = {}) {
 }
 
 /**
- * Compare Amazon / AliExpress / Cdiscount et retourne le moins cher avec prix réel si possible.
+ * Compare Amazon / AliExpress / Cdiscount EN PARALLÈLE.
+ * 1 meilleure offre pertinente par site (pas 3 Amazon).
  */
 async function findCheapestSupplier(
   query,
   { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3, onLog = null, priceMin = 0, priceMax = Infinity } = {}
 ) {
-  const pools = [];
-  const tasks = [];
-  const want = new Set(sources.includes("auto") ? ["amazon", "aliexpress", "cdiscount"] : sources);
+  const log = (m) => {
+    if (typeof onLog === "function") {
+      try {
+        onLog(m);
+      } catch (_) {}
+    }
+  };
+  const want = (sources.includes("auto") ? ["amazon", "aliexpress", "cdiscount"] : sources).filter((s) =>
+    /^(amazon|aliexpress|cdiscount)$/i.test(s)
+  );
+  const perSourceLimit = 5;
 
-  if (want.has("aliexpress")) {
-    tasks.push(
-      scrapeAliExpressSearch(query, { limit, onLog }).then((items) =>
-        items.map((i) => ({
-          ...i,
-          source: i.source || "aliexpress",
-          priceFromMarketplaceCard: i.price > 0 && !/\+bing|\+ddg/i.test(String(i.source || "")),
-        }))
-      )
-    );
-    // Plusieurs requêtes Bing — le site: strict rate souvent
-    for (const bq of [`${query} aliexpress`, `${query} site:aliexpress.com/item`, `${query} aliexpress item €`]) {
-      tasks.push(
-        searchViaBingRss(bq, {
-          limit: limit + 2,
-          linkTest: (link) => /aliexpress\.[a-z.]+\/item\/\d+/i.test(link),
-        })
-          .then((items) =>
-            items.map((i) => ({
-              ...i,
-              source: "aliexpress+bing",
-            }))
-          )
-          .catch(() => [])
-      );
+  const scrapeOne = async (name) => {
+    try {
+      if (name === "amazon") return (await scrapeAmazonSearch(query, { limit: perSourceLimit, onLog })) || [];
+      if (name === "aliexpress") return (await scrapeAliExpressSearch(query, { limit: perSourceLimit, onLog })) || [];
+      return (await scrapeCdiscountSearch(query, { limit: perSourceLimit, onLog })) || [];
+    } catch (e) {
+      log(`[${name}] échec: ${e.message}`);
+      return [];
+    }
+  };
+
+  log(`[SOURCE] Recherche parallèle ${want.join(" + ")}…`);
+  const settled = await Promise.all(
+    want.map(async (name) => ({ name, items: await scrapeOne(name) }))
+  );
+
+  for (const row of settled) {
+    if ((row.items || []).length) continue;
+    log(`[SOURCE] ${row.name}: 0 résultat — nouvel essai`);
+    row.items = await scrapeOne(row.name);
+  }
+
+  const pools = [];
+  for (const row of settled) {
+    const n = (row.items || []).length;
+    log(`[SOURCE] ${row.name}: ${n} candidat(s) brut(s)`);
+    for (const i of row.items || []) {
+      pools.push({ ...i, source: i.source || row.name });
     }
   }
-  if (want.has("amazon")) {
-    tasks.push(
-      scrapeAmazonSearch(query, { limit, onLog }).then((items) =>
-        items.map((i) => ({
-          ...i,
-          source: i.source || "amazon",
-          priceFromMarketplaceCard: i.price > 0,
-        }))
-      )
-    );
-    tasks.push(
-      searchViaBingRss(`${query} site:amazon.fr/dp`, {
-        limit,
-        linkTest: (link) => /amazon\.[a-z.]+\/.*(dp|gp\/product)/i.test(link),
-      })
-        .then((items) => items.map((i) => ({ ...i, source: "amazon+bing" })))
-        .catch(() => [])
-    );
-  }
-  if (want.has("cdiscount")) {
-    tasks.push(
-      scrapeCdiscountSearch(query, { limit }).then((items) =>
-        items.map((i) => ({
-          ...i,
-          source: i.source || "cdiscount",
-          priceFromMarketplaceCard: i.price > 0 && !/\+bing|\+ddg/i.test(String(i.source || "cdiscount")),
-        }))
-      )
-    );
-    tasks.push(
-      searchViaBingRss(`${query} site:cdiscount.com`, {
-        limit,
-        linkTest: (link) => /cdiscount\.com\/.+\.html/i.test(link) && !/search/i.test(link),
-      })
-        .then((items) => items.map((i) => ({ ...i, source: "cdiscount+bing" })))
-        .catch(() => [])
-    );
-  }
 
-  const results = await Promise.allSettled(tasks);
-  for (const r of results) {
-    if (r.status === "fulfilled" && Array.isArray(r.value)) pools.push(...r.value);
-  }
-
-  if (typeof onLog === "function") {
-    try {
-      onLog(`[SOURCE] ${pools.length} candidat(s) bruts après scrape (avant dédup/VERIFY)`);
-    } catch (_) {}
-  }
-
-  // Déduplique par URL produit normalisée
   const byKey = new Map();
   for (const p of pools) {
     if (!p?.url) continue;
     if (/cdiscount\.com\/[^?]*(?:\/r-|\/f-\d+-nav)/i.test(p.url)) continue;
-    const key = String(p.url)
-      .split("?")[0]
-      .replace(/\/$/, "")
-      .toLowerCase();
+    const key = String(p.url).split("?")[0].replace(/\/$/, "").toLowerCase();
     const prev = byKey.get(key);
     if (!prev) {
       byKey.set(key, p);
       continue;
     }
-    // Garde le plus complet (prix + meilleur titre)
     const score = (x) => (x.price > 0 ? 10 : 0) + Math.min(String(x.title || "").length, 40) / 10;
     if (score(p) > score(prev)) byKey.set(key, { ...prev, ...p, price: p.price || prev.price });
     else if (!prev.price && p.price) byKey.set(key, { ...prev, price: p.price });
@@ -3109,95 +3099,72 @@ async function findCheapestSupplier(
     return titleMatchesQuery(title, query);
   });
 
-  // Enrichir titre + prix — surtout AliExpress (Bing colle parfois le mot-clé sur une fiche hors-sujet)
-  const needMeta = uniq
-    .filter((p) => {
-      if (!p?.url || /wholesale-|\/search\/|SearchText=|\/r-/i.test(p.url)) return false;
-      const ali = /aliexpress/i.test(p.url) || /aliexpress/i.test(String(p.source || ""));
-      const titleOk = p.title && p.title.length >= 12 && titleMatchesQuery(p.title, query);
-      const priceOk = p.price > 0;
-      if (ali && (!titleOk || !priceOk)) return true;
-      if (!priceOk) return true;
-      return false;
-    })
-    .sort((a, b) => {
-      const ali = (x) => (/aliexpress/i.test(String(x.source || "")) || /aliexpress/i.test(String(x.url || "")) ? 0 : 1);
-      return ali(a) - ali(b);
-    })
-    .slice(0, 10);
-  for (const item of needMeta) {
-    try {
-      if (/aliexpress/i.test(item.url) || /aliexpress/i.test(String(item.source || ""))) {
-        const meta = await fetchAliExpressMeta(item.url, item.title);
-        if (meta.price > 0) {
-          item.price = meta.price;
+  // Enrichir PRIX/TITRE par site (4 fiches max chacun) — Ali n'est plus évincé par Amazon
+  const buckets = { amazon: [], aliexpress: [], cdiscount: [] };
+  for (const p of uniq) {
+    const k = marketplaceOf(p);
+    if (k) buckets[k].push(p);
+  }
+  for (const src of want) {
+    const list = buckets[src] || [];
+    const need = list
+      .filter((p) => {
+        if (!p?.url || /wholesale-|\/search\/|SearchText=|\/r-/i.test(p.url)) return false;
+        const titleOk = p.title && p.title.length >= 12 && titleMatchesQuery(p.title, query);
+        const priceOk = p.price > 0;
+        return !titleOk || !priceOk;
+      })
+      .slice(0, 4);
+    for (const item of need) {
+      try {
+        if (src === "aliexpress") {
+          const meta = await fetchAliExpressMeta(item.url, item.title);
+          if (meta.price > 0) {
+            item.price = meta.price;
+            item.priceConfirmed = true;
+          }
+          if (meta.title && meta.title.length > 8) item.title = meta.title;
+          if (item.price > 0 && item.title) continue;
+        }
+        const detail = await scrapeProduct(item.url);
+        if (detail.price > 0) {
+          item.price = detail.price;
           item.priceConfirmed = true;
         }
-        if (meta.title && meta.title.length > 8) item.title = meta.title;
-        if (item.price > 0 && item.title) continue;
-      }
-      const detail = await scrapeProduct(item.url);
-      if (detail.price > 0) {
-        item.price = detail.price;
-        item.priceConfirmed = true;
-      }
-      if (detail.title && detail.title.length > 12 && !/^produit |^cdiscount\.com$/i.test(detail.title)) {
-        item.title = detail.title;
-      }
-      if (detail.images?.[0]) item.image = detail.images[0];
-    } catch (_) {}
+        if (detail.title && detail.title.length > 12 && !/^produit |^cdiscount\.com$/i.test(detail.title)) {
+          item.title = detail.title;
+        }
+        if (detail.images?.[0]) item.image = detail.images[0];
+      } catch (_) {}
+    }
   }
 
-  // Sanitize + classer les prix
   for (const p of uniq) {
-    const isAli = /aliexpress/i.test(String(p.source || "")) || /aliexpress/i.test(String(p.url || ""));
+    const isAli = marketplaceOf(p) === "aliexpress";
     if (p.price > 0) {
-      const cleaned = isAli
-        ? sanitizeAliExpressPrice(p.price, p.title)
-        : sanitizeProductPrice(p.price, p.title);
-      if (!cleaned) {
-        p.price = null;
-        continue;
-      }
-      p.price = cleaned;
-    }
-    if (p.priceConfirmed) continue;
-    if (!(p.price > 0)) continue;
-    const src = String(p.source || "");
-    // Prix issu d'une carte recherche Amazon / Ali / Cdiscount (pas Bing seul) = utilisable
-    if (
-      /^(amazon|aliexpress|cdiscount)(\+jina)?$/i.test(src) ||
-      (/\+(?:jina)?$/i.test(src) && !/\+bing|\+ddg/i.test(src))
-    ) {
-      p.priceFromMarketplaceCard = true;
-      p.priceUnconfirmed = false;
-    } else if (/\+bing|\+ddg/i.test(src)) {
-      p.priceHint = p.price;
-      p.priceUnconfirmed = true;
-    } else {
-      // source générique marketplace
-      p.priceFromMarketplaceCard = /amazon|aliexpress|cdiscount/i.test(src);
-      p.priceUnconfirmed = !p.priceFromMarketplaceCard;
+      const cleaned = isAli ? sanitizeAliExpressPrice(p.price, p.title) : sanitizeProductPrice(p.price, p.title);
+      p.price = cleaned || null;
     }
   }
 
   const ranked = rankSupplierOffers(uniq, query, {
-    limit: Math.max(3, Number(limit) || 3),
+    limit: 3,
     priceMin,
     priceMax,
   });
   const pricedCount = uniq.filter((p) => p.price > 0 && titleMatchesQuery(p.title, query)).length;
-  if (ranked.length) {
-    return {
-      best: ranked[0],
-      candidates: ranked.slice(0, 3),
-      compared: pricedCount,
-    };
-  }
+  const summary = ["amazon", "aliexpress", "cdiscount"]
+    .map((src) => {
+      const hit = ranked.find((p) => marketplaceOf(p) === src);
+      return hit ? `${src} ${Number(hit.price).toFixed(2)}€` : `${src} —`;
+    })
+    .join(" · ");
+  log(`[SOURCE] Meilleure offre par site: ${summary}`);
+
   return {
-    best: null,
-    candidates: [],
-    compared: 0,
+    best: ranked[0] || null,
+    candidates: ranked.slice(0, 3),
+    compared: pricedCount,
   };
 }
 
