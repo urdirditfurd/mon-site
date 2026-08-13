@@ -2033,14 +2033,13 @@ app.post("/api/sav/auto-draft-all", async (_req, res) => {
 app.post("/api/auto-snipe", async (req, res) => {
   const {
     count = 1,
-    margin = 20,
     marketplace = "France",
-    ticket = "all",
     source = "auto",
     query = "gadgets",
   } = req.body || {};
-  // Mode REEL — import Mes Listings uniquement (pas de publish eBay auto)
+  // Mode REEL — propose 3 offres (pas de publish eBay auto)
   const testMode = false;
+  const ticket = "all";
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -2048,6 +2047,8 @@ app.post("/api/auto-snipe", async (req, res) => {
   res.flushHeaders?.();
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const progress = (pct, label, detail = "") =>
+    send({ type: "progress", pct, label, detail: String(detail || "").slice(0, 160) });
   const max = Math.min(Math.max(Number(count) || 1, 1), 100);
   const marketCode =
     /united states|ebay_us|\bus\b/i.test(String(marketplace))
@@ -2064,26 +2065,22 @@ app.post("/api/auto-snipe", async (req, res) => {
   let veroBlocked = 0;
   let skipped = 0;
 
-  const ticketFilter = (price) => {
-    if (ticket === "low") return price == null || price <= 30;
-    if (ticket === "mid") return price != null && price > 30 && price <= 100;
-    return true;
-  };
-
   try {
+    progress(5, "Initialisation", "Auto-Snipe v4");
     send({
       type: "log",
       message: `[INIT] Auto-Snipe v4 — 3 offres les moins chères (Amazon / Ali / Cdiscount) selon ton mot-clé`,
     });
     send({
       type: "log",
-      message: `[CONFIG] Market=${marketplace} (${marketCode}) | Ticket=${ticket} | Source=${source}`,
+      message: `[CONFIG] Market=${marketplace} (${marketCode}) | Source=${source}`,
     });
     send({
       type: "log",
       message: `[RULE] eBay = signal demande uniquement — on propose 3 fiches Amazon / AliExpress / Cdiscount (jamais eBay, pas d'import auto)`,
     });
     const d0 = await antiBanDelay({ testMode, label: "init" });
+    progress(12, "Protection anti-ban", `${d0.waitedMs}ms`);
     send({
       type: "log",
       message: `[PROTECT] Anti-ban humain ✓ (${d0.waitedMs}ms${d0.deferred ? ", hors horaires" : ""}) | VeRO scan ✓`,
@@ -2091,19 +2088,22 @@ app.post("/api/auto-snipe", async (req, res) => {
     await antiBanDelay({ testMode, label: "scan" });
 
     // 1) Signaux demande eBay (tendances) — mots-clés, pas le produit à importer
+    progress(18, "Scan demande eBay", query);
     send({ type: "log", message: `[SCAN] Signaux demande eBay pour "${query}"...` });
     let demandHints = [];
     try {
       const r = await browseSearch(query, { marketplace: marketCode, limit: max + 4 });
-      demandHints = r.items.filter((i) => ticketFilter(i.price));
+      demandHints = r.items;
       scanned = Math.max(demandHints.length * 12, demandHints.length);
+      progress(25, "Signaux eBay reçus", `${demandHints.length} signal(aux)`);
       send({ type: "log", message: `[SCAN] ${demandHints.length} signaux eBay (${r.api}) — on sourcera hors eBay` });
     } catch (err) {
       send({ type: "log", message: `[WARN] Browse API: ${err.message}` });
       try {
         const ebay = await scrapeEbaySearch(query, { marketplace: marketCode, limit: max + 4 });
-        demandHints = ebay.items.filter((i) => ticketFilter(i.price));
+        demandHints = ebay.items;
         scanned = demandHints.length * 8;
+        progress(25, "Signaux eBay (scrape)", `${demandHints.length} signal(aux)`);
         send({ type: "log", message: `[SCAN] ${demandHints.length} signaux via scrape eBay` });
       } catch (err2) {
         send({ type: "log", message: `[WARN] eBay scrape: ${err2.message}` });
@@ -2118,6 +2118,7 @@ app.post("/api/auto-snipe", async (req, res) => {
         .slice(0, 8)
         .join(" ") || "gadget";
 
+    progress(32, "Ciblage mot-clé", searchQ);
     send({
       type: "log",
       message: `[TARGET] Offres fournisseurs pour "${searchQ}" (mot-clé utilisateur — pas le titre eBay)`,
@@ -2127,6 +2128,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     if (vero.level === "block") {
       veroBlocked += 1;
       errors += 1;
+      progress(100, "Bloqué VeRO", vero.message);
       send({ type: "log", message: `[VERO] BLOQUÉ — ${vero.message}` });
       send({ type: "stats", scanned, imported: 0, listed: 0, errors, offers: 0 });
       send({ type: "done", scanned, imported: 0, listed: 0, errors, offers: 0 });
@@ -2137,6 +2139,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     const hazQ = scanHazardous(searchQ);
     if (hazQ.level === "block") {
       skipped += 1;
+      progress(100, "Bloqué hazmat", hazQ.message);
       send({ type: "log", message: `[HAZMAT] BLOQUÉ requête — ${hazQ.message}` });
       send({ type: "done", scanned, imported: 0, listed: 0, errors, offers: 0 });
       res.end();
@@ -2144,6 +2147,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     }
     await antiBanDelay({ testMode, label: "target" });
 
+    progress(40, "Comparaison sources", "Amazon · AliExpress · Cdiscount");
     send({
       type: "log",
       message:
@@ -2163,9 +2167,24 @@ app.post("/api/auto-snipe", async (req, res) => {
               ? ["cdiscount"]
               : ["amazon", "aliexpress", "cdiscount"];
 
-    const priceMin = ticket === "mid" ? 30.01 : 0;
-    const priceMax = ticket === "low" ? 30 : ticket === "mid" ? 100 : Infinity;
-    const sourceLog = (m) => send({ type: "log", message: m });
+    let progressFloor = 40;
+    const sourceLog = (m) => {
+      send({ type: "log", message: m });
+      const msg = String(m || "");
+      if (/\[amazon\]/i.test(msg)) {
+        progressFloor = Math.max(progressFloor, 52);
+        progress(progressFloor, "Recherche Amazon", msg.replace(/^\[[^\]]+\]\s*/, "").slice(0, 120));
+      } else if (/\[aliexpress\]/i.test(msg)) {
+        progressFloor = Math.max(progressFloor, 62);
+        progress(progressFloor, "Recherche AliExpress", msg.replace(/^\[[^\]]+\]\s*/, "").slice(0, 120));
+      } else if (/\[cdiscount\]/i.test(msg)) {
+        progressFloor = Math.max(progressFloor, 72);
+        progress(progressFloor, "Recherche Cdiscount", msg.replace(/^\[[^\]]+\]\s*/, "").slice(0, 120));
+      } else if (/\[SOURCE\]/i.test(msg)) {
+        progressFloor = Math.max(progressFloor, 78);
+        progress(progressFloor, "Tri des candidats", msg.replace(/^\[[^\]]+\]\s*/, "").slice(0, 120));
+      }
+    };
 
     let offers = [];
     try {
@@ -2173,12 +2192,12 @@ app.post("/api/auto-snipe", async (req, res) => {
         sources: sourcesWanted,
         limit: 6,
         onLog: sourceLog,
-        priceMin,
-        priceMax,
+        priceMin: 0,
+        priceMax: Infinity,
       });
+      progress(85, "Classement des prix", `${cmp.compared || 0} prix comparé(s)`);
       offers = (cmp.candidates || [])
         .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0)
-        .filter((p) => ticketFilter(p.price))
         .sort((a, b) => a.price - b.price)
         .slice(0, 3)
         .map((p) => ({
@@ -2194,12 +2213,12 @@ app.post("/api/auto-snipe", async (req, res) => {
     }
 
     if (!offers.length && (source === "auto" || source === "aliexpress")) {
+      progress(88, "Relance AliExpress", "Aucun candidat — nouvel essai");
       send({ type: "log", message: `[SOURCE] Relance AliExpress seule…` });
       try {
         const aliOnly = await scrapeAliExpressSearch(searchQ, { limit: 6, onLog: sourceLog });
         offers = (aliOnly || [])
           .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0)
-          .filter((p) => ticketFilter(p.price))
           .sort((a, b) => a.price - b.price)
           .slice(0, 3)
           .map((p) => ({
@@ -2217,6 +2236,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     imported = offers.length;
     if (!offers.length) {
       errors += 1;
+      progress(100, "Aucune offre", `Rien de pertinent pour « ${searchQ} »`);
       send({
         type: "log",
         message: `[ERROR] Aucune offre pertinente pour "${searchQ}" (titre doit coller au mot-clé, prix réel Amazon/Ali/Cdiscount).`,
@@ -2227,6 +2247,7 @@ app.post("/api/auto-snipe", async (req, res) => {
       return;
     }
 
+    progress(94, "3 offres prêtes", offers.map((o) => `${o.source} ${Number(o.price).toFixed(2)}€`).join(" · "));
     send({ type: "candidates", items: offers });
     for (const c of offers) {
       send({
@@ -2243,8 +2264,10 @@ app.post("/api/auto-snipe", async (req, res) => {
       type: "log",
       message: `[DONE] Auto-Snipe v4 — ${offers.length} offre(s) pour "${searchQ}", ${errors} erreur(s), VeRO=${veroBlocked}`,
     });
+    progress(100, "Terminé", `${offers.length} offre(s) — clique Importer pour ajouter à Mes Listings`);
     send({ type: "done", scanned, imported: offers.length, listed: 0, errors, offers: offers.length });
   } catch (err) {
+    progress(100, "Erreur", err.message);
     send({ type: "log", message: `[ERROR] ${err.message}` });
   }
   res.end();

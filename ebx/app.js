@@ -1227,13 +1227,35 @@ function colorizeLog(msg) {
   return `<div class="ok">${safe}</div>`;
 }
 
+function setSnipeProgress(pct, label, detail = "") {
+  const bar = document.getElementById("snipe-progress-bar");
+  const pctEl = document.getElementById("snipe-progress-pct");
+  const labelEl = document.getElementById("snipe-progress-label");
+  const detailEl = document.getElementById("snipe-progress-detail");
+  const n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  if (bar) bar.style.width = `${n}%`;
+  if (pctEl) pctEl.textContent = `${n}%`;
+  if (labelEl && label) labelEl.textContent = label;
+  if (detailEl && detail) detailEl.textContent = detail;
+  const step =
+    n >= 100 ? "done" : n >= 70 ? "price" : n >= 35 ? "source" : n >= 10 ? "scan" : null;
+  document.querySelectorAll("#snipe-progress-steps [data-step]").forEach((el) => {
+    const key = el.getAttribute("data-step");
+    el.classList.remove("is-active", "is-done");
+    if (!step) return;
+    const order = ["scan", "source", "price", "done"];
+    const cur = order.indexOf(step);
+    const mine = order.indexOf(key);
+    if (mine < cur) el.classList.add("is-done");
+    else if (mine === cur) el.classList.add("is-active");
+  });
+}
+
 async function runSnipe() {
   const btn = document.getElementById("snipe-btn");
-  const cons = document.getElementById("snipe-console");
   const candWrap = document.getElementById("snipe-candidates");
   const candList = document.getElementById("snipe-candidates-list");
   btn.disabled = true;
-  cons.innerHTML = "";
   if (candWrap) candWrap.classList.add("hidden");
   if (candList) candList.innerHTML = "";
   window.__snipeCandidates = [];
@@ -1243,12 +1265,13 @@ async function runSnipe() {
   if (errEl) errEl.textContent = "0";
   const listedEl = document.getElementById("stat-listed");
   if (listedEl) listedEl.textContent = "0";
+  setSnipeProgress(2, "Démarrage…", "Initialisation Auto-Snipe");
 
   const body = {
     query: document.getElementById("snipe-query")?.value || "gadgets",
     count: 1,
     marketplace: document.getElementById("snipe-market").value,
-    ticket: document.getElementById("snipe-ticket").value,
+    ticket: "all",
     source: document.getElementById("snipe-source").value,
     autoList: false,
     testMode: false,
@@ -1290,41 +1313,73 @@ async function runSnipe() {
       .join("");
   };
 
-  const res = await fetch(API + "/api/auto-snipe", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const applyProgressFromLog = (msg) => {
+    const m = String(msg || "");
+    if (/\[INIT\]/i.test(m)) setSnipeProgress(8, "Initialisation", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[CONFIG\]|\[PROTECT\]|\[RULE\]/i.test(m)) setSnipeProgress(14, "Préparation", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[SCAN\]/i.test(m)) setSnipeProgress(22, "Scan demande eBay", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[TARGET\]|\[VERO\]|\[HAZMAT\]/i.test(m)) setSnipeProgress(32, "Ciblage mot-clé", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[SOURCE\]/i.test(m)) setSnipeProgress(42, "Comparaison sources", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[amazon\]/i.test(m)) setSnipeProgress(52, "Recherche Amazon", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[aliexpress\]/i.test(m)) setSnipeProgress(62, "Recherche AliExpress", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[cdiscount\]/i.test(m)) setSnipeProgress(72, "Recherche Cdiscount", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[LINK\]/i.test(m)) setSnipeProgress(88, "Classement des offres", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[BEST\]/i.test(m)) setSnipeProgress(94, "Sélection des 3 meilleures", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[ERROR\]/i.test(m)) setSnipeProgress(100, "Erreur", m.replace(/^\[[^\]]+\]\s*/, ""));
+    else if (/\[DONE\]/i.test(m)) setSnipeProgress(100, "Terminé", m.replace(/^\[[^\]]+\]\s*/, ""));
+  };
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  try {
+    const res = await fetch(API + "/api/auto-snipe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() || "";
-    for (const part of parts) {
-      const line = part.replace(/^data:\s*/, "").trim();
-      if (!line) continue;
-      try {
-        const ev = JSON.parse(line);
-        if (ev.type === "log") {
-          cons.innerHTML += colorizeLog(ev.message);
-          cons.scrollTop = cons.scrollHeight;
-        }
-        if (ev.type === "candidates" && Array.isArray(ev.items)) {
-          renderCandidates(ev.items, true);
-        }
-        if (ev.type === "stats" || ev.type === "done") {
-          document.getElementById("stat-scanned").textContent = ev.scanned || ev.offers || 0;
-          document.getElementById("stat-imported").textContent = ev.offers || (window.__snipeCandidates || []).length || 0;
-          if (errEl) errEl.textContent = ev.errors || 0;
-        }
-      } catch (_) {}
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, "").trim();
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === "progress") {
+            setSnipeProgress(ev.pct, ev.label || "Calcul…", ev.detail || "");
+          }
+          if (ev.type === "log") {
+            applyProgressFromLog(ev.message);
+          }
+          if (ev.type === "candidates" && Array.isArray(ev.items)) {
+            renderCandidates(ev.items, true);
+            setSnipeProgress(96, "Offres prêtes", `${ev.items.length} fiche(s) proposée(s)`);
+          }
+          if (ev.type === "stats" || ev.type === "done") {
+            document.getElementById("stat-scanned").textContent = ev.scanned || ev.offers || 0;
+            document.getElementById("stat-imported").textContent =
+              ev.offers || (window.__snipeCandidates || []).length || 0;
+            if (errEl) errEl.textContent = ev.errors || 0;
+          }
+          if (ev.type === "done") {
+            const n = (window.__snipeCandidates || []).length;
+            setSnipeProgress(
+              100,
+              n ? "Terminé" : "Aucune offre",
+              n ? `${n} offre(s) à importer` : "Réessaie avec un autre mot-clé"
+            );
+          }
+        } catch (_) {}
+      }
     }
+  } catch (err) {
+    setSnipeProgress(100, "Erreur réseau", err.message || "Échec Auto-Snipe");
   }
   btn.disabled = false;
 }
