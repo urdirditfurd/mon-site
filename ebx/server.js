@@ -2072,7 +2072,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   try {
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v3.1-CHEAPEST — Mode REEL | Prix Ali résolus | Compare → moins cher`,
+      message: `[INIT] Auto-Snipe v3.2-CHEAPEST — Mode REEL | Bing→Ali prix | Compare → moins cher`,
     });
     send({
       type: "log",
@@ -2203,7 +2203,10 @@ app.post("/api/auto-snipe", async (req, res) => {
             }
           }
 
-          const best = cmp.best;
+          const best =
+            (cmp.candidates || [])
+              .filter((p) => p?.url && isSupplierProductUrl(p.url) && p.price > 0)
+              .sort((a, b) => a.price - b.price)[0] || cmp.best;
           if (best?.url && isSupplierProductUrl(best.url)) {
             supplier = {
               title: best.title || searchQ,
@@ -2231,21 +2234,54 @@ app.post("/api/auto-snipe", async (req, res) => {
           send({ type: "log", message: `[WARN] Comparaison sources: ${e.message}` });
         }
 
-        // Fallback ultime si rien trouvé
-        if (!supplier && source === "auto") {
-          supplier = {
-            title: searchQ,
-            url: `https://fr.aliexpress.com/w/wholesale-${encodeURIComponent(searchQ.replace(/\s+/g, "-"))}.html`,
-            price: null,
-            source: "aliexpress",
-          };
-          send({ type: "log", message: `[SOURCE] Fallback page recherche AliExpress` });
+        // Fallback : relance AliExpress seule si la comparaison a tout raté
+        if (!supplier && (source === "auto" || source === "aliexpress")) {
+          send({ type: "log", message: `[SOURCE] Relance AliExpress seule…` });
+          try {
+            const aliOnly = await scrapeAliExpressSearch(searchQ, {
+              limit: 5,
+              onLog: sourceLog,
+            });
+            const withPrice = (aliOnly || []).filter((p) => p?.url && isSupplierProductUrl(p.url));
+            if (withPrice.length) {
+              send({
+                type: "candidates",
+                items: withPrice.map((p) => ({
+                  title: p.title || searchQ,
+                  url: p.url,
+                  source: "aliexpress",
+                  price: p.price > 0 ? p.price : null,
+                })),
+              });
+              const bestAli =
+                withPrice.find((p) => p.price > 0) || withPrice[0];
+              supplier = {
+                title: bestAli.title || searchQ,
+                url: bestAli.url,
+                price: bestAli.price > 0 ? bestAli.price : null,
+                source: "aliexpress",
+                image: bestAli.image || null,
+              };
+              send({
+                type: "log",
+                message: `[BEST] AliExpress: ${
+                  supplier.price > 0 ? Number(supplier.price).toFixed(2) + "€" : "prix n/a"
+                } — ${String(supplier.title).slice(0, 50)}`,
+              });
+            }
+          } catch (e) {
+            send({ type: "log", message: `[WARN] Relance Ali: ${e.message}` });
+          }
         }
 
-        if (!supplier) {
+        // Pas de fallback page wholesale (pas de prix réel)
+        if (!supplier || !isSupplierProductUrl(supplier.url)) {
           skipped += 1;
           errors += 1;
-          send({ type: "log", message: `[ERROR] Aucun fournisseur pour "${searchQ}"` });
+          send({
+            type: "log",
+            message: `[ERROR] Aucun produit fournisseur avec URL fiche (Amazon/Ali/Cdiscount). Réessaie ou Import Manuel.`,
+          });
           send({ type: "stats", scanned, imported, listed, errors });
           continue;
         }
