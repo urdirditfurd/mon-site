@@ -2069,7 +2069,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     progress(5, "Initialisation", "Auto-Snipe v4");
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v4.4 — 1 meilleure offre par site (Amazon + Ali + Cdiscount) en parallèle`,
+      message: `[INIT] Auto-Snipe v4.5 — 1 meilleure offre par site, prix AliExpress en EUR`,
     });
     send({
       type: "log",

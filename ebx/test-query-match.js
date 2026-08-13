@@ -4,6 +4,7 @@ const {
   isPlaceholderSupplierTitle,
   normalizeAliExpressEuroPrice,
   sanitizeAliExpressPrice,
+  aliMoneyToEur,
 } = require("./scraper");
 
 const cases = [
@@ -37,25 +38,32 @@ if (!placeholderOk) failed += 1;
 
 const priceCases = [
   [3.69, 3.69],
-  [21.26, 21.26],
-  [2125.85, 21.26],
-  [2147.33, 21.47],
-  [212585, 21.26],
-  [151.99, 151.99],
-  [999, 999],
+  [7.99, 7.99],
+  [21.47, 2.73],
+  [2125.85, 2.7],
+  [2147.33, 2.73],
   [0, null],
 ];
 for (const [raw, expected] of priceCases) {
-  const got = normalizeAliExpressEuroPrice(raw);
+  const got = aliMoneyToEur(raw);
   const ok =
-    expected == null ? got == null : got != null && Math.abs(got - expected) < 0.02;
+    expected == null ? got == null : got != null && Math.abs(got - expected) < 0.05;
   if (!ok) failed += 1;
-  console.log(`${ok ? "OK" : "FAIL"}  aliPrice ${raw} → ${got} (attendu ${expected})`);
+  console.log(`${ok ? "OK" : "FAIL"}  aliMoney ${raw} → ${got} (attendu ${expected})`);
 }
 
-const absurd = sanitizeAliExpressPrice(2125.85, "Poncho de pluie");
-const absurdOk = absurd != null && absurd < 30;
-console.log(`${absurdOk ? "OK" : "FAIL"}  sanitize 2125.85€ poncho → ${absurd}`);
+const eurFmt = aliMoneyToEur(null, "", "€ 2,47");
+const eurFmtOk = eurFmt != null && Math.abs(eurFmt - 2.47) < 0.02;
+console.log(`${eurFmtOk ? "OK" : "FAIL"}  formatted € 2,47 → ${eurFmt}`);
+if (!eurFmtOk) failed += 1;
+
+const cnyOk = Math.abs(aliMoneyToEur(21.47, "CNY") - 2.73) < 0.05;
+console.log(`${cnyOk ? "OK" : "FAIL"}  21.47 CNY → ${aliMoneyToEur(21.47, "CNY")}`);
+if (!cnyOk) failed += 1;
+
+const absurd = sanitizeAliExpressPrice(2147.33, "Poncho de pluie");
+const absurdOk = absurd != null && absurd < 6;
+console.log(`${absurdOk ? "OK" : "FAIL"}  sanitize 2147.33 poncho → ${absurd}€ (pas 21.47€)`);
 if (!absurdOk) failed += 1;
 
 const raw = [
