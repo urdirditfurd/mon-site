@@ -2069,7 +2069,7 @@ app.post("/api/auto-snipe", async (req, res) => {
     progress(5, "Initialisation", "Auto-Snipe v4");
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v4 — 3 offres les moins chères (Amazon / Ali / Cdiscount) selon ton mot-clé`,
+      message: `[INIT] Auto-Snipe v4.3 — 3 offres les moins chères (Amazon / Ali / Cdiscount) selon ton mot-clé`,
     });
     send({
       type: "log",
@@ -2190,14 +2190,14 @@ app.post("/api/auto-snipe", async (req, res) => {
     try {
       const cmp = await findCheapestSupplier(searchQ, {
         sources: sourcesWanted,
-        limit: 6,
+        limit: 8,
         onLog: sourceLog,
         priceMin: 0,
-        priceMax: Infinity,
+        priceMax: 400,
       });
       progress(85, "Classement des prix", `${cmp.compared || 0} prix comparé(s)`);
       offers = (cmp.candidates || [])
-        .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0)
+        .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0 && p.price <= 400)
         .sort((a, b) => a.price - b.price)
         .slice(0, 3)
         .map((p) => ({
@@ -2218,7 +2218,7 @@ app.post("/api/auto-snipe", async (req, res) => {
       try {
         const aliOnly = await scrapeAliExpressSearch(searchQ, { limit: 6, onLog: sourceLog });
         offers = (aliOnly || [])
-          .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0)
+          .filter((p) => p?.url && isSupplierProductUrl(p.url) && titleMatchesQuery(p.title, searchQ) && p.price > 0 && p.price <= 400)
           .sort((a, b) => a.price - b.price)
           .slice(0, 3)
           .map((p) => ({

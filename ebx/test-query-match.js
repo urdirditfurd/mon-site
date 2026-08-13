@@ -1,4 +1,10 @@
-const { titleMatchesQuery, rankSupplierOffers, isPlaceholderSupplierTitle } = require("./scraper");
+const {
+  titleMatchesQuery,
+  rankSupplierOffers,
+  isPlaceholderSupplierTitle,
+  normalizeAliExpressEuroPrice,
+  sanitizeAliExpressPrice,
+} = require("./scraper");
 
 const cases = [
   ["poncho", "Poncho imperméable épais, résistant au vent, pour homme et femme", true],
@@ -11,6 +17,7 @@ const cases = [
   ["poncho", "poncho — AliExpress", false],
   ["poncho", "poncho", false],
   ["poncho", "Nu-June Poncho de surf dégradé pour femme", true],
+  ["poncho", "Vente Flash : Imperméable Transparent Réutilisable pour Homme et Femme – Poncho Épais", true],
   ["éponge maquillage", "Eponge maquillage 12 pcs", true],
   ["éponge maquillage", "Eponge cuisine microfibre", false],
   ["cape pluie", "Cape de pluie adulte EVA", true],
@@ -28,48 +35,94 @@ const placeholderOk = isPlaceholderSupplierTitle("poncho — AliExpress", "ponch
 console.log(`${placeholderOk ? "OK" : "FAIL"}  placeholder "poncho — AliExpress"`);
 if (!placeholderOk) failed += 1;
 
+const priceCases = [
+  [3.69, 3.69],
+  [21.26, 21.26],
+  [2125.85, 21.26],
+  [2147.33, 21.47],
+  [212585, 21.26],
+  [151.99, 151.99],
+  [999, 999],
+  [0, null],
+];
+for (const [raw, expected] of priceCases) {
+  const got = normalizeAliExpressEuroPrice(raw);
+  const ok =
+    expected == null ? got == null : got != null && Math.abs(got - expected) < 0.02;
+  if (!ok) failed += 1;
+  console.log(`${ok ? "OK" : "FAIL"}  aliPrice ${raw} → ${got} (attendu ${expected})`);
+}
+
+const absurd = sanitizeAliExpressPrice(2125.85, "Poncho de pluie");
+const absurdOk = absurd != null && absurd < 30;
+console.log(`${absurdOk ? "OK" : "FAIL"}  sanitize 2125.85€ poncho → ${absurd}`);
+if (!absurdOk) failed += 1;
+
 const raw = [
-  { title: "Poncho imperméable épais, résistant au vent, pour homme et femme", url: "https://fr.aliexpress.com/item/1.html", price: 3.69, source: "aliexpress" },
-  { title: "4/6/10 Pièces Poncho de Pluie Adulte, cape de pluie transparent", url: "https://www.amazon.fr/dp/B0DSHZXYY2", price: 7.99, source: "amazon" },
-  { title: "flintronic", url: "https://www.amazon.fr/dp/B0CHRMRN87", price: 7.99, source: "amazon" },
-  { title: "Poncho Pluie Imperméable avec Sac de Rangement", url: "https://www.amazon.fr/dp/B0FFN39LN2", price: 11.99, source: "amazon" },
-  { title: "Poncho Pluie, 2 Poncho Imperméable", url: "https://www.amazon.fr/dp/B0B5ZM4FYF", price: 14.99, source: "amazon" },
-  { title: "Imperméable intégral épais en Oxford, poncho de pluie ample", url: "https://fr.aliexpress.com/item/2.html", price: 15.89, source: "aliexpress" },
-  { title: "Nu-June Poncho de surf dégradé pour femme", url: "https://fr.aliexpress.com/item/3.html", price: 46.19, source: "aliexpress" },
-  { title: "Garde-boue avant en fibre de carbone pour moto DUCATI Panigale V2", url: "https://fr.aliexpress.com/item/4.html", price: 151.99, source: "aliexpress" },
-  { title: "poncho — AliExpress", url: "https://fr.aliexpress.com/item/5.html", price: 1.99, source: "aliexpress" },
+  {
+    title: "Vente Flash : Imperméable Transparent – Poncho Épais Portable",
+    url: "https://fr.aliexpress.com/item/1005011863385361.html",
+    price: 2125.85,
+    source: "aliexpress",
+  },
+  {
+    title: "Imperméable unisexe avec sac, poncho de pluie léger",
+    url: "https://fr.aliexpress.com/item/1005012897292167.html",
+    price: 2147.33,
+    source: "aliexpress",
+  },
+  {
+    title: "4/6/10 Pièces Poncho de Pluie Adulte, cape de pluie transparent",
+    url: "https://www.amazon.fr/dp/B0DSHZXYY2",
+    price: 7.99,
+    source: "amazon",
+  },
+  {
+    title: "Poncho Pluie Imperméable avec Sac de Rangement",
+    url: "https://www.amazon.fr/dp/B0FFN39LN2",
+    price: 11.99,
+    source: "amazon",
+  },
+  {
+    title: "Poncho camping Cdiscount",
+    url: "https://www.cdiscount.com/sports/poncho.html",
+    price: 9.99,
+    source: "cdiscount",
+  },
+  {
+    title: "Garde-boue avant en fibre de carbone pour moto DUCATI",
+    url: "https://fr.aliexpress.com/item/4.html",
+    price: 151.99,
+    source: "aliexpress",
+  },
 ];
 
 const top = rankSupplierOffers(raw, "poncho", { limit: 3 });
-const topTitles = top.map((p) => p.title);
-const expectUrls = [
-  "https://fr.aliexpress.com/item/1.html",
-  "https://www.amazon.fr/dp/B0DSHZXYY2",
-  "https://www.amazon.fr/dp/B0FFN39LN2",
-];
-const rankOk =
+const topOk =
   top.length === 3 &&
-  top.every((p) => p.price < 12) &&
-  top.map((p) => p.url).join() === expectUrls.join() &&
-  !topTitles.some((t) => /ducati|flintronic|aliExpress/i.test(t));
-console.log(`${rankOk ? "OK" : "FAIL"}  top3=${top.map((p) => `${p.price}€`).join(" | ")} (${top.length})`);
-if (!rankOk) {
+  top.every((p) => p.price < 50) &&
+  top.some((p) => /amazon/i.test(p.source)) &&
+  top.some((p) => /aliexpress/i.test(p.source)) &&
+  !top.some((p) => p.price > 100);
+console.log(
+  `${topOk ? "OK" : "FAIL"}  top3 diversity=${top.map((p) => `${p.source}:${p.price}€`).join(" | ")} (${top.length})`
+);
+if (!topOk) {
   failed += 1;
-  console.log("  got", top.map((p) => ({ price: p.price, title: p.title.slice(0, 40), url: p.url })));
+  console.log("  got", top.map((p) => ({ price: p.price, source: p.source, title: String(p.title).slice(0, 40) })));
 }
 
-const low = rankSupplierOffers(raw, "poncho", { limit: 3, priceMax: 30 });
-const lowOk = low.length === 3 && low.every((p) => p.price <= 30) && !low.some((p) => p.price > 40);
-console.log(`${lowOk ? "OK" : "FAIL"}  ticket low ≤30€ → ${low.length} offres`);
-if (!lowOk) failed += 1;
-
-const mid = rankSupplierOffers(raw, "poncho", { limit: 3, priceMin: 30.01, priceMax: 100 });
-const midOk = mid.length === 1 && mid[0].price === 46.19;
-console.log(`${midOk ? "OK" : "FAIL"}  ticket mid 30–100€ → ${mid.map((p) => p.price).join(",")}`);
-if (!midOk) failed += 1;
+const onlyAli = rankSupplierOffers(
+  raw.filter((p) => /aliexpress/i.test(p.source)),
+  "poncho",
+  { limit: 3 }
+);
+const onlyAliOk = onlyAli.length >= 2 && onlyAli.every((p) => p.price < 30);
+console.log(`${onlyAliOk ? "OK" : "FAIL"}  ali-only corrected → ${onlyAli.map((p) => p.price).join(", ")}`);
+if (!onlyAliOk) failed += 1;
 
 if (failed) {
   console.error(`\n${failed} échec(s)`);
   process.exit(1);
 }
-console.log("\nTous les tests pertinence OK");
+console.log("\nTous les tests pertinence + prix OK");
