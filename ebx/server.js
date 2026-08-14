@@ -53,6 +53,19 @@ const {
   draftSavReplyTemplate,
 } = require("./business-engine");
 const {
+  languageForMarket,
+  buildDemandKeywords,
+  nextDemandSlice,
+  pickMostProfitableOffer,
+  isSupplierUrl,
+  rollPipelineDay,
+  looksLikeCategoryLabel,
+  DEFAULT_PREPARE_PER_TICK,
+  DEFAULT_PUBLISH_PER_TICK,
+  QUEUE_CAP,
+  DEMAND_ALGO,
+} = require("./auto-publish-engine");
+const {
   getRankings,
   analyzeTitleKeywords,
   analyzeCompetitor,
@@ -132,6 +145,9 @@ if (!listingCols.includes("variations_json")) {
 }
 if (!listingCols.includes("cost_price")) {
   db.exec("ALTER TABLE listings ADD COLUMN cost_price REAL DEFAULT 0");
+}
+if (!listingCols.includes("auto_prepared")) {
+  db.exec("ALTER TABLE listings ADD COLUMN auto_prepared INTEGER DEFAULT 0");
 }
 
 db.exec(`
@@ -263,9 +279,39 @@ const listUnpublishedForAuto = db.prepare(
   `SELECT * FROM listings
    WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
      AND TRIM(COALESCE(seo_title, '')) != ''
-   ORDER BY created_at ASC
+   ORDER BY COALESCE(auto_prepared, 0) DESC, created_at ASC
    LIMIT 40`
 );
+const findListingBySourceUrl = db.prepare(
+  `SELECT id FROM listings WHERE source_url = ? ORDER BY id DESC LIMIT 1`
+);
+const markListingAutoPrepared = db.prepare(
+  `UPDATE listings SET auto_prepared = 1, suggested_price = ?, cost_price = ? WHERE id = ?`
+);
+const countAutoQueue = db.prepare(
+  `SELECT COUNT(*) AS n FROM listings
+   WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
+     AND COALESCE(auto_prepared, 0) = 1`
+);
+
+function loadPipelineState(marketplace = "France") {
+  let raw = {};
+  try {
+    raw = JSON.parse(getSetting.get("auto_publish_state")?.value || "{}");
+  } catch (_) {
+    raw = {};
+  }
+  return rollPipelineDay(raw, marketplace);
+}
+
+function savePipelineState(state) {
+  try {
+    state.queued = Number(countAutoQueue.get()?.n || 0);
+    upsertSetting.run("auto_publish_state", JSON.stringify(state));
+  } catch (err) {
+    console.warn("[EBX] save pipeline state:", err.message);
+  }
+}
 
 function listingCost(listing) {
   const stored = Number(listing?.cost_price);
@@ -326,12 +372,14 @@ async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 
 
 let autoPublishBusy = false;
 
-async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {} } = {}) {
-  if (autoPublishBusy) {
-    send({ type: "log", message: "[SKIP] Auto-Publish déjà en cours" });
-    return { busy: true, published: 0, skipped: 0, errors: 0, items: [] };
+async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {}, nested = false } = {}) {
+  if (!nested) {
+    if (autoPublishBusy) {
+      send({ type: "log", message: "[SKIP] Auto-Publish déjà en cours" });
+      return { busy: true, published: 0, skipped: 0, errors: 0, items: [] };
+    }
+    autoPublishBusy = true;
   }
-  autoPublishBusy = true;
   const stats = { published: 0, skipped: 0, errors: 0, items: [] };
   const marketCode = marketplaceToCode(marketplace);
   try {
@@ -345,8 +393,8 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
       message: `[INIT] Auto-Publish — ${rows.length} listing(s), marché ${marketCode}, qty 5000, net ≥ 5%`,
     });
     if (!rows.length) {
-      send({ type: "log", message: "[DONE] Aucun listing fournisseur en attente" });
-      send({ type: "done", ...stats });
+      send({ type: "log", message: "[PUBLISH] Aucun listing fournisseur en attente" });
+      if (!nested) send({ type: "done", ...stats });
       return stats;
     }
 
@@ -418,8 +466,12 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         } (${priced.competitorCount}) · vente ${Number(priced.sell).toFixed(2)}€ · net ${priced.netPct}%`,
       });
 
-      if (!(priced.sell > 0) || !priced.profitable) {
+      if (!(priced.sell > 0) || !priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
         stats.skipped += 1;
+        const why =
+          priced.competitorCount > 0 && priced.competitive === false
+            ? `Pas assez concurrentiel (plancher ${priced.minSell}€ vs eBay ${priced.cheapest}€)`
+            : `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`;
         insertAutoPublishLog.run(
           listing.id,
           title,
@@ -431,9 +483,9 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           "",
           marketCode,
           "skipped",
-          `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`
+          why
         );
-        send({ type: "log", message: `[SKIP] pas assez rentable (net ${priced.netPct}% < 5%)` });
+        send({ type: "log", message: `[SKIP] ${why}` });
         continue;
       }
 
@@ -496,10 +548,339 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
     send({ type: "stats", ...stats });
     send({
       type: "log",
-      message: `[DONE] publiés ${stats.published} · ignorés ${stats.skipped} · erreurs ${stats.errors}`,
+      message: `[PUBLISH] publiés ${stats.published} · ignorés ${stats.skipped} · erreurs ${stats.errors}`,
     });
-    send({ type: "done", ...stats });
+    if (!nested) {
+      send({ type: "done", ...stats });
+    }
     return stats;
+  } finally {
+    if (!nested) autoPublishBusy = false;
+  }
+}
+
+async function buildListingFromSupplierUrl(productUrl, { language = "fr", themeColor = "#6d7ddf" } = {}) {
+  const langOpts = { language, forceLanguage: language === "en" || language === "de" };
+  const scraped = await scrapeProduct(productUrl);
+  scraped.images = (scraped.images || []).filter(isRealProductImage);
+  scraped.title = stripSupplierProvenance(scraped.title);
+  scraped.description = cleanMarketingCopy(scraped.description || "");
+  scraped.bullets = (scraped.bullets || [])
+    .map((b) => cleanMarketingCopy(String(b).replace(/^\s*source\s*:\s*/i, "")))
+    .filter((b) => b && !/^source\s*:/i.test(b));
+  const vero = scanVero(`${scraped.title} ${(scraped.bullets || []).join(" ")}`);
+  if (vero.level === "block") throw new Error(`VeRO: ${vero.message}`);
+  const haz = scanHazardous(`${scraped.title} ${scraped.description || ""}`);
+  if (haz.level === "block") throw new Error(`Hazmat: ${haz.message}`);
+  const discreet = prepareDiscreetListing(scraped, { marginMult: 1.8, language });
+  discreet.seo_title = stripSupplierProvenance(discreet.seo_title);
+  if (discreet.product) {
+    discreet.product.title = stripSupplierProvenance(discreet.product.title);
+    discreet.product.description = cleanMarketingCopy(discreet.product.description || "");
+    discreet.product.language = language;
+    discreet.product = enrichProductListingCopy(
+      {
+        ...discreet.product,
+        originalTitle: discreet.original_title || discreet.product.originalTitle || discreet.product.title,
+        images: scraped.images || [],
+        language,
+      },
+      langOpts
+    );
+  }
+  const html = sanitizeListingHtml(buildHtmlFromProduct(discreet.product, themeColor, langOpts));
+  return {
+    seoTitle: String(discreet.seo_title || "").slice(0, 80),
+    html,
+    costPrice: Number(scraped.price) || 0,
+    suggestedPrice: Number(discreet.suggested_price) || 0,
+    source: scraped.source,
+    images: scraped.images || [],
+  };
+}
+
+async function refreshDemandIfNeeded(marketplace, send = () => {}) {
+  const marketCode = marketplaceToCode(marketplace);
+  let state = loadPipelineState(marketplace);
+  const dirty = (state.keywords || []).some((k) => {
+    const q = String(k.query || k || "");
+    return looksLikeCategoryLabel(q) || q.split(/\s+/).length < 2;
+  });
+  const hasSeeds = (state.keywords || []).some((k) => k.reason === "seed" || k.reason === "trend-seed");
+  if (
+    Array.isArray(state.keywords) &&
+    state.keywords.length >= 8 &&
+    !dirty &&
+    hasSeeds &&
+    state.algo === DEMAND_ALGO
+  ) {
+    return state;
+  }
+  send({ type: "log", message: `[DEMAND] Scan tendances eBay ${marketCode} (demande du jour)…` });
+  let trendItems = [];
+  let seeds = [];
+  try {
+    const { fetchTrendingProducts, seedsForPeriod } = require("./trending-engine");
+    seeds = seedsForPeriod("day", new Date(), marketCode) || [];
+    const trend = await fetchTrendingProducts({
+      marketplace: marketCode,
+      period: "day",
+      fast: true,
+      limit: 16,
+      maxMs: 20000,
+    });
+    trendItems = trend.items || [];
+    send({
+      type: "log",
+      message: `[DEMAND] ${trendItems.length} signal(aux) live${trend.live ? "" : " (cache)"}`,
+    });
+  } catch (err) {
+    send({ type: "log", message: `[DEMAND] trending: ${err.message}` });
+  }
+  const calendar = getEventCalendar();
+  state.keywords = buildDemandKeywords({
+    trendItems,
+    seeds,
+    calendarEvents: calendar,
+    limit: 28,
+  });
+  state.cursor = 0;
+  state.algo = DEMAND_ALGO;
+  savePipelineState(state);
+  send({
+    type: "log",
+    message: `[DEMAND] ${state.keywords.length} mot(s)-clé(s) ciblés aujourd'hui`,
+  });
+  return state;
+}
+
+async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PREPARE_PER_TICK, send = () => {} } = {}) {
+  const marketCode = marketplaceToCode(marketplace);
+  const language = languageForMarket(marketCode);
+  const max = Math.min(Math.max(Number(limit) || 2, 1), 5);
+  const stats = { prepared: 0, skipped: 0, errors: 0 };
+  const queuedNow = Number(countAutoQueue.get()?.n || 0);
+  if (queuedNow >= QUEUE_CAP) {
+    send({
+      type: "log",
+      message: `[PREPARE] File pleine (${queuedNow}/${QUEUE_CAP}) — publication d'abord, pas de nouvelles fiches`,
+    });
+    return stats;
+  }
+  let state = await refreshDemandIfNeeded(marketplace, send);
+  const slice = nextDemandSlice(state.keywords, state.cursor, max);
+  state.cursor = slice.cursor;
+  if (!slice.items.length) {
+    send({ type: "log", message: "[PREPARE] Aucun mot-clé demande aujourd'hui" });
+    savePipelineState(state);
+    return stats;
+  }
+
+  for (const kw of slice.items) {
+    if (Number(countAutoQueue.get()?.n || 0) >= QUEUE_CAP) {
+      send({ type: "log", message: `[PREPARE] File au plafond ${QUEUE_CAP} — stop préparation` });
+      break;
+    }
+    state.lastQuery = kw.query;
+    state.lastPhase = "prepare";
+    send({
+      type: "progress",
+      pct: 55,
+      label: "Préparation",
+      detail: `Demande « ${kw.query} »`,
+    });
+    send({ type: "log", message: `[PREPARE] Demande « ${kw.query} » (${kw.reason}) → sniper fournisseur` });
+
+    let competitorPrices = [];
+    try {
+      const r = await browseSearch(kw.query, { marketplace: marketCode, limit: 20 });
+      competitorPrices = (r.items || []).map((i) => Number(i.price)).filter((p) => p >= 1.99 && p < 2000);
+    } catch (_) {
+      try {
+        const ebay = await scrapeEbaySearch(kw.query, { marketplace: marketCode, limit: 20 });
+        competitorPrices = (ebay.items || []).map((i) => Number(i.price)).filter((p) => p >= 1.99 && p < 2000);
+      } catch (e) {
+        send({ type: "log", message: `[PREPARE] prix eBay: ${e.message}` });
+      }
+    }
+    send({
+      type: "log",
+      message: `[PREPARE] ${competitorPrices.length} concurrent(s) eBay pour « ${kw.query} »`,
+    });
+
+    let cmp = { candidates: [] };
+    try {
+      cmp = await findCheapestSupplier(kw.query, {
+        sources: ["amazon", "aliexpress", "cdiscount"],
+        limit: 3,
+        fast: true,
+        onLog: (m) => send({ type: "log", message: m }),
+      });
+    } catch (e) {
+      stats.errors += 1;
+      state.skippedToday += 1;
+      send({ type: "log", message: `[PREPARE] sniper: ${e.message}` });
+      continue;
+    }
+
+    const candidates = (cmp.candidates || []).filter((o) => isSupplierUrl(o.url) && Number(o.price) >= 1.99);
+    send({
+      type: "log",
+      message: `[PREPARE] candidats ${candidates.map((c) => `${c.source}:${Number(c.price).toFixed(2)}€`).join(" · ") || "aucun"}`,
+    });
+    const best = pickMostProfitableOffer(candidates, competitorPrices, 5);
+    if (!best) {
+      stats.skipped += 1;
+      state.skippedToday += 1;
+      insertAutoPublishLog.run(
+        0,
+        kw.query,
+        0,
+        0,
+        competitorPrices[0] || null,
+        competitorPrices.length,
+        null,
+        "",
+        marketCode,
+        "skipped",
+        "Aucune offre fournisseur rentable ≥ 5% et concurrentielle"
+      );
+      send({ type: "log", message: `[PREPARE] aucune offre rentable + concurrentielle pour « ${kw.query} »` });
+      continue;
+    }
+
+    const url = String(best.offer.url).split("?")[0];
+    if (findListingBySourceUrl.get(url)) {
+      send({ type: "log", message: `[PREPARE] déjà en Mes Listings — ${url}` });
+      stats.skipped += 1;
+      continue;
+    }
+
+    send({
+      type: "log",
+      message: `[PREPARE] meilleur fournisseur ${best.offer.source} ${Number(best.offer.price).toFixed(2)}€ → vente ${best.priced.sell}€ (net ${best.netPct}%)`,
+    });
+
+    try {
+      const built = await buildListingFromSupplierUrl(url, { language });
+      const cost = built.costPrice >= 1.99 ? built.costPrice : Number(best.offer.price);
+      const priced = competitiveSellPrice({
+        cost,
+        competitorPrices,
+        minNetPct: 5,
+      });
+      if (!priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
+        stats.skipped += 1;
+        state.skippedToday += 1;
+        insertAutoPublishLog.run(
+          0,
+          built.seoTitle || kw.query,
+          priced.sell || 0,
+          cost,
+          priced.cheapest,
+          priced.competitorCount || 0,
+          priced.netPct,
+          "",
+          marketCode,
+          "skipped",
+          "Fiche créée mais prix non concurrentiel / net < 5%"
+        );
+        send({ type: "log", message: `[PREPARE] fiche écartée après re-prix (net ${priced.netPct}%)` });
+        continue;
+      }
+      const result = await insertListingWithImageCache({
+        seoTitle: built.seoTitle,
+        html: built.html,
+        price: priced.sell,
+        keywords: `auto-publish:${kw.query}`,
+        sourceUrl: url,
+        costPrice: cost,
+      });
+      markListingAutoPrepared.run(priced.sell, cost, result.id);
+      stats.prepared += 1;
+      state.preparedToday += 1;
+      insertAutoPublishLog.run(
+        result.id,
+        built.seoTitle,
+        priced.sell,
+        cost,
+        priced.cheapest,
+        priced.competitorCount || 0,
+        priced.netPct,
+        "",
+        marketCode,
+        "prepared",
+        `file d'attente · ${best.offer.source} · qty 5000 au prochain cycle`
+      );
+      send({
+        type: "log",
+        message: `[PREPARE] listing #${result.id} en file — ${built.seoTitle.slice(0, 48)} @ ${priced.sell}€`,
+      });
+    } catch (err) {
+      stats.errors += 1;
+      state.lastError = err.message;
+      send({ type: "log", message: `[PREPARE] listing: ${err.message}` });
+    }
+  }
+
+  state.lastTickAt = new Date().toISOString();
+  savePipelineState(state);
+  send({
+    type: "log",
+    message: `[PREPARE] +${stats.prepared} en file · ignorés ${stats.skipped} · erreurs ${stats.errors}`,
+  });
+  return stats;
+}
+
+async function runAutoPublishTick({
+  marketplace = "France",
+  publishLimit = DEFAULT_PUBLISH_PER_TICK,
+  prepareLimit = DEFAULT_PREPARE_PER_TICK,
+  send = () => {},
+} = {}) {
+  if (autoPublishBusy) {
+    send({ type: "log", message: "[SKIP] pipeline déjà en cours" });
+    return { busy: true, published: 0, prepared: 0, skipped: 0, errors: 0 };
+  }
+  autoPublishBusy = true;
+  const out = { published: 0, prepared: 0, skipped: 0, errors: 0, items: [] };
+  try {
+    send({
+      type: "log",
+      message: `[INIT] Pipeline Auto-Publish — publie le lot prêt, puis prépare le suivant (net ≥ 5%, qty 5000)`,
+    });
+    send({ type: "progress", pct: 8, label: "Publication", detail: "Lot préparé au cycle précédent" });
+    const pub = await runAutoPublishBatch({
+      marketplace,
+      limit: publishLimit,
+      send,
+      nested: true,
+    });
+    out.published = pub.published || 0;
+    out.skipped += pub.skipped || 0;
+    out.errors += pub.errors || 0;
+    out.items = pub.items || [];
+    let state = loadPipelineState(marketplace);
+    state.publishedToday = (Number(state.publishedToday) || 0) + out.published;
+    state.lastPhase = "publish";
+    savePipelineState(state);
+
+    send({ type: "progress", pct: 48, label: "Préparation", detail: "Nouvelles annonces pour le prochain cycle" });
+    const prep = await runAutoPrepareBatch({ marketplace, limit: prepareLimit, send });
+    out.prepared = prep.prepared || 0;
+    out.skipped += prep.skipped || 0;
+    out.errors += prep.errors || 0;
+
+    send({
+      type: "log",
+      message: `[DONE] publiés ${out.published} · préparés ${out.prepared} · ignorés ${out.skipped} · erreurs ${out.errors}`,
+    });
+    send({ type: "done", ...out });
+    return out;
+  } catch (err) {
+    send({ type: "log", message: `[ERROR] ${err.message}` });
+    send({ type: "done", ...out, errors: (out.errors || 0) + 1 });
+    return out;
   } finally {
     autoPublishBusy = false;
   }
@@ -2024,7 +2405,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
     reply:
-      "Auto-Publish (sous Product Sniper) publie tes listings en attente. Avant chaque mise en ligne, EBX compare les prix eBay du marché choisi, vise le prix le plus concurrentiel, et n’envoie que si la rentabilité nette est ≥ 5 %. Quantité : 5000.",
+      "Auto-Publish (sous Product Sniper) enchaîne tout seul : tendances eBay du marché → fournisseur le plus rentable (Sniper) → fiche claire → prix concurrentiel avec net ≥ 5 % → publication toutes les 10 min (qty 5000). Pendant ces 10 min, le prochain lot est préparé.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],
@@ -2624,6 +3005,7 @@ app.get("/api/auto-publish/history", (_req, res) => {
   try {
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
     const market = getSetting.get("auto_publish_market")?.value || "France";
+    const state = loadPipelineState(market);
     res.json({
       success: true,
       data: {
@@ -2631,6 +3013,19 @@ app.get("/api/auto-publish/history", (_req, res) => {
         marketplace: market,
         quantity: 5000,
         minNetPct: 5,
+        intervalMin: 10,
+        pipeline: {
+          day: state.day,
+          lastPhase: state.lastPhase,
+          lastTickAt: state.lastTickAt,
+          lastQuery: state.lastQuery,
+          preparedToday: state.preparedToday || 0,
+          publishedToday: state.publishedToday || 0,
+          skippedToday: state.skippedToday || 0,
+          queued: Number(countAutoQueue.get()?.n || 0),
+          keywords: (state.keywords || []).slice(0, 12),
+          lastError: state.lastError || "",
+        },
         published: listPublishedHistory.all(),
         log: listAutoPublishLog.all(),
       },
@@ -2642,19 +3037,34 @@ app.get("/api/auto-publish/history", (_req, res) => {
 
 app.post("/api/auto-publish/settings", (req, res) => {
   try {
+    const wasOn = getSetting.get("auto_publish_enabled")?.value === "1";
     if (req.body?.enabled != null) {
       upsertSetting.run("auto_publish_enabled", req.body.enabled ? "1" : "0");
     }
     if (req.body?.marketplace) {
       upsertSetting.run("auto_publish_market", String(req.body.marketplace));
     }
+    const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
+    const marketplace = getSetting.get("auto_publish_market")?.value || "France";
+    if (enabled && !wasOn) {
+      setImmediate(() => {
+        runAutoPublishTick({
+          marketplace,
+          send: (o) => {
+            if (o.type === "log") console.log("[auto-publish]", o.message);
+          },
+        }).catch((err) => console.warn("[auto-publish]", err.message));
+      });
+    }
     res.json({
       success: true,
       data: {
-        enabled: getSetting.get("auto_publish_enabled")?.value === "1",
-        marketplace: getSetting.get("auto_publish_market")?.value || "France",
+        enabled,
+        marketplace,
         quantity: 5000,
         minNetPct: 5,
+        intervalMin: 10,
+        kicked: Boolean(enabled && !wasOn),
       },
     });
   } catch (err) {
@@ -2664,7 +3074,8 @@ app.post("/api/auto-publish/settings", (req, res) => {
 
 app.post("/api/auto-publish/run", async (req, res) => {
   const marketplace = req.body?.marketplace || getSetting.get("auto_publish_market")?.value || "France";
-  const limit = req.body?.limit || 5;
+  const publishLimit = req.body?.limit || DEFAULT_PUBLISH_PER_TICK;
+  const prepareLimit = req.body?.prepareLimit || DEFAULT_PREPARE_PER_TICK;
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -2672,10 +3083,10 @@ app.post("/api/auto-publish/run", async (req, res) => {
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
   try {
     upsertSetting.run("auto_publish_market", String(marketplace));
-    await runAutoPublishBatch({ marketplace, limit, send });
+    await runAutoPublishTick({ marketplace, publishLimit, prepareLimit, send });
   } catch (err) {
     send({ type: "log", message: `[ERROR] ${err.message}` });
-    send({ type: "done", published: 0, skipped: 0, errors: 1 });
+    send({ type: "done", published: 0, prepared: 0, skipped: 0, errors: 1 });
   }
   res.end();
 });
@@ -3846,9 +4257,8 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
     if (!enabled || autoPublishBusy) return;
     const marketplace = getSetting.get("auto_publish_market")?.value || "France";
-    runAutoPublishBatch({
+    runAutoPublishTick({
       marketplace,
-      limit: 3,
       send: (o) => {
         if (o.type === "log") console.log("[auto-publish]", o.message);
       },

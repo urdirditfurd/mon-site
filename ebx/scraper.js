@@ -2865,7 +2865,7 @@ function extractPricesNear(text, index, window = 120) {
 /**
  * Recherche AliExpress — Bing/DDG d'abord (HTML Ali souvent captcha), puis enrichissement prix.
  */
-async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
+async function scrapeAliExpressSearch(query, { limit = 5, onLog = null, fast = false } = {}) {
   const log = (msg) => {
     console.log(msg);
     if (typeof onLog === "function") {
@@ -2981,7 +2981,10 @@ async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
   log(`[aliexpress] Loop prix + titre pour ${items.length} produit(s)…`);
   for (let i = 0; i < items.length; i++) {
     try {
-      const looped = await confirmAliPriceLoop(items[i].url, items[i].title || q, { attempts: 3, onLog: log });
+      const looped = await confirmAliPriceLoop(items[i].url, items[i].title || q, {
+        attempts: fast ? 1 : 3,
+        onLog: log,
+      });
       if (looped.title && looped.title.length > 8) items[i].title = looped.title;
       if (looped.price >= 1.99) {
         items[i].price = looped.price;
@@ -3154,7 +3157,7 @@ async function scrapeCdiscountSearch(query, { limit = 5, onLog = null } = {}) {
  */
 async function findCheapestSupplier(
   query,
-  { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3, onLog = null, priceMin = 0, priceMax = Infinity } = {}
+  { sources = ["amazon", "aliexpress", "cdiscount"], limit = 3, onLog = null, priceMin = 0, priceMax = Infinity, fast = false } = {}
 ) {
   const log = (m) => {
     if (typeof onLog === "function") {
@@ -3171,7 +3174,7 @@ async function findCheapestSupplier(
   const scrapeOne = async (name) => {
     try {
       if (name === "amazon") return (await scrapeAmazonSearch(query, { limit: perSourceLimit, onLog })) || [];
-      if (name === "aliexpress") return (await scrapeAliExpressSearch(query, { limit: perSourceLimit, onLog })) || [];
+      if (name === "aliexpress") return (await scrapeAliExpressSearch(query, { limit: fast ? 3 : perSourceLimit, onLog, fast })) || [];
       return (await scrapeCdiscountSearch(query, { limit: perSourceLimit, onLog })) || [];
     } catch (e) {
       log(`[${name}] échec: ${e.message}`);
@@ -3184,10 +3187,12 @@ async function findCheapestSupplier(
     want.map(async (name) => ({ name, items: await scrapeOne(name) }))
   );
 
-  for (const row of settled) {
-    if ((row.items || []).length) continue;
-    log(`[SOURCE] ${row.name}: 0 résultat — nouvel essai`);
-    row.items = await scrapeOne(row.name);
+  if (!fast) {
+    for (const row of settled) {
+      if ((row.items || []).length) continue;
+      log(`[SOURCE] ${row.name}: 0 résultat — nouvel essai`);
+      row.items = await scrapeOne(row.name);
+    }
   }
 
   const pools = [];
@@ -3228,6 +3233,7 @@ async function findCheapestSupplier(
     if (k) buckets[k].push(p);
   }
   for (const src of want) {
+    if (fast) break;
     const list = buckets[src] || [];
     const need = list
       .filter((p) => {
@@ -3240,7 +3246,7 @@ async function findCheapestSupplier(
     for (const item of need) {
       try {
         if (src === "aliexpress") {
-          const looped = await confirmAliPriceLoop(item.url, item.title, { attempts: 3, onLog: log });
+          const looped = await confirmAliPriceLoop(item.url, item.title, { attempts: fast ? 1 : 3, onLog: log });
           if (looped.price >= 1.99) {
             item.price = looped.price;
             item.priceConfirmed = true;

@@ -685,6 +685,7 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
   }
   if (!(sell > 0) && median > 0) sell = median;
   const margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  const competitive = cheapest == null || sell <= Number((cheapest * 1.08).toFixed(2));
   return {
     sell: Number((sell || 0).toFixed(2)),
     minSell,
@@ -693,6 +694,7 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
     competitorCount: prices.length,
     netPct: margin.netPct,
     profitable: margin.netPct >= minNetPct - 0.05,
+    competitive,
   };
 }
 

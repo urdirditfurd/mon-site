@@ -1469,6 +1469,41 @@ function renderAutoPublishHistory(published) {
     .join("");
 }
 
+function renderAutoPublishLog(log) {
+  const body = document.getElementById("auto-publish-log");
+  if (!body) return;
+  const rows = Array.isArray(log) ? log : [];
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="5" class="p-6 text-sm text-zinc-400 text-center">Aucune activité pipeline pour l’instant.</td></tr>`;
+    return;
+  }
+  const badge = (status) => {
+    const s = String(status || "");
+    if (s === "published") return `<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg text-xs">publié</span>`;
+    if (s === "prepared") return `<span class="text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg text-xs">en file</span>`;
+    if (s === "skipped") return `<span class="text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg text-xs">ignoré</span>`;
+    return `<span class="text-red-700 bg-red-50 px-2 py-0.5 rounded-lg text-xs">erreur</span>`;
+  };
+  body.innerHTML = rows
+    .slice(0, 80)
+    .map((item) => {
+      const title = escapeHtml(item.seo_title || "—");
+      const price = Number(item.sell_price || 0);
+      const priceTxt = price > 0 ? `${price.toFixed(2)} €` : "—";
+      const net = item.net_pct != null && item.net_pct !== "" ? `${Number(item.net_pct).toFixed(1)} %` : "—";
+      const date = formatPublishDate(item.published_at);
+      const detail = escapeHtml(item.detail || "");
+      return `<tr class="border-b border-zinc-50">
+        <td class="p-3 whitespace-nowrap text-zinc-500">${date}</td>
+        <td class="p-3">${badge(item.status)}</td>
+        <td class="p-3 font-medium">${title}${detail ? `<div class="text-[11px] text-zinc-400 font-normal mt-0.5">${detail}</div>` : ""}</td>
+        <td class="p-3 text-brand-600 font-semibold">${priceTxt}</td>
+        <td class="p-3 text-zinc-500">${net}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 async function loadAutoPublishHistory() {
   try {
     const res = await fetch(API + "/api/auto-publish/history");
@@ -1480,15 +1515,27 @@ async function loadAutoPublishHistory() {
     const market = document.getElementById("auto-publish-market");
     if (market && data.marketplace) market.value = data.marketplace;
     const published = data.published || [];
-    document.getElementById("ap-stat-published").textContent = String(published.length);
-    const log = data.log || [];
-    document.getElementById("ap-stat-skipped").textContent = String(
-      log.filter((r) => r.status === "skipped").length
-    );
-    document.getElementById("ap-stat-errors").textContent = String(
-      log.filter((r) => r.status === "error").length
-    );
+    const pipe = data.pipeline || {};
+    const pubEl = document.getElementById("ap-stat-published");
+    if (pubEl) pubEl.textContent = String(pipe.publishedToday || published.length || 0);
+    const queuedEl = document.getElementById("ap-stat-queued");
+    if (queuedEl) queuedEl.textContent = String(pipe.queued || 0);
+    const prepEl = document.getElementById("ap-stat-prepared");
+    if (prepEl) prepEl.textContent = String(pipe.preparedToday || 0);
+    const meta = document.getElementById("ap-pipeline-meta");
+    if (meta) {
+      const kws = (pipe.keywords || []).slice(0, 6).map((k) => k.query || k).filter(Boolean);
+      const tick = pipe.lastTickAt ? formatPublishDate(pipe.lastTickAt) : "jamais";
+      meta.textContent =
+        (data.enabled ? "Automatisation ON · " : "Automatisation OFF · ") +
+        `dernier cycle ${tick}` +
+        (pipe.lastQuery ? ` · « ${pipe.lastQuery} »` : "") +
+        (pipe.lastPhase ? ` · phase ${pipe.lastPhase}` : "") +
+        (kws.length ? ` · demande : ${kws.join(", ")}` : "") +
+        ` · ignorés/jour ${pipe.skippedToday || 0}`;
+    }
     renderAutoPublishHistory(published);
+    renderAutoPublishLog(data.log || []);
   } catch (err) {
     const body = document.getElementById("auto-publish-history");
     if (body) {
@@ -1516,7 +1563,7 @@ async function saveAutoPublishSettings() {
 async function runAutoPublish() {
   const btn = document.getElementById("auto-publish-btn");
   if (btn) btn.disabled = true;
-  setAutoPublishProgress(4, "Démarrage…", "Comparaison des prix eBay puis publication");
+  setAutoPublishProgress(4, "Démarrage…", "Publication du lot prêt, puis préparation du suivant");
   const marketplace = document.getElementById("auto-publish-market")?.value || "France";
   await saveAutoPublishSettings();
   try {
@@ -1545,6 +1592,9 @@ async function runAutoPublish() {
           if (ev.type === "log") {
             const m = String(ev.message || "");
             if (/\[INIT\]/i.test(m)) setAutoPublishProgress(8, "Initialisation", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[DEMAND\]/i.test(m)) setAutoPublishProgress(20, "Demande eBay", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[PREPARE\]/i.test(m)) setAutoPublishProgress(60, "Préparation fiches", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[PUBLISH\]/i.test(m)) setAutoPublishProgress(40, "Publication", m.replace(/^\[[^\]]+\]\s*/, ""));
             else if (/\[PRICE\]/i.test(m)) setAutoPublishProgress(null, "Comparaison eBay", m.replace(/^\[[^\]]+\]\s*/, ""));
             else if (/\[OK\]/i.test(m)) setAutoPublishProgress(null, "Publié", m.replace(/^\[[^\]]+\]\s*/, ""));
             else if (/\[SKIP\]/i.test(m)) setAutoPublishProgress(null, "Ignoré", m.replace(/^\[[^\]]+\]\s*/, ""));
@@ -1552,15 +1602,20 @@ async function runAutoPublish() {
             else if (/\[ERROR\]/i.test(m)) setAutoPublishProgress(null, "Erreur", m.replace(/^\[[^\]]+\]\s*/, ""));
           }
           if (ev.type === "stats" || ev.type === "done") {
-            if (ev.published != null) document.getElementById("ap-stat-published").textContent = ev.published;
-            if (ev.skipped != null) document.getElementById("ap-stat-skipped").textContent = ev.skipped;
-            if (ev.errors != null) document.getElementById("ap-stat-errors").textContent = ev.errors;
+            if (ev.published != null) {
+              const el = document.getElementById("ap-stat-published");
+              if (el) el.textContent = ev.published;
+            }
+            if (ev.prepared != null) {
+              const el = document.getElementById("ap-stat-prepared");
+              if (el) el.textContent = ev.prepared;
+            }
           }
           if (ev.type === "done") {
             setAutoPublishProgress(
               100,
-              "Terminé",
-              `${ev.published || 0} publié(s) · ${ev.skipped || 0} ignoré(s) · ${ev.errors || 0} erreur(s)`
+              "Cycle terminé",
+              `${ev.published || 0} publié(s) · ${ev.prepared || 0} préparé(s) · ${ev.skipped || 0} ignoré(s)`
             );
           }
         } catch (_) {}

@@ -669,9 +669,9 @@
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h3 class="text-xl font-bold">Auto-Publish</h3>
-              <p class="text-sm text-zinc-500 mt-1">Publie tes listings après comparaison des prix eBay. Prix le plus concurrentiel possible, rentabilité nette ≥ 5 %. Quantité : 5 000.</p>
+              <p class="text-sm text-zinc-500 mt-1">Pipeline complet : tendances du marché → fournisseur le plus rentable (Product Sniper) → fiche eBay claire → prix concurrentiel (net ≥ 5 %) → publication toutes les 10 min (qty 5 000). Pendant l’intervalle, le prochain lot est préparé.</p>
             </div>
-            <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer Auto-Publish</button>
+            <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer un cycle</button>
           </div>
           <div class="grid md:grid-cols-3 gap-3">
             <div>
@@ -686,20 +686,23 @@
             <div class="flex items-end">
               <label class="flex items-center gap-3 text-sm text-ink-900 pb-2">
                 <input id="auto-publish-enabled" type="checkbox" class="toggle" onchange="saveAutoPublishSettings()" />
-                Automatisation (toutes les 10 min)
+                Automatisation (cycle 10 min : publier + préparer)
               </label>
             </div>
             <div class="grid grid-cols-3 gap-2 text-center text-sm">
               <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-published" class="font-bold text-lg">0</div>Publiés</div>
-              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-skipped" class="font-bold text-lg">0</div>Ignorés</div>
-              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-errors" class="font-bold text-lg">0</div>Erreurs</div>
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-queued" class="font-bold text-lg">0</div>En file</div>
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-prepared" class="font-bold text-lg">0</div>Préparés / jour</div>
             </div>
+          </div>
+          <div id="ap-pipeline-meta" class="text-xs text-zinc-500 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3">
+            Active le toggle pour enchaîner recherche de demande, sniper, fiche et publication.
           </div>
           <div id="ap-progress-wrap" class="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 space-y-2">
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <p id="ap-progress-label" class="text-sm font-medium text-ink-900 truncate">En attente</p>
-                <p id="ap-progress-detail" class="text-xs text-zinc-500 mt-0.5 truncate">Compare les concurrents eBay, puis publie si rentable.</p>
+                <p id="ap-progress-detail" class="text-xs text-zinc-500 mt-0.5 truncate">Cycle : publier le lot prêt, puis préparer les prochaines fiches.</p>
               </div>
               <span id="ap-progress-pct" class="text-sm font-semibold text-[#4452a8] tabular-nums shrink-0">0%</span>
             </div>
@@ -727,6 +730,25 @@
               </tr>
             </thead>
             <tbody id="auto-publish-history"></tbody>
+          </table>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <div class="p-5 border-b">
+            <h3 class="font-semibold">Activité du pipeline</h3>
+            <p class="text-xs text-zinc-400 mt-0.5">Préparé / publié / ignoré / erreur — titre, prix, rentabilité</p>
+          </div>
+          <table class="w-full text-sm">
+            <thead class="text-left text-zinc-400 border-b">
+              <tr>
+                <th class="p-3">Date</th>
+                <th class="p-3">Statut</th>
+                <th class="p-3">Titre</th>
+                <th class="p-3">Prix</th>
+                <th class="p-3">Net</th>
+              </tr>
+            </thead>
+            <tbody id="auto-publish-log"></tbody>
           </table>
         </div>
       </section>
@@ -1167,6 +1189,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-v5"></script>
+  <script src="app.js?v=snipe-v7"></script>
 </body>
 </html>
