@@ -57,7 +57,10 @@ const {
   buildDemandKeywords,
   nextDemandSlice,
   pickMostProfitableOffer,
+  rankOffersByProfit,
   isSupplierUrl,
+  competitorMarketPrices,
+  explainUnprofitable,
   rollPipelineDay,
   looksLikeCategoryLabel,
   DEFAULT_PREPARE_PER_TICK,
@@ -339,6 +342,52 @@ async function resolveListingCost(listing) {
   return cost;
 }
 
+async function loadCompetitorMarket(query, { marketplace = "FR", send = () => {} } = {}) {
+  let items = [];
+  let api = "";
+  try {
+    const r = await browseSearch(query, { marketplace, limit: 20 });
+    items = r.items || [];
+    api = r.api || "browse";
+  } catch (err) {
+    try {
+      const ebay = await scrapeEbaySearch(query, { marketplace, limit: 20 });
+      items = ebay.items || [];
+      api = "scrape";
+    } catch (err2) {
+      api = `fail:${err2.message || err.message}`;
+      send({ type: "log", message: `[PREPARE] prix eBay: ${err2.message || err.message}` });
+    }
+  }
+  const prices = competitorMarketPrices(items, query);
+  return { items, prices, api };
+}
+
+async function snipeSupplierCandidates(query, { send = () => {}, fast = true } = {}) {
+  const cmp = await findCheapestSupplier(query, {
+    sources: ["amazon", "aliexpress", "cdiscount"],
+    limit: 3,
+    fast,
+    onLog: (m) => send({ type: "log", message: m }),
+  });
+  return (cmp.candidates || []).filter((o) => isSupplierUrl(o.url) && Number(o.price) >= 1.99);
+}
+
+function mergeOfferLists(a = [], b = []) {
+  const seen = new Set();
+  const out = [];
+  for (const o of [...a, ...b]) {
+    const key = String(o?.url || "")
+      .split("?")[0]
+      .replace(/\/$/, "")
+      .toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(o);
+  }
+  return out;
+}
+
 async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 } = {}) {
   const cost = await resolveListingCost(listing);
   const q =
@@ -347,27 +396,10 @@ async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 
       .filter(Boolean)
       .slice(0, 8)
       .join(" ") || String(listing.seo_title || "produit");
-  let competitorPrices = [];
-  let api = "";
-  try {
-    const r = await browseSearch(q, { marketplace, limit: 20 });
-    competitorPrices = (r.items || [])
-      .map((i) => Number(i.price))
-      .filter((p) => p >= 1.99 && p < 2000);
-    api = r.api || "browse";
-  } catch (err) {
-    try {
-      const ebay = await scrapeEbaySearch(q, { marketplace, limit: 20 });
-      competitorPrices = (ebay.items || [])
-        .map((i) => Number(i.price))
-        .filter((p) => p >= 1.99 && p < 2000);
-      api = "scrape";
-    } catch (err2) {
-      api = `fail:${err2.message || err.message}`;
-    }
-  }
+  const market = await loadCompetitorMarket(q, { marketplace });
+  const competitorPrices = market.prices;
   const priced = competitiveSellPrice({ cost, competitorPrices, minNetPct });
-  return { ...priced, cost, competitorPrices, query: q, api };
+  return { ...priced, cost, competitorPrices, query: q, api: market.api };
 }
 
 let autoPublishBusy = false;
@@ -691,31 +723,18 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     });
     send({ type: "log", message: `[PREPARE] Demande « ${kw.query} » (${kw.reason}) → sniper fournisseur` });
 
-    let competitorPrices = [];
-    try {
-      const r = await browseSearch(kw.query, { marketplace: marketCode, limit: 20 });
-      competitorPrices = (r.items || []).map((i) => Number(i.price)).filter((p) => p >= 1.99 && p < 2000);
-    } catch (_) {
-      try {
-        const ebay = await scrapeEbaySearch(kw.query, { marketplace: marketCode, limit: 20 });
-        competitorPrices = (ebay.items || []).map((i) => Number(i.price)).filter((p) => p >= 1.99 && p < 2000);
-      } catch (e) {
-        send({ type: "log", message: `[PREPARE] prix eBay: ${e.message}` });
-      }
-    }
+    const ebayMarket = await loadCompetitorMarket(kw.query, { marketplace: marketCode, send });
+    const competitorPrices = ebayMarket.prices;
     send({
       type: "log",
-      message: `[PREPARE] ${competitorPrices.length} concurrent(s) eBay pour « ${kw.query} »`,
+      message: `[PREPARE] ${competitorPrices.length} concurrent(s) eBay neuf/même produit sur ${ebayMarket.items.length} annonce(s) (${ebayMarket.api})${
+        competitorPrices[0] ? ` · marché ${competitorPrices[0].toFixed(2)}€` : ""
+      }`,
     });
 
-    let cmp = { candidates: [] };
+    let candidates = [];
     try {
-      cmp = await findCheapestSupplier(kw.query, {
-        sources: ["amazon", "aliexpress", "cdiscount"],
-        limit: 3,
-        fast: true,
-        onLog: (m) => send({ type: "log", message: m }),
-      });
+      candidates = await snipeSupplierCandidates(kw.query, { send, fast: true });
     } catch (e) {
       stats.errors += 1;
       state.skippedToday += 1;
@@ -723,29 +742,53 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       continue;
     }
 
-    const candidates = (cmp.candidates || []).filter((o) => isSupplierUrl(o.url) && Number(o.price) >= 1.99);
     send({
       type: "log",
       message: `[PREPARE] candidats ${candidates.map((c) => `${c.source}:${Number(c.price).toFixed(2)}€`).join(" · ") || "aucun"}`,
     });
-    const best = pickMostProfitableOffer(candidates, competitorPrices, 5);
+
+    let ranked = rankOffersByProfit(candidates, competitorPrices, 5);
+    let best = ranked.find((r) => r.profitable) || null;
+    if (!best) {
+      send({ type: "log", message: `[PREPARE] relance AliExpress (souvent moins cher)…` });
+      try {
+        const ali = await findCheapestSupplier(kw.query, {
+          sources: ["aliexpress"],
+          limit: 3,
+          fast: false,
+          onLog: (m) => send({ type: "log", message: m }),
+        });
+        const extra = (ali.candidates || []).filter((o) => isSupplierUrl(o.url) && Number(o.price) >= 1.99);
+        candidates = mergeOfferLists(candidates, extra);
+        ranked = rankOffersByProfit(candidates, competitorPrices, 5);
+        best = ranked.find((r) => r.profitable) || null;
+        send({
+          type: "log",
+          message: `[PREPARE] après Ali: ${candidates.map((c) => `${c.source}:${Number(c.price).toFixed(2)}€`).join(" · ") || "aucun"}`,
+        });
+      } catch (e) {
+        send({ type: "log", message: `[PREPARE] Ali retry: ${e.message}` });
+      }
+    }
+
     if (!best) {
       stats.skipped += 1;
       state.skippedToday += 1;
+      const why = explainUnprofitable(ranked, competitorPrices);
       insertAutoPublishLog.run(
         0,
         kw.query,
-        0,
-        0,
-        competitorPrices[0] || null,
+        ranked[0]?.priced?.sell || 0,
+        ranked[0]?.offer?.price || 0,
+        ranked[0]?.priced?.market || competitorPrices[0] || null,
         competitorPrices.length,
-        null,
+        ranked[0]?.netPct ?? null,
         "",
         marketCode,
         "skipped",
-        "Aucune offre fournisseur rentable ≥ 5% et concurrentielle"
+        why
       );
-      send({ type: "log", message: `[PREPARE] aucune offre rentable + concurrentielle pour « ${kw.query} »` });
+      send({ type: "log", message: `[PREPARE] ignoré « ${kw.query} » — ${why}` });
       continue;
     }
 
@@ -772,20 +815,23 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       if (!priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
         stats.skipped += 1;
         state.skippedToday += 1;
+        const why = `Après scrape: plancher ${priced.minSell}€ vs eBay ${
+          priced.market != null ? priced.market + "€" : "n/a"
+        } (net ${priced.netPct}%)`;
         insertAutoPublishLog.run(
           0,
           built.seoTitle || kw.query,
           priced.sell || 0,
           cost,
-          priced.cheapest,
+          priced.market || priced.cheapest,
           priced.competitorCount || 0,
           priced.netPct,
           "",
           marketCode,
           "skipped",
-          "Fiche créée mais prix non concurrentiel / net < 5%"
+          why
         );
-        send({ type: "log", message: `[PREPARE] fiche écartée après re-prix (net ${priced.netPct}%)` });
+        send({ type: "log", message: `[PREPARE] fiche écartée — ${why}` });
         continue;
       }
       const result = await insertListingWithImageCache({

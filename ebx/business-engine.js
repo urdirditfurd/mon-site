@@ -670,27 +670,38 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
   const c = Number(cost) || 0;
   const denom = 1 - ebayFeeRate - minNetPct / 100;
   const minSell = c > 0 && denom > 0.2 ? Number((c / denom).toFixed(2)) : 0;
-  const prices = (competitorPrices || [])
+  let prices = (competitorPrices || [])
     .map((p) => Number(p))
     .filter((p) => p >= 1.99 && p < 2000)
     .sort((a, b) => a - b);
+  // Occasions / autre conditionnement : plus bas que ~75 % du coût fournisseur ≠ même produit.
+  if (c >= 1.99) {
+    const sameProduct = prices.filter((p) => p >= Number((c * 0.75).toFixed(2)));
+    if (sameProduct.length) prices = sameProduct;
+  }
+  if (prices.length >= 4) {
+    const med = prices[Math.floor(prices.length / 2)];
+    const trimmed = prices.filter((p) => p >= med * 0.5);
+    if (trimmed.length >= 3) prices = trimmed;
+  }
   const cheapest = prices[0] || null;
   const median = prices.length ? prices[Math.floor(prices.length / 2)] : null;
+  const market = prices.length ? prices[Math.floor((prices.length - 1) * 0.25)] : null;
   let sell = minSell;
-  if (cheapest > 0) {
-    const under = Number((cheapest * 0.99).toFixed(2));
-    sell = Math.max(minSell, under);
+  if (market > 0) {
+    sell = Math.max(minSell, Number((market * 0.99).toFixed(2)));
   } else if (median > 0) {
     sell = Math.max(minSell, median);
   }
   if (!(sell > 0) && median > 0) sell = median;
   const margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
-  const competitive = cheapest == null || sell <= Number((cheapest * 1.08).toFixed(2));
+  const competitive = market == null || sell <= Number((market * 1.12).toFixed(2));
   return {
     sell: Number((sell || 0).toFixed(2)),
     minSell,
     cheapest,
     median,
+    market,
     competitorCount: prices.length,
     netPct: margin.netPct,
     profitable: margin.netPct >= minNetPct - 0.05,

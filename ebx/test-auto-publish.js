@@ -5,6 +5,9 @@ const {
   pickMostProfitableOffer,
   rankOffersByProfit,
   isSupplierUrl,
+  competitorMarketPrices,
+  titleOverlapsQuery,
+  explainUnprofitable,
   rollPipelineDay,
   languageForMarket,
 } = require("./auto-publish-engine");
@@ -91,6 +94,37 @@ check(languageForMarket("France") === "fr" && languageForMarket("DE") === "de" &
 
 const floor = competitiveSellPrice({ cost: 10, competitorPrices: [8], minNetPct: 5 });
 check(floor.sell >= floor.minSell && !((8 * 0.99) >= floor.minSell && floor.sell < floor.minSell), "plancher 5% jamais cassé");
+
+const mixedEbay = competitorMarketPrices(
+  [
+    { title: "Crochet pantalon vintage", price: 2.99, condition: "Used" },
+    { title: "Lot 24 crochets muraux adhésifs", price: 8.5, condition: "New" },
+    { title: "Crochet mural adhésif 10 pcs neuf", price: 9.2, condition: "New" },
+    { title: "Serviette de bain", price: 3.5, condition: "New" },
+  ],
+  "crochet mural adhésif"
+);
+check(
+  mixedEbay[0] >= 8 && mixedEbay.every((p) => p >= 8),
+  `concurrents filtrés (neuf + même produit) → ${mixedEbay.join(", ")}`
+);
+
+const amazonCrochet = [
+  { title: "24 crochets", url: "https://www.amazon.fr/dp/B0F5WWWZC8", price: 5.57, source: "amazon" },
+];
+const dumped = pickMostProfitableOffer(amazonCrochet, [2.99, 3.1, 8.5, 9.2, 10], 5);
+check(
+  dumped && dumped.profitable && dumped.priced.sell >= dumped.priced.minSell,
+  `dump eBay ignoré, Amazon 5.57€ accepté → sell=${dumped ? dumped.priced.sell : "null"} competitive=${dumped && dumped.priced.competitive}`
+);
+
+check(titleOverlapsQuery("Lot 24 crochets muraux adhésifs", "crochet mural adhésif"), "titre concurrent proche OK");
+check(!titleOverlapsQuery("Serviette de bain coton", "crochet mural adhésif"), "titre hors sujet rejeté");
+
+const tight = pickMostProfitableOffer(amazonCrochet, [3.2, 3.4, 3.5], 5);
+check(tight == null, "marché neuf plus bas que le plancher 5% → rejeté");
+
+check(isSupplierUrl("https://www.amazon.fr/Nom-Produit/dp/B0DSHZXYY2"), "URL Amazon /titre/dp OK");
 
 if (failed) {
   console.error(`\n${failed} échec(s) auto-publish engine`);

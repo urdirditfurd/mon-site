@@ -183,12 +183,90 @@ function pickMostProfitableOffer(offers, competitorPrices = [], minNetPct = MIN_
   return best || null;
 }
 
+function normalizeMatch(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function queryToks(query) {
+  return normalizeMatch(query)
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+}
+
+function titleOverlapsQuery(title, query) {
+  const toks = queryToks(query);
+  if (!toks.length) return true;
+  const t = normalizeMatch(title);
+  if (!t) return false;
+  const hits = toks.filter(
+    (tok) => t.includes(tok) || t.includes(`${tok}s`) || (tok.endsWith("s") && t.includes(tok.slice(0, -1)))
+  );
+  return hits.length >= Math.min(toks.length, Math.max(2, Math.ceil(toks.length * 0.66)));
+}
+
+function isUsedListing(item = {}) {
+  const cond = String(item.condition || "");
+  if (/\b(new|neuf|brand new|new with tags|new without tags|nouveau)\b/i.test(cond)) return false;
+  const blob = `${cond} ${item.title || ""}`;
+  return /\b(used|occasion|usag[ée]|refurbished|reconditionn|pour pi[eè]ces|pre-?owned|very good|bon [eé]tat|tr[eè]s bon [eé]tat|acceptable|open box|comme neuf)\b/i.test(
+    blob
+  );
+}
+
+/**
+ * Prix eBay comparables : neuf, titre proche, hors occasions / lots dump.
+ * Accepte des nombres ou des objets { price, title, condition }.
+ */
+function competitorMarketPrices(items = [], query = "") {
+  const rows = [];
+  for (const it of items || []) {
+    if (typeof it === "number" || (it != null && typeof it !== "object")) {
+      const p = Number(it);
+      if (p >= 2.5 && p < 500) rows.push(p);
+      continue;
+    }
+    const p = Number(it.price);
+    if (!(p >= 2.5 && p < 500)) continue;
+    if (isUsedListing(it)) continue;
+    const title = String(it.title || "");
+    if (title && query && !titleOverlapsQuery(title, query)) continue;
+    rows.push(p);
+  }
+  rows.sort((a, b) => a - b);
+  return rows;
+}
+
+function explainUnprofitable(ranked, competitorPrices = []) {
+  if (!ranked.length) {
+    return "Aucun fournisseur avec une fiche produit (Amazon / AliExpress / Cdiscount)";
+  }
+  const r = ranked[0];
+  const cost = Number(r.offer?.price) || 0;
+  const minSell = r.priced?.minSell;
+  const market = r.priced?.market ?? r.priced?.cheapest;
+  const n = r.priced?.competitorCount || competitorPrices.length || 0;
+  const src = r.offer?.source || "fournisseur";
+  if (n <= 0) {
+    return `${src} ${cost.toFixed(2)}€ — coût ou URL invalide`;
+  }
+  return `${src} ${cost.toFixed(2)}€ → plancher ${Number(minSell).toFixed(2)}€ vs eBay neuf ${
+    market != null ? Number(market).toFixed(2) + "€" : "n/a"
+  } (${n} concurrent${n > 1 ? "s" : ""}) — pas concurrentiel à net ≥ 5%`;
+}
+
 function isSupplierUrl(url) {
   const u = String(url || "");
   if (!u || /ebay\.(com|fr|de|co\.uk|it|es)\b/i.test(u)) return false;
   if (/wholesale-|\/w\/wholesale|\/search\/|SearchText=|\/s\?k=/i.test(u)) return false;
   if (/cdiscount\.com\/[^?]*(?:\/r-|\/f-\d+-nav)/i.test(u)) return false;
-  return /amazon\.[a-z.]+\/.*(dp|gp\/product)|aliexpress\.com\/item\/|cdiscount\.com\/.+\.html/i.test(u);
+  return /amazon\.[a-z.]+\/(?:[^/?#]+\/)?(?:dp|gp\/(?:product|aw\/d))\b|aliexpress\.com\/(?:item|i)\/|cdiscount\.com\/.+\.html/i.test(
+    u
+  );
 }
 
 function emptyPipelineState(marketplace = "France") {
@@ -237,6 +315,9 @@ module.exports = {
   rankOffersByProfit,
   pickMostProfitableOffer,
   isSupplierUrl,
+  competitorMarketPrices,
+  titleOverlapsQuery,
+  explainUnprofitable,
   emptyPipelineState,
   rollPipelineDay,
 };
