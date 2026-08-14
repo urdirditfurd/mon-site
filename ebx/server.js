@@ -288,6 +288,9 @@ const listUnpublishedForAuto = db.prepare(
 const findListingBySourceUrl = db.prepare(
   `SELECT id FROM listings WHERE source_url = ? ORDER BY id DESC LIMIT 1`
 );
+const findListingByAutoQuery = db.prepare(
+  `SELECT id FROM listings WHERE keywords LIKE ? ORDER BY id DESC LIMIT 1`
+);
 const markListingAutoPrepared = db.prepare(
   `UPDATE listings SET auto_prepared = 1, suggested_price = ?, cost_price = ? WHERE id = ?`
 );
@@ -641,7 +644,7 @@ async function refreshDemandIfNeeded(marketplace, send = () => {}) {
   const hasSeeds = (state.keywords || []).some((k) => k.reason === "seed" || k.reason === "trend-seed");
   if (
     Array.isArray(state.keywords) &&
-    state.keywords.length >= 8 &&
+    state.keywords.length >= 4 &&
     !dirty &&
     hasSeeds &&
     state.algo === DEMAND_ALGO
@@ -700,19 +703,30 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     return stats;
   }
   let state = await refreshDemandIfNeeded(marketplace, send);
-  const slice = nextDemandSlice(state.keywords, state.cursor, max);
-  state.cursor = slice.cursor;
-  if (!slice.items.length) {
+  if (!(state.keywords || []).length) {
     send({ type: "log", message: "[PREPARE] Aucun mot-clé demande aujourd'hui" });
     savePipelineState(state);
     return stats;
   }
 
-  for (const kw of slice.items) {
+  const tried = new Set();
+  const maxAttempts = Math.min((state.keywords || []).length, Math.max(max * 4, 8));
+  while (stats.prepared < max && tried.size < maxAttempts) {
     if (Number(countAutoQueue.get()?.n || 0) >= QUEUE_CAP) {
       send({ type: "log", message: `[PREPARE] File au plafond ${QUEUE_CAP} — stop préparation` });
       break;
     }
+    const slice = nextDemandSlice(state.keywords, state.cursor, 1);
+    state.cursor = slice.cursor;
+    const kw = slice.items[0];
+    if (!kw?.query || tried.has(kw.query)) break;
+    tried.add(kw.query);
+
+    if (findListingByAutoQuery.get(`%auto-publish:${kw.query}%`)) {
+      send({ type: "log", message: `[PREPARE] « ${kw.query} » déjà en Mes Listings — mot-clé suivant` });
+      continue;
+    }
+
     state.lastQuery = kw.query;
     state.lastPhase = "prepare";
     send({
@@ -794,8 +808,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
 
     const url = String(best.offer.url).split("?")[0];
     if (findListingBySourceUrl.get(url)) {
-      send({ type: "log", message: `[PREPARE] déjà en Mes Listings — ${url}` });
-      stats.skipped += 1;
+      send({ type: "log", message: `[PREPARE] déjà en Mes Listings — ${url} — mot-clé suivant` });
       continue;
     }
 
