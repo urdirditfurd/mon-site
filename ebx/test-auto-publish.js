@@ -35,8 +35,8 @@ check(
     demand.some((d) => /eponge|maquillage/i.test(d.query)) &&
     !demand.some((d) => /nike/i.test(d.query)) &&
     !demand.some((d) => /Voyage/i.test(d.query)) &&
-    !demand.some((d) => String(d.query).split(/\s+/).length < 2) &&
-    !demand.some((d) => /^bagages$/i.test(d.query)),
+    !demand.some((d) => /deco ete|bagages/i.test(d.query)) &&
+    !demand.some((d) => String(d.query).split(/\s+/).length < 2),
   `demand keywords (seeds d'abord, sans VeRO / catégories / 1 mot) → ${demand.map((d) => d.query).join(" | ")}`
 );
 

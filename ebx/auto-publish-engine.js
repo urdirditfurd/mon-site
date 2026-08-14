@@ -18,7 +18,7 @@ const DEFAULT_PREPARE_PER_TICK = 3;
 const DEFAULT_PUBLISH_PER_TICK = 3;
 const QUEUE_CAP = 18;
 /** Incrémente pour forcer un rescan des mots-clés du jour. */
-const DEMAND_ALGO = 2;
+const DEMAND_ALGO = 3;
 
 function languageForMarket(marketplace = "FR") {
   const c = String(marketplace || "FR").toUpperCase().replace(/^EBAY_/, "");
@@ -62,6 +62,23 @@ function looksLikeCategoryLabel(q) {
   return false;
 }
 
+function isWeakDemandQuery(q) {
+  const toks = String(q || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (toks.length < 2) return true;
+  const GENERIC = new Set([
+    "deco", "ete", "plage", "voyage", "maison", "cadeau", "cadeaux", "sacs",
+    "mode", "sport", "jardin", "tech", "bureau", "enfants", "accessoires",
+  ]);
+  if (toks.every((t) => GENERIC.has(t) || t.length <= 3)) return true;
+  if (!toks.some((t) => t.length >= 5) && toks.every((t) => t.length <= 4)) return true;
+  return false;
+}
+
 /**
  * Construit la file de mots-clés du jour.
  * Seeds (niches rotatives = demande ciblée + snipable) d'abord, puis titres tendances eBay,
@@ -76,7 +93,7 @@ function buildDemandKeywords({ trendItems = [], seeds = [], calendarEvents = [],
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 80);
-    if (!q || looksLikeCategoryLabel(q) || isBlockedDemandQuery(q)) return false;
+    if (!q || looksLikeCategoryLabel(q) || isWeakDemandQuery(q) || isBlockedDemandQuery(q)) return false;
     if (q.split(/\s+/).length < 2) return false;
     const key = q.toLowerCase();
     if (seen.has(key)) return false;
@@ -213,6 +230,7 @@ module.exports = {
   keywordFromTitle,
   isBlockedDemandQuery,
   looksLikeCategoryLabel,
+  isWeakDemandQuery,
   buildDemandKeywords,
   nextDemandSlice,
   todayKey,
