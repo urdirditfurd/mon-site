@@ -309,6 +309,7 @@ const PAGE_META = {
   analytics: ["Analytics", "Performance et tendances"],
   competitors: ["Compétiteurs", "Analysez n'importe quel vendeur eBay"],
   sniper: ["Product Sniper", "Import fournisseur vers Mes Listings"],
+  "auto-publish": ["Auto-Publish", "Publication eBay après comparaison des prix concurrents"],
   listings: ["Mes Listings", "Annonces générées"],
   "title-builder": ["Title Builder", "Construisez un titre SEO eBay"],
   description: ["Description Builder", "Générez une description HTML en 1 clic"],
@@ -341,6 +342,7 @@ function navigate(page, opts = {}) {
   if (page === "analytics") loadAnalytics();
   if (page === "competitors") loadCompetitorHistory();
   if (page === "listings") loadListings();
+  if (page === "auto-publish") loadAutoPublishHistory();
   if (page === "sav") {
     loadSav();
     markNotificationsRead({ types: ["message"] });
@@ -1408,6 +1410,167 @@ async function importSnipeOffer(url, btn) {
     }
     alert(err.message);
   }
+}
+
+function formatPublishDate(value) {
+  if (!value) return "—";
+  const d = new Date(String(value).replace(" ", "T"));
+  if (Number.isNaN(d.getTime())) return escapeHtml(String(value));
+  return d.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function setAutoPublishProgress(pct, label, detail) {
+  const bar = document.getElementById("ap-progress-bar");
+  const pctEl = document.getElementById("ap-progress-pct");
+  const lab = document.getElementById("ap-progress-label");
+  const det = document.getElementById("ap-progress-detail");
+  if (pct != null && Number.isFinite(Number(pct))) {
+    const n = Math.max(0, Math.min(100, Number(pct)));
+    if (bar) bar.style.width = n + "%";
+    if (pctEl) pctEl.textContent = Math.round(n) + "%";
+  }
+  if (lab && label) lab.textContent = label;
+  if (det && detail != null) det.textContent = detail;
+}
+
+function renderAutoPublishHistory(published) {
+  const body = document.getElementById("auto-publish-history");
+  if (!body) return;
+  const rows = Array.isArray(published) ? published : [];
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="4" class="p-6 text-sm text-zinc-400 text-center">Aucun produit publié pour l’instant.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((item) => {
+      const title = escapeHtml(item.seo_title || item.title || "Produit");
+      const price = Number(item.suggested_price || item.sell_price || item.price || 0);
+      const priceTxt = price > 0 ? `${price.toFixed(2)} €` : "—";
+      const date = formatPublishDate(item.published_at || item.date);
+      const ebayId = String(item.ebay_listing_id || item.ebayListingId || "");
+      const link = ebayId
+        ? `<a class="text-[#6d7ddf] underline" target="_blank" rel="noopener" href="https://www.ebay.fr/itm/${escapeHtml(
+            ebayId
+          )}">#${escapeHtml(ebayId)}</a>`
+        : "—";
+      return `<tr class="border-b border-zinc-50">
+        <td class="p-3 whitespace-nowrap text-zinc-500">${date}</td>
+        <td class="p-3 font-medium">${title}</td>
+        <td class="p-3 text-brand-600 font-semibold">${priceTxt}</td>
+        <td class="p-3">${link}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+async function loadAutoPublishHistory() {
+  try {
+    const res = await fetch(API + "/api/auto-publish/history");
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Historique indisponible");
+    const data = json.data || {};
+    const enabled = document.getElementById("auto-publish-enabled");
+    if (enabled) enabled.checked = Boolean(data.enabled);
+    const market = document.getElementById("auto-publish-market");
+    if (market && data.marketplace) market.value = data.marketplace;
+    const published = data.published || [];
+    document.getElementById("ap-stat-published").textContent = String(published.length);
+    const log = data.log || [];
+    document.getElementById("ap-stat-skipped").textContent = String(
+      log.filter((r) => r.status === "skipped").length
+    );
+    document.getElementById("ap-stat-errors").textContent = String(
+      log.filter((r) => r.status === "error").length
+    );
+    renderAutoPublishHistory(published);
+  } catch (err) {
+    const body = document.getElementById("auto-publish-history");
+    if (body) {
+      body.innerHTML = `<tr><td colspan="4" class="p-6 text-sm text-red-600 text-center">${escapeHtml(
+        err.message
+      )}</td></tr>`;
+    }
+  }
+}
+
+async function saveAutoPublishSettings() {
+  const enabled = Boolean(document.getElementById("auto-publish-enabled")?.checked);
+  const marketplace = document.getElementById("auto-publish-market")?.value || "France";
+  try {
+    await fetch(API + "/api/auto-publish/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, marketplace }),
+    });
+  } catch (err) {
+    console.warn("[EBX] auto-publish settings:", err.message);
+  }
+}
+
+async function runAutoPublish() {
+  const btn = document.getElementById("auto-publish-btn");
+  if (btn) btn.disabled = true;
+  setAutoPublishProgress(4, "Démarrage…", "Comparaison des prix eBay puis publication");
+  const marketplace = document.getElementById("auto-publish-market")?.value || "France";
+  await saveAutoPublishSettings();
+  try {
+    const res = await fetch(API + "/api/auto-publish/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ marketplace, limit: 5 }),
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, "").trim();
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === "progress") {
+            setAutoPublishProgress(ev.pct, ev.label || "Publication…", ev.detail || "");
+          }
+          if (ev.type === "log") {
+            const m = String(ev.message || "");
+            if (/\[INIT\]/i.test(m)) setAutoPublishProgress(8, "Initialisation", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[PRICE\]/i.test(m)) setAutoPublishProgress(null, "Comparaison eBay", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[OK\]/i.test(m)) setAutoPublishProgress(null, "Publié", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[SKIP\]/i.test(m)) setAutoPublishProgress(null, "Ignoré", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[DONE\]/i.test(m)) setAutoPublishProgress(100, "Terminé", m.replace(/^\[[^\]]+\]\s*/, ""));
+            else if (/\[ERROR\]/i.test(m)) setAutoPublishProgress(null, "Erreur", m.replace(/^\[[^\]]+\]\s*/, ""));
+          }
+          if (ev.type === "stats" || ev.type === "done") {
+            if (ev.published != null) document.getElementById("ap-stat-published").textContent = ev.published;
+            if (ev.skipped != null) document.getElementById("ap-stat-skipped").textContent = ev.skipped;
+            if (ev.errors != null) document.getElementById("ap-stat-errors").textContent = ev.errors;
+          }
+          if (ev.type === "done") {
+            setAutoPublishProgress(
+              100,
+              "Terminé",
+              `${ev.published || 0} publié(s) · ${ev.skipped || 0} ignoré(s) · ${ev.errors || 0} erreur(s)`
+            );
+          }
+        } catch (_) {}
+      }
+    }
+    await loadAutoPublishHistory();
+  } catch (err) {
+    setAutoPublishProgress(100, "Erreur réseau", err.message || "Échec Auto-Publish");
+  }
+  if (btn) btn.disabled = false;
 }
 
 async function loadOrders() {
@@ -3502,7 +3665,7 @@ checkHealth();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer","runAutoPublish","loadAutoPublishHistory","saveAutoPublishSettings"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

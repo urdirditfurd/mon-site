@@ -16,6 +16,7 @@ const {
   titleMatchesQuery,
   resolvePriceViaSearch,
   sanitizeProductPrice,
+  confirmAliPriceLoop,
   buildKeywordAnalysisFromItems,
   buildHtmlFromProduct,
   enrichProductListingCopy,
@@ -42,6 +43,7 @@ const {
   prepareDiscreetListing,
   rewriteEbayTitle,
   estimateMargin,
+  competitiveSellPrice,
   buildPilotageFeed,
   getEventCalendar,
   getTrendingNiches,
@@ -128,9 +130,30 @@ if (!listingCols.includes("variations_active")) {
 if (!listingCols.includes("variations_json")) {
   db.exec("ALTER TABLE listings ADD COLUMN variations_json TEXT DEFAULT ''");
 }
+if (!listingCols.includes("cost_price")) {
+  db.exec("ALTER TABLE listings ADD COLUMN cost_price REAL DEFAULT 0");
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS auto_publish_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER,
+    seo_title TEXT,
+    sell_price REAL,
+    cost_price REAL,
+    competitor_price REAL,
+    competitor_count INTEGER DEFAULT 0,
+    net_pct REAL,
+    ebay_listing_id TEXT DEFAULT '',
+    marketplace TEXT DEFAULT 'FR',
+    status TEXT,
+    detail TEXT DEFAULT '',
+    published_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 
 const getRecentListings = db.prepare(
-  `SELECT id, seo_title, suggested_price, keywords, source_url, created_at,
+  `SELECT id, seo_title, suggested_price, cost_price, keywords, source_url, created_at,
           ebay_listing_id, ebay_offer_id, publish_env, published_at,
           variations_active, variations_json,
           CASE
@@ -167,7 +190,7 @@ function clearListingPublish(localId) {
   updateListingPublish.run("", "", "", 0, "", Number(localId));
 }
 const insertListingStmt = db.prepare(
-  "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url) VALUES (?, ?, ?, ?, ?)"
+  "INSERT INTO listings (seo_title, html_description, suggested_price, keywords, source_url, cost_price) VALUES (?, ?, ?, ?, ?, ?)"
 );
 const findRecentDuplicate = db.prepare(
   `SELECT id FROM listings
@@ -178,14 +201,22 @@ const findRecentDuplicate = db.prepare(
 );
 
 /** Insert listing; si même titre+prix dans les 30s → réutilise l'id (anti double-clic / double sniper). */
-function insertListingSafe({ seoTitle, html, price, keywords = "", sourceUrl = "" }) {
+function insertListingSafe({ seoTitle, html, price, keywords = "", sourceUrl = "", costPrice = 0 }) {
   const title = String(seoTitle || "").slice(0, 80);
   const suggested = Number(price) || 0;
+  const cost = Number(costPrice) || 0;
   const recent = findRecentDuplicate.get(title, suggested);
   if (recent) {
     return { id: Number(recent.id), duplicate: true };
   }
-  const result = insertListingStmt.run(title, String(html || ""), suggested, String(keywords || ""), String(sourceUrl || ""));
+  const result = insertListingStmt.run(
+    title,
+    String(html || ""),
+    suggested,
+    String(keywords || ""),
+    String(sourceUrl || ""),
+    cost
+  );
   return { id: Number(result.lastInsertRowid), duplicate: false };
 }
 
@@ -199,6 +230,279 @@ async function insertListingWithImageCache(opts) {
     console.warn(`[EBX] cache images listing #${result.id}:`, err.message);
   }
   return result;
+}
+
+function marketplaceToCode(marketplace) {
+  const s = String(marketplace || "");
+  if (/united states|ebay_us|\bus\b/i.test(s)) return "US";
+  if (/germany|ebay_de|\bde\b/i.test(s)) return "DE";
+  if (/united kingdom|ebay_gb|\bgb\b/i.test(s)) return "GB";
+  return "FR";
+}
+
+const insertAutoPublishLog = db.prepare(
+  `INSERT INTO auto_publish_log
+    (listing_id, seo_title, sell_price, cost_price, competitor_price, competitor_count, net_pct, ebay_listing_id, marketplace, status, detail)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const listAutoPublishLog = db.prepare(
+  `SELECT id, listing_id, seo_title, sell_price, cost_price, competitor_price, competitor_count, net_pct,
+          ebay_listing_id, marketplace, status, detail, published_at
+   FROM auto_publish_log
+   ORDER BY published_at DESC, id DESC
+   LIMIT 200`
+);
+const listPublishedHistory = db.prepare(
+  `SELECT id, seo_title, suggested_price, cost_price, published_at, ebay_listing_id, publish_env, source_url
+   FROM listings
+   WHERE published_at IS NOT NULL AND TRIM(COALESCE(ebay_listing_id, '')) != ''
+   ORDER BY published_at DESC
+   LIMIT 200`
+);
+const listUnpublishedForAuto = db.prepare(
+  `SELECT * FROM listings
+   WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
+     AND TRIM(COALESCE(seo_title, '')) != ''
+   ORDER BY created_at ASC
+   LIMIT 40`
+);
+
+function listingCost(listing) {
+  const stored = Number(listing?.cost_price);
+  if (stored > 0) return stored;
+  const sell = Number(listing?.suggested_price);
+  if (sell > 0) return Number((sell / 1.8).toFixed(2));
+  return 0;
+}
+
+async function resolveListingCost(listing) {
+  let cost = listingCost(listing);
+  const sourceUrl = String(listing?.source_url || "");
+  if (!(cost >= 1.99) && sourceUrl && isSupplierProductUrl(sourceUrl)) {
+    try {
+      const scraped = await scrapeProduct(sourceUrl);
+      const p = Number(scraped?.price) || 0;
+      if (p >= 1.99) {
+        cost = p;
+        db.prepare("UPDATE listings SET cost_price = ? WHERE id = ?").run(p, listing.id);
+      }
+    } catch (e) {
+      console.warn(`[EBX] cost scrape #${listing.id}:`, e.message);
+    }
+  }
+  return cost;
+}
+
+async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 } = {}) {
+  const cost = await resolveListingCost(listing);
+  const q =
+    String(listing.seo_title || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join(" ") || String(listing.seo_title || "produit");
+  let competitorPrices = [];
+  let api = "";
+  try {
+    const r = await browseSearch(q, { marketplace, limit: 20 });
+    competitorPrices = (r.items || [])
+      .map((i) => Number(i.price))
+      .filter((p) => p >= 1.99 && p < 2000);
+    api = r.api || "browse";
+  } catch (err) {
+    try {
+      const ebay = await scrapeEbaySearch(q, { marketplace, limit: 20 });
+      competitorPrices = (ebay.items || [])
+        .map((i) => Number(i.price))
+        .filter((p) => p >= 1.99 && p < 2000);
+      api = "scrape";
+    } catch (err2) {
+      api = `fail:${err2.message || err.message}`;
+    }
+  }
+  const priced = competitiveSellPrice({ cost, competitorPrices, minNetPct });
+  return { ...priced, cost, competitorPrices, query: q, api };
+}
+
+let autoPublishBusy = false;
+
+async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {} } = {}) {
+  if (autoPublishBusy) {
+    send({ type: "log", message: "[SKIP] Auto-Publish déjà en cours" });
+    return { busy: true, published: 0, skipped: 0, errors: 0, items: [] };
+  }
+  autoPublishBusy = true;
+  const stats = { published: 0, skipped: 0, errors: 0, items: [] };
+  const marketCode = marketplaceToCode(marketplace);
+  try {
+    const max = Math.min(Math.max(Number(limit) || 5, 1), 10);
+    const rows = listUnpublishedForAuto
+      .all()
+      .filter((row) => listingIsSupplierSourced(row))
+      .slice(0, max);
+    send({
+      type: "log",
+      message: `[INIT] Auto-Publish — ${rows.length} listing(s), marché ${marketCode}, qty 5000, net ≥ 5%`,
+    });
+    if (!rows.length) {
+      send({ type: "log", message: "[DONE] Aucun listing fournisseur en attente" });
+      send({ type: "done", ...stats });
+      return stats;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+      let listing = rows[i];
+      const title = String(listing.seo_title || "Produit");
+      send({
+        type: "progress",
+        pct: Math.round((i / rows.length) * 90) + 5,
+        label: `Listing ${i + 1}/${rows.length}`,
+        detail: title.slice(0, 70),
+      });
+      send({ type: "log", message: `[ITEM] #${listing.id} ${title.slice(0, 60)}` });
+
+      const vero = scanVero(`${listing.seo_title} ${listing.html_description || ""}`);
+      if (vero.level === "block") {
+        stats.skipped += 1;
+        insertAutoPublishLog.run(
+          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `VeRO: ${vero.message}`
+        );
+        send({ type: "log", message: `[SKIP] VeRO — ${vero.message}` });
+        continue;
+      }
+      const haz = scanHazardous(`${listing.seo_title} ${listing.html_description || ""}`);
+      if (haz.level === "block") {
+        stats.skipped += 1;
+        insertAutoPublishLog.run(
+          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `Hazmat: ${haz.message}`
+        );
+        send({ type: "log", message: `[SKIP] Hazmat — ${haz.message}` });
+        continue;
+      }
+
+      try {
+        listing = await ensureListingImages(listing);
+        if (countRealImagesInHtml(listing.html_description || "") <= 0) {
+          stats.skipped += 1;
+          insertAutoPublishLog.run(
+            listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", "Pas d'images utilisables"
+          );
+          send({ type: "log", message: `[SKIP] Pas d'images utilisables` });
+          continue;
+        }
+      } catch (imgErr) {
+        stats.errors += 1;
+        insertAutoPublishLog.run(
+          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "error", imgErr.message
+        );
+        send({ type: "log", message: `[ERROR] images: ${imgErr.message}` });
+        continue;
+      }
+
+      let priced;
+      try {
+        priced = await priceListingForEbay(listing, { marketplace: marketCode, minNetPct: 5 });
+      } catch (priceErr) {
+        stats.errors += 1;
+        insertAutoPublishLog.run(
+          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "error", priceErr.message
+        );
+        send({ type: "log", message: `[ERROR] prix: ${priceErr.message}` });
+        continue;
+      }
+
+      send({
+        type: "log",
+        message: `[PRICE] coût ${Number(priced.cost).toFixed(2)}€ · min ${Number(priced.minSell).toFixed(2)}€ · concurrent ${
+          priced.cheapest != null ? Number(priced.cheapest).toFixed(2) + "€" : "n/a"
+        } (${priced.competitorCount}) · vente ${Number(priced.sell).toFixed(2)}€ · net ${priced.netPct}%`,
+      });
+
+      if (!(priced.sell > 0) || !priced.profitable) {
+        stats.skipped += 1;
+        insertAutoPublishLog.run(
+          listing.id,
+          title,
+          priced.sell || 0,
+          priced.cost || 0,
+          priced.cheapest,
+          priced.competitorCount || 0,
+          priced.netPct,
+          "",
+          marketCode,
+          "skipped",
+          `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`
+        );
+        send({ type: "log", message: `[SKIP] pas assez rentable (net ${priced.netPct}% < 5%)` });
+        continue;
+      }
+
+      db.prepare("UPDATE listings SET suggested_price = ? WHERE id = ?").run(priced.sell, listing.id);
+      listing.suggested_price = priced.sell;
+
+      try {
+        await antiBanDelay({ testMode: false, label: "auto-publish" });
+        const result = await publishToEbay(listing, listing.id, { quantity: 5000, variations: { enabled: false } });
+        if (result?.listingId) {
+          rememberListingPublish(listing.id, result);
+          stats.published += 1;
+          const row = {
+            listingId: listing.id,
+            title,
+            price: priced.sell,
+            date: new Date().toISOString(),
+            ebayListingId: result.listingId,
+          };
+          stats.items.push(row);
+          insertAutoPublishLog.run(
+            listing.id,
+            title,
+            priced.sell,
+            priced.cost || 0,
+            priced.cheapest,
+            priced.competitorCount || 0,
+            priced.netPct,
+            String(result.listingId),
+            marketCode,
+            "published",
+            `qty 5000 · ${priced.competitorCount} concurrent(s)`
+          );
+          send({
+            type: "published",
+            item: row,
+          });
+          send({ type: "log", message: `[OK] publié #${result.listingId} à ${priced.sell.toFixed(2)}€` });
+        } else {
+          throw new Error("Pas de listingId eBay");
+        }
+      } catch (pubErr) {
+        stats.errors += 1;
+        insertAutoPublishLog.run(
+          listing.id,
+          title,
+          priced.sell,
+          priced.cost || 0,
+          priced.cheapest,
+          priced.competitorCount || 0,
+          priced.netPct,
+          "",
+          marketCode,
+          "error",
+          String(pubErr.message || pubErr).slice(0, 400)
+        );
+        send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
+      }
+    }
+    send({ type: "stats", ...stats });
+    send({
+      type: "log",
+      message: `[DONE] publiés ${stats.published} · ignorés ${stats.skipped} · erreurs ${stats.errors}`,
+    });
+    send({ type: "done", ...stats });
+    return stats;
+  } finally {
+    autoPublishBusy = false;
+  }
 }
 
 const insertCompetitor = db.prepare(
@@ -1710,12 +2014,17 @@ const HELP_FAQ = [
   {
     keys: ["sniper", "auto-snipe", "snipe", "import"],
     reply:
-      "Product Sniper cherche un signal eBay puis un produit Amazon / Ali / Cdiscount. Les liens trouvés s’affichent sous « Produits trouvés ». L’import va dans Mes Listings — tu publies ensuite manuellement.",
+      "Product Sniper cherche un signal eBay puis un produit Amazon / Ali / Cdiscount. Les liens trouvés s’affichent sous « Meilleure offre par site ». L’import va dans Mes Listings. Auto-Publish publie ensuite après comparaison des prix eBay (rentabilité ≥ 5 %, quantité 5000).",
   },
   {
     keys: ["prix", "skip", "manquant", "n/a"],
     reply:
       "Si le prix fournisseur n’est pas lu (captcha Amazon, Playwright manquant), EBX estime un coût et affiche quand même le lien produit. Sur Windows : installe Chrome + `npx playwright install`, ou utilise Import Manuel avec l’URL produit.",
+  },
+  {
+    keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
+    reply:
+      "Auto-Publish (sous Product Sniper) publie tes listings en attente. Avant chaque mise en ligne, EBX compare les prix eBay du marché choisi, vise le prix le plus concurrentiel, et n’envoie que si la rentabilité nette est ≥ 5 %. Quantité : 5000.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],
@@ -2050,14 +2359,7 @@ app.post("/api/auto-snipe", async (req, res) => {
   const progress = (pct, label, detail = "") =>
     send({ type: "progress", pct, label, detail: String(detail || "").slice(0, 160) });
   const max = Math.min(Math.max(Number(count) || 1, 1), 100);
-  const marketCode =
-    /united states|ebay_us|\bus\b/i.test(String(marketplace))
-      ? "US"
-      : /germany|ebay_de|\bde\b/i.test(String(marketplace))
-        ? "DE"
-        : /united kingdom|ebay_gb|\bgb\b/i.test(String(marketplace))
-          ? "GB"
-          : "FR";
+    const marketCode = marketplaceToCode(marketplace);
   let scanned = 0;
   let imported = 0;
   let listed = 0;
@@ -2066,10 +2368,10 @@ app.post("/api/auto-snipe", async (req, res) => {
   let skipped = 0;
 
   try {
-    progress(5, "Initialisation", "Auto-Snipe v4");
+    progress(5, "Initialisation", "Auto-Snipe v5");
     send({
       type: "log",
-      message: `[INIT] Auto-Snipe v4.5 — 1 meilleure offre par site, prix AliExpress en EUR`,
+      message: `[INIT] Auto-Snipe v5 — 1 meilleure offre par site, loop prix AliExpress`,
     });
     send({
       type: "log",
@@ -2246,6 +2548,38 @@ app.post("/api/auto-snipe", async (req, res) => {
       }
     }
 
+    progress(88, "Prix", "Loop confirmation AliExpress");
+    send({ type: "log", message: `[PRICE] Loop confirmation des prix AliExpress (rejette 1,00 € leurre)` });
+    const confirmed = [];
+    for (const o of offers) {
+      if (!/aliexpress/i.test(String(o.source || ""))) {
+        confirmed.push(o);
+        continue;
+      }
+      try {
+        const looped = await confirmAliPriceLoop(o.url, o.title, { attempts: 3, onLog: sourceLog });
+        if (looped.price >= 1.99) {
+          confirmed.push({
+            ...o,
+            price: looped.price,
+            title: looped.title && looped.title.length > 8 ? looped.title : o.title,
+          });
+          send({
+            type: "log",
+            message: `[PRICE] ${looped.price.toFixed(2)}€ confirmé — ${String(o.title).slice(0, 42)}`,
+          });
+        } else {
+          send({
+            type: "log",
+            message: `[PRICE] écarté (prix non fiable) — ${String(o.title).slice(0, 42)}`,
+          });
+        }
+      } catch (e) {
+        send({ type: "log", message: `[PRICE] loop fail: ${e.message}` });
+      }
+    }
+    offers = confirmed.sort((a, b) => a.price - b.price);
+
     imported = offers.length;
     if (!offers.length) {
       errors += 1;
@@ -2275,13 +2609,73 @@ app.post("/api/auto-snipe", async (req, res) => {
     send({ type: "stats", scanned, imported: offers.length, listed: 0, errors, offers: offers.length });
     send({
       type: "log",
-      message: `[DONE] Auto-Snipe v4 — ${offers.length} offre(s) pour "${searchQ}", ${errors} erreur(s), VeRO=${veroBlocked}`,
+      message: `[DONE] Auto-Snipe v5 — ${offers.length} offre(s) pour "${searchQ}", ${errors} erreur(s), VeRO=${veroBlocked}`,
     });
     progress(100, "Terminé", `${offers.length} offre(s) — clique Importer pour ajouter à Mes Listings`);
     send({ type: "done", scanned, imported: offers.length, listed: 0, errors, offers: offers.length });
   } catch (err) {
     progress(100, "Erreur", err.message);
     send({ type: "log", message: `[ERROR] ${err.message}` });
+  }
+  res.end();
+});
+
+app.get("/api/auto-publish/history", (_req, res) => {
+  try {
+    const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
+    const market = getSetting.get("auto_publish_market")?.value || "France";
+    res.json({
+      success: true,
+      data: {
+        enabled,
+        marketplace: market,
+        quantity: 5000,
+        minNetPct: 5,
+        published: listPublishedHistory.all(),
+        log: listAutoPublishLog.all(),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auto-publish/settings", (req, res) => {
+  try {
+    if (req.body?.enabled != null) {
+      upsertSetting.run("auto_publish_enabled", req.body.enabled ? "1" : "0");
+    }
+    if (req.body?.marketplace) {
+      upsertSetting.run("auto_publish_market", String(req.body.marketplace));
+    }
+    res.json({
+      success: true,
+      data: {
+        enabled: getSetting.get("auto_publish_enabled")?.value === "1",
+        marketplace: getSetting.get("auto_publish_market")?.value || "France",
+        quantity: 5000,
+        minNetPct: 5,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auto-publish/run", async (req, res) => {
+  const marketplace = req.body?.marketplace || getSetting.get("auto_publish_market")?.value || "France";
+  const limit = req.body?.limit || 5;
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  try {
+    upsertSetting.run("auto_publish_market", String(marketplace));
+    await runAutoPublishBatch({ marketplace, limit, send });
+  } catch (err) {
+    send({ type: "log", message: `[ERROR] ${err.message}` });
+    send({ type: "done", published: 0, skipped: 0, errors: 1 });
   }
   res.end();
 });
@@ -2460,12 +2854,14 @@ app.post("/api/generate-listing", async (req, res) => {
     listing.language_label = languageLabel(language);
     listing.html_description = sanitizeListingHtml(listing.html_description || "");
 
+    const costPrice = Number(scraped?.price || listing.product?.price || 0) || 0;
     const result = await insertListingWithImageCache({
       seoTitle: listing.seo_title || "",
       html: listing.html_description || "",
       price: listing.suggested_price || 0,
       keywords: rawKeywords || "",
       sourceUrl: productUrl || "",
+      costPrice,
     });
 
     const saved = getListingById.get(result.id);
@@ -2844,7 +3240,7 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
 
     let result;
     try {
-      result = await publishToEbay(listing, listing.id, { variations });
+      result = await publishToEbay(listing, listing.id, { variations, quantity: 5000 });
     } catch (pubErr) {
       const dup = parseDuplicateListingError(pubErr);
       if (!dup) throw pubErr;
@@ -2855,7 +3251,7 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
         console.warn(`[EBX] Doublon eBay → retry titre « ${newTitle} » (était « ${listing.seo_title} »)`);
         try {
           const retryListing = { ...listing, seo_title: newTitle };
-          result = await publishToEbay(retryListing, listing.id, { variations });
+          result = await publishToEbay(retryListing, listing.id, { variations, quantity: 5000 });
           if (result?.listingId) {
             db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?").run(newTitle, listing.id);
             rememberListingPublish(listing.id, result);
@@ -3446,6 +3842,18 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
+  setInterval(() => {
+    const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
+    if (!enabled || autoPublishBusy) return;
+    const marketplace = getSetting.get("auto_publish_market")?.value || "France";
+    runAutoPublishBatch({
+      marketplace,
+      limit: 3,
+      send: (o) => {
+        if (o.type === "log") console.log("[auto-publish]", o.message);
+      },
+    }).catch((err) => console.warn("[auto-publish]", err.message));
+  }, 10 * 60 * 1000);
 });
 server.on("error", (err) => {
   if (err && err.code === "EADDRINUSE") {

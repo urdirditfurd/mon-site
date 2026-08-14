@@ -5,6 +5,7 @@ const {
   normalizeAliExpressEuroPrice,
   sanitizeAliExpressPrice,
   aliMoneyToEur,
+  pickPlausibleAliEuro,
 } = require("./scraper");
 
 const cases = [
@@ -61,10 +62,20 @@ const cnyOk = Math.abs(aliMoneyToEur(21.47, "CNY") - 2.73) < 0.05;
 console.log(`${cnyOk ? "OK" : "FAIL"}  21.47 CNY → ${aliMoneyToEur(21.47, "CNY")}`);
 if (!cnyOk) failed += 1;
 
-const absurd = sanitizeAliExpressPrice(2147.33, "Poncho de pluie");
-const absurdOk = absurd != null && absurd < 6;
-console.log(`${absurdOk ? "OK" : "FAIL"}  sanitize 2147.33 poncho → ${absurd}€ (pas 21.47€)`);
-if (!absurdOk) failed += 1;
+const oneEuro = aliMoneyToEur(1, "EUR");
+const oneEuroOk = oneEuro == null;
+console.log(`${oneEuroOk ? "OK" : "FAIL"}  1.00 EUR rejeté → ${oneEuro}`);
+if (!oneEuroOk) failed += 1;
+
+const cluster = pickPlausibleAliEuro([1, 1, 1, 46.19]);
+const clusterOk = cluster != null && Math.abs(cluster - 46.19) < 0.02;
+console.log(`${clusterOk ? "OK" : "FAIL"}  ignore 1€ leurre, garde 46.19 → ${cluster}`);
+if (!clusterOk) failed += 1;
+
+const clusterEmpty = pickPlausibleAliEuro([1, 1, 0.99]);
+const clusterEmptyOk = clusterEmpty == null;
+console.log(`${clusterEmptyOk ? "OK" : "FAIL"}  seulement des 1€ → ${clusterEmpty}`);
+if (!clusterEmptyOk) failed += 1;
 
 const raw = [
   {
@@ -160,6 +171,50 @@ const mixedOk =
   mixed.find((p) => p.source === "amazon").price === 5.99;
 console.log(`${mixedOk ? "OK" : "FAIL"}  1 par site malgré 3 Amazon moins chers → ${mixed.map((p) => `${p.source}:${p.price}`).join(" | ")}`);
 if (!mixedOk) failed += 1;
+
+const decoyRank = rankSupplierOffers(
+  [
+    {
+      title: "Poncho de plage femme dégradé, sec rapide, microfibre",
+      url: "https://fr.aliexpress.com/item/1005012141738065.html",
+      price: 1,
+      source: "aliexpress",
+    },
+    {
+      title: "4/6/10 Pièces Poncho de Pluie Adulte, cape de pluie transparent",
+      url: "https://www.amazon.fr/dp/B0DSHZXYY2",
+      price: 7.99,
+      source: "amazon",
+    },
+  ],
+  "poncho",
+  { limit: 3 }
+);
+const decoyOk = decoyRank.every((p) => Number(p.price) >= 1.99) && !decoyRank.some((p) => Number(p.price) === 1);
+console.log(`${decoyOk ? "OK" : "FAIL"}  1,00 € Ali rejeté dans le ranking (${decoyRank.map((p) => p.price).join(", ")})`);
+if (!decoyOk) failed += 1;
+
+const { competitiveSellPrice } = require("./business-engine");
+const priced = competitiveSellPrice({ cost: 4, competitorPrices: [12, 14, 11], minNetPct: 5 });
+const pricedOk = priced.sell >= priced.minSell && priced.sell <= 12 && priced.profitable;
+console.log(`${pricedOk ? "OK" : "FAIL"}  auto-publish prix ${JSON.stringify(priced)}`);
+if (!pricedOk) failed += 1;
+const floor = competitiveSellPrice({ cost: 10, competitorPrices: [8, 8.5], minNetPct: 5 });
+const floorOk = floor.sell >= floor.minSell && floor.sell > 8;
+console.log(`${floorOk ? "OK" : "FAIL"}  plancher 5% ${floor.sell} (min ${floor.minSell}) vs concurrent 8`);
+if (!floorOk) failed += 1;
+
+const noComp = competitiveSellPrice({ cost: 5, competitorPrices: [], minNetPct: 5 });
+const noCompOk = noComp.sell >= noComp.minSell && noComp.profitable && noComp.minSell > 5;
+console.log(`${noCompOk ? "OK" : "FAIL"}  sans concurrent → plancher ${noComp.sell} (min ${noComp.minSell})`);
+if (!noCompOk) failed += 1;
+
+const { resolvePublishQuantity } = require("./ebay-api");
+const qty = resolvePublishQuantity(null, 5000);
+const qtyCap = resolvePublishQuantity({ sellingLimit: { quantity: 200 } }, 5000);
+const qtyOk = qty === 5000 && qtyCap === 200;
+console.log(`${qtyOk ? "OK" : "FAIL"}  quantité publish ${qty} (cap 200 → ${qtyCap})`);
+if (!qtyOk) failed += 1;
 
 if (failed) {
   console.error(`\n${failed} échec(s)`);

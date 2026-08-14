@@ -518,8 +518,38 @@ function aliMoneyToEur(amount, currency = "", formatted = "") {
     // Montant nu typique CNY (21.47 ¥ ≠ 21.47 €)
     eur = n * ALI_CNY_EUR;
   }
-  if (eur < 0.4 || eur > 800) return null;
+  if (eur < 1.99 || eur > 800) return null;
   return Math.round(eur * 100) / 100;
+}
+
+function isPlausibleAliEuro(n) {
+  const p = Number(n);
+  return p >= 1.99 && p <= 150;
+}
+
+/** Médiane des prix Ali plausibles — ignore 1,00 € (leurre / livraison). */
+function pickPlausibleAliEuro(values) {
+  const band = (values || []).filter((v) => Number(v) >= 1.99 && Number(v) <= 150);
+  if (!band.length) return null;
+  const sorted = [...band].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  const tight = sorted.filter((v) => v >= med * 0.4 && v <= Math.max(med * 3, med + 25));
+  const use = tight.length ? tight : sorted;
+  return use[Math.floor(use.length / 2)];
+}
+
+function extractEuroPricesFromHtml(html) {
+  const raw = String(html || "");
+  const euros = [];
+  const re = /(?:€|EUR)\s*(\d+[.,]\d{2})|(\d+[.,]\d{2})\s*(?:€|EUR)/gi;
+  let m;
+  while ((m = re.exec(raw)) && euros.length < 40) {
+    const ctx = raw.slice(Math.max(0, m.index - 48), m.index + 48);
+    if (/livraison|shipping|postage|frais de port|delivery|s&h|port offert/i.test(ctx)) continue;
+    const p = aliMoneyToEur(m[1] || m[2], "EUR");
+    if (p >= 1.99 && p <= 150) euros.push(p);
+  }
+  return pickPlausibleAliEuro(euros);
 }
 
 const ALI_EUR_COOKIE =
@@ -545,16 +575,13 @@ async function fetchAliExpressMeta(productIdOrUrl, titleHint = "") {
     const meta =
       html.match(/itemprop=["']price["'][^>]*content=["']([\d.]+)["']/i) ||
       html.match(/content=["']([\d.]+)["'][^>]*itemprop=["']price["']/i);
-    if (meta) out.price = aliMoneyToEur(meta[1], "EUR") || out.price;
-    if (!(out.price > 0)) {
-      const euroRe = /(?:€|EUR)\s*(\d+[.,]\d{2})|(\d+[.,]\d{2})\s*(?:€|EUR)/gi;
-      const euros = [];
-      let em;
-      while ((em = euroRe.exec(html)) && euros.length < 30) {
-        const p = aliMoneyToEur(em[1] || em[2], "EUR");
-        if (p > 0 && p < 250) euros.push(p);
-      }
-      if (euros.length) out.price = Math.min(...euros);
+    if (meta) {
+      const p = aliMoneyToEur(meta[1], "EUR");
+      if (p >= 1.99) out.price = p;
+    }
+    if (!(out.price >= 1.99)) {
+      const clustered = extractEuroPricesFromHtml(html);
+      if (clustered >= 1.99) out.price = clustered;
     }
     const og =
       html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
@@ -614,17 +641,15 @@ async function fetchAliExpressMeta(productIdOrUrl, titleHint = "") {
       });
       const found = [];
       for (const hit of hits) {
-        for (const hit of hits) {
-          const blob = `${hit.title || ""} ${hit.snippet || ""}`;
-          const euroRe = /(?:€|EUR)\s*(\d+[.,]\d{2})|(\d+[.,]\d{2})\s*(?:€|EUR)/gi;
-          let em;
-          while ((em = euroRe.exec(blob))) {
-            const ok = aliMoneyToEur(em[1] || em[2], "EUR");
-            if (ok) found.push(ok);
-          }
+        const blob = `${hit.title || ""} ${hit.snippet || ""}`;
+        const euroRe = /(?:€|EUR)\s*(\d+[.,]\d{2})|(\d+[.,]\d{2})\s*(?:€|EUR)/gi;
+        let em;
+        while ((em = euroRe.exec(blob))) {
+          const ok = aliMoneyToEur(em[1] || em[2], "EUR");
+          if (ok) found.push(ok);
         }
       }
-      const med = medianPrice(found);
+      const med = pickPlausibleAliEuro(found);
       if (med > 0) best.price = med;
     } catch (_) {}
   }
@@ -635,6 +660,57 @@ async function fetchAliExpressMeta(productIdOrUrl, titleHint = "") {
 async function fetchAliExpressPrice(productIdOrUrl, titleHint = "") {
   const meta = await fetchAliExpressMeta(productIdOrUrl, titleHint);
   return meta.price > 0 ? meta.price : null;
+}
+
+/**
+ * Mode loop : plusieurs sources jusqu’à un prix EUR plausible.
+ * Rejette 1,00 € (leurre / livraison).
+ */
+async function confirmAliPriceLoop(url, titleHint = "", { attempts = 4, onLog } = {}) {
+  const log = (m) => {
+    if (typeof onLog === "function") {
+      try {
+        onLog(m);
+      } catch (_) {}
+    }
+  };
+  const samples = [];
+  let title = String(titleHint || "");
+  const push = (p) => {
+    if (isPlausibleAliEuro(p)) samples.push(Number(p));
+  };
+
+  for (let i = 0; i < attempts; i++) {
+    log(`[aliexpress] loop prix ${i + 1}/${attempts}…`);
+    try {
+      const meta = await fetchAliExpressMeta(url, title);
+      if (meta.title && meta.title.length > 8) title = meta.title;
+      push(meta.price);
+    } catch (_) {}
+
+    if (samples.length < 2) {
+      try {
+        push(await resolvePriceViaSearch(url, title));
+      } catch (_) {}
+    }
+
+    const pick = pickPlausibleAliEuro(samples);
+    if (pick && (samples.length >= 2 || (i >= 1 && pick >= 2.5))) {
+      log(`[aliexpress] loop OK ${pick.toFixed(2)}€ (${samples.length} échantillon(s))`);
+      return { price: pick, title, attempts: i + 1, samples: [...samples] };
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 260 + i * 140));
+    }
+  }
+
+  const pick = pickPlausibleAliEuro(samples);
+  if (pick) {
+    log(`[aliexpress] loop médiane ${pick.toFixed(2)}€`);
+    return { price: pick, title, attempts, samples: [...samples] };
+  }
+  log(`[aliexpress] loop: prix non confirmé`);
+  return { price: null, title, attempts, samples: [...samples] };
 }
 
 /** Parse le JSON produit embarqué (runParams / imagePathList / props). */
@@ -711,8 +787,8 @@ function extractAliExpressEmbedded(html = "") {
     pushEur(aliMoneyToEur(sm[1], "CNY"));
   }
 
-  const eurFmt = euros.filter((p) => p < 250);
-  if (eurFmt.length) out.price = Math.min(...eurFmt);
+  const eurFmt = euros.filter((p) => p >= 1.99 && p <= 150);
+  if (eurFmt.length) out.price = pickPlausibleAliEuro(eurFmt);
 
   const imgBlock = raw.match(/"imagePathList"\s*:\s*\[([^\]]{20,8000})\]/);
   if (imgBlock) {
@@ -775,7 +851,13 @@ function parseAliExpress($, baseUrl, rawHtml = "") {
         const data = JSON.parse($(el).html() || "{}");
         const node = Array.isArray(data) ? data[0] : data;
         if (node?.name) found = cleanText(node.name);
-        if (node?.offers?.price && embedded.price == null) embedded.price = parsePrice(node.offers.price);
+        if (node?.offers?.price && embedded.price == null) {
+          const p = aliMoneyToEur(
+            node.offers.price,
+            node.offers.priceCurrency || node.offers.priceCurrencyCode || "EUR"
+          );
+          if (p >= 1.99) embedded.price = p;
+        }
         if (node?.image) {
           const imgs = Array.isArray(node.image) ? node.image : [node.image];
           imgs.forEach((u) => embedded.images.push(String(u)));
@@ -810,7 +892,7 @@ function parseAliExpress($, baseUrl, rawHtml = "") {
   const priceText =
     cleanText($("[class*='price']").first().text()) ||
     cleanText($("meta[property='og:price:amount']").attr("content"));
-  let price = sanitizeProductPrice(embedded.price || parsePrice(priceText), title);
+  let price = sanitizeAliExpressPrice(embedded.price || parsePrice(priceText), title);
 
   const images = new Set(embedded.images || []);
   const og = $("meta[property='og:image']").attr("content");
@@ -1478,7 +1560,10 @@ async function scrapeProduct(url) {
 
     if (!isWeakProductTitle(product.title)) {
       product.images = (product.images || []).filter(isRealProductImage);
-      product.price = sanitizeProductPrice(product.price, product.title);
+      product.price =
+        source === "aliexpress"
+          ? sanitizeAliExpressPrice(product.price, product.title)
+          : sanitizeProductPrice(product.price, product.title);
       product.live = true;
       directProduct = enrichProductListingCopy(product);
       // Prix manquant → résolution Bing (médiane, anti faux 8mm→8€)
@@ -1515,7 +1600,10 @@ async function scrapeProduct(url) {
     const viaJina = await scrapeProductViaJina(url);
     if (!isWeakProductTitle(viaJina.title)) {
       viaJina.images = (viaJina.images || []).filter(isRealProductImage);
-      viaJina.price = sanitizeProductPrice(viaJina.price, viaJina.title);
+      viaJina.price =
+        source === "aliexpress"
+          ? sanitizeAliExpressPrice(viaJina.price, viaJina.title)
+          : sanitizeProductPrice(viaJina.price, viaJina.title);
       if (!(viaJina.price > 0)) {
         try {
           const resolved = await resolvePriceViaSearch(url, viaJina.title);
@@ -2800,7 +2888,8 @@ async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
       let title = cleanText(i.title || "").replace(/\s*[-–|]\s*AliExpress.*$/i, "").trim();
       if (isPlaceholderSupplierTitle(title, q)) title = "";
       else if (title && title.length > 8 && !titleMatchesQuery(title, q)) continue;
-      const price = i.price > 0 ? i.price : null;
+      const rawPrice = i.price > 0 ? i.price : null;
+      const price = rawPrice ? sanitizeAliExpressPrice(rawPrice, title) : null;
       if (!prev) {
         byId.set(id, {
           title: title || "",
@@ -2862,7 +2951,11 @@ async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
               {
                 title: "",
                 url: `https://fr.aliexpress.com/item/${m[1]}.html`,
-                price: extractPricesNear(html, m.index, 280)[0] || null,
+                price: pickPlausibleAliEuro(
+                  (extractPricesNear(html, m.index, 280) || [])
+                    .map((p) => aliMoneyToEur(p, "EUR"))
+                    .filter(Boolean)
+                ),
               },
             ],
             "aliexpress"
@@ -2884,28 +2977,31 @@ async function scrapeAliExpressSearch(query, { limit = 5, onLog = null } = {}) {
     return [];
   }
 
-  // 3) Résoudre les prix pour CHAQUE fiche (priorité)
-  log(`[aliexpress] Résolution prix + titre pour ${items.length} produit(s)…`);
+  // 3) Loop confirmation du prix pour CHAQUE fiche (rejette 1,00 €)
+  log(`[aliexpress] Loop prix + titre pour ${items.length} produit(s)…`);
   for (let i = 0; i < items.length; i++) {
     try {
-      const meta = await fetchAliExpressMeta(items[i].url, items[i].title || q);
-      if (meta.title && meta.title.length > 8) items[i].title = meta.title;
-      if (meta.price > 0) {
-        items[i].price = meta.price;
+      const looped = await confirmAliPriceLoop(items[i].url, items[i].title || q, { attempts: 3, onLog: log });
+      if (looped.title && looped.title.length > 8) items[i].title = looped.title;
+      if (looped.price >= 1.99) {
+        items[i].price = looped.price;
         items[i].priceConfirmed = true;
         items[i].priceFromMarketplaceCard = true;
-        log(`[aliexpress] ✓ ${meta.price.toFixed(2)}€ — ${String(items[i].title).slice(0, 40)}`);
+        log(`[aliexpress] ✓ ${looped.price.toFixed(2)}€ — ${String(items[i].title).slice(0, 40)}`);
         continue;
       }
     } catch (_) {}
-    if (items[i].price > 0) {
+    const snippetOk = sanitizeAliExpressPrice(items[i].price, items[i].title);
+    if (snippetOk >= 1.99) {
+      items[i].price = snippetOk;
       items[i].priceConfirmed = true;
       continue;
     }
-    const fromSnippet = extractAllPrices(`${items[i].title} ${items[i].snippet || ""}`).find(
-      (n) => sanitizeProductPrice(n, items[i].title)
-    );
-    if (fromSnippet > 0) {
+    items[i].price = null;
+    const fromSnippet = extractAllPrices(`${items[i].title} ${items[i].snippet || ""}`)
+      .map((n) => sanitizeAliExpressPrice(n, items[i].title))
+      .find((n) => n >= 1.99);
+    if (fromSnippet >= 1.99) {
       items[i].price = fromSnippet;
       items[i].priceConfirmed = true;
       log(`[aliexpress] ✓ prix snippet ${fromSnippet.toFixed(2)}€`);
@@ -3137,20 +3233,22 @@ async function findCheapestSupplier(
       .filter((p) => {
         if (!p?.url || /wholesale-|\/search\/|SearchText=|\/r-/i.test(p.url)) return false;
         const titleOk = p.title && p.title.length >= 12 && titleMatchesQuery(p.title, query);
-        const priceOk = p.price > 0;
+        const priceOk = src === "aliexpress" ? isPlausibleAliEuro(p.price) : p.price > 0;
         return !titleOk || !priceOk;
       })
       .slice(0, 4);
     for (const item of need) {
       try {
         if (src === "aliexpress") {
-          const meta = await fetchAliExpressMeta(item.url, item.title);
-          if (meta.price > 0) {
-            item.price = meta.price;
+          const looped = await confirmAliPriceLoop(item.url, item.title, { attempts: 3, onLog: log });
+          if (looped.price >= 1.99) {
+            item.price = looped.price;
             item.priceConfirmed = true;
+          } else {
+            item.price = null;
           }
-          if (meta.title && meta.title.length > 8) item.title = meta.title;
-          if (item.price > 0 && item.title) continue;
+          if (looped.title && looped.title.length > 8) item.title = looped.title;
+          if (item.price >= 1.99 && item.title) continue;
         }
         const detail = await scrapeProduct(item.url);
         if (detail.price > 0) {
@@ -3169,7 +3267,7 @@ async function findCheapestSupplier(
     const isAli = marketplaceOf(p) === "aliexpress";
     if (p.price > 0) {
       const cleaned = isAli ? sanitizeAliExpressPrice(p.price, p.title) : sanitizeProductPrice(p.price, p.title);
-      p.price = cleaned || null;
+      p.price = isAli && !isPlausibleAliEuro(cleaned) ? null : cleaned || null;
     }
   }
 
@@ -3496,9 +3594,12 @@ module.exports = {
   findCheapestSupplier,
   fetchAliExpressPrice,
   fetchAliExpressMeta,
+  confirmAliPriceLoop,
+  isPlausibleAliEuro,
   titleMatchesQuery,
   rankSupplierOffers,
   isPlaceholderSupplierTitle,
+  pickPlausibleAliEuro,
   aliMoneyToEur,
   detectAliCurrency,
   sanitizeAliExpressPrice,

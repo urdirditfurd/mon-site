@@ -666,6 +666,36 @@ function draftSavReplyTemplate({ buyer, subject, body, product } = {}) {
   };
 }
 
+function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebayFeeRate = 0.13 } = {}) {
+  const c = Number(cost) || 0;
+  const denom = 1 - ebayFeeRate - minNetPct / 100;
+  const minSell = c > 0 && denom > 0.2 ? Number((c / denom).toFixed(2)) : 0;
+  const prices = (competitorPrices || [])
+    .map((p) => Number(p))
+    .filter((p) => p >= 1.99 && p < 2000)
+    .sort((a, b) => a - b);
+  const cheapest = prices[0] || null;
+  const median = prices.length ? prices[Math.floor(prices.length / 2)] : null;
+  let sell = minSell;
+  if (cheapest > 0) {
+    const under = Number((cheapest * 0.99).toFixed(2));
+    sell = Math.max(minSell, under);
+  } else if (median > 0) {
+    sell = Math.max(minSell, median);
+  }
+  if (!(sell > 0) && median > 0) sell = median;
+  const margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  return {
+    sell: Number((sell || 0).toFixed(2)),
+    minSell,
+    cheapest,
+    median,
+    competitorCount: prices.length,
+    netPct: margin.netPct,
+    profitable: margin.netPct >= minNetPct - 0.05,
+  };
+}
+
 module.exports = {
   getTopSellers,
   getMarketPulse,
@@ -679,6 +709,7 @@ module.exports = {
   prepareDiscreetListing,
   discreetImageOrder,
   estimateMargin,
+  competitiveSellPrice,
   buildPilotageFeed,
   getEventCalendar,
   getTrendingNiches,

@@ -294,6 +294,7 @@
       <div>
         <p class="px-3 text-[10px] uppercase tracking-wider text-slate-600 mb-1">Outils</p>
         <a href="#" data-page="sniper" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Product Sniper</a>
+        <a href="#" data-page="auto-publish" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Auto-Publish</a>
         <a href="#" data-page="listings" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Mes Listings</a>
         <a href="#" data-page="title-builder" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Title Builder</a>
         <a href="#" data-page="description" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg">Description Builder</a>
@@ -454,6 +455,13 @@
                   <span>
                     <span class="block text-sm font-semibold text-ink-900">Product Sniper</span>
                     <span class="block text-xs text-zinc-500">Trouver &amp; importer un produit</span>
+                  </span>
+                </button>
+                <button type="button" onclick="navigate('auto-publish')" class="action-violet w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:brightness-95 transition">
+                  <span class="w-10 h-10 rounded-xl bg-[#6d7ddf]/25 text-[#242b52] flex items-center justify-center text-lg shrink-0">📤</span>
+                  <span>
+                    <span class="block text-sm font-semibold text-ink-900">Auto-Publish</span>
+                    <span class="block text-xs text-zinc-500">Publier après comparaison eBay</span>
                   </span>
                 </button>
                 <button type="button" onclick="navigate('competitors')" class="action-violet w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:brightness-95 transition">
@@ -652,6 +660,74 @@
               <button type="button" onclick="navigate('listings')" class="text-sm px-3 py-2 border rounded-xl">Voir Mes Listings</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- AUTO-PUBLISH -->
+      <section id="page-auto-publish" class="page space-y-4">
+        <div class="bg-white rounded-2xl border border-zinc-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h3 class="text-xl font-bold">Auto-Publish</h3>
+              <p class="text-sm text-zinc-500 mt-1">Publie tes listings après comparaison des prix eBay. Prix le plus concurrentiel possible, rentabilité nette ≥ 5 %. Quantité : 5 000.</p>
+            </div>
+            <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer Auto-Publish</button>
+          </div>
+          <div class="grid md:grid-cols-3 gap-3">
+            <div>
+              <label class="text-xs text-zinc-500">Marketplace eBay</label>
+              <select id="auto-publish-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoPublishSettings()">
+                <option>France</option>
+                <option>United States</option>
+                <option>Germany</option>
+                <option>United Kingdom</option>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <label class="flex items-center gap-3 text-sm text-ink-900 pb-2">
+                <input id="auto-publish-enabled" type="checkbox" class="toggle" onchange="saveAutoPublishSettings()" />
+                Automatisation (toutes les 10 min)
+              </label>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-center text-sm">
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-published" class="font-bold text-lg">0</div>Publiés</div>
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-skipped" class="font-bold text-lg">0</div>Ignorés</div>
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-errors" class="font-bold text-lg">0</div>Erreurs</div>
+            </div>
+          </div>
+          <div id="ap-progress-wrap" class="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p id="ap-progress-label" class="text-sm font-medium text-ink-900 truncate">En attente</p>
+                <p id="ap-progress-detail" class="text-xs text-zinc-500 mt-0.5 truncate">Compare les concurrents eBay, puis publie si rentable.</p>
+              </div>
+              <span id="ap-progress-pct" class="text-sm font-semibold text-[#4452a8] tabular-nums shrink-0">0%</span>
+            </div>
+            <div class="h-2.5 rounded-full bg-zinc-200 overflow-hidden">
+              <div id="ap-progress-bar" class="h-full rounded-full bg-[#6d7ddf] transition-[width] duration-500 ease-out" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <div class="p-5 border-b flex items-center justify-between gap-3">
+            <div>
+              <h3 class="font-semibold">Historique des publications</h3>
+              <p class="text-xs text-zinc-400 mt-0.5">Titre, prix et date de chaque produit mis en ligne</p>
+            </div>
+            <button type="button" onclick="loadAutoPublishHistory()" class="text-sm px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Rafraîchir</button>
+          </div>
+          <table class="w-full text-sm">
+            <thead class="text-left text-zinc-400 border-b">
+              <tr>
+                <th class="p-3">Date</th>
+                <th class="p-3">Titre</th>
+                <th class="p-3">Prix</th>
+                <th class="p-3">eBay</th>
+              </tr>
+            </thead>
+            <tbody id="auto-publish-history"></tbody>
+          </table>
         </div>
       </section>
 
@@ -1091,6 +1167,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-v4.5"></script>
+  <script src="app.js?v=snipe-v5"></script>
 </body>
 </html>

@@ -1464,12 +1464,13 @@ async function diagnosePublishReadiness(token, { price } = {}) {
   };
 }
 
-function resolvePublishQuantity(privileges) {
+function resolvePublishQuantity(privileges, requested = 5000) {
+  const want = Math.max(1, Number(requested) || 5000);
   const cap = privileges?.sellingLimit?.quantity;
-  if (cap == null) return 1; // prudent pour comptes nouveaux / inconnus
+  if (cap == null) return want;
   const n = Number(cap);
-  if (!Number.isFinite(n) || n <= 0) return 1;
-  return Math.min(1, Math.max(1, n)); // toujours 1 au 1er publish (évite 25019 limites)
+  if (!Number.isFinite(n) || n <= 0) return want;
+  return Math.min(want, Math.max(1, Math.floor(n)));
 }
 
 async function publishOffer(token, offerId) {
@@ -1601,7 +1602,7 @@ async function publishToEbay(listing, listingDbId, options = {}) {
   const categoryId = await resolveCategoryId(token, title);
   const baseAspects = await buildAspectsForCategory(token, categoryId, title);
   const locationKey = await ensureInventoryLocation(token);
-  const quantity = resolvePublishQuantity(diagnosis.privileges);
+  const quantity = resolvePublishQuantity(diagnosis.privileges, options.quantity ?? 5000);
   // Par défaut: pas de variations (évite 25002 « Couleur non autorisée »).
   const variationInput =
     options.variations && typeof options.variations === "object"
@@ -2087,6 +2088,7 @@ module.exports = {
   differentiateEbayTitle,
   sanitizeEbayTitle,
   sanitizeListingForEbayPublish,
+  resolvePublishQuantity,
   diagnosePublishReadiness,
   fetchSellerPrivileges,
   currencyForMarketplace,
