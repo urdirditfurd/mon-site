@@ -694,7 +694,12 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
     sell = Math.max(minSell, median);
   }
   if (!(sell > 0) && median > 0) sell = median;
-  const margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  let margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  // Arrondi : plancher exact peut donner 4.9 % — on pousse de 5–10 cts pour passer ≥ 5 %
+  if (sell > 0 && margin.netPct < minNetPct && margin.netPct >= minNetPct - 0.25 && minSell > 0) {
+    sell = Number((Math.max(sell, minSell) + 0.1).toFixed(2));
+    margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  }
   const competitive = market == null || sell <= Number((market * 1.12).toFixed(2));
   return {
     sell: Number((sell || 0).toFixed(2)),
@@ -704,7 +709,7 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
     market,
     competitorCount: prices.length,
     netPct: margin.netPct,
-    profitable: margin.netPct >= minNetPct - 0.05,
+    profitable: margin.netPct >= minNetPct - 0.2,
     competitive,
   };
 }

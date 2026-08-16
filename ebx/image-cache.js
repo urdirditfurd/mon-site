@@ -41,9 +41,11 @@ function sniffImageType(buf) {
   return null;
 }
 
-/** eBay Gallery : éviter miniatures (ex. 40×40 / 953 octets). */
+/** eBay Gallery : côté le plus long ≥ 500 px (règlement photos). */
 const MIN_IMAGE_BYTES = 8 * 1024;
-const MIN_IMAGE_EDGE = 400;
+const MIN_IMAGE_EDGE = 500;
+/** En dessous : trop petit même pour un upscale fiable. */
+const MIN_UPSCALE_SOURCE = 160;
 
 /** Lit largeur/hauteur JPEG/PNG/GIF/WebP (best-effort). */
 function readImageDimensions(buf) {
@@ -415,12 +417,95 @@ function validateImageBuffer(buf, contentType) {
     throw new Error(`pas une image (${contentType})`);
   }
   const dims = readImageDimensions(buf);
-  if (dims && (dims.width < MIN_IMAGE_EDGE || dims.height < MIN_IMAGE_EDGE)) {
-    throw new Error(
-      `image trop petite (${dims.width}×${dims.height}, min ${MIN_IMAGE_EDGE}px) — miniature refusée par eBay`
-    );
+  if (dims) {
+    const longest = Math.max(dims.width, dims.height);
+    if (longest < MIN_UPSCALE_SOURCE) {
+      throw new Error(
+        `image trop petite (${dims.width}×${dims.height}, min ${MIN_UPSCALE_SOURCE}px) — miniature refusée par eBay`
+      );
+    }
   }
   return sniffed || (/^image\//i.test(ct) ? ct : "image/jpeg");
+}
+
+/**
+ * Agrandit l'image si le côté le plus long < minEdge (exigence eBay 500 px).
+ * Utilise Canvas via Playwright (déjà présent pour WebP).
+ */
+async function ensureMinLongestEdge(buf, contentType, minEdge = MIN_IMAGE_EDGE) {
+  const dims = readImageDimensions(buf);
+  if (!dims) return { buf, contentType: contentType || "image/jpeg" };
+  const longest = Math.max(dims.width, dims.height);
+  if (longest >= minEdge) return { buf, contentType: contentType || sniffImageType(buf) || "image/jpeg" };
+  if (longest < MIN_UPSCALE_SOURCE) {
+    throw new Error(`image trop petite pour upscale (${dims.width}×${dims.height})`);
+  }
+
+  let chromium;
+  try {
+    ({ chromium } = require("playwright-core"));
+  } catch {
+    throw new Error(`image ${dims.width}×${dims.height} < ${minEdge}px et playwright indisponible pour upscale`);
+  }
+
+  const sniff = sniffImageType(buf) || contentType || "image/jpeg";
+  const mime = /png/i.test(sniff) ? "image/png" : /gif/i.test(sniff) ? "image/gif" : /webp/i.test(sniff) ? "image/webp" : "image/jpeg";
+  const scale = minEdge / longest;
+  const tw = Math.max(minEdge, Math.ceil(dims.width * scale));
+  const th = Math.max(minEdge, Math.ceil(dims.height * scale));
+
+  const launchOpts = [{ channel: "chrome" }, { channel: "chromium" }];
+  if (process.env.CHROME_PATH) launchOpts.unshift({ executablePath: process.env.CHROME_PATH });
+  if (process.platform === "win32") {
+    const pf = process.env.PROGRAMFILES || "C:\\Program Files";
+    const pf86 = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+    const local = process.env.LOCALAPPDATA || "";
+    launchOpts.push(
+      { executablePath: `${pf}\\Google\\Chrome\\Application\\chrome.exe` },
+      { executablePath: `${pf86}\\Google\\Chrome\\Application\\chrome.exe` },
+      { executablePath: `${local}\\Google\\Chrome\\Application\\chrome.exe` }
+    );
+  }
+
+  let browser = null;
+  let lastErr = "chrome introuvable";
+  for (const opt of launchOpts) {
+    try {
+      browser = await chromium.launch({
+        ...opt,
+        headless: true,
+        args: ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
+      });
+      break;
+    } catch (err) {
+      lastErr = err.message;
+    }
+  }
+  if (!browser) throw new Error(`upscale fail: ${lastErr}`);
+
+  try {
+    const page = await browser.newPage({ viewport: { width: Math.min(tw + 40, 1600), height: Math.min(th + 40, 1600) } });
+    const b64 = Buffer.from(buf).toString("base64");
+    await page.setContent(
+      `<!doctype html><html><body style="margin:0;background:#fff">` +
+        `<canvas id="c" width="${tw}" height="${th}"></canvas>` +
+        `<img id="i" src="data:${mime};base64,${b64}" style="display:none"/>` +
+        `<script>
+          const img = document.getElementById('i');
+          const c = document.getElementById('c');
+          const ctx = c.getContext('2d');
+          img.onload = () => { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, ${tw}, ${th}); window.__ok = 1; };
+          if (img.complete) img.onload();
+        </script></body></html>`,
+      { waitUntil: "load", timeout: 20000 }
+    );
+    await page.waitForFunction(() => window.__ok === 1, { timeout: 15000 });
+    const png = await page.locator("#c").screenshot({ type: "png", omitBackground: false });
+    console.log(`[EBX] Upscale image ${dims.width}×${dims.height} → ${tw}×${th} (eBay ≥${minEdge}px)`);
+    return { buf: Buffer.from(png), contentType: "image/png" };
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 /**
@@ -432,16 +517,23 @@ async function cacheRemoteImage(imageUrl) {
   const src = String(imageUrl || "").trim();
   if (!src) throw new Error("URL image vide");
 
-  // Déjà local — revalide taille (évite anciens caches 40×40)
+  // Déjà local — revalide taille (évite anciens caches 40×40) + upscale si < 500
   if (isMediaUrl(src)) {
     const localPath = resolveLocalMediaPath(src);
     if (!localPath) throw new Error(`media manquant: ${src}`);
-    const buf = fs.readFileSync(localPath);
-    const contentType = validateImageBuffer(buf, sniffImageType(buf) || "image/jpeg");
+    let buf = fs.readFileSync(localPath);
+    let contentType = validateImageBuffer(buf, sniffImageType(buf) || "image/jpeg");
+    const sized = await ensureMinLongestEdge(buf, contentType);
+    buf = sized.buf;
+    contentType = sized.contentType;
+    const ext = extFromContentType(contentType, localPath);
+    const filename = path.basename(localPath).replace(/\.(webp|jpe?g|png|gif)$/i, `.${ext}`);
+    const outPath = path.join(CACHE_DIR, filename);
+    fs.writeFileSync(outPath, buf);
     return {
-      filename: path.basename(localPath),
-      publicPath: publicMediaPath(path.basename(localPath)),
-      localPath,
+      filename,
+      publicPath: publicMediaPath(filename),
+      localPath: outPath,
       contentType,
       buf,
       fromCache: true,
@@ -467,12 +559,13 @@ async function cacheRemoteImage(imageUrl) {
         }
         const ct0 = validateImageBuffer(buf, contentType);
         const compatible = await ensureEpsCompatibleBuffer(buf, ct0);
-        const ct = compatible.contentType;
-        const finalBuf = compatible.buf;
+        const sized = await ensureMinLongestEdge(compatible.buf, compatible.contentType);
+        const ct = sized.contentType;
+        const finalBuf = sized.buf;
         const ext = extFromContentType(ct, candidate);
         const filename = `${hashKey(src)}.${ext}`;
         const localPath = path.join(CACHE_DIR, filename);
-        if (!fs.existsSync(localPath)) fs.writeFileSync(localPath, finalBuf);
+        fs.writeFileSync(localPath, finalBuf);
         // Si on a aussi un vieux .webp du même hash, on privilégie le png
         return {
           filename,
@@ -507,12 +600,18 @@ async function loadImageBuffer(imageUrl) {
       const converted = await ensureEpsCompatibleBuffer(buf, contentType);
       buf = converted.buf;
       contentType = converted.contentType;
-      const pngName = path.basename(localPath).replace(/\.webp$/i, ".png");
-      const pngPath = path.join(CACHE_DIR, pngName);
-      if (!fs.existsSync(pngPath)) fs.writeFileSync(pngPath, buf);
-      return { buf, contentType, localPath: pngPath, publicPath: publicMediaPath(pngName) };
     }
-    return { buf, contentType, localPath, publicPath: publicMediaPath(path.basename(localPath)) };
+    const before = buf;
+    const sized = await ensureMinLongestEdge(buf, contentType);
+    buf = sized.buf;
+    contentType = sized.contentType;
+    const outExt = extFromContentType(contentType, localPath);
+    const outName = path.basename(localPath).replace(/\.(webp|jpe?g|png|gif)$/i, `.${outExt}`);
+    const outPath = path.join(CACHE_DIR, outName);
+    if (buf !== before || outPath !== localPath || !fs.existsSync(outPath)) {
+      fs.writeFileSync(outPath, buf);
+    }
+    return { buf, contentType, localPath: outPath, publicPath: publicMediaPath(outName) };
   }
 
   // Fichier absolu local (rare)
@@ -634,6 +733,7 @@ module.exports = {
   CACHE_DIR,
   MIN_IMAGE_BYTES,
   MIN_IMAGE_EDGE,
+  MIN_UPSCALE_SOURCE,
   ensureCacheDir,
   cacheRemoteImage,
   loadImageBuffer,
@@ -644,6 +744,7 @@ module.exports = {
   publicMediaPath,
   candidateImageUrls,
   ensureEpsCompatibleBuffer,
+  ensureMinLongestEdge,
   validateImageBuffer,
   readImageDimensions,
   isTinyOrPlaceholderImageUrl,

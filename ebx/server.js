@@ -61,6 +61,7 @@ const {
   isSupplierUrl,
   competitorMarketPrices,
   explainUnprofitable,
+  snipableDemandQuery,
   rollPipelineDay,
   looksLikeCategoryLabel,
   DEFAULT_PREPARE_PER_TICK,
@@ -282,6 +283,7 @@ const listUnpublishedForAuto = db.prepare(
   `SELECT * FROM listings
    WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
      AND TRIM(COALESCE(seo_title, '')) != ''
+     AND COALESCE(auto_prepared, 0) >= 0
    ORDER BY COALESCE(auto_prepared, 0) DESC, created_at ASC
    LIMIT 40`
 );
@@ -406,14 +408,50 @@ async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 
 }
 
 let autoPublishBusy = false;
+let autoPublishBusySince = 0;
+const AUTO_PUBLISH_BUSY_MAX_MS = 12 * 60 * 1000;
+
+function claimAutoPublishBusy(send = () => {}) {
+  if (autoPublishBusy) {
+    const age = Date.now() - (autoPublishBusySince || 0);
+    if (age > AUTO_PUBLISH_BUSY_MAX_MS) {
+      console.warn(`[EBX] Auto-Publish: verrou expiré après ${Math.round(age / 1000)}s — reset`);
+      send({ type: "log", message: `[WARN] Verrou pipeline expiré (${Math.round(age / 60_000)} min) — reprise` });
+      autoPublishBusy = false;
+    } else {
+      return false;
+    }
+  }
+  autoPublishBusy = true;
+  autoPublishBusySince = Date.now();
+  return true;
+}
+
+function releaseAutoPublishBusy() {
+  autoPublishBusy = false;
+  autoPublishBusySince = 0;
+}
+
+function quarantineListing(listingId, reason = "") {
+  try {
+    db.prepare("UPDATE listings SET auto_prepared = -1 WHERE id = ?").run(Number(listingId));
+    if (reason) console.warn(`[EBX] Listing #${listingId} retiré de la file auto: ${reason.slice(0, 160)}`);
+  } catch (err) {
+    console.warn(`[EBX] quarantine #${listingId}:`, err.message);
+  }
+}
+
+function isPhotoPublishError(msg) {
+  const m = String(msg || "");
+  return /25002|500 pixels|résolution des photos|photo.*exigences|Gallery|trop petite|image trop/i.test(m);
+}
 
 async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {}, nested = false } = {}) {
   if (!nested) {
-    if (autoPublishBusy) {
+    if (!claimAutoPublishBusy(send)) {
       send({ type: "log", message: "[SKIP] Auto-Publish déjà en cours" });
       return { busy: true, published: 0, skipped: 0, errors: 0, items: [] };
     }
-    autoPublishBusy = true;
   }
   const stats = { published: 0, skipped: 0, errors: 0, items: [] };
   const marketCode = marketplaceToCode(marketplace);
@@ -520,7 +558,8 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           "skipped",
           why
         );
-        send({ type: "log", message: `[SKIP] ${why}` });
+        quarantineListing(listing.id, why);
+        send({ type: "log", message: `[SKIP] ${why} — retiré de la file auto` });
         continue;
       }
 
@@ -564,6 +603,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         }
       } catch (pubErr) {
         stats.errors += 1;
+        const errMsg = String(pubErr.message || pubErr).slice(0, 400);
         insertAutoPublishLog.run(
           listing.id,
           title,
@@ -575,9 +615,40 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           "",
           marketCode,
           "error",
-          String(pubErr.message || pubErr).slice(0, 400)
+          errMsg
         );
         send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
+        if (isPhotoPublishError(errMsg)) {
+          try {
+            send({ type: "log", message: `[REPAIR] Photos eBay < 500px — re-scrape images…` });
+            listing = await ensureListingImages(listing);
+            const result2 = await publishToEbay(listing, listing.id, { quantity: 5000, variations: { enabled: false } });
+            if (result2?.listingId) {
+              rememberListingPublish(listing.id, result2);
+              stats.published += 1;
+              stats.errors = Math.max(0, stats.errors - 1);
+              insertAutoPublishLog.run(
+                listing.id,
+                title,
+                priced.sell,
+                priced.cost || 0,
+                priced.cheapest,
+                priced.competitorCount || 0,
+                priced.netPct,
+                String(result2.listingId),
+                marketCode,
+                "published",
+                `qty 5000 · photos réparées`
+              );
+              send({ type: "log", message: `[OK] publié #${result2.listingId} après réparation photos` });
+              continue;
+            }
+          } catch (repairErr) {
+            send({ type: "log", message: `[REPAIR] échec: ${repairErr.message}` });
+          }
+          quarantineListing(listing.id, errMsg);
+          send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (photos eBay)` });
+        }
       }
     }
     send({ type: "stats", ...stats });
@@ -590,7 +661,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
     }
     return stats;
   } finally {
-    if (!nested) autoPublishBusy = false;
+    if (!nested) releaseAutoPublishBusy();
   }
 }
 
@@ -737,7 +808,12 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     });
     send({ type: "log", message: `[PREPARE] Demande « ${kw.query} » (${kw.reason}) → sniper fournisseur` });
 
-    const ebayMarket = await loadCompetitorMarket(kw.query, { marketplace: marketCode, send });
+    const searchQ = snipableDemandQuery(kw.query) || kw.query;
+    if (searchQ !== kw.query) {
+      send({ type: "log", message: `[PREPARE] requête sniper nettoyée « ${kw.query} » → « ${searchQ} »` });
+    }
+
+    const ebayMarket = await loadCompetitorMarket(searchQ, { marketplace: marketCode, send });
     const competitorPrices = ebayMarket.prices;
     send({
       type: "log",
@@ -748,12 +824,20 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
 
     let candidates = [];
     try {
-      candidates = await snipeSupplierCandidates(kw.query, { send, fast: true });
+      candidates = await snipeSupplierCandidates(searchQ, { send, fast: true });
     } catch (e) {
       stats.errors += 1;
       state.skippedToday += 1;
       send({ type: "log", message: `[PREPARE] sniper: ${e.message}` });
       continue;
+    }
+
+    if (!candidates.length && searchQ.split(/\s+/).length > 2) {
+      const shortQ = searchQ.split(/\s+/).slice(0, 2).join(" ");
+      send({ type: "log", message: `[PREPARE] 0 candidat — essai court « ${shortQ} »` });
+      try {
+        candidates = await snipeSupplierCandidates(shortQ, { send, fast: true });
+      } catch (_) {}
     }
 
     send({
@@ -766,7 +850,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     if (!best) {
       send({ type: "log", message: `[PREPARE] relance AliExpress (souvent moins cher)…` });
       try {
-        const ali = await findCheapestSupplier(kw.query, {
+        const ali = await findCheapestSupplier(searchQ, {
           sources: ["aliexpress"],
           limit: 3,
           fast: false,
@@ -897,11 +981,10 @@ async function runAutoPublishTick({
   prepareLimit = DEFAULT_PREPARE_PER_TICK,
   send = () => {},
 } = {}) {
-  if (autoPublishBusy) {
+  if (!claimAutoPublishBusy(send)) {
     send({ type: "log", message: "[SKIP] pipeline déjà en cours" });
     return { busy: true, published: 0, prepared: 0, skipped: 0, errors: 0 };
   }
-  autoPublishBusy = true;
   const out = { published: 0, prepared: 0, skipped: 0, errors: 0, items: [] };
   try {
     send({
@@ -941,7 +1024,7 @@ async function runAutoPublishTick({
     send({ type: "done", ...out, errors: (out.errors || 0) + 1 });
     return out;
   } finally {
-    autoPublishBusy = false;
+    releaseAutoPublishBusy();
   }
 }
 
@@ -4314,7 +4397,13 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
   setInterval(() => {
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
-    if (!enabled || autoPublishBusy) return;
+    if (!enabled) return;
+    if (autoPublishBusy) {
+      const age = Date.now() - (autoPublishBusySince || 0);
+      if (age <= AUTO_PUBLISH_BUSY_MAX_MS) return;
+      console.warn(`[EBX] Auto-Publish interval: verrou expiré (${Math.round(age / 1000)}s)`);
+      releaseAutoPublishBusy();
+    }
     const marketplace = getSetting.get("auto_publish_market")?.value || "France";
     runAutoPublishTick({
       marketplace,

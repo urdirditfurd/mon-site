@@ -70,7 +70,8 @@ async function main() {
     // simpler: skip full PNG encode — just assert constants
     return width >= MIN_IMAGE_EDGE && height >= MIN_IMAGE_EDGE;
   })();
-  assert(sharpOk, "seuils dimension cohérents");
+  assert(sharpOk, "seuils dimension cohérents (≥500px côté long)");
+  assert(MIN_IMAGE_EDGE >= 500, `MIN_IMAGE_EDGE=${MIN_IMAGE_EDGE} (eBay exige 500)`);
 
   // extractImageUrls via ebay-api
   const { extractImageUrls } = (() => {

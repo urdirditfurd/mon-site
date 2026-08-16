@@ -126,6 +126,21 @@ check(tight == null, "marché neuf plus bas que le plancher 5% → rejeté");
 
 check(isSupplierUrl("https://www.amazon.fr/Nom-Produit/dp/B0DSHZXYY2"), "URL Amazon /titre/dp OK");
 
+const scrubbed = require("./auto-publish-engine").snipableDemandQuery("pinceaux maquillage pro krystalparis");
+check(
+  /pinceaux/.test(scrubbed) && /maquillage/.test(scrubbed) && !/krystal/i.test(scrubbed),
+  `snipable sans marque → "${scrubbed}"`
+);
+check(
+  !buildDemandKeywords({ trendItems: [{ title: "Pinceaux maquillage Krystalparis", sold: 10, price: 9 }], seeds: [], limit: 10 }).some((d) =>
+    /krystal/i.test(d.query)
+  ),
+  "titre tendance sans marque vendeur"
+);
+
+const edge = competitiveSellPrice({ cost: 5.99, competitorPrices: [], minNetPct: 5 });
+check(edge.profitable && edge.netPct >= 4.8, `tolérance net ~5% → ${edge.netPct}% sell=${edge.sell}`);
+
 if (failed) {
   console.error(`\n${failed} échec(s) auto-publish engine`);
   process.exit(1);

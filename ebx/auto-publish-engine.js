@@ -18,7 +18,7 @@ const DEFAULT_PREPARE_PER_TICK = 3;
 const DEFAULT_PUBLISH_PER_TICK = 3;
 const QUEUE_CAP = 18;
 /** Incrémente pour forcer un rescan des mots-clés du jour. */
-const DEMAND_ALGO = 3;
+const DEMAND_ALGO = 4;
 
 function languageForMarket(marketplace = "FR") {
   const c = String(marketplace || "FR").toUpperCase().replace(/^EBAY_/, "");
@@ -34,7 +34,7 @@ function keywordFromTitle(title = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9àâäéèêëïîôùûüç\s-]/gi, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w) && !looksLikeBrandToken(w));
   const uniq = [];
   for (const t of tokens) {
     if (!uniq.includes(t)) uniq.push(t);
@@ -73,10 +73,45 @@ function isWeakDemandQuery(q) {
   const GENERIC = new Set([
     "deco", "ete", "plage", "voyage", "maison", "cadeau", "cadeaux", "sacs",
     "mode", "sport", "jardin", "tech", "bureau", "enfants", "accessoires",
+    "laptop", "stands",
   ]);
   if (toks.every((t) => GENERIC.has(t) || t.length <= 3)) return true;
   if (!toks.some((t) => t.length >= 5) && toks.every((t) => t.length <= 4)) return true;
   return false;
+}
+
+/** Marques / noms vendeur collés dans les titres eBay — polluent le sniper. */
+function looksLikeBrandToken(tok) {
+  const t = String(tok || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (t.length < 5) return false;
+  if (
+    /^(krystalparis|krystal|cascata|aeuezxx|flintronic|vinato|elalove|aiqinu|lamicall|incutex|tuya|lenovo)$/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  // Marque collée type "krystalparis" / "prokrystal" sans voyelle régulière produit
+  if (t.length >= 11 && /(paris|crystal|krystal)$/i.test(t)) return true;
+  return false;
+}
+
+function snipableDemandQuery(query) {
+  const toks = String(query || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9àâäéèêëïîôùûüç\s-]/gi, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t) && !looksLikeBrandToken(t));
+  if (toks.length >= 2) return toks.slice(0, 4).join(" ");
+  return String(query || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
 }
 
 /**
@@ -309,6 +344,8 @@ module.exports = {
   isBlockedDemandQuery,
   looksLikeCategoryLabel,
   isWeakDemandQuery,
+  snipableDemandQuery,
+  looksLikeBrandToken,
   buildDemandKeywords,
   nextDemandSlice,
   todayKey,
