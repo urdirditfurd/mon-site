@@ -410,6 +410,20 @@ async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 
 let autoPublishBusy = false;
 let autoPublishBusySince = 0;
 const AUTO_PUBLISH_BUSY_MAX_MS = 12 * 60 * 1000;
+const AUTO_PUBLISH_INTERVAL_MS = Math.max(
+  15_000,
+  Number(process.env.AUTO_PUBLISH_INTERVAL_MS) || 10 * 60 * 1000
+);
+const autoPublishScheduler = {
+  intervalMs: AUTO_PUBLISH_INTERVAL_MS,
+  startedAt: null,
+  lastFiredAt: null,
+  nextFireAt: null,
+  fireCount: 0,
+  attemptCount: 0,
+  lastSkipReason: "",
+  timer: null,
+};
 
 function claimAutoPublishBusy(send = () => {}) {
   if (autoPublishBusy) {
@@ -430,6 +444,65 @@ function claimAutoPublishBusy(send = () => {}) {
 function releaseAutoPublishBusy() {
   autoPublishBusy = false;
   autoPublishBusySince = 0;
+}
+
+function scheduleAutoPublishNext(from = Date.now()) {
+  autoPublishScheduler.nextFireAt = new Date(from + autoPublishScheduler.intervalMs).toISOString();
+}
+
+function fireScheduledAutoPublish(reason = "interval") {
+  autoPublishScheduler.attemptCount += 1;
+  const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
+  if (!enabled) {
+    autoPublishScheduler.lastSkipReason = "disabled";
+    scheduleAutoPublishNext();
+    return { skipped: true, reason: "disabled" };
+  }
+  if (autoPublishBusy) {
+    const age = Date.now() - (autoPublishBusySince || 0);
+    if (age <= AUTO_PUBLISH_BUSY_MAX_MS) {
+      autoPublishScheduler.lastSkipReason = "busy";
+      console.log(`[auto-publish] pulse #${autoPublishScheduler.attemptCount} (${reason}) reporté — pipeline encore en cours (${Math.round(age / 1000)}s)`);
+      scheduleAutoPublishNext();
+      return { skipped: true, reason: "busy" };
+    }
+    console.warn(`[EBX] Auto-Publish interval: verrou expiré (${Math.round(age / 1000)}s)`);
+    releaseAutoPublishBusy();
+  }
+  autoPublishScheduler.lastSkipReason = "";
+  autoPublishScheduler.lastFiredAt = new Date().toISOString();
+  autoPublishScheduler.fireCount += 1;
+  scheduleAutoPublishNext();
+  const marketplace = getSetting.get("auto_publish_market")?.value || "France";
+  console.log(
+    `[auto-publish] tick #${autoPublishScheduler.fireCount} pulse #${autoPublishScheduler.attemptCount} (${reason}) · prochain ${autoPublishScheduler.nextFireAt}`
+  );
+  runAutoPublishTick({
+    marketplace,
+    send: (o) => {
+      if (o.type === "log") console.log("[auto-publish]", o.message);
+    },
+  }).catch((err) => console.warn("[auto-publish]", err.message));
+  return { skipped: false, reason, fireCount: autoPublishScheduler.fireCount };
+}
+
+function startAutoPublishScheduler() {
+  if (autoPublishScheduler.timer) return autoPublishScheduler;
+  autoPublishScheduler.startedAt = new Date().toISOString();
+  scheduleAutoPublishNext();
+  autoPublishScheduler.timer = setInterval(() => {
+    fireScheduledAutoPublish("interval");
+  }, autoPublishScheduler.intervalMs);
+  const mins = Math.round(autoPublishScheduler.intervalMs / 60000);
+  console.log(
+    `⏱️  Auto-Publish scheduler: toutes les ${mins} min (${autoPublishScheduler.intervalMs} ms) · prochain ${autoPublishScheduler.nextFireAt}`
+  );
+  const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
+  if (enabled) {
+    console.log("[auto-publish] Automatisation déjà ON au démarrage — kick immédiat");
+    setImmediate(() => fireScheduledAutoPublish("boot"));
+  }
+  return autoPublishScheduler;
 }
 
 function quarantineListing(listingId, reason = "") {
@@ -987,6 +1060,10 @@ async function runAutoPublishTick({
   }
   const out = { published: 0, prepared: 0, skipped: 0, errors: 0, items: [] };
   try {
+    let state0 = loadPipelineState(marketplace);
+    state0.lastTickAt = new Date().toISOString();
+    state0.lastPhase = "tick";
+    savePipelineState(state0);
     send({
       type: "log",
       message: `[INIT] Pipeline Auto-Publish — publie le lot prêt, puis prépare le suivant (net ≥ 5%, qty 5000)`,
@@ -3148,6 +3225,7 @@ app.get("/api/auto-publish/history", (_req, res) => {
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
     const market = getSetting.get("auto_publish_market")?.value || "France";
     const state = loadPipelineState(market);
+    const intervalMin = Math.round(autoPublishScheduler.intervalMs / 60000);
     res.json({
       success: true,
       data: {
@@ -3155,7 +3233,17 @@ app.get("/api/auto-publish/history", (_req, res) => {
         marketplace: market,
         quantity: 5000,
         minNetPct: 5,
-        intervalMin: 10,
+        intervalMin,
+        intervalMs: autoPublishScheduler.intervalMs,
+        scheduler: {
+          startedAt: autoPublishScheduler.startedAt,
+          lastFiredAt: autoPublishScheduler.lastFiredAt,
+          nextFireAt: autoPublishScheduler.nextFireAt,
+          fireCount: autoPublishScheduler.fireCount,
+          attemptCount: autoPublishScheduler.attemptCount,
+          lastSkipReason: autoPublishScheduler.lastSkipReason || "",
+          busy: autoPublishBusy,
+        },
         pipeline: {
           day: state.day,
           lastPhase: state.lastPhase,
@@ -3190,14 +3278,10 @@ app.post("/api/auto-publish/settings", (req, res) => {
     const marketplace = getSetting.get("auto_publish_market")?.value || "France";
     if (enabled && !wasOn) {
       setImmediate(() => {
-        runAutoPublishTick({
-          marketplace,
-          send: (o) => {
-            if (o.type === "log") console.log("[auto-publish]", o.message);
-          },
-        }).catch((err) => console.warn("[auto-publish]", err.message));
+        fireScheduledAutoPublish("enable");
       });
     }
+    const intervalMin = Math.round(autoPublishScheduler.intervalMs / 60000);
     res.json({
       success: true,
       data: {
@@ -3205,8 +3289,11 @@ app.post("/api/auto-publish/settings", (req, res) => {
         marketplace,
         quantity: 5000,
         minNetPct: 5,
-        intervalMin: 10,
+        intervalMin,
+        intervalMs: autoPublishScheduler.intervalMs,
         kicked: Boolean(enabled && !wasOn),
+        nextFireAt: autoPublishScheduler.nextFireAt,
+        fireCount: autoPublishScheduler.fireCount,
       },
     });
   } catch (err) {
@@ -4395,23 +4482,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
-  setInterval(() => {
-    const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
-    if (!enabled) return;
-    if (autoPublishBusy) {
-      const age = Date.now() - (autoPublishBusySince || 0);
-      if (age <= AUTO_PUBLISH_BUSY_MAX_MS) return;
-      console.warn(`[EBX] Auto-Publish interval: verrou expiré (${Math.round(age / 1000)}s)`);
-      releaseAutoPublishBusy();
-    }
-    const marketplace = getSetting.get("auto_publish_market")?.value || "France";
-    runAutoPublishTick({
-      marketplace,
-      send: (o) => {
-        if (o.type === "log") console.log("[auto-publish]", o.message);
-      },
-    }).catch((err) => console.warn("[auto-publish]", err.message));
-  }, 10 * 60 * 1000);
+  startAutoPublishScheduler();
 });
 server.on("error", (err) => {
   if (err && err.code === "EADDRINUSE") {

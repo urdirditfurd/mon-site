@@ -342,7 +342,12 @@ function navigate(page, opts = {}) {
   if (page === "analytics") loadAnalytics();
   if (page === "competitors") loadCompetitorHistory();
   if (page === "listings") loadListings();
-  if (page === "auto-publish") loadAutoPublishHistory();
+  if (page === "auto-publish") {
+    loadAutoPublishHistory();
+    startAutoPublishPoll();
+  } else {
+    stopAutoPublishPoll();
+  }
   if (page === "sav") {
     loadSav();
     markNotificationsRead({ types: ["message"] });
@@ -1504,6 +1509,22 @@ function renderAutoPublishLog(log) {
     .join("");
 }
 
+let autoPublishPollTimer = null;
+function stopAutoPublishPoll() {
+  if (autoPublishPollTimer) {
+    clearInterval(autoPublishPollTimer);
+    autoPublishPollTimer = null;
+  }
+}
+function startAutoPublishPoll() {
+  stopAutoPublishPoll();
+  autoPublishPollTimer = setInterval(() => {
+    if (document.getElementById("page-auto-publish")?.classList.contains("active")) {
+      loadAutoPublishHistory();
+    }
+  }, 20000);
+}
+
 async function loadAutoPublishHistory() {
   try {
     const res = await fetch(API + "/api/auto-publish/history");
@@ -1526,9 +1547,17 @@ async function loadAutoPublishHistory() {
     if (meta) {
       const kws = (pipe.keywords || []).slice(0, 6).map((k) => k.query || k).filter(Boolean);
       const tick = pipe.lastTickAt ? formatPublishDate(pipe.lastTickAt) : "jamais";
+      const sched = data.scheduler || {};
+      const next = sched.nextFireAt ? formatPublishDate(sched.nextFireAt) : null;
+      const intervalMin = data.intervalMin || 10;
       meta.textContent =
         (data.enabled ? "Automatisation ON · " : "Automatisation OFF · ") +
-        `dernier cycle ${tick}` +
+        `cycle toutes les ${intervalMin} min` +
+        (next && data.enabled ? ` · prochain ~ ${next}` : "") +
+        (sched.fireCount != null ? ` · ticks ${sched.fireCount}` : "") +
+        (sched.attemptCount != null ? `/${sched.attemptCount}` : "") +
+        (sched.busy ? " · en cours…" : "") +
+        ` · dernier cycle ${tick}` +
         (pipe.lastQuery ? ` · « ${pipe.lastQuery} »` : "") +
         (pipe.lastPhase ? ` · phase ${pipe.lastPhase}` : "") +
         (kws.length ? ` · demande : ${kws.join(", ")}` : "") +
