@@ -7,8 +7,9 @@
 #   BRANCH=cursor/ebx-dashboard-0eb5
 #   APP_DIR=/var/www/ebx
 #   DOMAIN=ebx.mondomaine.com   # laisse vide = HTTP IP seulement
-#   AUTH_USER=admin
+#   AUTH_USER=admin          # ignoré sauf si BASIC_AUTH_ENABLED=1
 #   AUTH_PASS=change-moi
+#   BASIC_AUTH_ENABLED=0     # 1 = popup login navigateur
 
 set -euo pipefail
 
@@ -18,6 +19,7 @@ APP_DIR="${APP_DIR:-/var/www/ebx}"
 DOMAIN="${DOMAIN:-}"
 AUTH_USER="${AUTH_USER:-admin}"
 AUTH_PASS="${AUTH_PASS:-}"
+BASIC_AUTH_ENABLED="${BASIC_AUTH_ENABLED:-0}"
 PORT="${PORT:-3000}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -52,22 +54,26 @@ npm install --omit=dev
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  if [[ -z "$AUTH_PASS" ]]; then
-    AUTH_PASS="$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-16)"
-  fi
   SESSION_SECRET="$(openssl rand -hex 24)"
-  sed -i "s/^EBX_BASIC_AUTH_USER=.*/EBX_BASIC_AUTH_USER=${AUTH_USER}/" .env
-  sed -i "s/^EBX_BASIC_AUTH_PASS=.*/EBX_BASIC_AUTH_PASS=${AUTH_PASS}/" .env
-  sed -i "s/^EBX_MULTIUSER=.*/EBX_MULTIUSER=1/" .env
+  sed -i "s/^EBX_BASIC_AUTH_ENABLED=.*/EBX_BASIC_AUTH_ENABLED=${BASIC_AUTH_ENABLED}/" .env
+  sed -i "s/^EBX_BASIC_AUTH_USER=.*/EBX_BASIC_AUTH_USER=/" .env
+  sed -i "s/^EBX_BASIC_AUTH_PASS=.*/EBX_BASIC_AUTH_PASS=/" .env
+  if [[ "$BASIC_AUTH_ENABLED" = "1" ]]; then
+    if [[ -z "$AUTH_PASS" ]]; then
+      AUTH_PASS="$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-16)"
+    fi
+    sed -i "s/^EBX_BASIC_AUTH_USER=.*/EBX_BASIC_AUTH_USER=${AUTH_USER}/" .env
+    sed -i "s/^EBX_BASIC_AUTH_PASS=.*/EBX_BASIC_AUTH_PASS=${AUTH_PASS}/" .env
+    echo ""
+    echo ">>> Basic Auth ON : ${AUTH_USER} / ${AUTH_PASS}"
+  fi
+  sed -i "s/^EBX_MULTIUSER=.*/EBX_MULTIUSER=0/" .env
   sed -i "s/^EBX_SESSION_SECRET=.*/EBX_SESSION_SECRET=${SESSION_SECRET}/" .env
   if [[ -n "$DOMAIN" ]]; then
     sed -i "s|^EBX_PUBLIC_URL=.*|EBX_PUBLIC_URL=https://${DOMAIN}|" .env
   fi
-  echo ""
-  echo ">>> Mot de passe Basic Auth (gate serveur) : ${AUTH_USER} / ${AUTH_PASS}"
-  echo ">>> Puis chaque visiteur crée son compte EBX et clique « Connecter mon eBay »"
-  echo ">>> RuName eBay doit pointer vers : https://${DOMAIN:-IP}/api/oauth/ebay/callback"
-  echo ">>> Complète EBAY_PROD_CLIENT_ID/SECRET + EBAY_RU_NAME_PROD dans ${APP_DIR}/ebx/.env"
+  echo ">>> Dashboard ouvert sans login. Complète les clés eBay dans ${APP_DIR}/ebx/.env"
+  echo ">>> RuName eBay : https://${DOMAIN:-IP}/api/oauth/ebay/callback"
 fi
 
 pm2 delete ebx >/dev/null 2>&1 || true

@@ -1379,11 +1379,12 @@ function supplierKeyFromName(nameOrUrl = "") {
 
 app.use(express.json({ limit: "2mb" }));
 
-/** Auth HTTP basique optionnelle — OBLIGATOIRE si le VPS est public (EBX_BASIC_AUTH_USER + EBX_BASIC_AUTH_PASS). */
+/** Auth HTTP basique — désactivée par défaut. Pour réactiver : EBX_BASIC_AUTH_ENABLED=1 + USER/PASS. */
 function basicAuthMiddleware(req, res, next) {
+  const enabled = String(process.env.EBX_BASIC_AUTH_ENABLED || "").trim() === "1";
   const user = String(process.env.EBX_BASIC_AUTH_USER || "").trim();
   const pass = String(process.env.EBX_BASIC_AUTH_PASS || "").trim();
-  if (!user || !pass) return next();
+  if (!enabled || !user || !pass) return next();
 
   const header = req.headers.authorization || "";
   if (header.startsWith("Basic ")) {
@@ -4472,10 +4473,12 @@ app.get("/api/accounts-DISABLED-PLACEHOLDER", (_req, res) => {
 
 const server = app.listen(PORT, "0.0.0.0", () => {
   const { isProduction } = require("./ebay-api");
-  const authOn = Boolean(
-    String(process.env.EBX_BASIC_AUTH_USER || "").trim() &&
-      String(process.env.EBX_BASIC_AUTH_PASS || "").trim()
-  );
+  const authOn =
+    String(process.env.EBX_BASIC_AUTH_ENABLED || "").trim() === "1" &&
+    Boolean(
+      String(process.env.EBX_BASIC_AUTH_USER || "").trim() &&
+        String(process.env.EBX_BASIC_AUTH_PASS || "").trim()
+    );
   console.log(`⚡ EBX Server running on http://0.0.0.0:${PORT}`);
   console.log(`📝 Description Builder: desc-v2 (infos produit enrichies)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
