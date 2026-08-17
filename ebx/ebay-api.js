@@ -1947,24 +1947,11 @@ async function tradingApiCall(callName, xmlBody) {
   return responseText;
 }
 
-function xmlUnescape(s) {
-  return String(s || "")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function extractXmlBlocks(xml, tag) {
-  const re = new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, "gi");
-  return xml.match(re) || [];
-}
-
-function xmlField(block, tag) {
-  const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return m ? xmlUnescape(m[1].trim()) : "";
-}
+const {
+  parseMemberMessagesXml,
+  parseMyMessagesXml,
+  mergeInboxMessages,
+} = require("./ebay-inbox-parse");
 
 /**
  * Messages acheteurs (Trading GetMemberMessages).
@@ -1988,26 +1975,96 @@ async function getMemberMessages({ daysBack = 14, unansweredOnly = false } = {})
 </GetMemberMessagesRequest>`;
 
   const responseText = await tradingApiCall("GetMemberMessages", xml);
-  const blocks = extractXmlBlocks(responseText, "MemberMessageExchange");
-  const messages = blocks.map((b) => {
-    const msg = extractXmlBlocks(b, "Question")[0] || b;
-    return {
-      messageId: xmlField(msg, "MessageID") || xmlField(b, "MessageID"),
-      itemId: xmlField(b, "ItemID") || xmlField(msg, "ItemID"),
-      itemTitle: xmlField(b, "Title") || xmlField(msg, "ItemTitle"),
-      sender: xmlField(msg, "SenderID") || xmlField(b, "SenderID"),
-      recipient: xmlField(msg, "RecipientID") || "",
-      subject: xmlField(msg, "Subject") || xmlField(b, "Subject"),
-      body: xmlField(msg, "Body") || xmlField(b, "Body"),
-      creationDate: xmlField(msg, "CreationDate") || xmlField(b, "CreationDate"),
-      messageStatus: xmlField(b, "MessageStatus") || xmlField(msg, "MessageStatus"),
-      answered: /Answered/i.test(xmlField(b, "MessageStatus") || ""),
-    };
-  }).filter((m) => m.messageId || m.body);
+  const messages = parseMemberMessagesXml(responseText);
 
   return {
     messages,
     count: messages.length,
+    env: isProduction() ? "production" : "sandbox",
+  };
+}
+
+/**
+ * Boîte My Messages eBay (Trading GetMyMessages) — messages eBay + acheteurs.
+ * Fenêtre max ~7 jours (contrainte API). Les e-mails marketing ne sont pas exposés.
+ */
+async function getMyMessages({ daysBack = 7 } = {}) {
+  const end = new Date();
+  const span = Math.min(7, Math.max(1, Number(daysBack) || 7));
+  const start = new Date(Date.now() - span * 86400000);
+  const headerXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+  <DetailLevel>ReturnHeaders</DetailLevel>
+  <StartTime>${start.toISOString()}</StartTime>
+  <EndTime>${end.toISOString()}</EndTime>
+</GetMyMessagesRequest>`;
+  const headersText = await tradingApiCall("GetMyMessages", headerXml);
+  const headers = parseMyMessagesXml(headersText);
+  const ids = headers.map((m) => String(m.messageId || "").replace(/^mm:/, "")).filter(Boolean);
+  if (!ids.length) {
+    return { messages: headers, count: headers.length, env: isProduction() ? "production" : "sandbox" };
+  }
+  const byId = new Map();
+  for (const m of headers) {
+    if (m.messageId) byId.set(String(m.messageId), m);
+  }
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const idsXml = chunk.map((id) => `<MessageID>${id}</MessageID>`).join("");
+    const bodyXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Version>1399</Version>
+  <DetailLevel>ReturnMessages</DetailLevel>
+  <MessageIDs>${idsXml}</MessageIDs>
+</GetMyMessagesRequest>`;
+    const text = await tradingApiCall("GetMyMessages", bodyXml);
+    for (const m of parseMyMessagesXml(text)) {
+      const prev = byId.get(String(m.messageId)) || {};
+      byId.set(String(m.messageId), {
+        ...prev,
+        ...m,
+        body: m.body || prev.body || "",
+        subject: m.subject || prev.subject || "",
+      });
+    }
+  }
+  const messages = [...byId.values()];
+  return {
+    messages,
+    count: messages.length,
+    env: isProduction() ? "production" : "sandbox",
+  };
+}
+
+/** Combine questions listing + My Messages. Une source peut échouer sans tout bloquer. */
+async function syncEbayInbox({ daysBackMember = 21, daysBackMy = 7 } = {}) {
+  const errors = [];
+  let member = { messages: [] };
+  let mine = { messages: [] };
+  try {
+    member = await getMemberMessages({ daysBack: daysBackMember, unansweredOnly: false });
+  } catch (e) {
+    errors.push(`GetMemberMessages: ${e.message}`);
+  }
+  try {
+    mine = await getMyMessages({ daysBack: daysBackMy });
+  } catch (e) {
+    errors.push(`GetMyMessages: ${e.message}`);
+  }
+  const messages = mergeInboxMessages(member.messages || [], mine.messages || []);
+  if (!messages.length && errors.length === 2) {
+    const err = new Error(errors.join(" · "));
+    err.partialErrors = errors;
+    throw err;
+  }
+  return {
+    messages,
+    count: messages.length,
+    memberCount: (member.messages || []).length,
+    myMessagesCount: (mine.messages || []).length,
+    errors,
+    live: errors.length < 2,
     env: isProduction() ? "production" : "sandbox",
   };
 }
@@ -2074,6 +2131,8 @@ module.exports = {
   getSellerIdentity,
   getRecentOrders,
   getMemberMessages,
+  getMyMessages,
+  syncEbayInbox,
   replyToMemberMessage,
   updateOfferPriceQuantity,
   endEbayOffer,

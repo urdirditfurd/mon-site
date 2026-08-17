@@ -1844,6 +1844,115 @@ function formatShipAddress(order) {
   return { text: lines.join("\n"), json: JSON.stringify(addr) };
 }
 
+/** Importe les ventes Fulfillment dans auto_orders. processQueue=false n’enchaîne pas Auto-Order. */
+async function importRecentEbayOrders({ processQueue = false } = {}) {
+  const { getRecentOrders } = require("./ebay-api");
+  const { orders, env, sellerUserId } = await getRecentOrders({ limit: 40, daysBack: 90 });
+  let created = 0;
+  let updated = 0;
+  for (const o of orders) {
+    const ref = String(o.orderId || "").slice(0, 40);
+    if (!ref) continue;
+    const line = o.lineItems?.[0];
+    const title = line?.title || "Commande eBay";
+    const amount = Number(o.pricingSummary?.total?.value || line?.total?.value || 0);
+    const qty = Number(line?.quantity || 1);
+    const ship = formatShipAddress(o);
+    let match = { source_url: "", supplier: "eBay→fournisseur" };
+    const sku = String(line?.sku || "");
+    const skuHit = sku.match(/^EBX-(\d+)/i);
+    if (skuHit) {
+      const listing = getListingById.get(Number(skuHit[1]));
+      if (listing?.source_url) {
+        const src = listing.source_url;
+        match = {
+          source_url: src,
+          supplier: /amazon/i.test(src)
+            ? "Amazon"
+            : /cdiscount/i.test(src)
+              ? "Cdiscount"
+              : /aliexpress/i.test(src)
+                ? "AliExpress"
+                : "Fournisseur",
+          listingId: listing.id,
+        };
+      }
+    }
+    if (!match.source_url) match = findSupplierForTitle(title);
+
+    const exists = getOrderByRef.get(ref);
+    if (!exists) {
+      insertOrder.run(
+        ref,
+        title.slice(0, 120),
+        o.buyer?.username || "buyer",
+        "pending",
+        match.supplier,
+        amount,
+        match.source_url || ""
+      );
+      updateOrderExtras.run(ship.json || "", ship.text || "", match.source_url || "", match.supplier, qty, ref);
+      created += 1;
+    } else {
+      updateOrderExtras.run(
+        ship.json || exists.ship_json || "",
+        ship.text || exists.notes || "",
+        exists.source_url || match.source_url || "",
+        exists.supplier || match.supplier,
+        qty,
+        ref
+      );
+      updated += 1;
+    }
+  }
+  const cfg = getSupplierConfig();
+  let autoPack = null;
+  if (processQueue && created > 0 && (cfg.autoOrderMode || cfg.autoProcessOnSync)) {
+    try {
+      const rows = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending");
+      const maxLeft = Math.max(0, (cfg.maxPerDay || 50) - (cfg.processedToday || 0));
+      autoPack = { processed: 0, ids: [] };
+      for (const row of rows.slice(0, maxLeft)) {
+        const key = supplierKeyFromName(row.supplier + " " + (row.source_url || ""));
+        if (cfg[key]?.enabled === false || cfg[key]?.comingSoon) continue;
+        if (cfg.autoOrderMode && cfg[key]?.auto === false) continue;
+        let url = row.source_url;
+        let supplier = row.supplier;
+        if (!url) {
+          const found = findSupplierForTitle(row.product);
+          url = found.source_url;
+          supplier = found.supplier || supplier;
+        }
+        if (!url) {
+          const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 5).join(" "));
+          url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
+          supplier = "AliExpress";
+        }
+        updateOrderSource.run(url, supplier || "Fournisseur", row.order_ref);
+        updateOrderStatus.run("ordered", row.order_ref);
+        autoPack.ids.push(row.order_ref);
+        autoPack.processed += 1;
+      }
+      cfg.processedToday = (cfg.processedToday || 0) + autoPack.processed;
+      cfg.processedDay = new Date().toISOString().slice(0, 10);
+      saveSupplierConfig(cfg);
+    } catch (_) {}
+  }
+  return {
+    fetched: orders.length,
+    created,
+    updated,
+    autoProcessed: autoPack?.processed || 0,
+    autoOrderMode: Boolean(cfg.autoOrderMode),
+    ebayEnv: env,
+    sellerUserId: sellerUserId || null,
+    note:
+      orders.length === 0
+        ? `Aucune vente trouvée sur le compte ${sellerUserId || "eBay"} (${env}) ces 90 derniers jours. Normal si tu n'as pas encore de commande acheteur.`
+        : `${orders.length} commande(s) synchronisée(s) depuis ${sellerUserId || "eBay"} (${env}).`,
+  };
+}
+
 app.get("/api/trending", async (req, res) => {
   try {
     const { fetchTrendingProducts, getCachedTrendingMeta, peekTrendingCache } = require("./trending-engine");
@@ -2461,6 +2570,130 @@ function seedDemoSavIfEmpty() {
   return;
 }
 
+function readSavSyncMeta() {
+  try {
+    const raw = getSetting.get("sav_sync_meta")?.value;
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeSavSyncMeta(meta) {
+  upsertSetting.run("sav_sync_meta", JSON.stringify(meta || {}));
+}
+
+function ingestSavMessages(messages) {
+  let created = 0;
+  let updated = 0;
+  for (const m of messages || []) {
+    const mid = String(m.messageId || `${m.itemId}-${m.sender}-${m.creationDate}`).slice(0, 80);
+    if (!mid) continue;
+    const received = m.creationDate || "";
+    const existing = getSavByMessageId.get(mid);
+    const subject = m.subject || (m.source === "mymessages" ? "(message eBay)" : "(sans sujet)");
+    if (existing) {
+      updateSavInboxFields.run(
+        m.itemId || existing.item_id || "",
+        m.itemTitle || existing.item_title || "",
+        m.sender || existing.sender || "",
+        subject || existing.subject || "",
+        m.body || existing.body || "",
+        received,
+        received,
+        mid
+      );
+      updated += 1;
+      continue;
+    }
+    insertSavMessage.run(
+      mid,
+      m.itemId || "",
+      m.itemTitle || "",
+      m.sender || "",
+      subject,
+      m.body || "",
+      "new",
+      "",
+      0,
+      "",
+      0,
+      "",
+      received || new Date().toISOString()
+    );
+    created += 1;
+  }
+  return { created, updated };
+}
+
+let inboxSyncBusy = false;
+async function syncSavInboxFromEbay({ includeOrders = true } = {}) {
+  const { syncEbayInbox, getSellerIdentity } = require("./ebay-api");
+  let seller = { ok: false, userId: null, error: null };
+  try {
+    const id = await getSellerIdentity();
+    seller = { ok: true, userId: id.userId || null, email: id.email || "", error: null };
+  } catch (e) {
+    seller = { ok: false, userId: null, error: e.message };
+  }
+  const inbox = await syncEbayInbox();
+  const ingested = ingestSavMessages(inbox.messages);
+  let orders = { fetched: 0, created: 0, updated: 0, error: null };
+  if (includeOrders) {
+    try {
+      orders = await importRecentEbayOrders({ processQueue: false });
+    } catch (e) {
+      orders.error = e.message;
+    }
+  }
+  const meta = {
+    at: new Date().toISOString(),
+    live: Boolean(inbox.live),
+    sellerOk: seller.ok,
+    sellerUserId: seller.userId || null,
+    memberCount: inbox.memberCount || 0,
+    myMessagesCount: inbox.myMessagesCount || 0,
+    fetched: inbox.count || 0,
+    created: ingested.created,
+    updated: ingested.updated,
+    errors: inbox.errors || [],
+    ordersError: orders.error || null,
+    salesFetched: orders.fetched || 0,
+  };
+  writeSavSyncMeta(meta);
+  return { ...inbox, ...ingested, seller, orders, meta };
+}
+
+function startInboxSyncScheduler() {
+  const ms = Math.max(60_000, Number(process.env.EBAY_INBOX_SYNC_MS) || 5 * 60 * 1000);
+  const run = () => {
+    if (inboxSyncBusy) return;
+    inboxSyncBusy = true;
+    syncSavInboxFromEbay({ includeOrders: true })
+      .then((r) => {
+        console.log(
+          `[sav-sync] live=${r.live} messages=${r.count} member=${r.memberCount} my=${r.myMessagesCount} ventes=${r.orders?.fetched || 0}`
+        );
+      })
+      .catch((err) => {
+        writeSavSyncMeta({
+          ...readSavSyncMeta(),
+          at: new Date().toISOString(),
+          live: false,
+          error: err.message,
+        });
+        console.warn("[sav-sync]", err.message);
+      })
+      .finally(() => {
+        inboxSyncBusy = false;
+      });
+  };
+  setTimeout(run, 12_000);
+  setInterval(run, ms);
+  console.log(`📬 Inbox eBay: sync toutes les ${Math.round(ms / 60000)} min (messages + ventes, sans Auto-Order)`);
+}
+
 app.get("/api/sav", (_req, res) => {
   try {
     seedDemoSavIfEmpty();
@@ -2471,6 +2704,47 @@ app.get("/api/sav", (_req, res) => {
         ...m,
         escalate: Boolean(m.escalate),
       })),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/sav/status", async (_req, res) => {
+  try {
+    const meta = readSavSyncMeta();
+    let seller = { ok: Boolean(meta.sellerOk), userId: meta.sellerUserId || null, error: meta.error || null };
+    if (!meta.at) {
+      try {
+        const { getSellerIdentity } = require("./ebay-api");
+        const id = await getSellerIdentity();
+        seller = { ok: true, userId: id.userId || null, error: null };
+      } catch (e) {
+        seller = { ok: false, userId: null, error: e.message };
+      }
+    }
+    const pendingSales = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending").length;
+    const inboxCount = listSavMessages.all().filter((m) => m.status !== "sent" && m.status !== "archived").length;
+    res.json({
+      success: true,
+      data: {
+        connected: Boolean(seller.ok),
+        sellerUserId: seller.userId || null,
+        sellerError: seller.error || null,
+        lastSyncAt: meta.at || null,
+        live: meta.live !== false && Boolean(seller.ok),
+        memberCount: meta.memberCount || 0,
+        myMessagesCount: meta.myMessagesCount || 0,
+        fetched: meta.fetched || 0,
+        errors: meta.errors || [],
+        ordersError: meta.ordersError || null,
+        salesFetched: meta.salesFetched || 0,
+        pendingSales,
+        inboxCount,
+        note: seller.ok
+          ? "Connecté à eBay : questions acheteurs (GetMemberMessages) + My Messages + ventes Fulfillment. Les e-mails marketing / pub / mot de passe eBay n’apparaissent pas ici."
+          : "Compte eBay non lu — reconnecte OAuth dans Paramètres. " + (seller.error || ""),
+      },
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -2625,7 +2899,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
     reply:
-      "Auto-Publish (sous Product Sniper) enchaîne tout seul : tendances eBay du marché → fournisseur le plus rentable (Sniper) → fiche claire → prix concurrentiel avec net ≥ 5 % → publication toutes les 10 min (qty 5000). Pendant ces 10 min, le prochain lot est préparé.",
+      "Auto-Publish (sous Product Sniper) enchaîne tout seul : tendances eBay du marché → fournisseur le plus rentable (Sniper) → fiche claire → prix concurrentiel avec net ≥ 5 % → publication toutes les 10 min (qty 5000). Auto-Order OFF ne bloque pas. Coche le toggle Automatisation ; le serveur (PM2) doit rester allumé.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],
@@ -2633,9 +2907,9 @@ const HELP_FAQ = [
       "Dans Mes Listings : Modifier → vérifier titre/prix/images → Publier eBay. Le bouton Rafraîchir recharge la liste sans attendre le diagnostic OAuth.",
   },
   {
-    keys: ["notification", "sav", "message"],
+    keys: ["notification", "sav", "message", "mail", "email"],
     reply:
-      "La page Notifications synchronise les messages eBay (GetMemberMessages). Utilise Sync eBay / Rafraîchir ; le badge se met à jour automatiquement.",
+      "Notifications = inbox eBay API (questions acheteurs + My Messages) et ventes à traiter — pas ta boîte mail. Les e-mails marketing / pub / mot de passe eBay n’y apparaissent jamais. Sync auto toutes les 5 min si le compte OAuth est lié.",
   },
   {
     keys: ["ebay", "oauth", "connecter", "compte"],
@@ -2645,7 +2919,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-order", "commande", "fournisseur", "vente"],
     reply:
-      "Auto-Order est dans Paramètres. Sync ventes eBay, puis Préparer commandes. Le bot prépare le checkout fournisseur ; tu valides le paiement.",
+      "Auto-Order (Paramètres) commande chez le fournisseur après une vente. Il n’a aucun effet sur Auto-Publish. Tu peux publier toutes les 10 min avec Auto-Order OFF — il faut juste cocher le toggle Automatisation Auto-Publish.",
   },
   {
     keys: ["langue", "allemand", "anglais", "manuel"],
@@ -2716,68 +2990,52 @@ app.post("/api/notifications/read", (req, res) => {
 
 app.post("/api/sav/sync", async (_req, res) => {
   try {
-    let fetched = 0;
-    let created = 0;
-    let updated = 0;
-    let live = false;
-    let apiError = null;
-    try {
-      const { getMemberMessages } = require("./ebay-api");
-      const { messages } = await getMemberMessages({ daysBack: 21, unansweredOnly: false });
-      live = true;
-      fetched = messages.length;
-      for (const m of messages) {
-        const mid = String(m.messageId || `${m.itemId}-${m.sender}-${m.creationDate}`).slice(0, 80);
-        if (!mid) continue;
-        const received = m.creationDate || "";
-        const existing = getSavByMessageId.get(mid);
-        if (existing) {
-          updateSavInboxFields.run(
-            m.itemId || existing.item_id || "",
-            m.itemTitle || existing.item_title || "",
-            m.sender || existing.sender || "",
-            m.subject || existing.subject || "",
-            m.body || existing.body || "",
-            received,
-            received,
-            mid
-          );
-          updated += 1;
-          continue;
-        }
-        insertSavMessage.run(
-          mid,
-          m.itemId || "",
-          m.itemTitle || "",
-          m.sender || "",
-          m.subject || "",
-          m.body || "",
-          "new",
-          "",
-          0,
-          "",
-          0,
-          "",
-          received || new Date().toISOString()
-        );
-        created += 1;
-      }
-    } catch (e) {
-      apiError = e.message;
-      seedDemoSavIfEmpty();
+    if (inboxSyncBusy) {
+      const meta = readSavSyncMeta();
+      return res.json({
+        success: true,
+        fetched: meta.fetched || 0,
+        created: 0,
+        updated: 0,
+        live: Boolean(meta.live),
+        busy: true,
+        apiError: null,
+        note: "Sync déjà en cours — réessaie dans quelques secondes.",
+        meta,
+      });
     }
-    res.json({
-      success: true,
-      fetched,
-      created,
-      updated,
-      live,
-      apiError,
-      note: live
-        ? "Messages eBay synchronisés (Trading GetMemberMessages)."
-        : "API messages indisponible (scopes OAuth / compte). " + (apiError || ""),
-    });
+    inboxSyncBusy = true;
+    try {
+      const result = await syncSavInboxFromEbay({ includeOrders: true });
+      const errNote = (result.errors || []).length ? ` (${result.errors.join(" · ")})` : "";
+      res.json({
+        success: true,
+        fetched: result.count || 0,
+        created: result.created || 0,
+        updated: result.updated || 0,
+        live: Boolean(result.live),
+        memberCount: result.memberCount || 0,
+        myMessagesCount: result.myMessagesCount || 0,
+        salesFetched: result.orders?.fetched || 0,
+        sellerUserId: result.seller?.userId || null,
+        connected: Boolean(result.seller?.ok),
+        apiError: result.seller?.ok ? null : result.seller?.error || null,
+        errors: result.errors || [],
+        note: result.live
+          ? `Inbox eBay : ${result.memberCount || 0} question(s) acheteur, ${result.myMessagesCount || 0} My Messages, ${result.orders?.fetched || 0} vente(s).${errNote}`
+          : "API messages indisponible (OAuth / compte). " + (result.errors || []).join(" · "),
+      });
+    } finally {
+      inboxSyncBusy = false;
+    }
   } catch (err) {
+    inboxSyncBusy = false;
+    writeSavSyncMeta({
+      ...readSavSyncMeta(),
+      at: new Date().toISOString(),
+      live: false,
+      error: err.message,
+    });
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -2878,7 +3136,7 @@ app.post("/api/sav/:id/send", async (req, res) => {
       const { replyToMemberMessage } = require("./ebay-api");
       await replyToMemberMessage({
         itemId: row.item_id,
-        parentMessageId: row.message_id,
+        parentMessageId: String(row.message_id || "").replace(/^(member|mm):/, ""),
         recipientId: row.sender,
         body,
       });
@@ -4057,114 +4315,11 @@ app.post("/api/listings/:id/end", async (req, res) => {
 
 app.post("/api/auto-orders/sync-ebay", async (_req, res) => {
   try {
-    const { getRecentOrders } = require("./ebay-api");
-    const { orders, env, sellerUserId } = await getRecentOrders({ limit: 40, daysBack: 90 });
-    let created = 0;
-    let updated = 0;
-    for (const o of orders) {
-      const ref = String(o.orderId || "").slice(0, 40);
-      if (!ref) continue;
-      const line = o.lineItems?.[0];
-      const title = line?.title || "Commande eBay";
-      const amount = Number(o.pricingSummary?.total?.value || line?.total?.value || 0);
-      const qty = Number(line?.quantity || 1);
-      const ship = formatShipAddress(o);
-      // SKU EBX-{listingId}-… → retrouver le listing source
-      let match = { source_url: "", supplier: "eBay→fournisseur" };
-      const sku = String(line?.sku || "");
-      const skuHit = sku.match(/^EBX-(\d+)/i);
-      if (skuHit) {
-        const listing = getListingById.get(Number(skuHit[1]));
-        if (listing?.source_url) {
-          const src = listing.source_url;
-          match = {
-            source_url: src,
-            supplier: /amazon/i.test(src)
-              ? "Amazon"
-              : /cdiscount/i.test(src)
-                ? "Cdiscount"
-                : /aliexpress/i.test(src)
-                  ? "AliExpress"
-                  : "Fournisseur",
-            listingId: listing.id,
-          };
-        }
-      }
-      if (!match.source_url) match = findSupplierForTitle(title);
-
-      const exists = getOrderByRef.get(ref);
-      if (!exists) {
-        insertOrder.run(
-          ref,
-          title.slice(0, 120),
-          o.buyer?.username || "buyer",
-          "pending",
-          match.supplier,
-          amount,
-          match.source_url || ""
-        );
-        updateOrderExtras.run(ship.json || "", ship.text || "", match.source_url || "", match.supplier, qty, ref);
-        created += 1;
-      } else {
-        updateOrderExtras.run(
-          ship.json || exists.ship_json || "",
-          ship.text || exists.notes || "",
-          exists.source_url || match.source_url || "",
-          exists.supplier || match.supplier,
-          qty,
-          ref
-        );
-        updated += 1;
-      }
-    }
     const cfg = getSupplierConfig();
-    let autoPack = null;
-    if (created > 0 && (cfg.autoOrderMode || cfg.autoProcessOnSync)) {
-      try {
-        // Relance logique file (réutilise même endpoint en interne)
-        const rows = getOrders.all().filter((o) => isRealEbayOrderRef(o.order_ref) && o.status === "pending");
-        const maxLeft = Math.max(0, (cfg.maxPerDay || 50) - (cfg.processedToday || 0));
-        autoPack = { processed: 0, ids: [] };
-        for (const row of rows.slice(0, maxLeft)) {
-          const key = supplierKeyFromName(row.supplier + " " + (row.source_url || ""));
-          if (cfg[key]?.enabled === false || cfg[key]?.comingSoon) continue;
-          if (cfg.autoOrderMode && cfg[key]?.auto === false) continue;
-          let url = row.source_url;
-          let supplier = row.supplier;
-          if (!url) {
-            const found = findSupplierForTitle(row.product);
-            url = found.source_url;
-            supplier = found.supplier || supplier;
-          }
-          if (!url) {
-            const q = encodeURIComponent(String(row.product || "").split(/\s+/).slice(0, 5).join(" "));
-            url = `https://www.aliexpress.com/w/wholesale-${q}.html`;
-            supplier = "AliExpress";
-          }
-          updateOrderSource.run(url, supplier || "Fournisseur", row.order_ref);
-          updateOrderStatus.run("ordered", row.order_ref);
-          autoPack.ids.push(row.order_ref);
-          autoPack.processed += 1;
-        }
-        cfg.processedToday = (cfg.processedToday || 0) + autoPack.processed;
-        cfg.processedDay = new Date().toISOString().slice(0, 10);
-        saveSupplierConfig(cfg);
-      } catch (_) {}
-    }
-    res.json({
-      success: true,
-      fetched: orders.length,
-      created,
-      updated,
-      autoProcessed: autoPack?.processed || 0,
-      autoOrderMode: cfg.autoOrderMode,
-      ebayEnv: env,
-      sellerUserId: sellerUserId || null,
-      note:
-        orders.length === 0
-          ? `Aucune vente trouvée sur le compte ${sellerUserId || "eBay"} (${env}) ces 90 derniers jours. Normal si tu n'as pas encore de commande acheteur.`
-          : `${orders.length} commande(s) synchronisée(s) depuis ${sellerUserId || "eBay"} (${env}).`,
+    const result = await importRecentEbayOrders({
+      processQueue: Boolean(cfg.autoOrderMode || cfg.autoProcessOnSync),
     });
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -4486,6 +4641,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
   startAutoPublishScheduler();
+  startInboxSyncScheduler();
 });
 server.on("error", (err) => {
   if (err && err.code === "EADDRINUSE") {

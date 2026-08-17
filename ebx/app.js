@@ -313,7 +313,7 @@ const PAGE_META = {
   listings: ["Mes Listings", "Annonces générées"],
   "title-builder": ["Title Builder", "Construisez un titre SEO eBay"],
   description: ["Description Builder", "Générez une description HTML en 1 clic"],
-  sav: ["Notifications", "Messages eBay"],
+  sav: ["Notifications", "Inbox eBay (messages + ventes), pas les e-mails marketing"],
   settings: ["Paramètres", "Compte, eBay & Auto-Order"],
 };
 
@@ -349,8 +349,7 @@ function navigate(page, opts = {}) {
     stopAutoPublishPoll();
   }
   if (page === "sav") {
-    loadSav();
-    markNotificationsRead({ types: ["message"] });
+    loadSavInboxPage();
   }
   if (page === "settings") {
     loadSettings();
@@ -1551,7 +1550,7 @@ async function loadAutoPublishHistory() {
       const next = sched.nextFireAt ? formatPublishDate(sched.nextFireAt) : null;
       const intervalMin = data.intervalMin || 10;
       meta.textContent =
-        (data.enabled ? "Automatisation ON · " : "Automatisation OFF · ") +
+        (data.enabled ? "Automatisation ON · " : "Automatisation OFF — coche le toggle pour publier toutes les 10 min · ") +
         `cycle toutes les ${intervalMin} min` +
         (next && data.enabled ? ` · prochain ~ ${next}` : "") +
         (sched.fireCount != null ? ` · ticks ${sched.fireCount}` : "") +
@@ -1561,7 +1560,11 @@ async function loadAutoPublishHistory() {
         (pipe.lastQuery ? ` · « ${pipe.lastQuery} »` : "") +
         (pipe.lastPhase ? ` · phase ${pipe.lastPhase}` : "") +
         (kws.length ? ` · demande : ${kws.join(", ")}` : "") +
-        ` · ignorés/jour ${pipe.skippedToday || 0}`;
+        ` · ignorés/jour ${pipe.skippedToday || 0}` +
+        " · Auto-Order n’impacte pas cette page";
+      meta.className = data.enabled
+        ? "text-xs text-zinc-500 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3"
+        : "text-xs text-amber-800 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3";
     }
     renderAutoPublishHistory(published);
     renderAutoPublishLog(data.log || []);
@@ -1584,6 +1587,7 @@ async function saveAutoPublishSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled, marketplace }),
     });
+    await loadAutoPublishHistory();
   } catch (err) {
     console.warn("[EBX] auto-publish settings:", err.message);
   }
@@ -2600,14 +2604,91 @@ async function loadSav() {
             </button>`;
           })
           .join("")
-      : `<p class="p-6 text-sm text-zinc-300 text-center">Aucun message — Sync ou Brouillons auto.</p>`;
+      : `<p class="p-6 text-sm text-zinc-300 text-center">Aucun message eBay pour l’instant. Clique Sync eBay — seules les questions acheteurs et My Messages apparaissent ici (pas les e-mails marketing).</p>`;
     if (savSelectedId && savCache.some((x) => x.id === savSelectedId)) {
       selectSav(savSelectedId);
     }
     await markNotificationsRead({ types: ["message"] });
+    await refreshSavStatus();
+    await loadSavSales();
   } catch (err) {
     alert("SAV: " + err.message);
   }
+}
+
+async function refreshSavStatus() {
+  const el = document.getElementById("sav-ebay-status");
+  if (!el) return;
+  try {
+    const res = await fetch(API + "/api/sav/status");
+    const json = await res.json();
+    const d = json.data || {};
+    const when = d.lastSyncAt ? formatSavDate(d.lastSyncAt) : "jamais";
+    if (d.connected) {
+      el.className = "text-xs rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-emerald-800";
+      el.textContent =
+        `API connectée · compte ${d.sellerUserId || "eBay"} · dernier sync ${when} · ` +
+        `${d.inboxCount || 0} message(s) · ${d.memberCount || 0} question(s) · ${d.myMessagesCount || 0} My Messages · ${d.pendingSales || 0} vente(s) à traiter. ` +
+        (d.note || "");
+    } else {
+      el.className = "text-xs rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800";
+      el.textContent =
+        `eBay non lu (${d.sellerError || "OAuth"}) · dernier sync ${when}. ` +
+        "Reconnecte le compte dans Paramètres. Les e-mails marketing eBay ne sont jamais importés.";
+    }
+  } catch (err) {
+    el.className = "text-xs rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-red-700";
+    el.textContent = "Impossible de vérifier la connexion eBay : " + err.message;
+  }
+}
+
+async function loadSavSales() {
+  const wrap = document.getElementById("sav-sales-wrap");
+  const list = document.getElementById("sav-sales-list");
+  if (!wrap || !list) return;
+  try {
+    const res = await fetch(API + "/api/auto-orders");
+    const json = await res.json();
+    const pending = (json.data || []).filter((o) => {
+      const r = String(o.order_ref || "");
+      return r && !/^AO-/i.test(r) && !/^DEMO/i.test(r) && o.status === "pending";
+    });
+    if (!pending.length) {
+      wrap.classList.add("hidden");
+      list.innerHTML = "";
+      return;
+    }
+    wrap.classList.remove("hidden");
+    list.innerHTML = pending
+      .map((o) => {
+        const title = escapeHtml(o.product || "Vente eBay");
+        const amt = Number(o.amount || 0).toFixed(2);
+        const when = escapeHtml(formatSavDate(o.created_at));
+        const ref = escapeHtml(o.order_ref || "");
+        return `<button type="button" class="w-full text-left px-4 py-3 hover:bg-brand-50" onclick="navigate('settings', { scrollTo: 'auto-order' })">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-sm font-medium truncate">${title}</p>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-emerald-100 text-emerald-800">vente</span>
+          </div>
+          <p class="text-[11px] text-zinc-400 mt-0.5">${amt} € · ${ref} · ${when}</p>
+        </button>`;
+      })
+      .join("");
+  } catch (_) {
+    wrap.classList.add("hidden");
+  }
+}
+
+async function loadSavInboxPage() {
+  await refreshSavStatus();
+  try {
+    if (!window.__ebxLastSavSync || Date.now() - window.__ebxLastSavSync > 30000) {
+      await fetch(API + "/api/sav/sync", { method: "POST" });
+      window.__ebxLastSavSync = Date.now();
+    }
+  } catch (_) {}
+  await loadSav();
+  await refreshNotifications(false);
 }
 
 function selectSav(id) {
@@ -2682,9 +2763,12 @@ async function syncSavMessages() {
     if (!json.success) throw new Error(json.error);
     window.__ebxLastSavSync = Date.now();
     alert(
-      (json.live ? "Sync live: " : "API indisponible: ") +
+      (json.live ? "Sync eBay OK. " : "API messages partielle. ") +
         `${json.fetched || 0} lu(s), ${json.created || 0} nouveau(x), ${json.updated || 0} mis à jour.\n` +
-        (json.note || "")
+        `Questions: ${json.memberCount || 0} · My Messages: ${json.myMessagesCount || 0} · Ventes: ${json.salesFetched || 0}\n` +
+        (json.connected === false ? "Compte eBay non lu — reconnecte OAuth dans Paramètres.\n" : "") +
+        (json.note || "") +
+        "\n\nLes e-mails marketing / pub eBay ne passent pas par cette API."
     );
     await loadSav();
     await refreshNotifications(false);
@@ -3749,7 +3833,7 @@ checkHealth();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer","runAutoPublish","loadAutoPublishHistory","saveAutoPublishSettings"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","loadSavInboxPage","refreshSavStatus","loadSavSales","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer","runAutoPublish","loadAutoPublishHistory","saveAutoPublishSettings"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

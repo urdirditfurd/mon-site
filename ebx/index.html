@@ -670,6 +670,7 @@
             <div>
               <h3 class="text-xl font-bold">Auto-Publish</h3>
               <p class="text-sm text-zinc-500 mt-1">Pipeline complet : tendances du marché → fournisseur le plus rentable (Product Sniper) → fiche eBay claire → prix concurrentiel (net ≥ 5 %) → publication toutes les 10 min (qty 5 000). Pendant l’intervalle, le prochain lot est préparé.</p>
+              <p class="text-xs text-zinc-400 mt-2">Auto-Order (commandes fournisseur) n’a aucun effet ici. Pour publier vraiment toutes les 10 min : coche le toggle Automatisation ci-dessous, et laisse le serveur (PM2) allumé.</p>
             </div>
             <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer un cycle</button>
           </div>
@@ -696,7 +697,7 @@
             </div>
           </div>
           <div id="ap-pipeline-meta" class="text-xs text-zinc-500 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3">
-            Active le toggle pour enchaîner recherche de demande, sniper, fiche et publication.
+            Coche le toggle Automatisation pour un cycle toutes les 10 min. Auto-Order OFF ne bloque pas.
           </div>
           <div id="ap-progress-wrap" class="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 space-y-2">
             <div class="flex items-center justify-between gap-3">
@@ -902,8 +903,9 @@
       <section id="page-sav" class="page space-y-4">
         <div class="bg-white rounded-2xl border border-zinc-200 p-5 space-y-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0">
               <h3 class="font-semibold text-lg">Notifications</h3>
+              <p class="text-sm text-zinc-500 mt-1">Inbox eBay : questions acheteurs, messages My Messages, et ventes à traiter. Ce n’est pas ta boîte mail — les e-mails marketing / pub / mot de passe eBay n’apparaissent jamais ici.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="syncSavMessages()" class="text-sm px-3 py-1.5 border rounded-lg">Sync eBay</button>
@@ -911,6 +913,13 @@
               <button onclick="loadSav()" class="text-sm px-3 py-1.5 border rounded-lg">Rafraîchir</button>
             </div>
           </div>
+          <div id="sav-ebay-status" class="text-xs rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-zinc-500">
+            Vérification de la connexion eBay…
+          </div>
+        </div>
+        <div id="sav-sales-wrap" class="bg-white rounded-2xl border border-zinc-200 overflow-hidden hidden">
+          <div class="p-3 border-b text-xs font-medium text-zinc-400 uppercase tracking-wider">Ventes eBay à traiter</div>
+          <div id="sav-sales-list" class="divide-y divide-zinc-50"></div>
         </div>
         <div class="grid lg:grid-cols-5 gap-4">
           <div class="lg:col-span-2 bg-white rounded-2xl border border-zinc-200 overflow-hidden">
@@ -1189,6 +1198,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-v10"></script>
+  <script src="app.js?v=snipe-v11"></script>
 </body>
 </html>
