@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BayPilot — Opérateur DFY</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#f3f3fc] text-slate-800 min-h-screen">
+  <header class="bg-[#1a1f3d] text-white px-6 py-4 flex items-center justify-between">
+    <div>
+      <p class="text-xl font-bold tracking-tight">BayPilot</p>
+      <p class="text-xs text-indigo-200">Opérateur — copie améliorée, hors clone EBX du VPS</p>
+    </div>
+    <div class="flex gap-3 text-sm">
+      <a class="underline text-indigo-200" href="/offre.html">Offre client</a>
+      <a class="underline text-indigo-200" href="/PLAYBOOK.md">Playbook</a>
+    </div>
+  </header>
+  <main class="max-w-6xl mx-auto p-6 space-y-6">
+    <section class="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-950">
+      Le clone <strong>ebx</strong> (port 3000 / PM2 <code>ebx</code>) ne doit pas être modifié.
+      Ici : nouvelle instance <code>baypilot-ops</code> + un cockpit par client (ports 3101+).
+    </section>
+
+    <section class="bg-white rounded-2xl border border-[#d4d4f0] p-5 space-y-4">
+      <h2 class="font-semibold">Nouveau client DFY</h2>
+      <form id="create-form" class="grid sm:grid-cols-2 gap-3 text-sm">
+        <input name="name" required placeholder="Nom boutique" class="px-3 py-2 rounded-xl border" />
+        <input name="email" type="email" placeholder="Email" class="px-3 py-2 rounded-xl border" />
+        <input name="feeEur" type="number" min="500" value="1800" class="px-3 py-2 rounded-xl border" />
+        <select name="marketplace" class="px-3 py-2 rounded-xl border">
+          <option value="EBAY_FR">eBay FR</option>
+          <option value="EBAY_DE">eBay DE</option>
+          <option value="EBAY_GB">eBay UK</option>
+          <option value="EBAY_US">eBay US</option>
+        </select>
+        <button class="sm:col-span-2 bg-[#4452a8] text-white rounded-xl py-2 font-semibold">Créer le dossier isolé</button>
+      </form>
+      <p id="create-msg" class="text-sm text-slate-500"></p>
+    </section>
+
+    <section class="bg-white rounded-2xl border border-[#d4d4f0] overflow-hidden">
+      <div class="px-5 py-3 border-b flex justify-between items-center">
+        <h2 class="font-semibold">Clients</h2>
+        <button id="reload" class="text-sm text-[#4452a8] underline">Rafraîchir</button>
+      </div>
+      <div id="list" class="divide-y text-sm"></div>
+    </section>
+
+    <section id="detail" class="hidden bg-white rounded-2xl border border-[#d4d4f0] p-5 space-y-4"></section>
+  </main>
+  <script>
+    async function j(url, opts) {
+      const res = await fetch(url, opts);
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+    function esc(s) {
+      return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+    async function loadList() {
+      const { data } = await j("/api/clients");
+      const el = document.getElementById("list");
+      if (!data.length) {
+        el.innerHTML = '<p class="p-5 text-slate-400">Aucun client. Crée le premier (ton propre compte eBay en dogfood).</p>';
+        return;
+      }
+      el.innerHTML = data.map((c) => `
+        <button data-id="${esc(c.id)}" class="w-full text-left px-5 py-3 hover:bg-indigo-50 flex justify-between gap-3">
+          <span><strong>${esc(c.name)}</strong> · ${esc(c.id)} · ${esc(c.marketplace)}</span>
+          <span>${c.feeEur} €/mois · :${c.port} · ${esc(c.status)}</span>
+        </button>`).join("");
+      el.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => showClient(b.dataset.id)));
+    }
+    async function showClient(id) {
+      const { data } = await j("/api/clients/" + id);
+      const report = await j("/api/clients/" + id + "/report");
+      const r = report.data;
+      const ob = data.onboarding || {};
+      const checks = [
+        ["contractSigned", "Mandat signé"],
+        ["ebayOauth", "OAuth eBay"],
+        ["policies", "Policies"],
+        ["firstListing", "1er listing"],
+        ["savInbox", "Inbox SAV"],
+        ["autoPublishArmed", "Auto-Publish armé"],
+      ].map(([k, label]) => `
+        <label class="flex items-center gap-2"><input type="checkbox" data-k="${k}" ${ob[k] ? "checked" : ""}/> ${label}</label>
+      `).join("");
+      const box = document.getElementById("detail");
+      box.classList.remove("hidden");
+      box.innerHTML = `
+        <h2 class="font-semibold text-lg">${esc(data.name)}</h2>
+        <p class="text-sm text-slate-500">Cockpit : <a class="underline text-[#4452a8]" href="${esc(data.cockpitUrl)}" target="_blank">${esc(data.cockpitUrl)}</a>
+        — après <code>pm2 start ecosystem.config.cjs</code></p>
+        <p class="text-sm">Semaine : CA ${r.kpis.weekGmv} € · ventes ${r.kpis.weekOrders} · publiés ${r.kpis.weekPublished} · SAV ${r.kpis.unansweredSav}</p>
+        <p class="text-sm">Cumul net estimé : ${r.kpis.allTime.net} € (${r.kpis.allTime.netPct} %)</p>
+        <div class="grid sm:grid-cols-2 gap-2 text-sm">${checks}</div>
+        <button id="save-ob" class="bg-[#4452a8] text-white rounded-xl px-4 py-2 text-sm">Sauver onboarding</button>
+        <a class="text-sm underline text-[#4452a8] ml-2" href="/api/clients/${esc(id)}/report?format=html" target="_blank">Rapport HTML</a>
+        <ul class="text-sm list-disc pl-5">${r.actions.map((a) => `<li>${esc(a.text)}</li>`).join("")}</ul>
+      `;
+      document.getElementById("save-ob").onclick = async () => {
+        const payload = {};
+        box.querySelectorAll("input[data-k]").forEach((i) => { payload[i.dataset.k] = i.checked; });
+        await j("/api/clients/" + id + "/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        await showClient(id);
+      };
+    }
+    document.getElementById("create-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const msg = document.getElementById("create-msg");
+      try {
+        const body = Object.fromEntries(fd.entries());
+        body.feeEur = Number(body.feeEur);
+        const { data } = await j("/api/clients", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        msg.textContent = "Créé " + data.id + " port " + data.port + " — relance pm2 start ecosystem.config.cjs";
+        e.target.reset();
+        await loadList();
+      } catch (err) {
+        msg.textContent = err.message;
+      }
+    });
+    document.getElementById("reload").onclick = loadList;
+    loadList().catch((err) => { document.getElementById("list").textContent = err.message; });
+  </script>
+</body>
+</html>

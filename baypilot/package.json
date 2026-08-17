@@ -1,0 +1,31 @@
+{
+  "name": "baypilot",
+  "version": "1.1.0",
+  "description": "BayPilot — cockpit dropshipping eBay (copie améliorée, opérateur DFY)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "ops": "node operator-server.js",
+    "dev": "node server.js",
+    "kill-port": "node scripts/kill-port.js 3101",
+    "restart": "node scripts/kill-port.js 3101 && node server.js",
+    "policies": "node create-policies.js",
+    "policies:prod": "node create-policies.js --prod",
+    "oauth": "node get-refresh-token.js",
+    "oauth:prod": "node get-refresh-token.js --prod",
+    "env-check": "node env-check.js",
+    "check": "node check-setup.js",
+    "test": "node test-auto-publish.js && node test-auto-publish-scheduler.js && node test-ebay-inbox.js && node test-query-match.js && node test-ops-engine.js && node test-client-registry.js && node test-operator-api.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonrepair": "^3.11.2",
+    "openai": "^4.77.0",
+    "playwright-core": "^1.49.1"
+  }
+}
