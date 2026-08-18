@@ -14,8 +14,10 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
+const PROSPECTION_HTML_PATH = path.join(ROOT_DIR, "prospection.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
+const { createProspectionRouter } = require("./prospection-agent");
 const { FAL_LIMITS, estimateFalJob, listFalModels, DEFAULT_FAL_MODEL } = require("./fal-limits");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
@@ -3276,6 +3278,8 @@ function readDeployInfo() {
   return { rootDir: ROOT_DIR, indexBytes, uiSimplified };
 }
 
+app.use("/api/prospection", createProspectionRouter());
+
 app.get("/api/fal/limits", (_req, res) => {
   res.json({
     ok: true,
@@ -3893,6 +3897,13 @@ app.get("/studio", (_req, res) => {
     return res.status(404).send("video-factory.html introuvable");
   }
   return res.sendFile(VIDEO_FACTORY_HTML_PATH);
+});
+app.get("/prospection", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(PROSPECTION_HTML_PATH)) {
+    return res.status(404).send("prospection.html introuvable");
+  }
+  return res.sendFile(PROSPECTION_HTML_PATH);
 });
 
 ensureDirs()

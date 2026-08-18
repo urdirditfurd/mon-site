@@ -1,0 +1,911 @@
+/**
+ * Agent de prospection — sources 100 % gratuites, sans clé API.
+ * - BODACC (data.gouv / DILA) : créations d'entreprises du jour
+ * - API Recherche d'entreprises (annuaire-entreprises) : NAF, dirigeants, adresse
+ * - OpenStreetMap Nominatim : téléphone / e-mail / site si le lieu est cartographié
+ * - DuckDuckGo + PagesJaunes via le lecteur Jina (gratuit) : contacts publics
+ */
+
+const express = require("express");
+
+const USER_AGENT = "ClipForge-Prospection/1.0 (+https://github.com/urdirditfurd/mon-site)";
+const BODACC_URL = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records";
+const SIRENE_URL = "https://recherche-entreprises.api.gouv.fr/search";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const JINA_PREFIX = "https://r.jina.ai/";
+const BODACC_PAGE_SIZE = 100;
+
+const STOP_WORDS = new Set([
+  "sarl", "sas", "sasu", "eurl", "sci", "selarl", "selas", "snc", "sa", "ei",
+  "societe", "ste", "les", "des", "une", "aux", "pour", "avec", "dans", "sur",
+  "the", "and", "de", "du", "la", "le", "et", "en", "au", "d", "l"
+]);
+
+const DIRECTORY_HOSTS = new Set([
+  "societe.com", "www.societe.com", "pappers.fr", "www.pappers.fr",
+  "infogreffe.fr", "www.infogreffe.fr", "verif.com", "www.verif.com",
+  "manageo.fr", "www.manageo.fr", "score3.fr", "www.score3.fr",
+  "annuaire-entreprises.data.gouv.fr", "bodacc.fr", "www.bodacc.fr",
+  "entreprise.lefigaro.fr", "www.societeinfo.com", "societeinfo.com"
+]);
+
+const EMAIL_BLOCK_DOMAINS = [
+  "sentry.io", "example.com", "wixpress.com", "pagesjaunes.fr", "duckduckgo.com",
+  "jina.ai", "google.com", "gstatic.com", "schema.org", "societe.com", "pappers.fr",
+  "facebook.com", "cloudflare.com", "w3.org", "googleapis.com", "microsoft.com",
+  "bing.com", "yahoo.com", "gravatar.com"
+];
+
+const NAF_LABELS = {
+  "01": "Agriculture",
+  "10": "Industries alimentaires",
+  "41": "Construction de bâtiments",
+  "42": "Génie civil",
+  "43": "Travaux de construction spécialisés",
+  "45": "Commerce et réparation d'automobiles",
+  "46": "Commerce de gros",
+  "47": "Commerce de détail",
+  "49": "Transports terrestres",
+  "52": "Entreposage et services auxiliaires de transport",
+  "55": "Hébergement",
+  "56": "Restauration",
+  "62": "Programmation, conseil et autres activités informatiques",
+  "63": "Services d'information",
+  "64": "Activités financières",
+  "68": "Activités immobilières",
+  "69": "Activités juridiques et comptables",
+  "70": "Activités des sièges sociaux ; conseil de gestion",
+  "71": "Architecture et ingénierie",
+  "73": "Publicité et études de marché",
+  "74": "Autres activités spécialisées",
+  "81": "Services relatifs aux bâtiments et aménagement paysager",
+  "82": "Activités administratives de bureau",
+  "85": "Enseignement",
+  "86": "Activités pour la santé humaine",
+  "90": "Arts, spectacles",
+  "93": "Activités sportives, récréatives",
+  "96": "Autres services personnels",
+  "56.10A": "Restauration traditionnelle",
+  "56.10B": "Cafétérias et autres libres-services",
+  "56.10C": "Restauration de type rapide",
+  "56.30Z": "Débits de boissons",
+  "96.02A": "Coiffure",
+  "96.02B": "Soins de beauté",
+  "68.31Z": "Agences immobilières",
+  "62.01Z": "Programmation informatique",
+  "62.02A": "Conseil en systèmes et logiciels informatiques"
+};
+
+const SECTORS = [
+  {
+    id: "restauration",
+    label: "Restauration, cafés, bars",
+    nafPrefixes: ["56"],
+    keywords: ["restaurant", "pizzeria", "brasserie", "snack", "traiteur", "café", "bar ", "salon de thé", "food truck", "glacier", "crêperie", "restauration rapide"],
+    exclude: ["livraison de commandes restaurant", "coursier", "restauration de bien", "restauration d'immeuble", "restauration et/ou"]
+  },
+  {
+    id: "btp",
+    label: "BTP / artisanat du bâtiment",
+    nafPrefixes: ["41", "42", "43"],
+    keywords: ["maçonnerie", "plomberie", "électricité", "couverture", "peinture", "rénovation", "construction", "carrelage", "menuiserie", "plâtrerie", "chauffage"],
+    exclude: []
+  },
+  {
+    id: "commerce",
+    label: "Commerce de détail",
+    nafPrefixes: ["47"],
+    keywords: ["commerce de détail", "boutique", "magasin", "épicerie", "prêt à porter", "vente au détail"],
+    exclude: []
+  },
+  {
+    id: "immobilier",
+    label: "Immobilier",
+    nafPrefixes: ["68"],
+    keywords: ["agence immobilière", "transaction immobilière", "gestion locative", "marchand de biens"],
+    exclude: []
+  },
+  {
+    id: "informatique",
+    label: "Informatique / digital",
+    nafPrefixes: ["62", "63"],
+    keywords: ["informatique", "développement web", "logiciel", "numérique", "digital", "application mobile", "sites internet"],
+    exclude: []
+  },
+  {
+    id: "conseil",
+    label: "Conseil, gestion, juridique",
+    nafPrefixes: ["69", "70", "74"],
+    keywords: ["conseil", "consulting", "expertise", "audit", "ressources humaines", "cabinet"],
+    exclude: []
+  },
+  {
+    id: "sante",
+    label: "Santé / médical",
+    nafPrefixes: ["86"],
+    keywords: ["médical", "dentaire", "infirmier", "kinésith", "ostéopath", "psycholog", "cabinet médical", "orthophon"],
+    exclude: []
+  },
+  {
+    id: "beaute",
+    label: "Beauté / coiffure",
+    nafPrefixes: ["96"],
+    keywords: ["coiffure", "esthétique", "salon de coiffure", "onglerie", "institut de beauté", " barbier"],
+    exclude: []
+  },
+  {
+    id: "transport",
+    label: "Transport / logistique",
+    nafPrefixes: ["49", "52"],
+    keywords: ["transport", "taxi", "vtc", "déménagement", "logistique", "livraison"],
+    exclude: []
+  },
+  {
+    id: "enseignement",
+    label: "Formation / enseignement",
+    nafPrefixes: ["85"],
+    keywords: ["formation", "enseignement", "coaching", "auto-école", "soutien scolaire"],
+    exclude: []
+  },
+  {
+    id: "arts",
+    label: "Arts, spectacles, sport",
+    nafPrefixes: ["90", "93"],
+    keywords: ["spectacle", "audiovisuel", "salle de sport", "fitness", "yoga", "production"],
+    exclude: []
+  },
+  {
+    id: "services",
+    label: "Services aux entreprises",
+    nafPrefixes: ["81", "82"],
+    keywords: ["nettoyage", "sécurité", "secrétariat", "services aux entreprises", "paysagiste"],
+    exclude: []
+  }
+];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function listSectors() {
+  return SECTORS.map(({ id, label }) => ({ id, label }));
+}
+
+function resolveSector(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return null;
+  const byId = SECTORS.find((s) => s.id === value);
+  if (byId) return byId;
+  const lowered = value.toLowerCase();
+  const byLabel = SECTORS.find((s) => lowered.includes(s.id) || s.label.toLowerCase().includes(lowered) || s.keywords.some((k) => lowered.includes(k.trim())));
+  if (byLabel) {
+    return {
+      ...byLabel,
+      extraKeywords: [value]
+    };
+  }
+  return {
+    id: "custom",
+    label: value,
+    nafPrefixes: [],
+    keywords: [value],
+    exclude: [],
+    extraKeywords: []
+  };
+}
+
+function tokenize(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+}
+
+function nameSimilarity(a, b) {
+  const left = new Set(tokenize(a));
+  const right = new Set(tokenize(b));
+  if (!left.size || !right.size) return 0;
+  let hit = 0;
+  for (const token of left) {
+    if (right.has(token)) hit += 1;
+  }
+  return hit / Math.min(left.size, right.size);
+}
+
+function activityMatchesSector(activity, sector) {
+  const text = String(activity || "").toLowerCase();
+  if (!text) return false;
+  const excluded = (sector.exclude || []).some((needle) => text.includes(needle.toLowerCase()));
+  if (excluded) return false;
+  const keys = [...(sector.keywords || []), ...(sector.extraKeywords || [])]
+    .map((k) => k.toLowerCase().trim())
+    .filter(Boolean);
+  if (!keys.length) return true;
+  return keys.some((key) => text.includes(key.trim()));
+}
+
+function nafMatchesSector(naf, sector) {
+  const code = String(naf || "");
+  if (!code || !(sector.nafPrefixes || []).length) return true;
+  return sector.nafPrefixes.some((prefix) => code.startsWith(prefix));
+}
+
+function nafLabel(code) {
+  if (!code) return "";
+  if (NAF_LABELS[code]) return NAF_LABELS[code];
+  const two = code.slice(0, 2);
+  return NAF_LABELS[two] || "";
+}
+
+function parseJsonField(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function firstEtablissement(record) {
+  const parsed = parseJsonField(record.listeetablissements);
+  if (!parsed) return null;
+  const et = parsed.etablissement;
+  if (Array.isArray(et)) return et[0] || null;
+  return et || null;
+}
+
+function extractSiren(record) {
+  const registre = record.registre || [];
+  for (const item of registre) {
+    const digits = String(item || "").replace(/\D/g, "");
+    if (digits.length === 9) return digits;
+  }
+  const personnes = parseJsonField(record.listepersonnes);
+  const person = personnes && (Array.isArray(personnes.personne) ? personnes.personne[0] : personnes.personne);
+  const raw = person && person.numeroImmatriculation && person.numeroImmatriculation.numeroIdentification;
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length === 9 ? digits : "";
+}
+
+function formatPersonName(person) {
+  if (!person) return "";
+  if (person.denomination) return String(person.denomination).trim();
+  const prenom = Array.isArray(person.prenom) ? person.prenom[0] : person.prenom;
+  return [prenom, person.nom].filter(Boolean).join(" ").trim();
+}
+
+function parseDirectors(record) {
+  const personnes = parseJsonField(record.listepersonnes);
+  const person = personnes && (Array.isArray(personnes.personne) ? personnes.personne[0] : personnes.personne);
+  if (!person) return [];
+  if (person.administration) {
+    return [String(person.administration).replace(/^Gérant\s*:\s*/i, "").trim()].filter(Boolean);
+  }
+  const name = formatPersonName(person);
+  return name ? [name] : [];
+}
+
+function parseBodaccRecord(record) {
+  const etab = firstEtablissement(record);
+  const adresseObj = (etab && etab.adresse) || {};
+  const personnes = parseJsonField(record.listepersonnes);
+  const person = personnes && (Array.isArray(personnes.personne) ? personnes.personne[0] : personnes.personne);
+  const siegeAdr = person && person.adresseSiegeSocial;
+  const addressParts = [
+    adresseObj.numeroVoie || (siegeAdr && siegeAdr.numeroVoie),
+    adresseObj.typeVoie || (siegeAdr && siegeAdr.typeVoie),
+    adresseObj.nomVoie || (siegeAdr && siegeAdr.nomVoie),
+    adresseObj.codePostal || (siegeAdr && siegeAdr.codePostal) || record.cp,
+    adresseObj.ville || (siegeAdr && siegeAdr.ville) || record.ville
+  ].filter(Boolean);
+  const acte = parseJsonField(record.acte) || {};
+  const createdAt = acte.dateCommencementActivite || record.dateparution || "";
+  const commercialName = person && (person.nomCommercial || person.denomination);
+  return {
+    source: "BODACC",
+    bodaccId: record.id || "",
+    name: String(commercialName || record.commercant || "").replace(/\s+/g, " ").trim(),
+    legalName: String(record.commercant || "").trim(),
+    activity: String((etab && etab.activite) || "").trim(),
+    siren: extractSiren(record),
+    createdAt,
+    publishedAt: record.dateparution || "",
+    address: addressParts.join(" ").replace(/\s+/g, " ").trim(),
+    city: String(adresseObj.ville || (siegeAdr && siegeAdr.ville) || record.ville || "").trim(),
+    postalCode: String(adresseObj.codePostal || (siegeAdr && siegeAdr.ville && siegeAdr.codePostal) || record.cp || "").trim(),
+    department: String(record.numerodepartement || "").trim(),
+    directors: parseDirectors(record),
+    bodaccUrl: record.url_complete || "",
+    naf: "",
+    nafLabel: "",
+    email: "",
+    phone: "",
+    website: "",
+    contactSource: "",
+    contactConfidence: "none"
+  };
+}
+
+function normalizeFrPhone(raw) {
+  if (!raw) return "";
+  let digits = String(raw).replace(/\D/g, "");
+  if (digits.startsWith("33") && digits.length >= 11) {
+    digits = `0${digits.slice(2)}`;
+  }
+  if (digits.length > 10 && digits.startsWith("0")) {
+    digits = digits.slice(0, 10);
+  }
+  if (digits.length !== 10 || !digits.startsWith("0")) return "";
+  if (digits.startsWith("089") || digits.startsWith("08") && digits[2] === "9") return "";
+  if (digits.startsWith("0033")) return "";
+  return `${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
+}
+
+function extractPhones(text) {
+  const matches = String(text || "").match(/(?:\+33|0)\s*[1-9](?:[\s.\-]?\d{2}){4}/g) || [];
+  const out = [];
+  for (const match of matches) {
+    const normalized = normalizeFrPhone(match);
+    if (normalized && !out.includes(normalized)) out.push(normalized);
+  }
+  return out;
+}
+
+function extractEmails(text) {
+  const matches = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  const out = [];
+  for (const raw of matches) {
+    const email = raw.toLowerCase().replace(/[.,;:]+$/, "");
+    if (email.includes("...")) continue;
+    const [localPart = "", domainPart = ""] = email.split("@");
+    if (/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(email) || /\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(localPart)) continue;
+    if (!domainPart.includes(".")) continue;
+    if (EMAIL_BLOCK_DOMAINS.some((blocked) => domainPart === blocked || domainPart.endsWith(`.${blocked}`))) continue;
+    if (!out.includes(email)) out.push(email);
+  }
+  return out;
+}
+
+function pageMatchesCompany(text, company) {
+  const hay = String(text || "").toLowerCase();
+  if (company.siren && hay.includes(company.siren)) return true;
+  if (company.postalCode && hay.includes(company.postalCode)) return true;
+  const city = String(company.city || "").toLowerCase();
+  const nameScore = nameSimilarity(company.name, hay.slice(0, 4000));
+  if (city && hay.includes(city) && nameScore >= 0.34) return true;
+  if (nameScore >= 0.6) return true;
+  return false;
+}
+
+function decodeDuckDuckGoUrl(href) {
+  try {
+    const parsed = new URL(href, "https://duckduckgo.com/");
+    const uddg = parsed.searchParams.get("uddg");
+    return uddg ? decodeURIComponent(uddg) : href;
+  } catch {
+    return href;
+  }
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isDirectoryHost(url) {
+  const host = hostOf(url);
+  return DIRECTORY_HOSTS.has(host) || host.endsWith(".gouv.fr") && host.includes("annuaire");
+}
+
+function parseMarkdownLinks(markdown) {
+  const links = [];
+  const re = /\[([^\]]+)\]\((https?:[^)]+)\)/g;
+  let match;
+  while ((match = re.exec(markdown))) {
+    const title = match[1].replace(/\s+/g, " ").trim();
+    if (title.startsWith("![") || title.startsWith("Image ")) continue;
+    const href = decodeDuckDuckGoUrl(match[2]);
+    if (!href.startsWith("http")) continue;
+    if (href.includes("duckduckgo.com") || href.includes("jina.ai") || href.includes("r.jina.ai")) continue;
+    links.push({ title, href });
+  }
+  return links;
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const timeoutMs = options.timeoutMs || 20000;
+  const retries = options.retries ?? 2;
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: options.accept || "application/json,text/html,text/plain;q=0.9,*/*;q=0.8",
+          "Accept-Language": "fr-FR,fr;q=0.9",
+          ...(options.headers || {})
+        },
+        signal: controller.signal
+      });
+      if (response.status === 429 && attempt < retries) {
+        const waitSec = Number(response.headers.get("retry-after") || 2);
+        await sleep(Math.min(Math.max(waitSec, 1), 8) * 1000);
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) await sleep(600 * (attempt + 1));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error(`Échec de récupération: ${url}`);
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetchWithTimeout(url, options);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} pour ${url}`);
+  }
+  return response.json();
+}
+
+async function fetchText(url, options = {}) {
+  const response = await fetchWithTimeout(url, { ...options, accept: "text/html,text/plain,*/*" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} pour ${url}`);
+  }
+  return response.text();
+}
+
+async function fetchViaJina(targetUrl) {
+  const wrapped = `${JINA_PREFIX}${targetUrl}`;
+  return fetchText(wrapped, { timeoutMs: 25000, retries: 1 });
+}
+
+function buildBodaccWhere(sector, days, department) {
+  const start = new Date();
+  start.setUTCDate(start.getUTCDate() - Math.max(1, Number(days) || 30));
+  const iso = start.toISOString().slice(0, 10);
+  const clauses = [
+    "familleavis='creation'",
+    `dateparution>=date'${iso}'`
+  ];
+  if (department) {
+    const dep = String(department).padStart(2, "0");
+    clauses.push(`numerodepartement='${dep}'`);
+  }
+  const keywords = [...(sector.keywords || [])].slice(0, 6);
+  if (keywords.length) {
+    const likes = keywords.map((kw) => `listeetablissements LIKE '%${kw.replace(/'/g, "''")}%'`);
+    clauses.push(`(${likes.join(" OR ")})`);
+  }
+  return clauses.join(" AND ");
+}
+
+async function fetchBodaccCreations(sector, days, department, needed) {
+  const where = buildBodaccWhere(sector, days, department);
+  const collected = [];
+  const seen = new Set();
+  let offset = 0;
+  let total = Infinity;
+  while (collected.length < needed * 3 && offset < total && offset < 400) {
+    const url = `${BODACC_URL}?${new URLSearchParams({
+      where,
+      limit: String(BODACC_PAGE_SIZE),
+      offset: String(offset),
+      order_by: "dateparution desc"
+    }).toString()}`;
+    const payload = await fetchJson(url, { timeoutMs: 25000 });
+    total = Number(payload.total_count || 0);
+    const rows = payload.results || [];
+    if (!rows.length) break;
+    for (const row of rows) {
+      const company = parseBodaccRecord(row);
+      if (!company.name || !company.activity) continue;
+      if (!activityMatchesSector(company.activity, sector)) continue;
+      const key = company.siren || `${company.name}|${company.city}|${company.createdAt}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(company);
+      if (collected.length >= needed * 3) break;
+    }
+    offset += rows.length;
+    if (rows.length < BODACC_PAGE_SIZE) break;
+    await sleep(200);
+  }
+  return { total, companies: collected };
+}
+
+async function enrichSirene(company) {
+  if (!company.siren) return company;
+  const url = `${SIRENE_URL}?${new URLSearchParams({ q: company.siren }).toString()}`;
+  try {
+    const payload = await fetchJson(url, { timeoutMs: 15000, retries: 3 });
+    const hit = (payload.results || [])[0];
+    if (!hit) return company;
+    const nom = hit.nom_complet || hit.nom_raison_sociale || "";
+    if (nom && !String(nom).includes("NON-DIFFUSIBLE")) {
+      company.name = nom;
+    }
+    company.naf = hit.activite_principale || company.naf;
+    company.nafLabel = nafLabel(company.naf);
+    if (hit.date_creation) company.createdAt = hit.date_creation;
+    const siege = hit.siege || {};
+    company.address = siege.geo_adresse || siege.adresse || company.address;
+    company.city = siege.libelle_commune || company.city;
+    company.postalCode = siege.code_postal || company.postalCode;
+    company.latitude = siege.latitude ? Number(siege.latitude) : undefined;
+    company.longitude = siege.longitude ? Number(siege.longitude) : undefined;
+    const dirigeants = Array.isArray(hit.dirigeants) ? hit.dirigeants : [];
+    const names = dirigeants
+      .map((d) => [d.prenoms, d.nom, d.denomination].filter(Boolean).join(" ").trim())
+      .filter(Boolean);
+    if (names.length) company.directors = names;
+    company.sireneUrl = `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}`;
+  } catch {
+    // L'annonce BODACC reste exploitable si Sirene est limitée.
+  }
+  return company;
+}
+
+function applyContact(company, { email, phone, website, source, confidence }) {
+  if (email && !company.email) company.email = email;
+  if (phone && !company.phone) company.phone = phone;
+  if (website && !company.website) company.website = website;
+  if ((email || phone) && !company.contactSource) {
+    company.contactSource = source;
+    company.contactConfidence = confidence || "medium";
+  }
+}
+
+async function enrichFromNominatim(company) {
+  const query = [company.name, company.city, "France"].filter(Boolean).join(" ");
+  const url = `${NOMINATIM_URL}?${new URLSearchParams({
+    q: query,
+    format: "json",
+    addressdetails: "1",
+    extratags: "1",
+    limit: "5"
+  }).toString()}`;
+  try {
+    const rows = await fetchJson(url, {
+      timeoutMs: 12000,
+      headers: { "User-Agent": USER_AGENT }
+    });
+    for (const row of rows || []) {
+      const extra = row.extratags || {};
+      const display = row.display_name || "";
+      if (!pageMatchesCompany(`${display} ${JSON.stringify(extra)}`, company) && nameSimilarity(company.name, row.name || display) < 0.5) {
+        continue;
+      }
+      const phone = normalizeFrPhone(extra.phone || extra["contact:phone"] || "");
+      const email = extractEmails(extra.email || extra["contact:email"] || "")[0] || "";
+      const website = extra.website || extra["contact:website"] || "";
+      if (phone || email) {
+        applyContact(company, {
+          email,
+          phone,
+          website,
+          source: "OpenStreetMap",
+          confidence: "high"
+        });
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function pickBestFromText(text, company, source) {
+  if (!pageMatchesCompany(text, company) && nameSimilarity(company.name, text.slice(0, 1500)) < 0.45) {
+    return null;
+  }
+  const emails = extractEmails(text);
+  const phones = extractPhones(text);
+  if (!emails.length && !phones.length) return null;
+  return {
+    email: emails[0] || "",
+    phone: phones[0] || "",
+    source,
+    confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+  };
+}
+
+async function scrapeWebsite(url, company) {
+  const paths = ["", "/contact", "/contactez-nous", "/mentions-legales", "/mentions_legales"];
+  let combined = "";
+  let baseText = "";
+  for (const pathName of paths) {
+    const target = pathName ? new URL(pathName, url).toString() : url;
+    try {
+      const html = await fetchText(target, { timeoutMs: 12000, retries: 0 });
+      combined += `\n${html}`;
+      if (!pathName) baseText = html;
+      await sleep(150);
+    } catch {
+      try {
+        const via = await fetchViaJina(target);
+        combined += `\n${via}`;
+        if (!pathName) baseText = via;
+      } catch {
+        // page absente
+      }
+    }
+    const picked = pickBestFromText(combined, company, `site ${hostOf(url)}`);
+    if (picked && (picked.email || picked.phone)) {
+      return { ...picked, website: url, html: baseText || combined };
+    }
+  }
+  return { website: pageMatchesCompany(combined, company) ? url : "", html: combined };
+}
+
+async function enrichFromPagesJaunes(company) {
+  const target = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodeURIComponent(company.name)}&ou=${encodeURIComponent(company.city || "")}`;
+  try {
+    const markdown = await fetchViaJina(target);
+    if (/aucun résultat/i.test(markdown)) return false;
+    if (!pageMatchesCompany(markdown, company) && nameSimilarity(company.name, markdown.slice(0, 2000)) < 0.5) {
+      return false;
+    }
+    const phones = extractPhones(markdown);
+    const emails = extractEmails(markdown);
+    const links = parseMarkdownLinks(markdown)
+      .map((l) => l.href)
+      .filter((href) => href.includes("pagesjaunes.fr/pros/"));
+    if (phones[0] || emails[0]) {
+      applyContact(company, {
+        email: emails[0] || "",
+        phone: phones[0] || "",
+        website: links[0] || "",
+        source: "PagesJaunes",
+        confidence: "medium"
+      });
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function enrichFromSearch(company) {
+  const query = `"${company.name}" ${company.city || ""} téléphone email contact`.trim();
+  const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  let markdown = "";
+  try {
+    markdown = await fetchViaJina(target);
+  } catch {
+    return false;
+  }
+  const snippetHit = pickBestFromText(markdown, company, "DuckDuckGo");
+  if (snippetHit && (snippetHit.email || snippetHit.phone)) {
+    applyContact(company, snippetHit);
+  }
+  const links = parseMarkdownLinks(markdown);
+  const candidates = [];
+  for (const link of links) {
+    if (isDirectoryHost(link.href) && !link.href.includes("pagesjaunes.fr/pros/")) continue;
+    const score = nameSimilarity(company.name, `${link.title} ${link.href}`);
+    if (score < 0.2 && !/pagesjaunes\.fr\/pros\//.test(link.href)) continue;
+    candidates.push({ ...link, score });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  for (const candidate of candidates.slice(0, 3)) {
+    if (company.email && company.phone) break;
+    try {
+      const scraped = await scrapeWebsite(candidate.href, company);
+      if (scraped.email || scraped.phone) {
+        applyContact(company, {
+          email: scraped.email,
+          phone: scraped.phone,
+          website: scraped.website || candidate.href,
+          source: scraped.source || `web ${hostOf(candidate.href)}`,
+          confidence: scraped.confidence || "medium"
+        });
+      } else if (scraped.website && !company.website) {
+        company.website = scraped.website;
+      }
+    } catch {
+      // suivant
+    }
+    await sleep(400);
+  }
+  return Boolean(company.email || company.phone);
+}
+
+function buildProposal(company, sender = {}) {
+  const who = sender.name || "un expert-comptable partenaire";
+  const director = company.directors[0] ? ` ${company.directors[0]}` : "";
+  const activity = company.activity || company.nafLabel || "votre activité";
+  const subject = `Proposition d'accompagnement comptable — ${company.name}`;
+  const body = `Bonjour${director ? ` ${director}` : ""},
+
+Félicitations pour la création de ${company.name}${company.createdAt ? ` (${company.createdAt})` : ""}.
+
+Je me permets de vous contacter car les premières semaines d'une entreprise sont décisives pour poser une gestion comptable simple et fiable (facturation, charges, TVA, trésorerie).
+
+${who} peut vous accompagner sur :
+- la mise en place de la comptabilité et du prévisionnel
+- le suivi mensuel (recettes / dépenses / TVA)
+- la préparation des échéances URSSAF, impôts et bulletins si besoin
+
+Activité déclarée : ${activity}
+${company.address ? `Adresse : ${company.address}` : ""}
+
+Si vous le souhaitez, je vous propose un premier échange offert de 20 minutes pour faire le point.
+
+Cordialement,
+${sender.name || ""}
+${sender.email || ""}
+${sender.phone || ""}`.replace(/\n{3,}/g, "\n\n").trim();
+
+  const mailto = company.email
+    ? `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    : "";
+  return { subject, body, mailto };
+}
+
+function publicCompany(company, sender) {
+  const proposal = buildProposal(company, sender);
+  return {
+    name: company.name,
+    legalName: company.legalName,
+    activity: company.activity,
+    naf: company.naf,
+    nafLabel: company.nafLabel,
+    siren: company.siren,
+    createdAt: company.createdAt,
+    publishedAt: company.publishedAt,
+    address: company.address,
+    city: company.city,
+    postalCode: company.postalCode,
+    department: company.department,
+    directors: company.directors,
+    email: company.email || "",
+    phone: company.phone || "",
+    website: company.website || "",
+    contactSource: company.contactSource || "",
+    hasContact: Boolean(company.email || company.phone),
+    bodaccUrl: company.bodaccUrl,
+    sireneUrl: company.sireneUrl || (company.siren ? `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}` : ""),
+    proposal
+  };
+}
+
+async function runProspection(params = {}, onEvent = () => {}) {
+  const sector = resolveSector(params.sector);
+  if (!sector) {
+    throw new Error("Choisissez un secteur d'activité.");
+  }
+  const days = Math.min(180, Math.max(7, Number(params.days) || 30));
+  const limit = Math.min(20, Math.max(3, Number(params.limit) || 8));
+  const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
+  const sender = {
+    name: String(params.senderName || "").trim(),
+    email: String(params.senderEmail || "").trim(),
+    phone: String(params.senderPhone || "").trim()
+  };
+  const enrichContacts = params.enrichContacts !== false;
+
+  onEvent({ type: "status", message: `Recherche BODACC — créations ${sector.label}, ${days} derniers jours.` });
+  const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
+  onEvent({ type: "status", message: `${total} annonces brutes, ${companies.length} entreprises du secteur.` });
+
+  const selected = [];
+  for (const company of companies) {
+    if (selected.length >= limit) break;
+    onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
+    await enrichSirene(company);
+    await sleep(180);
+    if (company.naf && !nafMatchesSector(company.naf, sector) && sector.nafPrefixes.length) {
+      continue;
+    }
+    selected.push(company);
+    onEvent({ type: "company", company: publicCompany(company, sender) });
+  }
+
+  if (enrichContacts) {
+    for (const company of selected) {
+      onEvent({ type: "status", message: `Recherche de contact — ${company.name}` });
+      await enrichFromNominatim(company);
+      await sleep(800);
+      if (!company.email && !company.phone) {
+        await enrichFromPagesJaunes(company);
+        await sleep(900);
+      }
+      if (!company.email && !company.phone) {
+        await enrichFromSearch(company);
+        await sleep(900);
+      }
+      onEvent({ type: "contact", siren: company.siren, company: publicCompany(company, sender) });
+    }
+  }
+
+  const results = selected.map((company) => publicCompany(company, sender));
+  const withContact = results.filter((row) => row.hasContact).length;
+  const summary = {
+    sector: { id: sector.id, label: sector.label },
+    days,
+    department: department || null,
+    totalBodacc: total,
+    found: results.length,
+    withContact,
+    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "DuckDuckGo + PagesJaunes via Jina Reader (gratuit)"]
+  };
+  onEvent({ type: "done", summary, companies: results });
+  return { summary, companies: results };
+}
+
+function writeSse(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function createProspectionRouter() {
+  const router = express.Router();
+
+  router.get("/sectors", (_req, res) => {
+    res.json({ sectors: listSectors() });
+  });
+
+  router.post("/search", async (req, res) => {
+    try {
+      const result = await runProspection(req.body || {});
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Recherche impossible" });
+    }
+  });
+
+  router.get("/stream", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+    try {
+      await runProspection({
+        sector: req.query.sector,
+        days: req.query.days,
+        limit: req.query.limit,
+        department: req.query.department,
+        senderName: req.query.senderName,
+        senderEmail: req.query.senderEmail,
+        senderPhone: req.query.senderPhone,
+        enrichContacts: req.query.enrichContacts !== "0"
+      }, (event) => writeSse(res, event));
+    } catch (error) {
+      writeSse(res, { type: "error", message: error instanceof Error ? error.message : "Recherche impossible" });
+    }
+    res.end();
+  });
+
+  return router;
+}
+
+module.exports = {
+  SECTORS,
+  createProspectionRouter,
+  runProspection,
+  listSectors,
+  resolveSector,
+  parseBodaccRecord,
+  normalizeFrPhone,
+  extractEmails,
+  extractPhones,
+  activityMatchesSector,
+  nameSimilarity,
+  buildProposal,
+  decodeDuckDuckGoUrl
+};

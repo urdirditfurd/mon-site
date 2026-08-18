@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent de prospection — nouvelles entreprises</title>
+  <link rel="icon" href="favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .prospect-layout {
+      grid-template-columns: 380px 1fr;
+    }
+    .results-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .results-head h2 { margin: 0; }
+    .log-box {
+      background: #0d1430;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      min-height: 64px;
+      max-height: 120px;
+      overflow: auto;
+      font-size: .8rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .company-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .company-card {
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .company-card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+    .meta { color: var(--muted); font-size: .82rem; line-height: 1.45; }
+    .contact-row {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(63, 209, 127, .08);
+      border: 1px solid rgba(63, 209, 127, .25);
+    }
+    .contact-row.missing {
+      background: rgba(255, 212, 138, .08);
+      border-color: rgba(255, 212, 138, .28);
+    }
+    .contact-row strong { display: block; margin-bottom: 4px; }
+    .chip {
+      display: inline-block;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #1a2447;
+      color: var(--primary-2);
+      margin-left: 8px;
+    }
+    .chip.ok { background: rgba(63, 209, 127, .15); color: #3fd17f; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+    .stat {
+      background: #151e3f;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: .8rem;
+      color: var(--muted);
+    }
+    .stat b { color: var(--text); }
+    @media (max-width: 900px) {
+      .prospect-layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Agent IA · sources publiques gratuites</p>
+      <h1>Agent de prospection</h1>
+      <p class="subtitle">
+        Recense les <strong>nouvelles entreprises</strong> d’un secteur, retrouve un <strong>e-mail ou un téléphone</strong> public, puis prépare une proposition d’aide en gestion comptable.
+        <a href="/" style="color:inherit;font-weight:700">Retour à ClipForge</a>
+      </p>
+    </div>
+  </header>
+
+  <main class="layout prospect-layout">
+    <section class="panel">
+      <h2>Lancer l’agent</h2>
+      <label class="field">
+        <span>Secteur des nouvelles entreprises</span>
+        <select id="sectorSelect"></select>
+      </label>
+      <label class="field">
+        <span>Ou saisir un secteur libre</span>
+        <input id="sectorCustom" type="text" placeholder="ex. plomberie, auto-école, boulangerie" autocomplete="off">
+      </label>
+      <div class="grid-3">
+        <label class="field">
+          <span>Période</span>
+          <select id="daysSelect">
+            <option value="7">7 jours</option>
+            <option value="15">15 jours</option>
+            <option value="30" selected>30 jours</option>
+            <option value="60">60 jours</option>
+            <option value="90">90 jours</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Nombre</span>
+          <select id="limitSelect">
+            <option value="5">5</option>
+            <option value="8" selected>8</option>
+            <option value="12">12</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Département</span>
+          <input id="departmentInput" type="text" maxlength="3" placeholder="tous" inputmode="numeric">
+        </label>
+      </div>
+      <label class="field">
+        <span>Votre nom (signature du mail)</span>
+        <input id="senderName" type="text" placeholder="Eva Moreau">
+      </label>
+      <label class="field">
+        <span>Votre e-mail</span>
+        <input id="senderEmail" type="email" placeholder="vous@cabinet.fr">
+      </label>
+      <label class="field">
+        <span>Votre téléphone</span>
+        <input id="senderPhone" type="tel" placeholder="06 12 34 56 78">
+      </label>
+      <button id="runBtn" class="btn btn-primary btn-block" type="button">Lancer la prospection</button>
+      <p class="hint small">BODACC + Annuaire des entreprises + OpenStreetMap + PagesJaunes / DuckDuckGo. Aucune clé API, aucun abonnement.</p>
+      <div class="log-box" id="logBox">En attente d’un secteur…</div>
+    </section>
+
+    <section class="workspace">
+      <div class="timeline-card" style="padding:16px">
+        <div class="results-head">
+          <h2>Nouvelles entreprises trouvées</h2>
+          <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
+        </div>
+        <div class="stats" id="statsBox"></div>
+        <ul class="company-list" id="companyList">
+          <li class="empty">Aucun résultat pour le moment. Choisissez un secteur puis lancez l’agent.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/">ClipForge</a>
+    <span>·</span>
+    <a href="/prospection">Agent de prospection</a>
+    <span>·</span>
+    <a href="/terms.html">Conditions</a>
+  </footer>
+  <script src="prospection.js"></script>
+</body>
+</html>
