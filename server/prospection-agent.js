@@ -3,9 +3,10 @@
  * - BODACC (data.gouv / DILA) : créations d'entreprises du jour
  * - API Recherche d'entreprises (annuaire-entreprises) : NAF, dirigeants, adresse
  * - OpenStreetMap Nominatim : téléphone / e-mail / site si le lieu est cartographié
- * - DuckDuckGo + PagesJaunes via le lecteur Jina (gratuit) : contacts publics
+ * - Brave Search + PagesJaunes via le lecteur Jina (gratuit) : contacts publics
  */
 
+const dns = require("dns").promises;
 const express = require("express");
 
 const USER_AGENT = "ClipForge-Prospection/1.0 (+https://github.com/urdirditfurd/mon-site)";
@@ -18,7 +19,7 @@ const BODACC_PAGE_SIZE = 100;
 const STOP_WORDS = new Set([
   "sarl", "sas", "sasu", "eurl", "sci", "selarl", "selas", "snc", "sa", "ei",
   "societe", "ste", "les", "des", "une", "aux", "pour", "avec", "dans", "sur",
-  "the", "and", "de", "du", "la", "le", "et", "en", "au", "d", "l"
+  "the", "and", "de", "du", "la", "le", "et", "en", "au", "d", "l", "by", "or", "un"
 ]);
 
 const DIRECTORY_HOSTS = new Set([
@@ -29,11 +30,17 @@ const DIRECTORY_HOSTS = new Set([
   "entreprise.lefigaro.fr", "www.societeinfo.com", "societeinfo.com"
 ]);
 
+const RELAY_HOSTS = new Set([
+  "le-site-de.com", "www.le-site-de.com", "telephone.city", "www.telephone.city",
+  "svaplus.fr", "www.svaplus.fr"
+]);
+
 const EMAIL_BLOCK_DOMAINS = [
   "sentry.io", "example.com", "wixpress.com", "pagesjaunes.fr", "duckduckgo.com",
   "jina.ai", "google.com", "gstatic.com", "schema.org", "societe.com", "pappers.fr",
   "facebook.com", "cloudflare.com", "w3.org", "googleapis.com", "microsoft.com",
-  "bing.com", "yahoo.com", "gravatar.com"
+  "bing.com", "yahoo.com", "gravatar.com", "treatwell.fr", "treatwell.com",
+  "planity.com", "planity.fr", "wavy.co", "booksy.com", "cloudinary.com"
 ];
 
 const NAF_LABELS = {
@@ -82,7 +89,7 @@ const SECTORS = [
     label: "Restauration, cafés, bars",
     nafPrefixes: ["56"],
     keywords: ["restaurant", "pizzeria", "brasserie", "snack", "traiteur", "café", "bar ", "salon de thé", "food truck", "glacier", "crêperie", "restauration rapide"],
-    exclude: ["livraison de commandes restaurant", "coursier", "restauration de bien", "restauration d'immeuble", "restauration et/ou"]
+    exclude: ["livraison de commandes restaurant", "coursier", "restauration de bien", "restauration d'immeuble", "restauration et/ou", "commerce de gros"]
   },
   {
     id: "btp",
@@ -194,6 +201,36 @@ function resolveSector(raw) {
   };
 }
 
+function cleanDisplayName(name) {
+  return String(name || "")
+    .replace(/["'`«»]/g, " ")
+    .replace(/[\u201c\u201d\u00ab\u00bb]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function searchName(company) {
+  const candidates = [company.brandName, company.name, company.legalName]
+    .map((value) => cleanDisplayName(value))
+    .filter(Boolean);
+  const expanded = [];
+  for (const candidate of candidates) {
+    expanded.push(candidate);
+    const withoutParens = candidate.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    if (withoutParens) expanded.push(withoutParens);
+    const inner = candidate.match(/\(([^)]+)\)/);
+    if (inner && inner[1].trim().length >= 4) expanded.push(inner[1].trim());
+  }
+  expanded.sort((a, b) => tokenize(b).length - tokenize(a).length || b.length - a.length);
+  return expanded[0] || cleanDisplayName(company.name);
+}
+
+function isGenericCompanyName(company) {
+  const tokens = tokenize(searchName(company));
+  if (tokens.some((token) => token.length >= 5)) return false;
+  return tokens.length < 2;
+}
+
 function tokenize(text) {
   return String(text || "")
     .toLowerCase()
@@ -201,7 +238,7 @@ function tokenize(text) {
     .replace(/\p{M}/gu, "")
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
-    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
 }
 
 function nameSimilarity(a, b) {
@@ -308,7 +345,8 @@ function parseBodaccRecord(record) {
   return {
     source: "BODACC",
     bodaccId: record.id || "",
-    name: String(commercialName || record.commercant || "").replace(/\s+/g, " ").trim(),
+    brandName: cleanDisplayName(commercialName || record.commercant || ""),
+    name: cleanDisplayName(commercialName || record.commercant || ""),
     legalName: String(record.commercant || "").trim(),
     activity: String((etab && etab.activite) || "").trim(),
     siren: extractSiren(record),
@@ -340,9 +378,21 @@ function normalizeFrPhone(raw) {
     digits = digits.slice(0, 10);
   }
   if (digits.length !== 10 || !digits.startsWith("0")) return "";
-  if (digits.startsWith("089") || digits.startsWith("08") && digits[2] === "9") return "";
+  if (digits.startsWith("089") || (digits.startsWith("08") && digits[2] === "9")) return "";
   if (digits.startsWith("0033")) return "";
   return `${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
+}
+
+function phoneFitsCompany(phone, company) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length !== 10) return false;
+  const prefix = digits.slice(0, 2);
+  if (prefix === "06" || prefix === "07" || prefix === "09") return true;
+  const dep = String(company.department || "").padStart(2, "0");
+  const idf = new Set(["75", "77", "78", "91", "92", "93", "94", "95"]);
+  if (idf.has(dep) && prefix !== "01") return false;
+  if (dep && !idf.has(dep) && prefix === "01") return false;
+  return true;
 }
 
 function extractPhones(text) {
@@ -373,11 +423,22 @@ function extractEmails(text) {
 function pageMatchesCompany(text, company) {
   const hay = String(text || "").toLowerCase();
   if (company.siren && hay.includes(company.siren)) return true;
-  if (company.postalCode && hay.includes(company.postalCode)) return true;
   const city = String(company.city || "").toLowerCase();
+  const hugeCities = new Set(["paris", "lyon", "marseille", "toulouse", "lille", "bordeaux", "nantes", "nice", "strasbourg"]);
+  const streetTokens = tokenize(company.address).filter((token) => token !== city && !/^\d+$/.test(token) && token !== "rue" && token !== "av" && token !== "avenue" && token !== "bd" && token !== "boulevard" && token !== "chemin" && token !== "place");
+  const hasStreet = streetTokens.length >= 2 && streetTokens.filter((token) => hay.includes(token)).length >= 2;
+  const hasPlace = Boolean(
+    (company.postalCode && hay.includes(String(company.postalCode).toLowerCase()))
+    || hasStreet
+    || (city && hay.includes(city) && !hugeCities.has(city))
+  );
   const nameScore = nameSimilarity(company.name, hay.slice(0, 4000));
-  if (city && hay.includes(city) && nameScore >= 0.34) return true;
-  if (nameScore >= 0.6) return true;
+  const tokens = tokenize(company.name);
+  if (tokens.length <= 1) {
+    return hasPlace && nameScore >= 0.99;
+  }
+  if (hasPlace && nameScore >= 0.34) return true;
+  if (nameScore >= 0.8) return true;
   return false;
 }
 
@@ -401,7 +462,22 @@ function hostOf(url) {
 
 function isDirectoryHost(url) {
   const host = hostOf(url);
-  return DIRECTORY_HOSTS.has(host) || host.endsWith(".gouv.fr") && host.includes("annuaire");
+  return DIRECTORY_HOSTS.has(host) || (host.endsWith(".gouv.fr") && host.includes("annuaire"));
+}
+
+function isRelayHost(url) {
+  return RELAY_HOSTS.has(hostOf(url));
+}
+
+function slugify(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\b(sarl|sas|sasu|eurl|sci|selarl|ste|societe)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }
 
 function parseMarkdownLinks(markdown) {
@@ -470,7 +546,11 @@ async function fetchText(url, options = {}) {
 
 async function fetchViaJina(targetUrl) {
   const wrapped = `${JINA_PREFIX}${targetUrl}`;
-  return fetchText(wrapped, { timeoutMs: 25000, retries: 1 });
+  return fetchText(wrapped, {
+    timeoutMs: 25000,
+    retries: 1,
+    headers: { "X-No-Cache": "true", Accept: "text/markdown" }
+  });
 }
 
 function buildBodaccWhere(sector, days, department) {
@@ -527,6 +607,10 @@ async function fetchBodaccCreations(sector, days, department, needed) {
   return { total, companies: collected };
 }
 
+function isNonDiffusible(value) {
+  return /NON-DIFFUSIBLE/i.test(String(value || ""));
+}
+
 async function enrichSirene(company) {
   if (!company.siren) return company;
   const url = `${SIRENE_URL}?${new URLSearchParams({ q: company.siren }).toString()}`;
@@ -535,22 +619,29 @@ async function enrichSirene(company) {
     const hit = (payload.results || [])[0];
     if (!hit) return company;
     const nom = hit.nom_complet || hit.nom_raison_sociale || "";
-    if (nom && !String(nom).includes("NON-DIFFUSIBLE")) {
+    if (nom && !isNonDiffusible(nom)) {
       company.name = nom;
     }
     company.naf = hit.activite_principale || company.naf;
     company.nafLabel = nafLabel(company.naf);
-    if (hit.date_creation) company.createdAt = hit.date_creation;
+    if (hit.date_creation && !String(hit.date_creation).startsWith("1900")) {
+      company.createdAt = hit.date_creation;
+    }
     const siege = hit.siege || {};
-    company.address = siege.geo_adresse || siege.adresse || company.address;
-    company.city = siege.libelle_commune || company.city;
-    company.postalCode = siege.code_postal || company.postalCode;
-    company.latitude = siege.latitude ? Number(siege.latitude) : undefined;
-    company.longitude = siege.longitude ? Number(siege.longitude) : undefined;
+    const sireneAddress = siege.geo_adresse || siege.adresse || "";
+    if (sireneAddress && !isNonDiffusible(sireneAddress)) {
+      company.address = sireneAddress;
+      company.city = siege.libelle_commune || company.city;
+      company.postalCode = siege.code_postal || company.postalCode;
+    }
+    if (siege.latitude && !isNonDiffusible(sireneAddress)) {
+      company.latitude = Number(siege.latitude);
+      company.longitude = Number(siege.longitude);
+    }
     const dirigeants = Array.isArray(hit.dirigeants) ? hit.dirigeants : [];
     const names = dirigeants
       .map((d) => [d.prenoms, d.nom, d.denomination].filter(Boolean).join(" ").trim())
-      .filter(Boolean);
+      .filter((name) => name && !isNonDiffusible(name));
     if (names.length) company.directors = names;
     company.sireneUrl = `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}`;
   } catch {
@@ -570,7 +661,8 @@ function applyContact(company, { email, phone, website, source, confidence }) {
 }
 
 async function enrichFromNominatim(company) {
-  const query = [company.name, company.city, "France"].filter(Boolean).join(" ");
+  if (!company.city && !company.postalCode) return false;
+  const query = [searchName(company), company.postalCode, company.city, "France"].filter(Boolean).join(" ");
   const url = `${NOMINATIM_URL}?${new URLSearchParams({
     q: query,
     format: "json",
@@ -585,11 +677,13 @@ async function enrichFromNominatim(company) {
     });
     for (const row of rows || []) {
       const extra = row.extratags || {};
-      const display = row.display_name || "";
-      if (!pageMatchesCompany(`${display} ${JSON.stringify(extra)}`, company) && nameSimilarity(company.name, row.name || display) < 0.5) {
-        continue;
-      }
+      const display = `${row.name || ""} ${row.display_name || ""} ${JSON.stringify(extra)}`;
+      const sameCity = company.city && display.toLowerCase().includes(String(company.city).toLowerCase());
+      const sameCp = company.postalCode && display.includes(company.postalCode);
+      if (!sameCity && !sameCp) continue;
+      if (nameSimilarity(company.name, row.name || row.display_name) < 0.5) continue;
       const phone = normalizeFrPhone(extra.phone || extra["contact:phone"] || "");
+      if (phone && !phoneFitsCompany(phone, company)) continue;
       const email = extractEmails(extra.email || extra["contact:email"] || "")[0] || "";
       const website = extra.website || extra["contact:website"] || "";
       if (phone || email) {
@@ -609,58 +703,134 @@ async function enrichFromNominatim(company) {
   return false;
 }
 
-function pickBestFromText(text, company, source) {
-  if (!pageMatchesCompany(text, company) && nameSimilarity(company.name, text.slice(0, 1500)) < 0.45) {
-    return null;
+async function enrichFromDomainGuess(company) {
+  const base = slugify(searchName(company));
+  const city = slugify(company.city);
+  if (!base || base.length < 4) return false;
+  const parts = base.split("-").filter(Boolean);
+  const forms = new Set([base, parts.join("")]);
+  if (parts.length >= 3) {
+    forms.add(`${parts.slice(0, 2).join("")}-${parts.slice(2).join("-")}`);
+    forms.add(parts.filter((part) => part !== "le" && part !== "la" && part !== "les").join("-"));
   }
-  const emails = extractEmails(text);
-  const phones = extractPhones(text);
+  if (city) forms.add(`${base}-${city}`);
+  const unique = [...forms].filter((form) => form.length >= 4).slice(0, 8);
+  for (const form of unique) {
+    for (const tld of [".fr", ".com"]) {
+      const host = form + tld;
+      try {
+        await dns.lookup(host);
+      } catch {
+        continue;
+      }
+      const urls = [`https://${host}`, `https://www.${host}`];
+      for (const url of urls) {
+        try {
+          const scraped = await scrapeWebsite(url, company);
+          if (scraped.email || scraped.phone) {
+            applyContact(company, {
+              email: scraped.email,
+              phone: scraped.phone,
+              website: scraped.website || url,
+              source: `site ${hostOf(url) || host}`,
+              confidence: scraped.confidence || "medium"
+            });
+            return true;
+          }
+        } catch {
+          // domaine squatté / parking
+        }
+      }
+      await sleep(150);
+    }
+  }
+  return false;
+}
+
+function pickBestFromText(text, company, source, href = "", options = {}) {
+  if (!pageMatchesCompany(text, company)) return null;
+  const hay = String(text || "");
+  const lowered = hay.toLowerCase();
+  const tokens = tokenize(searchName(company)).sort((a, b) => b.length - a.length);
+  const needle = tokens[0] || "";
+  const idx = needle ? lowered.indexOf(needle) : 0;
+  const sample = options.fullText
+    ? hay
+    : (idx >= 0 ? hay.slice(Math.max(0, idx - 120), idx + 900) : hay.slice(0, 1800));
+  const relayPage = /2,99\s*€|mise en relation|n'est pas le numéro du destinataire/i.test(sample) || isRelayHost(href);
+  const emails = extractEmails(sample);
+  const phones = (relayPage ? [] : extractPhones(sample)).filter((phone) => phoneFitsCompany(phone, company));
   if (!emails.length && !phones.length) return null;
   return {
     email: emails[0] || "",
     phone: phones[0] || "",
     source,
-    confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+    confidence: company.postalCode && sample.includes(company.postalCode) ? "high" : "medium"
   };
 }
 
+function discoverContactUrls(html, baseUrl) {
+  const found = [];
+  const re = /href=["']([^"'#]+)["']/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    if (!/contact|mention|legal|coordonn|acces|acc[eè]s|rdv|horaire/i.test(match[1])) continue;
+    try {
+      const absolute = new URL(match[1], baseUrl).toString();
+      if (hostOf(absolute) === hostOf(baseUrl) && !found.includes(absolute)) found.push(absolute);
+    } catch {
+      // ignore
+    }
+  }
+  return found.slice(0, 5);
+}
+
 async function scrapeWebsite(url, company) {
-  const paths = ["", "/contact", "/contactez-nous", "/mentions-legales", "/mentions_legales"];
+  const paths = ["", "/contact", "/contactez-nous", "/access-contact", "/mentions-legales", "/mentions_legales"];
   let combined = "";
   let baseText = "";
-  for (const pathName of paths) {
-    const target = pathName ? new URL(pathName, url).toString() : url;
+  const visited = new Set();
+  const queue = paths.map((pathName) => (pathName ? new URL(pathName, url).toString() : url));
+  for (let i = 0; i < queue.length; i += 1) {
+    const target = queue[i];
+    if (visited.has(target)) continue;
+    visited.add(target);
+    let html = "";
     try {
-      const html = await fetchText(target, { timeoutMs: 12000, retries: 0 });
-      combined += `\n${html}`;
-      if (!pathName) baseText = html;
-      await sleep(150);
+      html = await fetchText(target, { timeoutMs: 12000, retries: 0 });
     } catch {
       try {
-        const via = await fetchViaJina(target);
-        combined += `\n${via}`;
-        if (!pathName) baseText = via;
+        html = await fetchViaJina(target);
       } catch {
-        // page absente
+        html = "";
       }
     }
-    const picked = pickBestFromText(combined, company, `site ${hostOf(url)}`);
+    if (!html) continue;
+    combined += `\n${html}`;
+    if (i === 0) {
+      baseText = html;
+      for (const extra of discoverContactUrls(html, url)) {
+        if (!visited.has(extra)) queue.push(extra);
+      }
+    }
+    const picked = pickBestFromText(combined, company, `site ${hostOf(url)}`, target, { fullText: true });
     if (picked && (picked.email || picked.phone)) {
       return { ...picked, website: url, html: baseText || combined };
     }
+    await sleep(150);
   }
   return { website: pageMatchesCompany(combined, company) ? url : "", html: combined };
 }
 
 async function enrichFromPagesJaunes(company) {
-  const target = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodeURIComponent(company.name)}&ou=${encodeURIComponent(company.city || "")}`;
+  const target = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodeURIComponent(searchName(company))}&ou=${encodeURIComponent(company.city || "")}`;
   try {
     const markdown = await fetchViaJina(target);
-    if (/aucun résultat/i.test(markdown)) return false;
-    if (!pageMatchesCompany(markdown, company) && nameSimilarity(company.name, markdown.slice(0, 2000)) < 0.5) {
+    if (/aucun résultat/i.test(markdown) || /terme manquant/i.test(markdown)) return false;
+    if (!pageMatchesCompany(markdown, company)) {
       return false;
     }
-    const phones = extractPhones(markdown);
+      const phones = extractPhones(markdown).filter((phone) => phoneFitsCompany(phone, company));
     const emails = extractEmails(markdown);
     const links = parseMarkdownLinks(markdown)
       .map((l) => l.href)
@@ -682,45 +852,59 @@ async function enrichFromPagesJaunes(company) {
 }
 
 async function enrichFromSearch(company) {
-  const query = `"${company.name}" ${company.city || ""} téléphone email contact`.trim();
-  const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  let markdown = "";
-  try {
-    markdown = await fetchViaJina(target);
-  } catch {
-    return false;
-  }
-  const snippetHit = pickBestFromText(markdown, company, "DuckDuckGo");
-  if (snippetHit && (snippetHit.email || snippetHit.phone)) {
-    applyContact(company, snippetHit);
-  }
-  const links = parseMarkdownLinks(markdown);
-  const candidates = [];
-  for (const link of links) {
-    if (isDirectoryHost(link.href) && !link.href.includes("pagesjaunes.fr/pros/")) continue;
-    const score = nameSimilarity(company.name, `${link.title} ${link.href}`);
-    if (score < 0.2 && !/pagesjaunes\.fr\/pros\//.test(link.href)) continue;
-    candidates.push({ ...link, score });
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  for (const candidate of candidates.slice(0, 3)) {
-    if (company.email && company.phone) break;
+  const queries = [
+    `${searchName(company)} ${company.city || ""} téléphone email`.trim(),
+    `"${searchName(company)}" téléphone email`
+  ];
+  const seenHref = new Set();
+  for (const query of queries) {
+    const target = `https://search.brave.com/search?q=${encodeURIComponent(query)}`;
+    let markdown = "";
     try {
-      const scraped = await scrapeWebsite(candidate.href, company);
-      if (scraped.email || scraped.phone) {
-        applyContact(company, {
-          email: scraped.email,
-          phone: scraped.phone,
-          website: scraped.website || candidate.href,
-          source: scraped.source || `web ${hostOf(candidate.href)}`,
-          confidence: scraped.confidence || "medium"
-        });
-      } else if (scraped.website && !company.website) {
-        company.website = scraped.website;
-      }
+      markdown = await fetchViaJina(target);
     } catch {
-      // suivant
+      continue;
     }
+    const snippetHit = pickBestFromText(markdown, company, "Brave Search");
+    if (snippetHit && (snippetHit.email || snippetHit.phone)) {
+      applyContact(company, snippetHit);
+      return true;
+    }
+    const links = parseMarkdownLinks(markdown);
+    const candidates = [];
+    for (const link of links) {
+      if (seenHref.has(link.href)) continue;
+      const host = hostOf(link.href);
+      if (host.includes("brave.com") || host.includes("search.brave")) continue;
+      if (isDirectoryHost(link.href) && !link.href.includes("pagesjaunes.fr/pros/")) continue;
+      if (isRelayHost(link.href)) continue;
+      const score = nameSimilarity(searchName(company), `${link.title} ${link.href}`);
+      if (score < 0.2 && !/pagesjaunes\.fr\/pros\//.test(link.href)) continue;
+      seenHref.add(link.href);
+      candidates.push({ ...link, score });
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    for (const candidate of candidates.slice(0, 3)) {
+      if (company.email && company.phone) break;
+      try {
+        const scraped = await scrapeWebsite(candidate.href, company);
+        if (scraped.email || scraped.phone) {
+          applyContact(company, {
+            email: scraped.email,
+            phone: scraped.phone,
+            website: scraped.website || candidate.href,
+            source: scraped.source || `web ${hostOf(candidate.href)}`,
+            confidence: scraped.confidence || "medium"
+          });
+        } else if (scraped.website && !company.website) {
+          company.website = scraped.website;
+        }
+      } catch {
+        // suivant
+      }
+      await sleep(400);
+    }
+    if (company.email || company.phone) return true;
     await sleep(400);
   }
   return Boolean(company.email || company.phone);
@@ -810,9 +994,6 @@ async function runProspection(params = {}, onEvent = () => {}) {
     onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
     await enrichSirene(company);
     await sleep(180);
-    if (company.naf && !nafMatchesSector(company.naf, sector) && sector.nafPrefixes.length) {
-      continue;
-    }
     selected.push(company);
     onEvent({ type: "company", company: publicCompany(company, sender) });
   }
@@ -820,15 +1001,20 @@ async function runProspection(params = {}, onEvent = () => {}) {
   if (enrichContacts) {
     for (const company of selected) {
       onEvent({ type: "status", message: `Recherche de contact — ${company.name}` });
-      await enrichFromNominatim(company);
-      await sleep(800);
-      if (!company.email && !company.phone) {
-        await enrichFromPagesJaunes(company);
-        await sleep(900);
-      }
-      if (!company.email && !company.phone) {
-        await enrichFromSearch(company);
-        await sleep(900);
+      if (!isGenericCompanyName(company)) {
+        await enrichFromNominatim(company);
+        await sleep(400);
+        if (!company.email && !company.phone) {
+          await enrichFromDomainGuess(company);
+        }
+        if (!company.email && !company.phone) {
+          await enrichFromPagesJaunes(company);
+          await sleep(700);
+        }
+        if (!company.email && !company.phone) {
+          await enrichFromSearch(company);
+          await sleep(700);
+        }
       }
       onEvent({ type: "contact", siren: company.siren, company: publicCompany(company, sender) });
     }
@@ -843,7 +1029,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
     totalBodacc: total,
     found: results.length,
     withContact,
-    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "DuckDuckGo + PagesJaunes via Jina Reader (gratuit)"]
+    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "Brave Search + PagesJaunes via Jina Reader (gratuit)"]
   };
   onEvent({ type: "done", summary, companies: results });
   return { summary, companies: results };
@@ -907,5 +1093,10 @@ module.exports = {
   activityMatchesSector,
   nameSimilarity,
   buildProposal,
-  decodeDuckDuckGoUrl
+  decodeDuckDuckGoUrl,
+  pageMatchesCompany,
+  phoneFitsCompany,
+  searchName,
+  isGenericCompanyName,
+  enrichFromDomainGuess
 };

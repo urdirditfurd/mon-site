@@ -9,7 +9,9 @@ const {
   resolveSector,
   nameSimilarity,
   buildProposal,
-  decodeDuckDuckGoUrl
+  decodeDuckDuckGoUrl,
+  pageMatchesCompany,
+  phoneFitsCompany
 } = require("./prospection-agent");
 
 test("normalise les téléphones français et ignore les numéros surtaxés", () => {
@@ -83,6 +85,40 @@ test("décode les liens DuckDuckGo", () => {
   assert.equal(decodeDuckDuckGoUrl(href), "https://www.restaurantelia.com/");
 });
 
+test("n'associe pas un site homonyme sans la ville", () => {
+  const company = { name: "LA MOUSTACHE", city: "Cheille", postalCode: "37190", siren: "108515347" };
+  assert.equal(pageMatchesCompany("La Moustache Production contact@lamoustache.fr Paris", company), false);
+  assert.equal(pageMatchesCompany("LA MOUSTACHE 8 HAMEAU DE LA BALLIERE 37190 Cheille", company), true);
+});
+
+test("reconnaît la marque officielle même si la ville du site diffère", () => {
+  const company = {
+    name: "LE QG BY KERT",
+    city: "Tournan-en-Brie",
+    postalCode: "77220",
+    address: "Tournan-en-Brie",
+    department: "77"
+  };
+  assert.equal(
+    pageMatchesCompany("Salon de coiffure Le QG By Kert à Ozoir-la-Ferrière. Tél 06 17 92 03 42", company),
+    true
+  );
+});
+
+test("un téléphone 05 n'est pas valable pour Paris", () => {
+  const company = { department: "75" };
+  assert.equal(phoneFitsCompany("05 53 55 31 20", company), false);
+  assert.equal(phoneFitsCompany("01 43 21 00 00", company), true);
+  assert.equal(phoneFitsCompany("06 12 34 56 78", company), true);
+});
+
 test("extrait plusieurs téléphones uniques", () => {
   assert.deepEqual(extractPhones("tél 01 64 21 02 02 ou 0164210202"), ["01 64 21 02 02"]);
+});
+
+test("nettoie le nom de recherche et ignore les noms trop génériques", () => {
+  const { searchName, isGenericCompanyName } = require("./prospection-agent");
+  assert.equal(searchName({ name: '"LE QG" BY KERT' }), "LE QG BY KERT");
+  assert.equal(isGenericCompanyName({ name: "CF" }), true);
+  assert.equal(isGenericCompanyName({ name: "LE QG BY KERT" }), false);
 });
