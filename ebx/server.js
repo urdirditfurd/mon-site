@@ -1,5 +1,5 @@
-const { loadEbayEnv } = require("./load-env");
-loadEbayEnv();
+const { loadEbayEnv, isPlaceholderEnvValue } = require("./load-env");
+const envLoad = loadEbayEnv();
 // Ne pas rappeler dotenv après : il coupe les valeurs contenant # si mal quotées
 const express = require("express");
 const path = require("path");
@@ -4721,7 +4721,7 @@ app.get("/api/accounts-DISABLED-PLACEHOLDER", (_req, res) => {
 });
 
 const server = app.listen(PORT, "0.0.0.0", () => {
-  const { isProduction } = require("./ebay-api");
+  const { isProduction, describeAuthState } = require("./ebay-api");
   const authOn =
     String(process.env.EBX_BASIC_AUTH_ENABLED || "").trim() === "1" &&
     Boolean(
@@ -4732,6 +4732,19 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`📝 Description Builder: desc-v2 (infos produit enrichies)`);
   console.log(`🧠 LLM endpoint: ${process.env.LOCAL_LLM_URL || "http://localhost:1234/v1"}`);
   console.log(`🛒 Publish mode: ${isProduction() ? "PRODUCTION (réel)" : "sandbox (test)"}`);
+  const auth = describeAuthState();
+  console.log(
+    `🔑 eBay ${auth.env}: clientId=${auth.hasClientId ? "oui" : "NON"} secret=${auth.hasClientSecret ? "oui" : "NON"} refresh=${auth.refreshLen} car.`
+  );
+  if (
+    isPlaceholderEnvValue(process.env.EBAY_PROD_CLIENT_ID) &&
+    isPlaceholderEnvValue(process.env.EBAY_CLIENT_ID)
+  ) {
+    console.error("❌ Aucune clé eBay réelle dans .env — Auto-Publish restera bloqué (coller *_PROD puis pm2 restart ebx --update-env).");
+  }
+  for (const issue of envLoad.issues || []) {
+    console.log(`   ⚠️  ${issue}`);
+  }
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
   startAutoPublishScheduler();

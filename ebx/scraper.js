@@ -4,6 +4,7 @@
  */
 
 const cheerio = require("cheerio");
+const fs = require("fs");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
@@ -94,6 +95,27 @@ function windowsBrowserCandidates() {
   ];
 }
 
+function linuxBrowserCandidates() {
+  const paths = [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/opt/google/chrome/chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/snap/bin/chromium",
+  ];
+  const out = [{ channel: "chrome" }];
+  for (const executablePath of paths) {
+    if (fs.existsSync(executablePath)) out.push({ executablePath });
+  }
+  out.push({ channel: "chromium" });
+  return out;
+}
+
+function browserLaunchCandidates() {
+  return process.platform === "win32" ? windowsBrowserCandidates() : linuxBrowserCandidates();
+}
+
 async function fetchHtmlViaChrome(url, { waitMs = 3500, extraHeaders = {} } = {}) {
   let chromium;
   try {
@@ -102,10 +124,7 @@ async function fetchHtmlViaChrome(url, { waitMs = 3500, extraHeaders = {} } = {}
     throw new Error("playwright-core non installé — dans le dossier ebx: npm install");
   }
 
-  const launches =
-    process.platform === "win32"
-      ? windowsBrowserCandidates()
-      : [{ channel: "chrome" }, { channel: "chromium" }];
+  const launches = browserLaunchCandidates();
 
   let lastErr = null;
   for (const opt of launches) {
@@ -3590,6 +3609,7 @@ function sanitizeListingHtml(html) {
 }
 
 module.exports = {
+  browserLaunchCandidates,
   scrapeProduct,
   scrapeEbaySearch,
   scrapeEbaySeller,

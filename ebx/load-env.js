@@ -113,13 +113,22 @@ function loadEbayEnv({ override = true } = {}) {
     delete process.env.EBAY_USER_TOKEN;
   }
 
+  applyProdFallbacks(result);
+
   const refresh = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
+  const prodRefresh = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
+  const effectiveRefresh =
+    String(process.env.EBAY_ENV || "").toLowerCase() === "production"
+      ? prodRefresh || refresh
+      : refresh || prodRefresh;
   const user = cleanEnvToken(process.env.EBAY_USER_TOKEN);
-  if (!result.keys.includes("EBAY_REFRESH_TOKEN")) {
-    result.issues.push("Aucune ligne EBAY_REFRESH_TOKEN= dans le fichier .env");
-  } else if (refresh.length < 40) {
+  const hasRefreshLine =
+    result.keys.includes("EBAY_REFRESH_TOKEN") || result.keys.includes("EBAY_REFRESH_TOKEN_PROD");
+  if (!hasRefreshLine) {
+    result.issues.push("Aucune ligne EBAY_REFRESH_TOKEN= ni EBAY_REFRESH_TOKEN_PROD= dans .env");
+  } else if (effectiveRefresh.length < 40) {
     result.issues.push(
-      `EBAY_REFRESH_TOKEN trop court (${refresh.length} car.) après parse — vérifie guillemets et copie complète`
+      `Refresh token trop court (${effectiveRefresh.length} car.) après parse — mets-le entre guillemets droits ASCII`
     );
   }
   if (result.keys.includes("EBAY_USER_TOKEN") && user.length > 0 && user.length < 80) {
@@ -131,9 +140,81 @@ function loadEbayEnv({ override = true } = {}) {
   return result;
 }
 
+function isPlaceholderEnvValue(v) {
+  const s = cleanEnvToken(v);
+  return !s || /your_sandbox|your_|changeme|placeholder|xxx+/i.test(s);
+}
+
+/**
+ * Si les clés *_PROD sont remplies, on publie en production
+ * (évite sandbox + token 0 car. alors que EBAY_REFRESH_TOKEN_PROD est là).
+ */
+function applyProdFallbacks(result = { issues: [] }) {
+  const prodId = cleanEnvToken(process.env.EBAY_PROD_CLIENT_ID);
+  const prodSecret = cleanEnvToken(process.env.EBAY_PROD_CLIENT_SECRET);
+  let prodRefresh = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
+  const sandboxId = cleanEnvToken(process.env.EBAY_CLIENT_ID);
+  const sandboxSecret = cleanEnvToken(process.env.EBAY_CLIENT_SECRET);
+  let sandboxRefresh = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
+  const sandboxRefreshOnly = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_SANDBOX);
+
+  if (prodId && isPlaceholderEnvValue(sandboxId)) {
+    process.env.EBAY_CLIENT_ID = prodId;
+  }
+  if (prodSecret && isPlaceholderEnvValue(sandboxSecret)) {
+    process.env.EBAY_CLIENT_SECRET = prodSecret;
+  }
+
+  const ruProd = cleanEnvToken(process.env.EBAY_RU_NAME_PROD);
+  if (ruProd && isPlaceholderEnvValue(process.env.EBAY_RU_NAME)) {
+    process.env.EBAY_RU_NAME = ruProd;
+  }
+
+  const hasProdKeys = !isPlaceholderEnvValue(prodId) && !isPlaceholderEnvValue(prodSecret);
+  const hasProdRefresh = prodRefresh.length >= 40;
+  const hasGenericRefresh = sandboxRefresh.length >= 40;
+  const envNow = String(process.env.EBAY_ENV || "sandbox").toLowerCase();
+  const staySandbox = envNow === "sandbox" && sandboxRefreshOnly.length >= 40 && !hasProdRefresh && !hasProdKeys;
+
+  if (!staySandbox && (hasProdKeys || hasProdRefresh) && envNow !== "production") {
+    process.env.EBAY_ENV = "production";
+    result.issues.push("EBAY_ENV forcé à production (clés / refresh *_PROD détectés)");
+  }
+
+  if (String(process.env.EBAY_ENV || "").toLowerCase() === "production") {
+    process.env.EBAY_API_BASE = "https://api.ebay.com";
+    process.env.EBAY_AUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token";
+    if (hasProdRefresh && sandboxRefresh.length < 40) {
+      process.env.EBAY_REFRESH_TOKEN = prodRefresh;
+      sandboxRefresh = prodRefresh;
+    }
+    if (hasGenericRefresh && prodRefresh.length < 40) {
+      process.env.EBAY_REFRESH_TOKEN_PROD = sandboxRefresh;
+      prodRefresh = sandboxRefresh;
+    }
+    for (const [prodKey, genericKey] of [
+      ["EBAY_FULFILLMENT_POLICY_ID_PROD", "EBAY_FULFILLMENT_POLICY_ID"],
+      ["EBAY_PAYMENT_POLICY_ID_PROD", "EBAY_PAYMENT_POLICY_ID"],
+      ["EBAY_RETURN_POLICY_ID_PROD", "EBAY_RETURN_POLICY_ID"],
+    ]) {
+      const prodVal = cleanEnvToken(process.env[prodKey]);
+      if (prodVal && isPlaceholderEnvValue(process.env[genericKey])) {
+        process.env[genericKey] = prodVal;
+      }
+    }
+    if (prodRefresh.length < 40 && sandboxRefresh.length < 40) {
+      result.issues.push(
+        `Aucun refresh token prod ≥ 40 car. — colle EBAY_REFRESH_TOKEN_PROD="v^1.1#..." entre guillemets`
+      );
+    }
+  }
+}
+
 module.exports = {
   ENV_PATH,
   loadEbayEnv,
   cleanEnvToken,
   parseLine,
+  applyProdFallbacks,
+  isPlaceholderEnvValue,
 };

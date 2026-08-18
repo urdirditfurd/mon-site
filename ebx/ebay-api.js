@@ -40,11 +40,13 @@ function isProduction() {
 function ebayRefreshToken() {
   const seller = currentSeller();
   if (seller?.refresh_token) return cleanEnvToken(seller.refresh_token);
-  // En production : uniquement le refresh Prod (jamais le token Sandbox).
+  const prod = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
+  const generic = cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
+  // En production : token Prod d'abord, puis la ligne générique si elle est déjà un token prod.
   if (isProduction()) {
-    return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN_PROD);
+    return prod || generic;
   }
-  return cleanEnvToken(process.env.EBAY_REFRESH_TOKEN);
+  return generic;
 }
 
 function ebayUserToken() {

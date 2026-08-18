@@ -3,29 +3,38 @@
  * Fonctionne avec Client ID + Client Secret (Sandbox ou Production).
  */
 
-const EBAY_AUTH_URL = process.env.EBAY_AUTH_URL || "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
-const EBAY_API_BASE = process.env.EBAY_API_BASE || "https://api.sandbox.ebay.com";
-const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID || "";
-const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET || "";
-// Pour la recherche catalogue réelle, privilégier Production Browse API
-const EBAY_BROWSE_BASE = process.env.EBAY_BROWSE_BASE || "https://api.ebay.com";
-const EBAY_BROWSE_AUTH_URL =
-  process.env.EBAY_BROWSE_AUTH_URL || "https://api.ebay.com/identity/v1/oauth2/token";
-const EBAY_PROD_CLIENT_ID = process.env.EBAY_PROD_CLIENT_ID || EBAY_CLIENT_ID;
-const EBAY_PROD_CLIENT_SECRET = process.env.EBAY_PROD_CLIENT_SECRET || EBAY_CLIENT_SECRET;
+const { loadEbayEnv } = require("./load-env");
+loadEbayEnv();
 
 let appToken = null;
 let appTokenExpiry = 0;
 
+function env(name, fallback = "") {
+  return String(process.env[name] || fallback).trim();
+}
+
+function prodClientId() {
+  return env("EBAY_PROD_CLIENT_ID") || env("EBAY_CLIENT_ID");
+}
+
+function prodClientSecret() {
+  return env("EBAY_PROD_CLIENT_SECRET") || env("EBAY_CLIENT_SECRET");
+}
+
 async function getAppToken({ production = true } = {}) {
+  loadEbayEnv({ override: false });
   if (appToken && Date.now() < appTokenExpiry) return appToken;
 
-  const clientId = production ? EBAY_PROD_CLIENT_ID : EBAY_CLIENT_ID;
-  const clientSecret = production ? EBAY_PROD_CLIENT_SECRET : EBAY_CLIENT_SECRET;
-  const authUrl = production ? EBAY_BROWSE_AUTH_URL : EBAY_AUTH_URL;
+  const clientId = production ? prodClientId() : env("EBAY_CLIENT_ID");
+  const clientSecret = production ? prodClientSecret() : env("EBAY_CLIENT_SECRET");
+  const authUrl = production
+    ? env("EBAY_BROWSE_AUTH_URL", "https://api.ebay.com/identity/v1/oauth2/token")
+    : env("EBAY_AUTH_URL", "https://api.sandbox.ebay.com/identity/v1/oauth2/token");
 
   if (!clientId || !clientSecret || clientId.includes("your_sandbox")) {
-    throw new Error("EBAY_CLIENT_ID / EBAY_CLIENT_SECRET manquants dans .env");
+    throw new Error(
+      "Clés eBay manquantes dans .env (EBAY_PROD_CLIENT_ID / EBAY_PROD_CLIENT_SECRET, ou CLIENT_ID sandbox)"
+    );
   }
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -50,6 +59,11 @@ async function getAppToken({ production = true } = {}) {
   appToken = data.access_token;
   appTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return appToken;
+}
+
+function browseBase(production = true) {
+  if (production) return env("EBAY_BROWSE_BASE", "https://api.ebay.com");
+  return env("EBAY_API_BASE", "https://api.sandbox.ebay.com");
 }
 
 function marketplaceId(code = "FR") {
@@ -134,7 +148,7 @@ function mapBrowseSummary(it) {
  */
 async function browseItem(itemId, { marketplace = "FR", production = true } = {}) {
   if (!itemId) throw new Error("itemId requis");
-  const base = production ? EBAY_BROWSE_BASE : EBAY_API_BASE;
+  const base = production ? browseBase(true) : browseBase(false);
   const token = await getAppToken({ production });
   const url = `${base}/buy/browse/v1/item/${encodeURIComponent(itemId)}`;
   const res = await fetch(url, {
@@ -185,8 +199,8 @@ async function enrichBrowseItems(items, { marketplace = "FR", limit = 12 } = {})
 async function browseSearch(query, { marketplace = "FR", limit = 20 } = {}) {
   // Tente Production d'abord (données réelles), puis Sandbox
   const attempts = [
-    { production: true, base: EBAY_BROWSE_BASE },
-    { production: false, base: EBAY_API_BASE },
+    { production: true, base: browseBase(true) },
+    { production: false, base: browseBase(false) },
   ];
 
   let lastError;
@@ -236,8 +250,8 @@ function estimateSold(it) {
 
 async function browseSellerItems(seller, { marketplace = "FR", limit = 30 } = {}) {
   const tokenAttempts = [
-    { production: true, base: EBAY_BROWSE_BASE },
-    { production: false, base: EBAY_API_BASE },
+    { production: true, base: browseBase(true) },
+    { production: false, base: browseBase(false) },
   ];
 
   let lastError;

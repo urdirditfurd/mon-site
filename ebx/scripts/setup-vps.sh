@@ -51,6 +51,7 @@ fi
 
 cd "$APP_DIR/ebx"
 npm install --omit=dev
+EBX_DIR="$APP_DIR/ebx" bash "$APP_DIR/ebx/scripts/install-browsers.sh" || true
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
