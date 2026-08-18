@@ -296,7 +296,7 @@ function seedsForPeriod(period, now = new Date(), marketplace = "FR") {
   const rotated = pool.slice(start).concat(pool.slice(0, start));
 
   if (period === "day") {
-    return rotated.slice(0, 6);
+    return rotated.slice(0, 18);
   }
   if (period === "week") {
     const weekOffset = Math.floor(dayOfYear / 7) % pool.length;
@@ -304,6 +304,14 @@ function seedsForPeriod(period, now = new Date(), marketplace = "FR") {
     return [...new Set([...rotated.slice(0, 4), ...weekRot.slice(0, 8)])].slice(0, 10);
   }
   return [...new Set([...seasonal, ...rotated.slice(0, 14)])].slice(0, 14);
+}
+
+function allSeedsForMarket(marketplace = "FR", now = new Date()) {
+  return [...new Set([
+    ...seedsForPeriod("day", now, marketplace),
+    ...seedsForPeriod("week", now, marketplace),
+    ...seedsForPeriod("month", now, marketplace),
+  ])];
 }
 
 function isBlockedTrendTitle(title) {
@@ -598,6 +606,7 @@ module.exports = {
   peekTrendingCache,
   scheduleTrendingRefresh,
   seedsForPeriod,
+  allSeedsForMarket,
   periodKey,
   isBlockedTrendTitle,
   getCachedTrendingMeta,

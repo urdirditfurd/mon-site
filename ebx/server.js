@@ -62,12 +62,19 @@ const {
   competitorMarketPrices,
   explainUnprofitable,
   snipableDemandQuery,
+  sniperQueryVariants,
   rollPipelineDay,
   looksLikeCategoryLabel,
   DEFAULT_PREPARE_PER_TICK,
   DEFAULT_PUBLISH_PER_TICK,
   QUEUE_CAP,
   DEMAND_ALGO,
+  DAILY_PUBLISH_TARGET,
+  LOOP_MS,
+  REST_MS,
+  loopDelayMs,
+  nextLoopMarket,
+  isFatalListingError,
 } = require("./auto-publish-engine");
 const {
   getRankings,
@@ -410,12 +417,8 @@ async function priceListingForEbay(listing, { marketplace = "FR", minNetPct = 5 
 let autoPublishBusy = false;
 let autoPublishBusySince = 0;
 const AUTO_PUBLISH_BUSY_MAX_MS = 12 * 60 * 1000;
-const AUTO_PUBLISH_INTERVAL_MS = Math.max(
-  15_000,
-  Number(process.env.AUTO_PUBLISH_INTERVAL_MS) || 10 * 60 * 1000
-);
 const autoPublishScheduler = {
-  intervalMs: AUTO_PUBLISH_INTERVAL_MS,
+  intervalMs: LOOP_MS,
   startedAt: null,
   lastFiredAt: null,
   nextFireAt: null,
@@ -423,7 +426,37 @@ const autoPublishScheduler = {
   attemptCount: 0,
   lastSkipReason: "",
   timer: null,
+  looping: true,
+  target: DAILY_PUBLISH_TARGET,
 };
+
+function publishedTodayCount() {
+  try {
+    const raw = JSON.parse(getSetting.get("auto_publish_state")?.value || "{}");
+    return Number(raw.publishedToday) || 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function pickLoopMarketplace() {
+  const idx = Number(getSetting.get("auto_publish_market_idx")?.value || 0) || 0;
+  const step = nextLoopMarket(idx);
+  upsertSetting.run("auto_publish_market_idx", String(step.nextIndex));
+  upsertSetting.run("auto_publish_market", step.marketplace);
+  return step.marketplace;
+}
+
+function armAutoPublishTimer(delayMs, reason = "loop") {
+  if (autoPublishScheduler.timer) {
+    clearTimeout(autoPublishScheduler.timer);
+    autoPublishScheduler.timer = null;
+  }
+  const wait = Math.max(15_000, Number(delayMs) || LOOP_MS);
+  autoPublishScheduler.intervalMs = wait;
+  autoPublishScheduler.nextFireAt = new Date(Date.now() + wait).toISOString();
+  autoPublishScheduler.timer = setTimeout(() => fireScheduledAutoPublish(reason), wait);
+}
 
 function claimAutoPublishBusy(send = () => {}) {
   if (autoPublishBusy) {
@@ -446,16 +479,13 @@ function releaseAutoPublishBusy() {
   autoPublishBusySince = 0;
 }
 
-function scheduleAutoPublishNext(from = Date.now()) {
-  autoPublishScheduler.nextFireAt = new Date(from + autoPublishScheduler.intervalMs).toISOString();
-}
-
 function fireScheduledAutoPublish(reason = "interval") {
   autoPublishScheduler.attemptCount += 1;
   const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
   if (!enabled) {
     autoPublishScheduler.lastSkipReason = "disabled";
-    scheduleAutoPublishNext();
+    autoPublishScheduler.looping = false;
+    armAutoPublishTimer(REST_MS, "interval");
     return { skipped: true, reason: "disabled" };
   }
   if (autoPublishBusy) {
@@ -463,7 +493,7 @@ function fireScheduledAutoPublish(reason = "interval") {
     if (age <= AUTO_PUBLISH_BUSY_MAX_MS) {
       autoPublishScheduler.lastSkipReason = "busy";
       console.log(`[auto-publish] pulse #${autoPublishScheduler.attemptCount} (${reason}) reporté — pipeline encore en cours (${Math.round(age / 1000)}s)`);
-      scheduleAutoPublishNext();
+      armAutoPublishTimer(LOOP_MS, "busy-retry");
       return { skipped: true, reason: "busy" };
     }
     console.warn(`[EBX] Auto-Publish interval: verrou expiré (${Math.round(age / 1000)}s)`);
@@ -472,35 +502,47 @@ function fireScheduledAutoPublish(reason = "interval") {
   autoPublishScheduler.lastSkipReason = "";
   autoPublishScheduler.lastFiredAt = new Date().toISOString();
   autoPublishScheduler.fireCount += 1;
-  scheduleAutoPublishNext();
-  const marketplace = getSetting.get("auto_publish_market")?.value || "France";
+  const marketplace = pickLoopMarketplace();
+  const pub = publishedTodayCount();
+  autoPublishScheduler.looping = pub < DAILY_PUBLISH_TARGET;
   console.log(
-    `[auto-publish] tick #${autoPublishScheduler.fireCount} pulse #${autoPublishScheduler.attemptCount} (${reason}) · prochain ${autoPublishScheduler.nextFireAt}`
+    `[auto-publish] tick #${autoPublishScheduler.fireCount} pulse #${autoPublishScheduler.attemptCount} (${reason}) · ${marketplace} · ${pub}/${DAILY_PUBLISH_TARGET} aujourd'hui`
   );
+  const armAfter = () => {
+    const after = publishedTodayCount();
+    const delay = loopDelayMs(after, DAILY_PUBLISH_TARGET);
+    autoPublishScheduler.looping = after < DAILY_PUBLISH_TARGET;
+    armAutoPublishTimer(delay, after >= DAILY_PUBLISH_TARGET ? "quota-rest" : "loop");
+    console.log(
+      `[auto-publish] prochain ${autoPublishScheduler.nextFireAt} (${after >= DAILY_PUBLISH_TARGET ? "pause quota 200" : "boucle 20s"})`
+    );
+  };
   runAutoPublishTick({
     marketplace,
+    publishLimit: DEFAULT_PUBLISH_PER_TICK,
+    prepareLimit: DEFAULT_PREPARE_PER_TICK,
     send: (o) => {
       if (o.type === "log") console.log("[auto-publish]", o.message);
     },
-  }).catch((err) => console.warn("[auto-publish]", err.message));
-  return { skipped: false, reason, fireCount: autoPublishScheduler.fireCount };
+  })
+    .then(armAfter)
+    .catch((err) => {
+      console.warn("[auto-publish]", err.message);
+      armAfter();
+    });
+  return { skipped: false, reason, fireCount: autoPublishScheduler.fireCount, marketplace };
 }
 
 function startAutoPublishScheduler() {
-  if (autoPublishScheduler.timer) return autoPublishScheduler;
+  if (autoPublishScheduler.startedAt) return autoPublishScheduler;
   autoPublishScheduler.startedAt = new Date().toISOString();
-  scheduleAutoPublishNext();
-  autoPublishScheduler.timer = setInterval(() => {
-    fireScheduledAutoPublish("interval");
-  }, autoPublishScheduler.intervalMs);
-  const mins = Math.round(autoPublishScheduler.intervalMs / 60000);
-  console.log(
-    `⏱️  Auto-Publish scheduler: toutes les ${mins} min (${autoPublishScheduler.intervalMs} ms) · prochain ${autoPublishScheduler.nextFireAt}`
-  );
   const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
   if (enabled) {
-    console.log("[auto-publish] Automatisation déjà ON au démarrage — kick immédiat");
+    console.log(`[auto-publish] Boucle ON — objectif ${DAILY_PUBLISH_TARGET}/jour tous marchés (FR DE GB US)`);
     setImmediate(() => fireScheduledAutoPublish("boot"));
+  } else {
+    armAutoPublishTimer(REST_MS, "interval");
+    console.log(`⏱️  Auto-Publish scheduler: OFF · recheck ${autoPublishScheduler.nextFireAt}`);
   }
   return autoPublishScheduler;
 }
@@ -529,7 +571,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
   const stats = { published: 0, skipped: 0, errors: 0, items: [] };
   const marketCode = marketplaceToCode(marketplace);
   try {
-    const max = Math.min(Math.max(Number(limit) || 5, 1), 10);
+    const max = Math.min(Math.max(Number(limit) || 5, 1), 15);
     const rows = listUnpublishedForAuto
       .all()
       .filter((row) => listingIsSupplierSourced(row))
@@ -561,6 +603,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         insertAutoPublishLog.run(
           listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `VeRO: ${vero.message}`
         );
+        quarantineListing(listing.id, vero.message);
         send({ type: "log", message: `[SKIP] VeRO — ${vero.message}` });
         continue;
       }
@@ -570,6 +613,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         insertAutoPublishLog.run(
           listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `Hazmat: ${haz.message}`
         );
+        quarantineListing(listing.id, haz.message);
         send({ type: "log", message: `[SKIP] Hazmat — ${haz.message}` });
         continue;
       }
@@ -590,6 +634,10 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "error", imgErr.message
         );
         send({ type: "log", message: `[ERROR] images: ${imgErr.message}` });
+        if (isFatalListingError(imgErr.message)) {
+          quarantineListing(listing.id, imgErr.message);
+          send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (extrait / images)` });
+        }
         continue;
       }
 
@@ -691,7 +739,10 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           errMsg
         );
         send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
-        if (isPhotoPublishError(errMsg)) {
+        if (isFatalListingError(errMsg) && !isPhotoPublishError(errMsg)) {
+          quarantineListing(listing.id, errMsg);
+          send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (extrait)` });
+        } else if (isPhotoPublishError(errMsg)) {
           try {
             send({ type: "log", message: `[REPAIR] Photos eBay < 500px — re-scrape images…` });
             listing = await ensureListingImages(listing);
@@ -786,12 +837,17 @@ async function refreshDemandIfNeeded(marketplace, send = () => {}) {
     return looksLikeCategoryLabel(q) || q.split(/\s+/).length < 2;
   });
   const hasSeeds = (state.keywords || []).some((k) => k.reason === "seed" || k.reason === "trend-seed");
+  const failedMap = state.failedQueries && typeof state.failedQueries === "object" ? state.failedQueries : {};
+  const allFailed =
+    (state.keywords || []).length > 0 &&
+    (state.keywords || []).every((k) => failedMap[String(k.query || "")]);
   if (
     Array.isArray(state.keywords) &&
     state.keywords.length >= 4 &&
     !dirty &&
     hasSeeds &&
-    state.algo === DEMAND_ALGO
+    state.algo === DEMAND_ALGO &&
+    !allFailed
   ) {
     return state;
   }
@@ -799,8 +855,10 @@ async function refreshDemandIfNeeded(marketplace, send = () => {}) {
   let trendItems = [];
   let seeds = [];
   try {
-    const { fetchTrendingProducts, seedsForPeriod } = require("./trending-engine");
-    seeds = seedsForPeriod("day", new Date(), marketCode) || [];
+    const { fetchTrendingProducts, seedsForPeriod, allSeedsForMarket } = require("./trending-engine");
+    seeds = allFailed
+      ? allSeedsForMarket(marketCode, new Date())
+      : seedsForPeriod("day", new Date(), marketCode) || [];
     const trend = await fetchTrendingProducts({
       marketplace: marketCode,
       period: "day",
@@ -821,8 +879,8 @@ async function refreshDemandIfNeeded(marketplace, send = () => {}) {
     trendItems,
     seeds,
     calendarEvents: calendar,
-    limit: 28,
-  });
+    limit: 40,
+  }).filter((k) => !failedMap[String(k.query || "")]);
   state.cursor = 0;
   state.algo = DEMAND_ALGO;
   savePipelineState(state);
@@ -836,7 +894,7 @@ async function refreshDemandIfNeeded(marketplace, send = () => {}) {
 async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PREPARE_PER_TICK, send = () => {} } = {}) {
   const marketCode = marketplaceToCode(marketplace);
   const language = languageForMarket(marketCode);
-  const max = Math.min(Math.max(Number(limit) || 2, 1), 5);
+  const max = Math.min(Math.max(Number(limit) || 2, 1), 12);
   const stats = { prepared: 0, skipped: 0, errors: 0 };
   const queuedNow = Number(countAutoQueue.get()?.n || 0);
   if (queuedNow >= QUEUE_CAP) {
@@ -847,6 +905,8 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     return stats;
   }
   let state = await refreshDemandIfNeeded(marketplace, send);
+  state.failedQueries = state.failedQueries && typeof state.failedQueries === "object" ? state.failedQueries : {};
+  state.failedUrls = state.failedUrls && typeof state.failedUrls === "object" ? state.failedUrls : {};
   if (!(state.keywords || []).length) {
     send({ type: "log", message: "[PREPARE] Aucun mot-clé demande aujourd'hui" });
     savePipelineState(state);
@@ -854,7 +914,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
   }
 
   const tried = new Set();
-  const maxAttempts = Math.min((state.keywords || []).length, Math.max(max * 4, 8));
+  const maxAttempts = Math.min((state.keywords || []).length, Math.max(max * 5, 12));
   while (stats.prepared < max && tried.size < maxAttempts) {
     if (Number(countAutoQueue.get()?.n || 0) >= QUEUE_CAP) {
       send({ type: "log", message: `[PREPARE] File au plafond ${QUEUE_CAP} — stop préparation` });
@@ -865,6 +925,11 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     const kw = slice.items[0];
     if (!kw?.query || tried.has(kw.query)) break;
     tried.add(kw.query);
+
+    if (state.failedQueries[kw.query]) {
+      send({ type: "log", message: `[PREPARE] « ${kw.query} » déjà ignoré aujourd'hui — suivant` });
+      continue;
+    }
 
     if (findListingByAutoQuery.get(`%auto-publish:${kw.query}%`)) {
       send({ type: "log", message: `[PREPARE] « ${kw.query} » déjà en Mes Listings — mot-clé suivant` });
@@ -881,9 +946,10 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     });
     send({ type: "log", message: `[PREPARE] Demande « ${kw.query} » (${kw.reason}) → sniper fournisseur` });
 
-    const searchQ = snipableDemandQuery(kw.query) || kw.query;
+    const variants = sniperQueryVariants(kw.query);
+    const searchQ = variants[0] || snipableDemandQuery(kw.query) || kw.query;
     if (searchQ !== kw.query) {
-      send({ type: "log", message: `[PREPARE] requête sniper nettoyée « ${kw.query} » → « ${searchQ} »` });
+      send({ type: "log", message: `[PREPARE] variantes « ${variants.join(" · ")} »` });
     }
 
     const ebayMarket = await loadCompetitorMarket(searchQ, { marketplace: marketCode, send });
@@ -897,20 +963,21 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
 
     let candidates = [];
     try {
-      candidates = await snipeSupplierCandidates(searchQ, { send, fast: true });
+      for (const q of variants) {
+        send({ type: "log", message: `[PREPARE] sniper « ${q} »` });
+        candidates = await snipeSupplierCandidates(q, { send, fast: true });
+        if (candidates.length) break;
+      }
+      if (!candidates.length) {
+        send({ type: "log", message: `[PREPARE] 0 candidat rapide — essai lent Ali/Amazon` });
+        candidates = await snipeSupplierCandidates(searchQ, { send, fast: false });
+      }
     } catch (e) {
       stats.errors += 1;
       state.skippedToday += 1;
+      state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
       send({ type: "log", message: `[PREPARE] sniper: ${e.message}` });
       continue;
-    }
-
-    if (!candidates.length && searchQ.split(/\s+/).length > 2) {
-      const shortQ = searchQ.split(/\s+/).slice(0, 2).join(" ");
-      send({ type: "log", message: `[PREPARE] 0 candidat — essai court « ${shortQ} »` });
-      try {
-        candidates = await snipeSupplierCandidates(shortQ, { send, fast: true });
-      } catch (_) {}
     }
 
     send({
@@ -923,7 +990,8 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     if (!best) {
       send({ type: "log", message: `[PREPARE] relance AliExpress (souvent moins cher)…` });
       try {
-        const ali = await findCheapestSupplier(searchQ, {
+        const aliQ = variants.find((v) => /[a-z]/i.test(v) && v !== searchQ) || searchQ;
+        const ali = await findCheapestSupplier(aliQ, {
           sources: ["aliexpress"],
           limit: 3,
           fast: false,
@@ -945,6 +1013,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     if (!best) {
       stats.skipped += 1;
       state.skippedToday += 1;
+      state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
       const why = explainUnprofitable(ranked, competitorPrices);
       insertAutoPublishLog.run(
         0,
@@ -959,13 +1028,14 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
         "skipped",
         why
       );
-      send({ type: "log", message: `[PREPARE] ignoré « ${kw.query} » — ${why}` });
+      send({ type: "log", message: `[PREPARE] ignoré « ${kw.query} » — ${why} (plus aujourd'hui)` });
       continue;
     }
 
     const url = String(best.offer.url).split("?")[0];
-    if (findListingBySourceUrl.get(url)) {
-      send({ type: "log", message: `[PREPARE] déjà en Mes Listings — ${url} — mot-clé suivant` });
+    if (state.failedUrls[url] || findListingBySourceUrl.get(url)) {
+      send({ type: "log", message: `[PREPARE] URL déjà vue / en listings — mot-clé suivant` });
+      state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
       continue;
     }
 
@@ -985,6 +1055,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       if (!priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
         stats.skipped += 1;
         state.skippedToday += 1;
+        state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
         const why = `Après scrape: plancher ${priced.minSell}€ vs eBay ${
           priced.market != null ? priced.market + "€" : "n/a"
         } (net ${priced.netPct}%)`;
@@ -1035,7 +1106,22 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     } catch (err) {
       stats.errors += 1;
       state.lastError = err.message;
-      send({ type: "log", message: `[PREPARE] listing: ${err.message}` });
+      state.failedUrls[url] = (state.failedUrls[url] || 0) + 1;
+      state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
+      insertAutoPublishLog.run(
+        0,
+        kw.query,
+        best.priced?.sell || 0,
+        best.offer?.price || 0,
+        null,
+        0,
+        null,
+        "",
+        marketCode,
+        "error",
+        err.message
+      );
+      send({ type: "log", message: `[PREPARE] listing: ${err.message} — URL et mot-clé écartés aujourd'hui` });
     }
   }
 
@@ -1066,7 +1152,7 @@ async function runAutoPublishTick({
     savePipelineState(state0);
     send({
       type: "log",
-      message: `[INIT] Pipeline Auto-Publish — publie le lot prêt, puis prépare le suivant (net ≥ 5%, qty 5000)`,
+      message: `[INIT] Boucle Auto-Publish — objectif ${DAILY_PUBLISH_TARGET}/jour tous marchés · publie puis prépare (net ≥ 5%, qty 5000)`,
     });
     send({ type: "progress", pct: 8, label: "Publication", detail: "Lot préparé au cycle précédent" });
     const pub = await runAutoPublishBatch({
@@ -2899,7 +2985,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
     reply:
-      "Auto-Publish (sous Product Sniper) enchaîne tout seul : tendances eBay du marché → fournisseur le plus rentable (Sniper) → fiche claire → prix concurrentiel avec net ≥ 5 % → publication toutes les 10 min (qty 5000). Auto-Order OFF ne bloque pas. Coche le toggle Automatisation ; le serveur (PM2) doit rester allumé.",
+      "Auto-Publish enchaîne en boucle jusqu’à 200 publications / jour, tous marchés (FR DE GB US) : tendances → sniper → fiche → net ≥ 5 % → eBay qty 5000. Un mot-clé sans fournisseur n’est plus retenté le même jour. Auto-Order OFF ne bloque pas. Coche Automatisation ; PM2 + eBay lié.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],
@@ -2919,7 +3005,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-order", "commande", "fournisseur", "vente"],
     reply:
-      "Auto-Order (Paramètres) commande chez le fournisseur après une vente. Il n’a aucun effet sur Auto-Publish. Tu peux publier toutes les 10 min avec Auto-Order OFF — il faut juste cocher le toggle Automatisation Auto-Publish.",
+      "Auto-Order (Paramètres) commande chez le fournisseur après une vente. Il n’a aucun effet sur Auto-Publish. La boucle 200/jour tourne avec Auto-Order OFF — coche Automatisation et relie eBay.",
   },
   {
     keys: ["langue", "allemand", "anglais", "manuel"],
@@ -3484,7 +3570,9 @@ app.get("/api/auto-publish/history", (_req, res) => {
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
     const market = getSetting.get("auto_publish_market")?.value || "France";
     const state = loadPipelineState(market);
-    const intervalMin = Math.round(autoPublishScheduler.intervalMs / 60000);
+    const intervalMs = autoPublishScheduler.intervalMs;
+    const intervalMin = Math.max(1, Math.round(intervalMs / 60000));
+    const intervalSec = Math.max(1, Math.round(intervalMs / 1000));
     res.json({
       success: true,
       data: {
@@ -3492,8 +3580,11 @@ app.get("/api/auto-publish/history", (_req, res) => {
         marketplace: market,
         quantity: 5000,
         minNetPct: 5,
+        dailyTarget: DAILY_PUBLISH_TARGET,
+        looping: Boolean(autoPublishScheduler.looping && enabled),
         intervalMin,
-        intervalMs: autoPublishScheduler.intervalMs,
+        intervalSec,
+        intervalMs,
         scheduler: {
           startedAt: autoPublishScheduler.startedAt,
           lastFiredAt: autoPublishScheduler.lastFiredAt,
@@ -3502,6 +3593,8 @@ app.get("/api/auto-publish/history", (_req, res) => {
           attemptCount: autoPublishScheduler.attemptCount,
           lastSkipReason: autoPublishScheduler.lastSkipReason || "",
           busy: autoPublishBusy,
+          looping: Boolean(autoPublishScheduler.looping && enabled),
+          target: DAILY_PUBLISH_TARGET,
         },
         pipeline: {
           day: state.day,
@@ -3514,6 +3607,7 @@ app.get("/api/auto-publish/history", (_req, res) => {
           queued: Number(countAutoQueue.get()?.n || 0),
           keywords: (state.keywords || []).slice(0, 12),
           lastError: state.lastError || "",
+          failedQueries: Object.keys(state.failedQueries || {}).length,
         },
         published: listPublishedHistory.all(),
         log: listAutoPublishLog.all(),

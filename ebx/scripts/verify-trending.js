@@ -9,7 +9,7 @@ const {
 
 const dayA = seedsForPeriod("day", new Date("2026-08-07T12:00:00Z"), "FR");
 const dayB = seedsForPeriod("day", new Date("2026-08-08T12:00:00Z"), "FR");
-assert.equal(dayA.length, 6, "6 niches / jour");
+assert.equal(dayA.length, 18, "18 niches / jour");
 assert.notDeepEqual(dayA, dayB, "rotation jour à jour");
 
 const week = seedsForPeriod("week", new Date("2026-08-07T12:00:00Z"), "FR");

@@ -14,11 +14,17 @@ const STOPWORDS = new Set(
 );
 
 const MIN_NET_PCT = 5;
-const DEFAULT_PREPARE_PER_TICK = 3;
-const DEFAULT_PUBLISH_PER_TICK = 3;
-const QUEUE_CAP = 18;
+const DEFAULT_PREPARE_PER_TICK = 8;
+const DEFAULT_PUBLISH_PER_TICK = 8;
+const QUEUE_CAP = 40;
+/** Objectif publications / jour, tous marchés. */
+const DAILY_PUBLISH_TARGET = 200;
+/** Pause courte entre ticks tant que l’objectif n’est pas atteint. */
+const LOOP_MS = 20 * 1000;
+const REST_MS = 10 * 60 * 1000;
+const AUTO_PUBLISH_MARKETS = ["France", "Germany", "United Kingdom", "United States"];
 /** Incrémente pour forcer un rescan des mots-clés du jour. */
-const DEMAND_ALGO = 4;
+const DEMAND_ALGO = 5;
 
 function languageForMarket(marketplace = "FR") {
   const c = String(marketplace || "FR").toUpperCase().replace(/^EBAY_/, "");
@@ -97,6 +103,97 @@ function looksLikeBrandToken(tok) {
   // Marque collée type "krystalparis" / "prokrystal" sans voyelle régulière produit
   if (t.length >= 11 && /(paris|crystal|krystal)$/i.test(t)) return true;
   return false;
+}
+
+/** FR → EN pour AliExpress (les fiches sont souvent en anglais). */
+const QUERY_EN = {
+  eponge: "sponge",
+  maquillage: "makeup",
+  blender: "blender",
+  pinceaux: "brushes",
+  pinceau: "brush",
+  miroir: "mirror",
+  led: "led",
+  rouleau: "roller",
+  jade: "jade",
+  visage: "face",
+  bandeau: "headband",
+  spa: "spa",
+  colle: "glue",
+  telephone: "phone",
+  chargeur: "charger",
+  support: "holder",
+  tapis: "mat",
+  lampe: "lamp",
+  organiseur: "organizer",
+  crochet: "hook",
+  adhesif: "adhesive",
+  mural: "wall",
+  verre: "tempered",
+  trempe: "glass",
+  protection: "screen",
+  ecran: "protector",
+  coque: "case",
+  silicone: "silicone",
+  cable: "cable",
+  tresse: "braided",
+  powerbank: "powerbank",
+  ecouteurs: "earbuds",
+  ventilateur: "fan",
+  gourde: "bottle",
+};
+
+function toEnglishQuery(query) {
+  const toks = String(query || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  const mapped = toks.map((t) => QUERY_EN[t] || t);
+  if (mapped.join(" ") === toks.join(" ")) return "";
+  return mapped.join(" ");
+}
+
+/** Variantes de recherche fournisseur : court, original, anglais. */
+function sniperQueryVariants(query) {
+  const base = snipableDemandQuery(query) || String(query || "").replace(/\s+/g, " ").trim();
+  const toks = base.split(/\s+/).filter(Boolean);
+  const short = toks.slice(0, 2).join(" ");
+  const en = toEnglishQuery(base);
+  const enShort = toEnglishQuery(short);
+  const out = [];
+  const seen = new Set();
+  for (const q of [short, base, enShort, en]) {
+    const k = String(q || "")
+      .toLowerCase()
+      .trim();
+    if (!k || k.length < 5 || seen.has(k)) continue;
+    seen.add(k);
+    out.push(q.trim());
+  }
+  return out;
+}
+
+function loopDelayMs(publishedToday = 0, target = DAILY_PUBLISH_TARGET) {
+  const pub = Number(publishedToday) || 0;
+  const goal = Math.max(1, Number(target) || DAILY_PUBLISH_TARGET);
+  return pub >= goal ? REST_MS : LOOP_MS;
+}
+
+function nextLoopMarket(index = 0) {
+  const i = ((Number(index) || 0) % AUTO_PUBLISH_MARKETS.length + AUTO_PUBLISH_MARKETS.length) % AUTO_PUBLISH_MARKETS.length;
+  return {
+    marketplace: AUTO_PUBLISH_MARKETS[i],
+    nextIndex: (i + 1) % AUTO_PUBLISH_MARKETS.length,
+  };
+}
+
+function isFatalListingError(msg) {
+  const m = String(msg || "");
+  return /Impossible d'extraire|essayez une autre URL|Aucune image|Pas d'images utilisables|source_url|produit trop pauvre/i.test(
+    m
+  );
 }
 
 function snipableDemandQuery(query) {
@@ -319,13 +416,30 @@ function emptyPipelineState(marketplace = "France") {
     lastQuery: "",
     queued: 0,
     algo: 0,
+    failedQueries: {},
+    failedUrls: {},
   };
 }
 
 function rollPipelineDay(state, marketplace, now = new Date()) {
   const day = todayKey(now);
   const prev = state && typeof state === "object" ? state : {};
-  if (prev.day === day && prev.marketplace === marketplace) return { ...prev, marketplace };
+  if (prev.day === day) {
+    const out = {
+      ...emptyPipelineState(marketplace),
+      ...prev,
+      day,
+      marketplace,
+      failedQueries: prev.failedQueries && typeof prev.failedQueries === "object" ? prev.failedQueries : {},
+      failedUrls: prev.failedUrls && typeof prev.failedUrls === "object" ? prev.failedUrls : {},
+    };
+    if (prev.marketplace !== marketplace) {
+      out.keywords = [];
+      out.cursor = 0;
+      out.algo = 0;
+    }
+    return out;
+  }
   return {
     ...emptyPipelineState(marketplace),
     day,
@@ -339,12 +453,21 @@ module.exports = {
   DEFAULT_PUBLISH_PER_TICK,
   QUEUE_CAP,
   DEMAND_ALGO,
+  DAILY_PUBLISH_TARGET,
+  LOOP_MS,
+  REST_MS,
+  AUTO_PUBLISH_MARKETS,
   languageForMarket,
   keywordFromTitle,
   isBlockedDemandQuery,
   looksLikeCategoryLabel,
   isWeakDemandQuery,
   snipableDemandQuery,
+  sniperQueryVariants,
+  toEnglishQuery,
+  loopDelayMs,
+  nextLoopMarket,
+  isFatalListingError,
   looksLikeBrandToken,
   buildDemandKeywords,
   nextDemandSlice,

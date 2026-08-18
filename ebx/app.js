@@ -1548,10 +1548,17 @@ async function loadAutoPublishHistory() {
       const tick = pipe.lastTickAt ? formatPublishDate(pipe.lastTickAt) : "jamais";
       const sched = data.scheduler || {};
       const next = sched.nextFireAt ? formatPublishDate(sched.nextFireAt) : null;
-      const intervalMin = data.intervalMin || 10;
+      const target = data.dailyTarget || sched.target || 200;
+      const pubToday = Number(pipe.publishedToday || published.length || 0);
+      const looping = Boolean(data.looping || sched.looping);
+      const waitLabel = looping
+        ? `boucle ~${data.intervalSec || 20}s`
+        : `pause ${data.intervalMin || 10} min`;
       meta.textContent =
-        (data.enabled ? "Automatisation ON · " : "Automatisation OFF — coche le toggle pour publier toutes les 10 min · ") +
-        `cycle toutes les ${intervalMin} min` +
+        (data.enabled ? "Automatisation ON · " : "Automatisation OFF — coche le toggle pour la boucle 200/jour · ") +
+        `${pubToday}/${target} publiés aujourd'hui` +
+        (looping ? " · boucle tous marchés" : " · quota atteint") +
+        ` · ${waitLabel}` +
         (next && data.enabled ? ` · prochain ~ ${next}` : "") +
         (sched.fireCount != null ? ` · ticks ${sched.fireCount}` : "") +
         (sched.attemptCount != null ? `/${sched.attemptCount}` : "") +
@@ -1561,7 +1568,7 @@ async function loadAutoPublishHistory() {
         (pipe.lastPhase ? ` · phase ${pipe.lastPhase}` : "") +
         (kws.length ? ` · demande : ${kws.join(", ")}` : "") +
         ` · ignorés/jour ${pipe.skippedToday || 0}` +
-        " · Auto-Order n’impacte pas cette page";
+        (pipe.failedQueries ? ` · mots-clés écartés ${pipe.failedQueries}` : "");
       meta.className = data.enabled
         ? "text-xs text-zinc-500 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3"
         : "text-xs text-amber-800 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3";

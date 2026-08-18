@@ -669,8 +669,8 @@
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h3 class="text-xl font-bold">Auto-Publish</h3>
-              <p class="text-sm text-zinc-500 mt-1">Pipeline complet : tendances du marché → fournisseur le plus rentable (Product Sniper) → fiche eBay claire → prix concurrentiel (net ≥ 5 %) → publication toutes les 10 min (qty 5 000). Pendant l’intervalle, le prochain lot est préparé.</p>
-              <p class="text-xs text-zinc-400 mt-2">Auto-Order (commandes fournisseur) n’a aucun effet ici. Pour publier vraiment toutes les 10 min : coche le toggle Automatisation ci-dessous, et laisse le serveur (PM2) allumé.</p>
+              <p class="text-sm text-zinc-500 mt-1">Boucle continue jusqu’à <strong>200 publications / jour</strong> tous marchés (FR, DE, GB, US) : tendances → sniper → fiche → prix net ≥ 5 % → eBay (qty 5 000). Un mot-clé ou une URL qui échoue n’est plus retenté le même jour.</p>
+              <p class="text-xs text-zinc-400 mt-2">Auto-Order n’a aucun effet ici. Coche Automatisation et laisse PM2 allumé. Relie eBay dans Paramètres sinon les fiches se préparent sans partir en ligne.</p>
             </div>
             <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer un cycle</button>
           </div>
@@ -687,17 +687,17 @@
             <div class="flex items-end">
               <label class="flex items-center gap-3 text-sm text-ink-900 pb-2">
                 <input id="auto-publish-enabled" type="checkbox" class="toggle" onchange="saveAutoPublishSettings()" />
-                Automatisation (cycle 10 min : publier + préparer)
+                Automatisation (boucle 200/jour, tous marchés)
               </label>
             </div>
             <div class="grid grid-cols-3 gap-2 text-center text-sm">
-              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-published" class="font-bold text-lg">0</div>Publiés</div>
+              <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-published" class="font-bold text-lg">0</div>Publiés / 200</div>
               <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-queued" class="font-bold text-lg">0</div>En file</div>
               <div class="bg-zinc-50 rounded-xl p-3"><div id="ap-stat-prepared" class="font-bold text-lg">0</div>Préparés / jour</div>
             </div>
           </div>
           <div id="ap-pipeline-meta" class="text-xs text-zinc-500 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3">
-            Coche le toggle Automatisation pour un cycle toutes les 10 min. Auto-Order OFF ne bloque pas.
+            Coche Automatisation : boucle ~20 s jusqu’à 200 publiés/jour, puis pause. Rotation FR → DE → GB → US.
           </div>
           <div id="ap-progress-wrap" class="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 space-y-2">
             <div class="flex items-center justify-between gap-3">
@@ -1198,6 +1198,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-v11"></script>
+  <script src="app.js?v=snipe-v12"></script>
 </body>
 </html>

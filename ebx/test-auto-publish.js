@@ -10,6 +10,10 @@ const {
   explainUnprofitable,
   rollPipelineDay,
   languageForMarket,
+  sniperQueryVariants,
+  loopDelayMs,
+  isFatalListingError,
+  DAILY_PUBLISH_TARGET,
 } = require("./auto-publish-engine");
 const { competitiveSellPrice } = require("./business-engine");
 
@@ -140,6 +144,26 @@ check(
 
 const edge = competitiveSellPrice({ cost: 5.99, competitorPrices: [], minNetPct: 5 });
 check(edge.profitable && edge.netPct >= 4.8, `tolérance net ~5% → ${edge.netPct}% sell=${edge.sell}`);
+
+const variants = sniperQueryVariants("eponge maquillage blender");
+check(
+  variants.some((v) => /sponge makeup/i.test(v)) && variants.some((v) => v === "eponge maquillage"),
+  `variantes sniper → ${variants.join(" | ")}`
+);
+check(isFatalListingError("Impossible d'extraire le produit (aliexpress) — essayez une autre URL"), "erreur extrait = fatale");
+check(!isFatalListingError("Accès refusé eBay (scope manquant)"), "erreur OAuth pas fatale");
+check(DAILY_PUBLISH_TARGET === 200, "quota 200/jour");
+check(loopDelayMs(10) < loopDelayMs(200), "boucle plus courte que la pause quota");
+
+const dayKeep = rollPipelineDay(
+  { day: "2026-08-18", marketplace: "France", publishedToday: 42, keywords: [{ query: "x" }], algo: 5 },
+  "Germany",
+  new Date("2026-08-18T12:00:00Z")
+);
+check(
+  dayKeep.publishedToday === 42 && dayKeep.marketplace === "Germany" && (dayKeep.keywords || []).length === 0,
+  "changement de marché le même jour : conserve le compteur, recharge les mots-clés"
+);
 
 if (failed) {
   console.error(`\n${failed} échec(s) auto-publish engine`);
