@@ -508,7 +508,16 @@ function fireScheduledAutoPublish(reason = "interval") {
   console.log(
     `[auto-publish] tick #${autoPublishScheduler.fireCount} pulse #${autoPublishScheduler.attemptCount} (${reason}) · ${marketplace} · ${pub}/${DAILY_PUBLISH_TARGET} aujourd'hui`
   );
-  const armAfter = () => {
+  const SELLING_LIMIT_PAUSE_MS = 60 * 60 * 1000;
+  const armAfter = (tickResult) => {
+    if (tickResult?.sellingLimitHit) {
+      autoPublishScheduler.looping = false;
+      armAutoPublishTimer(SELLING_LIMIT_PAUSE_MS, "selling-limit-pause");
+      console.log(
+        `[auto-publish] ⚠️  Plafond de vente eBay atteint — pause 1 h (prochain ${autoPublishScheduler.nextFireAt}). Demande une hausse dans Seller Hub.`
+      );
+      return;
+    }
     const after = publishedTodayCount();
     const delay = loopDelayMs(after, DAILY_PUBLISH_TARGET);
     autoPublishScheduler.looping = after < DAILY_PUBLISH_TARGET;
@@ -517,18 +526,19 @@ function fireScheduledAutoPublish(reason = "interval") {
       `[auto-publish] prochain ${autoPublishScheduler.nextFireAt} (${after >= DAILY_PUBLISH_TARGET ? "pause quota 200" : "boucle 20s"})`
     );
   };
+  const tickSend = (o) => {
+    if (o.type === "log") console.log("[auto-publish]", o.message);
+  };
   runAutoPublishTick({
     marketplace,
     publishLimit: DEFAULT_PUBLISH_PER_TICK,
     prepareLimit: DEFAULT_PREPARE_PER_TICK,
-    send: (o) => {
-      if (o.type === "log") console.log("[auto-publish]", o.message);
-    },
+    send: tickSend,
   })
     .then(armAfter)
     .catch((err) => {
       console.warn("[auto-publish]", err.message);
-      armAfter();
+      armAfter({});
     });
   return { skipped: false, reason, fireCount: autoPublishScheduler.fireCount, marketplace };
 }
@@ -695,7 +705,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
 
       try {
         await antiBanDelay({ testMode: false, label: "auto-publish" });
-        const result = await publishToEbay(listing, listing.id, { quantity: 5000, variations: { enabled: false } });
+        const result = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
         if (result?.listingId) {
           rememberListingPublish(listing.id, result);
           stats.published += 1;
@@ -746,10 +756,12 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         );
         send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
         if (isSellingLimitError(errMsg)) {
+          quarantineListing(listing.id, "Plafond de vente eBay atteint");
           send({
             type: "log",
             message: `[LIMIT] Plafond de vente eBay atteint — arrêt du lot. Demande une hausse dans Seller Hub → Limites de vente.`,
           });
+          stats.sellingLimitHit = true;
           break;
         }
         if (isFatalListingError(errMsg) && !isPhotoPublishError(errMsg)) {
@@ -759,7 +771,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           try {
             send({ type: "log", message: `[REPAIR] Photos eBay < 500px — re-scrape images…` });
             listing = await ensureListingImages(listing);
-            const result2 = await publishToEbay(listing, listing.id, { quantity: 5000, variations: { enabled: false } });
+            const result2 = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
             if (result2?.listingId) {
               rememberListingPublish(listing.id, result2);
               stats.published += 1;
@@ -1178,6 +1190,7 @@ async function runAutoPublishTick({
     out.skipped += pub.skipped || 0;
     out.errors += pub.errors || 0;
     out.items = pub.items || [];
+    if (pub.sellingLimitHit) out.sellingLimitHit = true;
     let state = loadPipelineState(marketplace);
     state.publishedToday = (Number(state.publishedToday) || 0) + out.published;
     state.lastPhase = "publish";
@@ -3591,7 +3604,7 @@ app.get("/api/auto-publish/history", (_req, res) => {
       data: {
         enabled,
         marketplace: market,
-        quantity: 5000,
+        quantity: 1,
         minNetPct: 5,
         dailyTarget: DAILY_PUBLISH_TARGET,
         looping: Boolean(autoPublishScheduler.looping && enabled),
@@ -3653,7 +3666,7 @@ app.post("/api/auto-publish/settings", (req, res) => {
       data: {
         enabled,
         marketplace,
-        quantity: 5000,
+        quantity: 1,
         minNetPct: 5,
         intervalMin,
         intervalMs: autoPublishScheduler.intervalMs,
@@ -4246,7 +4259,7 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
 
     let result;
     try {
-      result = await publishToEbay(listing, listing.id, { variations, quantity: 5000 });
+      result = await publishToEbay(listing, listing.id, { variations, quantity: 1 });
     } catch (pubErr) {
       const dup = parseDuplicateListingError(pubErr);
       if (!dup) throw pubErr;
@@ -4257,7 +4270,7 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
         console.warn(`[EBX] Doublon eBay → retry titre « ${newTitle} » (était « ${listing.seo_title} »)`);
         try {
           const retryListing = { ...listing, seo_title: newTitle };
-          result = await publishToEbay(retryListing, listing.id, { variations, quantity: 5000 });
+          result = await publishToEbay(retryListing, listing.id, { variations, quantity: 1 });
           if (result?.listingId) {
             db.prepare("UPDATE listings SET seo_title = ? WHERE id = ?").run(newTitle, listing.id);
             rememberListingPublish(listing.id, result);
