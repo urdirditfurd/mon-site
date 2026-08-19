@@ -1466,13 +1466,20 @@ async function diagnosePublishReadiness(token, { price } = {}) {
   };
 }
 
-function resolvePublishQuantity(privileges, requested = 5000) {
-  const want = Math.max(1, Number(requested) || 5000);
+function resolvePublishQuantity(privileges, requested = 5000, unitPrice = 0) {
+  let want = Math.max(1, Number(requested) || 5000);
   const cap = privileges?.sellingLimit?.quantity;
-  if (cap == null) return want;
-  const n = Number(cap);
-  if (!Number.isFinite(n) || n <= 0) return want;
-  return Math.min(want, Math.max(1, Math.floor(n)));
+  if (cap != null) {
+    const n = Number(cap);
+    if (Number.isFinite(n) && n > 0) want = Math.min(want, Math.max(1, Math.floor(n)));
+  }
+  const amtCap = Number(privileges?.sellingLimit?.amount?.value);
+  const price = Number(unitPrice);
+  if (Number.isFinite(amtCap) && amtCap > 0 && Number.isFinite(price) && price > 0) {
+    const maxByAmt = Math.max(1, Math.floor(amtCap / price));
+    want = Math.min(want, maxByAmt);
+  }
+  return want;
 }
 
 async function publishOffer(token, offerId) {
@@ -1604,7 +1611,7 @@ async function publishToEbay(listing, listingDbId, options = {}) {
   const categoryId = await resolveCategoryId(token, title);
   const baseAspects = await buildAspectsForCategory(token, categoryId, title);
   const locationKey = await ensureInventoryLocation(token);
-  const quantity = resolvePublishQuantity(diagnosis.privileges, options.quantity ?? 5000);
+  const quantity = resolvePublishQuantity(diagnosis.privileges, options.quantity ?? 5000, listing.suggested_price);
   // Par défaut: pas de variations (évite 25002 « Couleur non autorisée »).
   const variationInput =
     options.variations && typeof options.variations === "object"

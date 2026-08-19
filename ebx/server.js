@@ -556,9 +556,15 @@ function quarantineListing(listingId, reason = "") {
   }
 }
 
+function isSellingLimitError(msg) {
+  const m = String(msg || "");
+  return /limite de vente|selling limit|dépassement du montant/i.test(m);
+}
+
 function isPhotoPublishError(msg) {
   const m = String(msg || "");
-  return /25002|500 pixels|résolution des photos|photo.*exigences|Gallery|trop petite|image trop/i.test(m);
+  if (isSellingLimitError(m)) return false;
+  return /500 pixels|résolution des photos|photo.*exigences|Gallery|trop petite|image trop/i.test(m);
 }
 
 async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {}, nested = false } = {}) {
@@ -578,7 +584,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
       .slice(0, max);
     send({
       type: "log",
-      message: `[INIT] Auto-Publish — ${rows.length} listing(s), marché ${marketCode}, qty 5000, net ≥ 5%`,
+      message: `[INIT] Auto-Publish — ${rows.length} listing(s), marché ${marketCode}, net ≥ 5%`,
     });
     if (!rows.length) {
       send({ type: "log", message: "[PUBLISH] Aucun listing fournisseur en attente" });
@@ -712,7 +718,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
             String(result.listingId),
             marketCode,
             "published",
-            `qty 5000 · ${priced.competitorCount} concurrent(s)`
+            `${priced.competitorCount} concurrent(s)`
           );
           send({
             type: "published",
@@ -739,6 +745,13 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           errMsg
         );
         send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
+        if (isSellingLimitError(errMsg)) {
+          send({
+            type: "log",
+            message: `[LIMIT] Plafond de vente eBay atteint — arrêt du lot. Demande une hausse dans Seller Hub → Limites de vente.`,
+          });
+          break;
+        }
         if (isFatalListingError(errMsg) && !isPhotoPublishError(errMsg)) {
           quarantineListing(listing.id, errMsg);
           send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (extrait)` });
@@ -762,7 +775,7 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
                 String(result2.listingId),
                 marketCode,
                 "published",
-                `qty 5000 · photos réparées`
+                `photos réparées`
               );
               send({ type: "log", message: `[OK] publié #${result2.listingId} après réparation photos` });
               continue;
@@ -1097,7 +1110,7 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
         "",
         marketCode,
         "prepared",
-        `file d'attente · ${best.offer.source} · qty 5000 au prochain cycle`
+        `file d'attente · ${best.offer.source} au prochain cycle`
       );
       send({
         type: "log",
@@ -1152,7 +1165,7 @@ async function runAutoPublishTick({
     savePipelineState(state0);
     send({
       type: "log",
-      message: `[INIT] Boucle Auto-Publish — objectif ${DAILY_PUBLISH_TARGET}/jour tous marchés · publie puis prépare (net ≥ 5%, qty 5000)`,
+      message: `[INIT] Boucle Auto-Publish — objectif ${DAILY_PUBLISH_TARGET}/jour tous marchés · publie puis prépare (net ≥ 5%)`,
     });
     send({ type: "progress", pct: 8, label: "Publication", detail: "Lot préparé au cycle précédent" });
     const pub = await runAutoPublishBatch({
@@ -2985,7 +2998,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
     reply:
-      "Auto-Publish enchaîne en boucle jusqu’à 200 publications / jour, tous marchés (FR DE GB US) : tendances → sniper → fiche → net ≥ 5 % → eBay qty 5000. Un mot-clé sans fournisseur n’est plus retenté le même jour. Auto-Order OFF ne bloque pas. Coche Automatisation ; PM2 + eBay lié.",
+      "Auto-Publish enchaîne en boucle jusqu’à 200 publications / jour, tous marchés (FR DE GB US) : tendances → sniper → fiche → net ≥ 5 % → eBay quantité adaptée à ta limite de vente. Un mot-clé sans fournisseur n’est plus retenté le même jour. Auto-Order OFF ne bloque pas. Coche Automatisation ; PM2 + eBay lié.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],

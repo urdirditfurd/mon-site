@@ -212,9 +212,17 @@ if (!noCompOk) failed += 1;
 const { resolvePublishQuantity } = require("./ebay-api");
 const qty = resolvePublishQuantity(null, 5000);
 const qtyCap = resolvePublishQuantity({ sellingLimit: { quantity: 200 } }, 5000);
+const qtyAmt = resolvePublishQuantity({ sellingLimit: { amount: { value: "12838.38", currency: "EUR" } } }, 5000, 92.67);
+const qtyBoth = resolvePublishQuantity({ sellingLimit: { quantity: 200, amount: { value: "500", currency: "EUR" } } }, 5000, 10);
 const qtyOk = qty === 5000 && qtyCap === 200;
+const qtyAmtOk = qtyAmt === 138;
+const qtyBothOk = qtyBoth === 50;
 console.log(`${qtyOk ? "OK" : "FAIL"}  quantité publish ${qty} (cap 200 → ${qtyCap})`);
 if (!qtyOk) failed += 1;
+console.log(`${qtyAmtOk ? "OK" : "FAIL"}  plancher montant 12838€ / 92.67€ = ${qtyAmt} (attendu 138)`);
+if (!qtyAmtOk) failed += 1;
+console.log(`${qtyBothOk ? "OK" : "FAIL"}  cap double qty=200 + montant 500€/10€ = ${qtyBoth} (attendu 50)`);
+if (!qtyBothOk) failed += 1;
 
 if (failed) {
   console.error(`\n${failed} échec(s)`);
