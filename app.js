@@ -1,1796 +1,1066 @@
-const runtimeConfig = typeof window.CLIPFORGE_CONFIG !== "undefined" ? window.CLIPFORGE_CONFIG : {};
-const defaults = runtimeConfig.defaults || {};
+const API = window.location.origin;
+let themeColor = "#667eea";
+let titleData = null;
+let titleTab = "keywords";
+let selectedKeywords = [];
+let kwPageIdx = 0;
+const KW_PER_PAGE = 8;
+let rankingsPeriod = "month";
+let competitorPeriod = "month";
+let lastCompetitor = null;
+let lastDesc = null;
+let descImages = [];
+let replaceImgIdx = 0;
 
-const config = {
-  apiBase: runtimeConfig.apiBase || "",
-  pollIntervalMs: Number(runtimeConfig.pollIntervalMs) || 1200,
-  sampleTranscript: runtimeConfig.sampleTranscript || "",
-  defaultClipDuration: Number(defaults.clipDurationSec) || 30,
-  defaultClipsCount: Number(defaults.clipsCount) || 4,
-  defaultMinGapSec: Number(defaults.minGapSecBetweenClips) || 0,
-  defaultIgnoreIntroSec: Number(defaults.ignoreIntroSec) || 0
+const PAGE_META = {
+  dashboard: ["Dashboard", "Vue d'ensemble de votre activité"],
+  analytics: ["Analytics", "Performance et tendances"],
+  rankings: ["Classements", "Meilleures ventes eBay"],
+  competitors: ["Compétiteurs", "Analysez n'importe quel vendeur eBay"],
+  sniper: ["Product Sniper", "Auto-Snipe — listing automatique"],
+  "auto-order": ["Auto-Order", "Commandes fournisseurs automatisées"],
+  listings: ["Mes Listings", "Historique des générations"],
+  "title-builder": ["Title Builder", "Construisez un titre SEO eBay"],
+  description: ["Description Builder", "Générez une description HTML en 1 clic"],
+  settings: ["Paramètres", "Configuration locale EBX"],
 };
 
-const state = {
-  backendAvailable: false,
-  youtubeApiAvailable: false,
-  tiktokConfigured: false,
-  youtubeCookiesConfigured: false,
-  youtubeCookiesUpdatedAt: "",
-  ytDlpAvailable: false,
-  quickMode: true,
-  languageMode: "no-added-audio",
-  noAddedAudio: true,
-  localVideoFile: null,
-  localVideoObjectUrl: "",
-  localVideoDuration: 0,
-  sourceVideoUrl: "",
-  activeJobId: "",
-  bundleFilename: "",
-  pollTimer: null,
-  clips: [],
-  selectedClipIndex: -1,
-  subtitleTheme: "classic",
-  highlightMode: "viral",
-  frameMode: "full-video",
-  includeAutoTranscript: false,
-  dubFrenchAudio: false,
-  autoDubVoiceBySpeaker: false,
-  includeSrtInZip: false,
-  burnSubtitles: false,
-  ignoreIntroSec: config.defaultIgnoreIntroSec,
-  currentAspectRatio: "9:16",
-  batchRunning: false,
-  batchStopRequested: false,
-  batchJobs: [],
-  discoverRunning: false,
-  discoverResults: [],
-  automationRunning: false,
-  automationRunId: "",
-  automationPollTimer: null,
-  automationItems: [],
-  automationScheduleEnabled: false,
-  generationMode: "ai-remix",
-  sulphurJobId: "",
-  falLimitsLoaded: false
-};
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-const AI_KEYS_STORAGE = "clipforge-ai-keys";
+function navigate(page) {
+  document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
+  document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
+  document.getElementById("page-" + page)?.classList.add("active");
+  document.querySelector(`[data-page="${page}"]`)?.classList.add("active");
+  const meta = PAGE_META[page] || [page, ""];
+  document.getElementById("page-title").textContent = meta[0];
+  document.getElementById("page-subtitle").textContent = meta[1];
 
-const dom = {
-  videoUrlInput: document.getElementById("videoUrlInput"),
-  quickMode: document.getElementById("quickMode"),
-  languageMode: document.getElementById("languageMode"),
-  youtubeCookiesInput: document.getElementById("youtubeCookiesInput"),
-  saveYoutubeCookiesBtn: document.getElementById("saveYoutubeCookiesBtn"),
-  clearYoutubeCookiesBtn: document.getElementById("clearYoutubeCookiesBtn"),
-  youtubeCookiesStatus: document.getElementById("youtubeCookiesStatus"),
-  videoInput: document.getElementById("videoInput"),
-  clipDuration: document.getElementById("clipDuration"),
-  clipsCount: document.getElementById("clipsCount"),
-  clipsCountValue: document.getElementById("clipsCountValue"),
-  aspectRatio: document.getElementById("aspectRatio"),
-  copyrightShield: document.getElementById("copyrightShield"),
-  frameMode: document.getElementById("frameMode"),
-  transcriptInput: document.getElementById("transcriptInput"),
-  subtitleTheme: document.getElementById("subtitleTheme"),
-  highlightMode: document.getElementById("highlightMode"),
-  ignoreIntroSec: document.getElementById("ignoreIntroSec"),
-  includeAutoTranscript: document.getElementById("includeAutoTranscript"),
-  dubFrenchAudio: document.getElementById("dubFrenchAudio"),
-  autoDubVoiceBySpeaker: document.getElementById("autoDubVoiceBySpeaker"),
-  includeSrtInZip: document.getElementById("includeSrtInZip"),
-  burnSubtitles: document.getElementById("burnSubtitles"),
-  minGapSecBetweenClips: document.getElementById("minGapSecBetweenClips"),
-  minGapValue: document.getElementById("minGapValue"),
-  generateScriptBtn: document.getElementById("generateScriptBtn"),
-  analyzeBtn: document.getElementById("analyzeBtn"),
-  discoverQuery: document.getElementById("discoverQuery"),
-  discoverMaxResults: document.getElementById("discoverMaxResults"),
-  discoverOrder: document.getElementById("discoverOrder"),
-  discoverMinDurationSec: document.getElementById("discoverMinDurationSec"),
-  discoverLanguage: document.getElementById("discoverLanguage"),
-  discoverRegion: document.getElementById("discoverRegion"),
-  discoverPublishedWithinDays: document.getElementById("discoverPublishedWithinDays"),
-  discoverExcludeChannels: document.getElementById("discoverExcludeChannels"),
-  discoverExcludeSeen: document.getElementById("discoverExcludeSeen"),
-  discoverYoutubeBtn: document.getElementById("discoverYoutubeBtn"),
-  useDiscoverResultsBtn: document.getElementById("useDiscoverResultsBtn"),
-  discoverAndRunBatchBtn: document.getElementById("discoverAndRunBatchBtn"),
-  discoverGeneratePublishBtn: document.getElementById("discoverGeneratePublishBtn"),
-  discoverStatus: document.getElementById("discoverStatus"),
-  discoverResultsList: document.getElementById("discoverResultsList"),
-  automationStatus: document.getElementById("automationStatus"),
-  automationItemsList: document.getElementById("automationItemsList"),
-  tiktokAccessToken: document.getElementById("tiktokAccessToken"),
-  tiktokOpenId: document.getElementById("tiktokOpenId"),
-  tiktokPrivacy: document.getElementById("tiktokPrivacy"),
-  tiktokHashtags: document.getElementById("tiktokHashtags"),
-  saveTikTokConfigBtn: document.getElementById("saveTikTokConfigBtn"),
-  clearTikTokConfigBtn: document.getElementById("clearTikTokConfigBtn"),
-  tiktokConfigStatus: document.getElementById("tiktokConfigStatus"),
-  automationIntervalMinutes: document.getElementById("automationIntervalMinutes"),
-  automationBaseUrl: document.getElementById("automationBaseUrl"),
-  saveAutomationScheduleBtn: document.getElementById("saveAutomationScheduleBtn"),
-  disableAutomationScheduleBtn: document.getElementById("disableAutomationScheduleBtn"),
-  runAutomationNowBtn: document.getElementById("runAutomationNowBtn"),
-  automationScheduleStatus: document.getElementById("automationScheduleStatus"),
-  batchVideoUrlsInput: document.getElementById("batchVideoUrlsInput"),
-  batchClipsCount: document.getElementById("batchClipsCount"),
-  batchIgnoreIntroSec: document.getElementById("batchIgnoreIntroSec"),
-  startBatchBtn: document.getElementById("startBatchBtn"),
-  stopBatchBtn: document.getElementById("stopBatchBtn"),
-  batchStatus: document.getElementById("batchStatus"),
-  batchJobsList: document.getElementById("batchJobsList"),
-  generationProgress: document.getElementById("generationProgress"),
-  generationProgressText: document.getElementById("generationProgressText"),
-  player: document.getElementById("player"),
-  videoShell: document.querySelector(".video-shell"),
-  subtitleOverlay: document.getElementById("subtitleOverlay"),
-  clipsList: document.getElementById("clipsList"),
-  statusBadge: document.getElementById("statusBadge"),
-  playClipBtn: document.getElementById("playClipBtn"),
-  downloadAllBtn: document.getElementById("downloadAllBtn"),
-  backendMeta: document.getElementById("backendMeta"),
-  selectedClipTitle: document.getElementById("selectedClipTitle"),
-  selectedClipScore: document.getElementById("selectedClipScore"),
-  selectedClipSummary: document.getElementById("selectedClipSummary"),
-  generationMode: document.getElementById("generationMode"),
-  generationModeHint: document.getElementById("generationModeHint"),
-  copyrightShieldRow: document.getElementById("copyrightShieldRow"),
-  copyrightShieldHint: document.getElementById("copyrightShieldHint"),
-  aiKeysDetails: document.getElementById("aiKeysDetails"),
-  mistralApiKey: document.getElementById("mistralApiKey"),
-  falApiKey: document.getElementById("falApiKey"),
-  falLimitsList: document.getElementById("falLimitsList"),
-  falCostEstimate: document.getElementById("falCostEstimate"),
-  scriptVideoRow: document.getElementById("scriptVideoRow"),
-  scriptVideoInput: document.getElementById("scriptVideoInput"),
-  videoDurationRow: document.getElementById("videoDurationRow"),
-  videoDurationMin: document.getElementById("videoDurationMin"),
-  youtubeUrlRow: document.getElementById("youtubeUrlRow"),
-  clipSettingsGrid: document.getElementById("clipSettingsGrid"),
-  ytDlpWarning: document.getElementById("ytDlpWarning")
-};
+  if (page === "dashboard") loadDashboard();
+  if (page === "analytics") loadAnalytics();
+  if (page === "rankings") loadRankings();
+  if (page === "competitors") loadCompetitorHistory();
+  if (page === "auto-order") loadOrders();
+  if (page === "listings") loadListings();
+  if (page === "settings") loadSettings();
+}
 
-function isLikelyYouTubeUrl(value) {
+document.querySelectorAll(".nav-link").forEach((link) => {
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate(link.dataset.page);
+  });
+});
+
+document.getElementById("rankings-period")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-period]");
+  if (!btn) return;
+  rankingsPeriod = btn.dataset.period;
+  document.querySelectorAll("#rankings-period .period-pill").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  loadRankings();
+});
+
+document.getElementById("sniper-tabs")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-stab]");
+  if (!btn) return;
+  document.querySelectorAll(".sniper-tab").forEach((b) => {
+    b.classList.remove("active");
+    b.classList.add("text-zinc-500", "bg-zinc-100");
+  });
+  btn.classList.add("active");
+  btn.classList.remove("text-zinc-500", "bg-zinc-100");
+  const tab = btn.dataset.stab;
+  document.getElementById("sniper-auto").classList.toggle("hidden", tab !== "auto");
+  document.getElementById("sniper-bulking").classList.toggle("hidden", tab !== "bulking");
+  document.getElementById("sniper-sub").classList.toggle("hidden", tab !== "sub");
+});
+
+document.querySelectorAll(".desc-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".desc-tab").forEach((b) => {
+      b.classList.remove("active");
+      b.classList.add("text-zinc-500");
+    });
+    btn.classList.add("active");
+    btn.classList.remove("text-zinc-500");
+    const tab = btn.dataset.dtab;
+    document.getElementById("desc-preview-wrap").classList.toggle("hidden", tab !== "preview");
+    document.getElementById("desc-html-wrap").classList.toggle("hidden", tab !== "html");
+  });
+});
+
+document.getElementById("snipe-real")?.addEventListener("change", (e) => {
+  if (e.target.checked) document.getElementById("snipe-test").checked = false;
+});
+document.getElementById("snipe-test")?.addEventListener("change", (e) => {
+  if (e.target.checked) document.getElementById("snipe-real").checked = false;
+});
+
+async function checkHealth() {
+  const el = document.getElementById("api-status");
   try {
-    const host = new URL(value).hostname.toLowerCase();
-    return host.includes("youtube.com") || host.includes("youtu.be");
+    const res = await fetch(API + "/api/health");
+    const json = await res.json();
+    el.className = "text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium";
+    el.textContent = "● API connectée";
+    document.getElementById("settings-llm").textContent = json.llm_url || "—";
+    const mode = document.getElementById("settings-mode");
+    if (mode) mode.textContent = json.mode || "live+fallback";
   } catch {
-    return false;
+    el.className = "text-xs bg-red-50 text-red-500 px-2.5 py-1 rounded-full font-medium";
+    el.textContent = "● API hors ligne";
   }
 }
 
-function renderBackendMeta() {
-  if (!dom.backendMeta) return;
-  dom.backendMeta.textContent =
-    `Serveur connecté · yt-dlp: ${state.ytDlpAvailable ? "oui" : "non"} · cookies: ${state.youtubeCookiesConfigured ? "oui" : "non"}`;
-  if (!state.ytDlpAvailable) {
-    dom.backendMeta.textContent += " — lance: npm install puis npm start";
-  }
+async function loadDashboard() {
+  const res = await fetch(API + "/api/dashboard");
+  const json = await res.json();
+  const d = json.data || {};
+  document.getElementById("dash-cards").innerHTML = [
+    ["CA estimé", `${(d.revenue || 0).toFixed(2)} €`],
+    ["Commandes", d.orders || 0],
+    ["Listings", d.listings || 0],
+    ["Marge", `${d.margin || 0}%`],
+  ]
+    .map(
+      ([label, value]) =>
+        `<div class="bg-white rounded-2xl border border-zinc-200 p-5"><p class="text-xs text-zinc-400">${label}</p><p class="text-2xl font-bold mt-1">${value}</p></div>`
+    )
+    .join("");
 }
 
-function renderYtDlpWarning() {
-  if (!dom.ytDlpWarning) return;
-  const show = state.backendAvailable && !state.ytDlpAvailable;
-  dom.ytDlpWarning.hidden = !show;
-  if (show) {
-    dom.ytDlpWarning.textContent =
-      "yt-dlp manquant. Dans le dossier du projet : npm install puis npm start (le binaire est inclus automatiquement).";
-  }
-}
-function apiUrl(path) {
-  return `${config.apiBase.trim()}${path}`;
-}
-
-function secondsToClock(value) {
-  const sec = Math.max(0, Math.floor(value));
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function updateStatus(text, ready = false) {
-  dom.statusBadge.textContent = text;
-  dom.statusBadge.classList.toggle("ready", ready);
-}
-
-function setButtonsEnabled(enabled) {
-  if (dom.downloadAllBtn) dom.downloadAllBtn.disabled = !enabled;
-}
-
-function setGenerationProgress(value, stageText = "") {
-  const progress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-  if (dom.generationProgress) {
-    dom.generationProgress.style.width = `${progress}%`;
-  }
-  if (dom.generationProgressText) {
-    const stage = String(stageText || "").trim();
-    dom.generationProgressText.textContent = stage
-      ? `Progression: ${progress}% — ${stage}`
-      : `Progression: ${progress}%`;
-  }
-}
-
-function loadAiKeysFromStorage() {
+async function loadAnalytics() {
   try {
-    const raw = localStorage.getItem(AI_KEYS_STORAGE);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (dom.mistralApiKey && parsed.mistralApiKey) dom.mistralApiKey.value = parsed.mistralApiKey;
-    if (dom.falApiKey && parsed.falApiKey) dom.falApiKey.value = parsed.falApiKey;
-  } catch {
-    // ignore corrupt storage
+    const res = await fetch(API + "/api/dashboard");
+    const d = (await res.json()).data || {};
+    document.getElementById("analytics-kpis").innerHTML = [
+      ["CA", `${(d.revenue || 0).toFixed(0)} €`],
+      ["Commandes", d.orders || 0],
+      ["En attente", d.pendingOrders || 0],
+    ]
+      .map(
+        ([l, v]) =>
+          `<div class="bg-white rounded-2xl border p-5"><p class="text-xs text-zinc-400">${l}</p><p class="text-2xl font-bold mt-1">${v}</p></div>`
+      )
+      .join("");
+  } catch (_) {
+    document.getElementById("analytics-kpis").innerHTML = "";
+  }
+  const rows = [
+    ["Conversion", 64],
+    ["Sell-through", 42],
+    ["Marge moyenne", 71],
+    ["Snipes réussis", 55],
+  ];
+  document.getElementById("analytics-bars").innerHTML = rows
+    .map(
+      ([label, pct]) =>
+        `<div><div class="flex justify-between text-sm mb-1"><span>${label}</span><span class="text-zinc-400">${pct}%</span></div><div class="h-2 bg-zinc-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500 rounded-full" style="width:${pct}%"></div></div></div>`
+    )
+    .join("");
+}
+
+function periodFactor(period) {
+  if (period === "day") return 0.05;
+  if (period === "week") return 0.28;
+  return 1;
+}
+
+async function loadRankings() {
+  const res = await fetch(API + `/api/rankings?period=${rankingsPeriod}`);
+  const json = await res.json();
+  const factor = periodFactor(rankingsPeriod);
+  const src = document.getElementById("rankings-source");
+  if (src) {
+    src.textContent = json.live
+      ? `Données live (${json.source || "eBay"})`
+      : "Fallback local (ajoutez EBAY_PROD_CLIENT_ID pour le live)";
+  }
+  const list = document.getElementById("rankings-list");
+  list.innerHTML = (json.data || [])
+    .map((p, i) => {
+      const rank = p.rank || i + 1;
+      const sold = Math.max(1, Math.round((p.sold || 10) * factor));
+      const price = Number(p.price || 0);
+      const oldPrice = price > 0 ? (price * 1.35).toFixed(2) : null;
+      const img = p.image
+        ? `<img src="${escapeHtml(p.image)}" class="w-14 h-14 rounded-lg object-cover bg-zinc-100" alt="" />`
+        : `<div class="w-14 h-14 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-300 text-xs">—</div>`;
+      const rankClass = rank <= 3 ? `rank-${rank}` : "text-zinc-400";
+      const href = p.url || "#";
+      return `<a href="${escapeHtml(href)}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50 transition">
+        <span class="w-8 text-center font-bold text-lg ${rankClass}">${rank}</span>
+        ${img}
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-sm truncate">${escapeHtml(p.title)}</p>
+          <p class="text-xs text-zinc-400 mt-0.5">${escapeHtml(p.category || "eBay")}</p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class="text-sm text-emerald-600 font-medium">${sold} vendus</p>
+          <p class="text-sm font-semibold">${price.toFixed(2)} €</p>
+          ${oldPrice ? `<p class="text-xs text-zinc-400 line-through">${oldPrice} €</p>` : ""}
+        </div>
+      </a>`;
+    })
+    .join("") || `<p class="p-8 text-center text-zinc-300">Aucun classement.</p>`;
+}
+
+async function loadCompetitorHistory() {
+  const res = await fetch(API + "/api/competitors/history");
+  const json = await res.json();
+  const box = document.getElementById("competitor-history");
+  const rows = json.data || [];
+  if (!rows.length) {
+    box.innerHTML = `<p class="text-sm text-zinc-400 col-span-2">Aucune analyse récente.</p>`;
+    return;
+  }
+  box.innerHTML = rows
+    .map((r) => {
+      let revenue = "—";
+      try {
+        const p = JSON.parse(r.payload || "{}");
+        if (p.revenue != null) revenue = `${Number(p.revenue).toFixed(2)} €/mois`;
+      } catch (_) {}
+      return `<div class="bg-white border rounded-2xl p-4 flex items-center gap-3">
+        <span class="text-xl">🇫🇷</span>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium truncate">${escapeHtml(r.seller_name)}</p>
+          <p class="text-xs text-emerald-600">${revenue}</p>
+        </div>
+        <button onclick="viewCompetitorHistory(${r.id})" class="text-xs px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg">Voir les stats</button>
+        <button onclick="deleteCompetitorHistory(${r.id})" class="text-zinc-300 hover:text-red-500 text-lg leading-none" title="Supprimer">🗑</button>
+      </div>`;
+    })
+    .join("");
+}
+
+async function viewCompetitorHistory(id) {
+  const res = await fetch(API + "/api/competitors/history/" + id);
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  renderCompetitor(json.data);
+}
+
+async function deleteCompetitorHistory(id) {
+  await fetch(API + "/api/competitors/history/" + id, { method: "DELETE" });
+  loadCompetitorHistory();
+}
+
+async function analyzeCompetitor() {
+  const seller = document.getElementById("competitor-input").value.trim();
+  if (!seller) return alert("Nom vendeur requis");
+  const btn = document.getElementById("competitor-btn");
+  btn.disabled = true;
+  btn.textContent = "Analyse...";
+  try {
+    const res = await fetch(API + "/api/competitors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seller, marketplace: "FR" }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Erreur");
+    renderCompetitor(json.data);
+    loadCompetitorHistory();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analyser";
   }
 }
 
-function saveAiKeysToStorage() {
-  try {
-    localStorage.setItem(
-      AI_KEYS_STORAGE,
-      JSON.stringify({
-        mistralApiKey: (dom.mistralApiKey?.value || "").trim(),
-        falApiKey: (dom.falApiKey?.value || "").trim()
+function renderCompetitor(d) {
+  lastCompetitor = d;
+  competitorPeriod = "month";
+  const box = document.getElementById("competitor-result");
+  box.classList.remove("hidden");
+  const ebayUrl = `https://www.ebay.fr/usr/${encodeURIComponent(d.seller)}`;
+  const location = d.location || "France";
+  box.innerHTML = `
+    <div class="bg-white rounded-2xl border p-5 flex flex-wrap items-center gap-4">
+      <div class="flex-1">
+        <div class="flex items-center gap-2"><span class="text-xl">🇫🇷</span><h3 class="text-xl font-bold">${escapeHtml(d.seller)}</h3>
+          ${d.live === false ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">estimé</span>' : '<span class="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">live</span>'}
+          ${d.source || d.api ? `<span class="text-[10px] text-zinc-400">${escapeHtml(d.source || d.api || "")}</span>` : ""}
+        </div>
+        <p class="text-sm text-zinc-400 mt-1">${escapeHtml(location)}</p>
+      </div>
+      <a href="${ebayUrl}" target="_blank" class="px-4 py-2 border rounded-xl text-sm font-medium">Voir sur eBay</a>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="bg-brand-600 text-white rounded-2xl p-5 col-span-2 lg:col-span-1">
+        <div class="flex gap-1 mb-2 text-[10px] font-medium">
+          <button data-cp="day" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Jour</button>
+          <button data-cp="week" class="cp-pill px-2 py-0.5 rounded-full bg-white/20">Semaine</button>
+          <button data-cp="month" class="cp-pill px-2 py-0.5 rounded-full bg-white">Mois</button>
+        </div>
+        <p class="text-xs opacity-80">Chiffre d'Affaires</p>
+        <p class="text-2xl font-bold mt-1" id="comp-revenue">${Number(d.revenue || 0).toFixed(2)} €</p>
+        <p class="text-[10px] opacity-70 mt-1" id="comp-revenue-label">/ mois (estimé)</p>
+      </div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Annonces actives</p><p class="text-xl font-bold mt-1">${d.activeListings || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Prix moyen</p><p class="text-xl font-bold mt-1">${Number(d.avgPrice || 0).toFixed(2)} €</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Taux de vente</p><p class="text-xl font-bold mt-1 text-emerald-600">${d.sellThrough || 0}%</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Ventes réussies</p><p class="text-xl font-bold mt-1">${d.successfulSales || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Objets vendus</p><p class="text-xl font-bold mt-1">${d.totalSold || 0}</p></div>
+      <div class="bg-white rounded-2xl border p-4"><p class="text-xs text-zinc-400">Abonnés</p><p class="text-xl font-bold mt-1">${d.followers || 0}</p></div>
+    </div>
+    <div class="bg-white rounded-2xl border overflow-hidden">
+      <div class="p-4 border-b flex items-center justify-between">
+        <div class="font-semibold">Meilleures ventes — ${escapeHtml(d.seller)}</div>
+        <div class="flex gap-1 text-xs" id="best-period">
+          <button data-bp="day" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Jour</button>
+          <button data-bp="week" class="bp-pill px-2 py-1 rounded-full bg-zinc-100">Semaine</button>
+          <button data-bp="month" class="bp-pill px-2 py-1 rounded-full bg-brand-600 text-white">Mois</button>
+        </div>
+      </div>
+      <div id="comp-bestsellers" class="divide-y"></div>
+      <div class="p-3 text-center border-t"><button id="comp-more" class="text-sm text-brand-600 font-medium">Voir plus</button></div>
+    </div>`;
+
+  box.querySelectorAll(".cp-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      competitorPeriod = btn.dataset.cp;
+      box.querySelectorAll(".cp-pill").forEach((b) => {
+        b.classList.remove("bg-white");
+        b.classList.add("bg-white/20");
+      });
+      btn.classList.add("bg-white");
+      btn.classList.remove("bg-white/20");
+      const f = periodFactor(competitorPeriod);
+      const labels = { day: "/ jour (estimé)", week: "/ semaine (estimé)", month: "/ mois (estimé)" };
+      document.getElementById("comp-revenue").textContent =
+        (Number(d.revenue || 0) * f).toFixed(2) + " €";
+      document.getElementById("comp-revenue-label").textContent = labels[competitorPeriod];
+    });
+  });
+
+  let showAll = false;
+  const renderBest = (period) => {
+    const f = periodFactor(period);
+    const items = d.bestsellers || [];
+    const visible = showAll ? items : items.slice(0, 4);
+    document.getElementById("comp-bestsellers").innerHTML = visible
+      .map((b, i) => {
+        const sold = Math.max(1, Math.round((b.sold || 5) * f));
+        const price = Number(b.price || 0);
+        const img = b.image
+          ? `<img src="${escapeHtml(b.image)}" class="w-12 h-12 rounded-lg object-cover bg-zinc-100" alt="" />`
+          : `<div class="w-12 h-12 rounded-lg bg-zinc-100"></div>`;
+        return `<a href="${escapeHtml(b.url || "#")}" target="_blank" class="flex items-center gap-4 p-4 hover:bg-zinc-50">
+          <span class="w-6 font-bold text-brand-600">${i + 1}</span>
+          ${img}
+          <div class="flex-1 min-w-0"><p class="text-sm font-medium truncate">${escapeHtml(b.title)}</p></div>
+          <div class="text-right"><p class="text-sm text-emerald-600">${sold} vendus</p><p class="text-sm font-semibold">${price.toFixed(2)} €</p></div>
+        </a>`;
       })
-    );
-  } catch {
-    // ignore quota errors
-  }
-}
-
-function isAiRemixMode() {
-  return state.generationMode === "ai-remix";
-}
-
-function isScriptVideoMode() {
-  return state.generationMode === "script-video";
-}
-
-function usesFalApi() {
-  return isAiRemixMode() || isScriptVideoMode();
-}
-
-function resolveGenerationMode(value) {
-  if (value === "script-video") return "script-video";
-  if (value === "ai-remix") return "ai-remix";
-  return "classic";
-}
-
-async function loadFalLimits() {
-  if (!state.backendAvailable || state.falLimitsLoaded) return;
-  try {
-    const res = await fetch(apiUrl("/api/fal/limits"));
-    if (!res.ok) return;
-    const data = await res.json();
-    state.falLimitsLoaded = true;
-    if (dom.falLimitsList && data.limits) {
-      const L = data.limits;
-      dom.falLimitsList.innerHTML = `
-        <li><strong>Facturation :</strong> ${L.billingModel}</li>
-        <li><strong>Crédits inscription :</strong> ${L.signupCredits.summary}</li>
-        <li><strong>Expiration :</strong> achats = ${L.creditExpiry.purchased}</li>
-        <li><strong>Parallélisme :</strong> ${L.concurrency.newAccount} requêtes simultanées (nouveau compte)</li>
-        <li><strong>Recharge min :</strong> ${L.minTopUpUsd} $ après épuisement des crédits</li>
-        <li><strong>Non facturé :</strong> erreurs serveur, attente en file</li>
-      `;
-    }
-    void updateFalCostEstimate();
-  } catch {
-    // ignore
-  }
-}
-
-async function updateFalCostEstimate() {
-  if (!dom.falCostEstimate || !usesFalApi()) return;
-  if (!state.backendAvailable) {
-    dom.falCostEstimate.textContent = "Estimation : serveur hors ligne";
-    return;
-  }
-  const body = isScriptVideoMode()
-    ? {
-        durationMin: Number(dom.videoDurationMin?.value || 1),
-        clipSec: 5,
-        sceneCount: Math.ceil((Number(dom.videoDurationMin?.value || 1) * 60) / 5)
-      }
-    : {
-        clipsCount: Number(dom.clipsCount?.value || 4),
-        clipDurationSec: Number(dom.clipDuration?.value || 45),
-        clipSec: 5
-      };
-  try {
-    const res = await fetch(apiUrl("/api/fal/estimate"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) return;
-    const est = await res.json();
-    dom.falCostEstimate.textContent =
-      `Estimation : ~${est.sceneCount} scènes FAL · ~${est.totalEur} € (~${est.totalUsd} $) · ${est.modelLabel}`;
-  } catch {
-    dom.falCostEstimate.textContent = "Estimation : indisponible";
-  }
-}
-
-function applyGenerationModeUi() {
-  const aiMode = isAiRemixMode();
-  const scriptMode = isScriptVideoMode();
-  const falMode = usesFalApi();
-
-  if (dom.aiKeysDetails) dom.aiKeysDetails.open = falMode;
-  if (dom.scriptVideoRow) dom.scriptVideoRow.hidden = !scriptMode;
-  if (dom.videoDurationRow) dom.videoDurationRow.hidden = !scriptMode;
-  if (dom.youtubeUrlRow) dom.youtubeUrlRow.hidden = scriptMode;
-  if (dom.clipSettingsGrid) dom.clipSettingsGrid.hidden = scriptMode;
-  if (dom.copyrightShieldRow) dom.copyrightShieldRow.hidden = scriptMode;
-
-  if (dom.generationModeHint) {
-    if (scriptMode) {
-      dom.generationModeHint.textContent =
-        "Mistral découpe votre script en scènes, FAL génère les clips, le serveur assemble le MP4 — tout en interne.";
-    } else if (aiMode) {
-      dom.generationModeHint.textContent =
-        "L'IA VOANH (Mistral) analyse la vidéo source, écrit des scripts viraux originaux, puis FAL génère des shorts IA avec sous-titres.";
-    } else {
-      dom.generationModeHint.textContent = "Découpe automatique des meilleurs moments de la vidéo source en shorts.";
-    }
-  }
-  if (dom.copyrightShieldRow && !scriptMode) {
-    const label = dom.copyrightShieldRow.querySelector("span");
-    if (label) {
-      label.textContent = aiMode
-        ? "Musique de fond + sous-titres viraux (recommandé pour YouTube Shorts)"
-        : "Mode Shorts foot — miroir, zoom, musique de fond, sous-titres discrets";
-    }
-  }
-  if (dom.copyrightShieldHint && !scriptMode) {
-    dom.copyrightShieldHint.textContent = aiMode
-      ? "Les vidéos sont 100 % générées par IA à partir du script — prêtes à publier en Short."
-      : "Réduit le risque Content ID (sans garantie). Ajoute ta facecam dans YouTube Studio si possible.";
-  }
-  if (dom.analyzeBtn) {
-    dom.analyzeBtn.textContent = scriptMode
-      ? "Générer ma vidéo IA"
-      : aiMode
-        ? "Générer mes shorts IA"
-        : "Générer mes shorts";
-  }
-  void updateFalCostEstimate();
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function escapeHtml(text) {
-  return String(text || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function clearPolling() {
-  if (state.pollTimer) {
-    clearTimeout(state.pollTimer);
-    state.pollTimer = null;
-  }
-}
-
-function resetClipState() {
-  clearPolling();
-  state.clips = [];
-  state.selectedClipIndex = -1;
-  setButtonsEnabled(false);
-  renderClips();
-  if (dom.subtitleOverlay) dom.subtitleOverlay.innerHTML = "";
-  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = "Aucun clip sélectionné";
-  if (dom.selectedClipSummary) {
-    dom.selectedClipSummary.textContent = "Clique sur un clip ci-dessous pour le prévisualiser.";
-  }
-  setGenerationProgress(0);
-}
-
-function isNoAddedAudioSelected() {
-  return state.noAddedAudio || state.languageMode === "no-added-audio";
-}
-
-function applySubtitleTheme(theme) {
-  if (!dom.subtitleOverlay) return;
-  dom.subtitleOverlay.classList.remove("theme-classic", "theme-bold", "theme-cinema", "theme-neon");
-  dom.subtitleOverlay.classList.add(`theme-${theme}`);
-}
-
-function applyPreviewAspectRatio(aspectRatio) {
-  if (!dom.videoShell) return;
-  const ratio = aspectRatio === "1:1" ? "1 / 1" : aspectRatio === "16:9" ? "16 / 9" : "9 / 16";
-  dom.videoShell.style.aspectRatio = ratio;
-}
-
-function renderClips() {
-  dom.clipsList.innerHTML = "";
-  if (!state.clips.length) {
-    dom.clipsList.innerHTML = `<li class="empty">Aucun clip généré pour le moment.</li>`;
-    return;
-  }
-
-  state.clips.forEach((clip, idx) => {
-    const li = document.createElement("li");
-    li.className = "clip-item";
-    if (idx === state.selectedClipIndex) li.classList.add("active");
-
-    li.innerHTML = `
-      <div class="clip-top">
-        <h3 class="clip-title">${clip.title}</h3>
-        <span class="chip">${Math.round(clip.duration)}s</span>
-      </div>
-      <p class="clip-times">
-        ${secondsToClock(clip.start)} → ${secondsToClock(clip.end)} · ${clip.aspectRatio || "9:16"}
-      </p>
-      <div class="clip-actions">
-        <button class="mini-btn" data-action="select">Voir</button>
-        <button class="mini-btn" data-action="play">Lire</button>
-      </div>
-    `;
-
-    li.querySelector('[data-action="select"]').addEventListener("click", () => selectClip(idx, false));
-    li.querySelector('[data-action="play"]').addEventListener("click", () => selectClip(idx, true));
-    dom.clipsList.appendChild(li);
-  });
-}
-
-function setBatchStatus(message, isError = false) {
-  if (!dom.batchStatus) return;
-  dom.batchStatus.textContent = message;
-  dom.batchStatus.classList.toggle("note-error", isError);
-}
-
-function setBatchControlsDisabled(isRunning) {
-  state.batchRunning = isRunning;
-  if (dom.startBatchBtn) dom.startBatchBtn.disabled = isRunning || !state.backendAvailable;
-  if (dom.stopBatchBtn) dom.stopBatchBtn.disabled = !isRunning;
-  setDiscoverControlsDisabled(state.discoverRunning);
-}
-
-function formatCompactNumber(value) {
-  const num = Number(value || 0);
-  if (!Number.isFinite(num)) return "0";
-  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-  if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
-  return String(Math.round(num));
-}
-
-function formatSecondsShort(totalSeconds) {
-  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-  const hours = Math.floor(sec / 3600);
-  const minutes = Math.floor((sec % 3600) / 60);
-  const seconds = sec % 60;
-  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}`;
-  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, "0")}`;
-  return `${seconds}s`;
-}
-
-function setDiscoverStatus(message, isError = false) {
-  if (!dom.discoverStatus) return;
-  dom.discoverStatus.textContent = message;
-  dom.discoverStatus.classList.toggle("note-error", isError);
-}
-
-function setDiscoverControlsDisabled(disabled) {
-  state.discoverRunning = disabled;
-  const isEnabled = state.backendAvailable && state.youtubeApiAvailable;
-  if (dom.discoverYoutubeBtn) dom.discoverYoutubeBtn.disabled = disabled || !isEnabled;
-  if (dom.useDiscoverResultsBtn) dom.useDiscoverResultsBtn.disabled = disabled || !state.discoverResults.length;
-  if (dom.discoverAndRunBatchBtn) {
-    dom.discoverAndRunBatchBtn.disabled = disabled || !isEnabled || state.batchRunning;
-  }
-  if (dom.discoverGeneratePublishBtn) {
-    dom.discoverGeneratePublishBtn.disabled = disabled || !isEnabled || state.batchRunning;
-  }
-}
-
-function setAutomationControlsDisabled(disabled) {
-  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
-  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = disabled || !state.backendAvailable;
-  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = disabled || !state.backendAvailable;
-  if (dom.disableAutomationScheduleBtn) {
-    dom.disableAutomationScheduleBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
-  }
-  if (dom.runAutomationNowBtn) {
-    dom.runAutomationNowBtn.disabled = disabled || !state.backendAvailable || !state.automationScheduleEnabled;
-  }
-}
-
-function renderDiscoverResults() {
-  if (!dom.discoverResultsList) return;
-  if (!state.discoverResults.length) {
-    dom.discoverResultsList.innerHTML = `<li class="empty">Aucune découverte pour le moment.</li>`;
-    setDiscoverControlsDisabled(state.discoverRunning);
-    return;
-  }
-
-  dom.discoverResultsList.innerHTML = state.discoverResults
-    .map((item, idx) => {
-      const duration = formatSecondsShort(item.durationSec);
-      const views = formatCompactNumber(item.viewCount);
-      const score = Math.round(Number(item.score || 0));
-      const checked = item.selected ? "checked" : "";
-      return `
-        <li class="clip-item">
-          <div class="clip-top">
-            <h3 class="clip-title">#${idx + 1} · ${escapeHtml(item.channelTitle || "Chaîne inconnue")}</h3>
-            <span class="chip">Score ${score}</span>
-          </div>
-          <label class="toggle-row compact discover-checkbox">
-            <input type="checkbox" data-discover-id="${escapeHtml(item.videoId)}" ${checked}>
-            <span>${escapeHtml(item.title || item.url)}</span>
-          </label>
-          <p class="clip-times">${duration} · ${views} vues · ${escapeHtml(item.publishedAt || "")}</p>
-          <p class="clip-snippet">${escapeHtml(item.url)}</p>
-        </li>
-      `;
-    })
-    .join("");
-  setDiscoverControlsDisabled(state.discoverRunning);
-}
-
-function getSelectedDiscoverUrls() {
-  return state.discoverResults.filter((item) => item.selected).map((item) => item.url);
-}
-
-function pushSelectedDiscoverUrlsToBatch() {
-  const selectedUrls = getSelectedDiscoverUrls();
-  if (!selectedUrls.length) {
-    setDiscoverStatus("Sélection vide: coche au moins un résultat V2.", true);
-    return [];
-  }
-  if (dom.batchVideoUrlsInput) {
-    dom.batchVideoUrlsInput.value = selectedUrls.join("\n");
-  }
-  setBatchStatus(`${selectedUrls.length} lien(s) injecté(s) depuis la découverte V2.`, false);
-  setDiscoverStatus(`${selectedUrls.length} lien(s) envoyés vers le batch V1.`, false);
-  return selectedUrls;
-}
-
-async function discoverYoutubeSources(autoRunBatch = false) {
-  if (state.discoverRunning) return;
-  if (!state.backendAvailable) {
-    setDiscoverStatus("Backend indisponible — lance: npm start", true);
-    return;
-  }
-  if (!state.youtubeApiAvailable) {
-    setDiscoverStatus("YOUTUBE_API_KEY absente côté serveur. Configure la clé puis redémarre.", true);
-    return;
-  }
-
-  const query = (dom.discoverQuery?.value || "").trim();
-  if (!query) {
-    setDiscoverStatus("Ajoute un mot-clé de niche pour la découverte V2.", true);
-    return;
-  }
-
-  const params = new URLSearchParams({
-    q: query,
-    maxResults: String(Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12)))),
-    order: String(dom.discoverOrder?.value || "relevance"),
-    minDurationSec: String(Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300)))),
-    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
-    regionCode: String(dom.discoverRegion?.value || "FR"),
-    publishedWithinDays: String(Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90)))),
-    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
-    excludeSeen: String(Boolean(dom.discoverExcludeSeen?.checked))
-  });
-
-  setDiscoverControlsDisabled(true);
-  setDiscoverStatus("Recherche YouTube V2 en cours…", false);
-
-  try {
-    const response = await fetch(apiUrl(`/api/youtube/discover?${params.toString()}`));
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Échec de la découverte YouTube V2.");
-    }
-
-    state.discoverResults = Array.isArray(payload.candidates)
-      ? payload.candidates.map((candidate) => ({ ...candidate, selected: true }))
-      : [];
-    renderDiscoverResults();
-
-    if (!state.discoverResults.length) {
-      setDiscoverStatus("Aucun résultat trouvé. Ajuste la niche ou les filtres V2.", true);
-      return;
-    }
-
-    const droppedByHistory = Number(payload?.stats?.droppedByHistory || 0);
-    const droppedByChannel = Number(payload?.stats?.droppedByChannel || 0);
-    const droppedByDuration = Number(payload?.stats?.droppedByDuration || 0);
-    const skippedSummary = [];
-    if (droppedByHistory > 0) skippedSummary.push(`${droppedByHistory} doublons historiques`);
-    if (droppedByChannel > 0) skippedSummary.push(`${droppedByChannel} chaînes exclues`);
-    if (droppedByDuration > 0) skippedSummary.push(`${droppedByDuration} trop courtes`);
-    const skippedText = skippedSummary.length ? ` · filtrés: ${skippedSummary.join(", ")}` : "";
-    setDiscoverStatus(`${state.discoverResults.length} lien(s) trouvés automatiquement${skippedText}.`, false);
-
-    if (autoRunBatch) {
-      pushSelectedDiscoverUrlsToBatch();
-      if (state.batchRunning) {
-        setDiscoverStatus("Batch déjà en cours: relance après la fin du batch actuel.", true);
-        return;
-      }
-      await startBatchGeneration();
-    }
-  } catch (error) {
-    setDiscoverStatus(error instanceof Error ? error.message : "Erreur découverte V2.", true);
-  } finally {
-    setDiscoverControlsDisabled(false);
-  }
-}
-
-function setAutomationStatus(message, isError = false) {
-  if (!dom.automationStatus) return;
-  dom.automationStatus.textContent = message;
-  dom.automationStatus.classList.toggle("note-error", isError);
-}
-
-function renderAutomationItems(items = []) {
-  state.automationItems = Array.isArray(items) ? items : [];
-  if (!dom.automationItemsList) return;
-  if (!state.automationItems.length) {
-    dom.automationItemsList.innerHTML = `<li class="empty">Aucune automatisation lancée.</li>`;
-    return;
-  }
-  dom.automationItemsList.innerHTML = state.automationItems
-    .map((item, idx) => {
-      const status = escapeHtml(item.status || "inconnu");
-      const sourceUrl = escapeHtml(item.sourceUrl || "");
-      const jobId = escapeHtml(item.jobId || "");
-      const publishedCount = Array.isArray(item.published)
-        ? item.published.filter((pub) => pub.publishStatus === "published").length
-        : 0;
-      const generated = Number(item.generatedClips || 0);
-      const err = escapeHtml(item.error || item.publishError || "");
-      return `
-        <li class="clip-item">
-          <div class="clip-top">
-            <h3 class="clip-title">Source auto #${idx + 1}</h3>
-            <span class="chip">${status}</span>
-          </div>
-          <p class="clip-snippet">${sourceUrl}</p>
-          <p class="clip-times">Job: ${jobId || "—"} · clips: ${generated} · publiés: ${publishedCount}</p>
-          ${err ? `<p class="hint small note-error no-margin">${err}</p>` : ""}
-        </li>
-      `;
-    })
-    .join("");
-}
-
-function renderAutomationScheduleStatus(payload) {
-  const enabled = Boolean(payload?.enabled);
-  state.automationScheduleEnabled = enabled;
-  if (dom.automationIntervalMinutes && payload?.intervalMinutes) {
-    dom.automationIntervalMinutes.value = String(payload.intervalMinutes);
-  }
-  if (dom.automationBaseUrl && typeof payload?.payload?.baseUrl === "string") {
-    dom.automationBaseUrl.value = String(payload.payload.baseUrl || "");
-  }
-  if (dom.automationScheduleStatus) {
-    const pieces = [];
-    pieces.push(enabled ? "Planification active" : "Planification inactive");
-    if (payload?.intervalMinutes) pieces.push(`intervalle ${payload.intervalMinutes} min`);
-    if (payload?.nextRunAt) pieces.push(`prochain run: ${new Date(payload.nextRunAt).toLocaleString()}`);
-    if (payload?.lastRunAt) pieces.push(`dernier run: ${new Date(payload.lastRunAt).toLocaleString()}`);
-    if (payload?.lastRunStatus) pieces.push(`statut dernier run: ${payload.lastRunStatus}`);
-    if (payload?.lastError) pieces.push(`erreur: ${payload.lastError}`);
-    dom.automationScheduleStatus.textContent = pieces.join(" · ");
-    dom.automationScheduleStatus.classList.toggle("note-error", Boolean(payload?.lastError));
-  }
-  setAutomationControlsDisabled(false);
-}
-
-async function refreshTikTokConfigStatus() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  try {
-    const response = await fetch(apiUrl("/api/tiktok/config/status"));
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de lire la config TikTok.");
-    }
-    state.tiktokConfigured = Boolean(payload.configured);
-    const configured = Boolean(payload.configured);
-    const privacy = payload.defaultPrivacyLevel || "SELF_ONLY";
-    const tags = String(payload.defaultHashtags || "");
-    if (dom.tiktokPrivacy) dom.tiktokPrivacy.value = privacy;
-    if (dom.tiktokHashtags) dom.tiktokHashtags.value = tags;
-    if (dom.tiktokConfigStatus) {
-      dom.tiktokConfigStatus.textContent = configured
-        ? `Configuration TikTok active · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`
-        : "Configuration TikTok inactive.";
-      dom.tiktokConfigStatus.classList.toggle("note-error", !configured);
-    }
-    if (configured) {
-      setAutomationStatus(`TikTok configuré · privacy ${privacy}${tags ? ` · tags: ${tags}` : ""}`, false);
-    } else {
-      setAutomationStatus("TikTok non configuré: ajoute accessToken + openId.", true);
-    }
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur config TikTok.", true);
-  }
-}
-
-async function saveTikTokConfigFromUi() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  const accessToken = String(dom.tiktokAccessToken?.value || "").trim();
-  const openId = String(dom.tiktokOpenId?.value || "").trim();
-  const defaultPrivacyLevel = String(dom.tiktokPrivacy?.value || "SELF_ONLY").trim();
-  const defaultHashtags = String(dom.tiktokHashtags?.value || "").trim();
-  if (!accessToken || !openId) {
-    setAutomationStatus("Access token TikTok + OpenID requis.", true);
-    return;
-  }
-  if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = true;
-  try {
-    const response = await fetch(apiUrl("/api/tiktok/config"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessToken, openId, defaultPrivacyLevel, defaultHashtags })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de sauvegarder la config TikTok.");
-    }
-    if (dom.tiktokAccessToken) dom.tiktokAccessToken.value = "";
-    if (dom.tiktokOpenId) dom.tiktokOpenId.value = "";
-    setAutomationStatus("Config TikTok enregistrée.", false);
-    await refreshTikTokConfigStatus();
-    await refreshAutomationScheduleStatus();
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur sauvegarde TikTok.", true);
-  } finally {
-    if (dom.saveTikTokConfigBtn) dom.saveTikTokConfigBtn.disabled = false;
-  }
-}
-
-async function clearTikTokConfigFromUi() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = true;
-  try {
-    const response = await fetch(apiUrl("/api/tiktok/config"), { method: "DELETE" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de supprimer la config TikTok.");
-    }
-    setAutomationStatus("Config TikTok supprimée.", false);
-    await refreshTikTokConfigStatus();
-    await refreshAutomationScheduleStatus();
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur suppression TikTok.", true);
-  } finally {
-    if (dom.clearTikTokConfigBtn) dom.clearTikTokConfigBtn.disabled = false;
-  }
-}
-
-function buildAutomationRequestPayload() {
-  return {
-    q: String(dom.discoverQuery?.value || "").trim(),
-    maxResults: Math.max(1, Math.min(25, Number(dom.discoverMaxResults?.value || 12))),
-    order: String(dom.discoverOrder?.value || "relevance"),
-    minDurationSec: Math.max(0, Math.min(7200, Number(dom.discoverMinDurationSec?.value || 300))),
-    relevanceLanguage: String(dom.discoverLanguage?.value || ""),
-    regionCode: String(dom.discoverRegion?.value || "FR"),
-    publishedWithinDays: Math.max(0, Math.min(3650, Number(dom.discoverPublishedWithinDays?.value || 90))),
-    blockedChannelKeywords: String(dom.discoverExcludeChannels?.value || "").trim(),
-    excludeSeen: Boolean(dom.discoverExcludeSeen?.checked),
-    clipDurationSec: 120,
-    ignoreIntroSec: Math.max(0, Math.min(600, Number(dom.batchIgnoreIntroSec?.value || 20))),
-    minGapSecBetweenClips: 6,
-    hashtags: String(dom.tiktokHashtags?.value || "").trim(),
-    defaultPrivacyLevel: String(dom.tiktokPrivacy?.value || "SELF_ONLY"),
-    baseUrl: String(dom.automationBaseUrl?.value || "").trim() || window.location.origin
+      .join("");
   };
-}
+  renderBest("month");
 
-async function refreshAutomationScheduleStatus() {
-  if (!state.backendAvailable) {
-    renderAutomationScheduleStatus({ enabled: false, lastError: "Backend indisponible." });
-    return;
-  }
-  try {
-    const response = await fetch(apiUrl("/api/automation/schedule/status"));
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de lire le statut de planification.");
-    }
-    renderAutomationScheduleStatus(payload);
-  } catch (error) {
-    renderAutomationScheduleStatus({
-      enabled: false,
-      lastError: error instanceof Error ? error.message : "Erreur statut planification."
+  box.querySelectorAll(".bp-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      box.querySelectorAll(".bp-pill").forEach((b) => {
+        b.className = "bp-pill px-2 py-1 rounded-full bg-zinc-100";
+      });
+      btn.className = "bp-pill px-2 py-1 rounded-full bg-brand-600 text-white";
+      renderBest(btn.dataset.bp);
     });
+  });
+
+  document.getElementById("comp-more")?.addEventListener("click", () => {
+    showAll = !showAll;
+    document.getElementById("comp-more").textContent = showAll ? "Voir moins" : "Voir plus";
+    const active = box.querySelector(".bp-pill.bg-brand-600")?.dataset.bp || "month";
+    renderBest(active);
+  });
+}
+
+function colorizeLog(msg) {
+  const safe = escapeHtml(msg);
+  if (/\[ERROR\]/i.test(msg)) return `<div class="err">${safe}</div>`;
+  if (/\[WARN\]/i.test(msg)) return `<div class="warn">${safe}</div>`;
+  if (/\[OK\]|\[DONE\]|\[SIMULATION\]|Listé|importé/i.test(msg)) return `<div class="ok">${safe}</div>`;
+  if (/\[INIT\]|\[CONFIG\]|\[SCAN\]|\[PROTECT\]/i.test(msg)) return `<div class="info">${safe}</div>`;
+  return `<div class="ok">${safe}</div>`;
+}
+
+async function runSnipe() {
+  const btn = document.getElementById("snipe-btn");
+  const cons = document.getElementById("snipe-console");
+  btn.disabled = true;
+  cons.innerHTML = "";
+  const testMode = document.getElementById("snipe-test").checked;
+  const realMode = document.getElementById("snipe-real").checked;
+  const body = {
+    query: document.getElementById("snipe-query")?.value || "gadgets",
+    count: Number(document.getElementById("snipe-count").value),
+    margin: Number(document.getElementById("snipe-margin").value),
+    marketplace: document.getElementById("snipe-market").value,
+    ticket: document.getElementById("snipe-ticket").value,
+    source: document.getElementById("snipe-source").value,
+    autoList: document.getElementById("snipe-autolist").checked,
+    testMode: realMode ? false : testMode,
+  };
+
+  const res = await fetch(API + "/api/auto-snipe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() || "";
+    for (const part of parts) {
+      const line = part.replace(/^data:\s*/, "").trim();
+      if (!line) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === "log") {
+          cons.innerHTML += colorizeLog(ev.message);
+          cons.scrollTop = cons.scrollHeight;
+        }
+        if (ev.type === "stats" || ev.type === "done") {
+          document.getElementById("stat-scanned").textContent = ev.scanned || 0;
+          document.getElementById("stat-imported").textContent = ev.imported || 0;
+          document.getElementById("stat-listed").textContent = ev.listed || 0;
+          document.getElementById("stat-errors").textContent = ev.errors || 0;
+        }
+      } catch (_) {}
+    }
+  }
+  btn.disabled = false;
+}
+
+async function loadOrders() {
+  const res = await fetch(API + "/api/auto-orders");
+  const json = await res.json();
+  const colors = {
+    pending: "bg-amber-50 text-amber-700",
+    ordered: "bg-blue-50 text-blue-700",
+    shipped: "bg-indigo-50 text-indigo-700",
+    delivered: "bg-green-50 text-green-700",
+  };
+  document.getElementById("orders-body").innerHTML = (json.data || [])
+    .map(
+      (o) =>
+        `<tr class="border-b border-zinc-50">
+          <td class="p-3 font-mono text-xs">${escapeHtml(o.id)}</td>
+          <td class="p-3">${escapeHtml(o.product)}</td>
+          <td class="p-3">${escapeHtml(o.supplier)}</td>
+          <td class="p-3">${Number(o.amount || 0).toFixed(2)} €</td>
+          <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${colors[o.status] || ""}">${escapeHtml(o.status)}</span></td>
+          <td class="p-3"><button onclick="advanceOrder('${escapeHtml(o.id)}')" class="text-xs text-brand-600">Avancer</button></td>
+        </tr>`
+    )
+    .join("") || `<tr><td colspan="6" class="p-8 text-center text-zinc-300">Aucune commande.</td></tr>`;
+}
+
+async function advanceOrder(id) {
+  await fetch(API + "/api/auto-orders/" + encodeURIComponent(id) + "/advance", { method: "POST" });
+  loadOrders();
+}
+
+async function loadListings() {
+  const res = await fetch(API + "/api/listings");
+  const json = await res.json();
+  const rows = json.data || [];
+  try {
+    const setup = await (await fetch(API + "/api/setup")).json();
+    const hint = document.getElementById("listings-publish-hint");
+    if (hint) {
+      if (!setup.data?.policies) {
+        hint.classList.remove("hidden");
+        hint.textContent =
+          "Pour Publier eBay : ajoute EBAY_FULFILLMENT/PAYMENT/RETURN_POLICY_ID dans .env (ex. 6240367000 / 6240368000 / 6240369000) + token Sandbox valide.";
+      } else if (!setup.data?.userToken) {
+        hint.classList.remove("hidden");
+        hint.textContent = "EBAY_USER_TOKEN manquant ou invalide — renouvelle le token Sandbox sur developer.ebay.com.";
+      } else {
+        hint.classList.add("hidden");
+      }
+    }
+  } catch (_) {}
+  document.getElementById("listings-body").innerHTML = rows.length
+    ? rows
+        .map(
+          (item) => `
+      <tr class="border-b border-zinc-50">
+        <td class="p-3 text-xs text-zinc-400">${new Date(item.created_at).toLocaleString("fr-FR")}</td>
+        <td class="p-3 font-medium">${escapeHtml(item.seo_title || "—")}</td>
+        <td class="p-3 text-brand-600 font-semibold">${item.suggested_price ? item.suggested_price.toFixed(2) + " €" : "—"}</td>
+        <td class="p-3 text-right space-x-2">
+          <button onclick="viewListing(${item.id})" class="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg">Voir</button>
+          <button onclick="publishListing(${item.id}, this)" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg">Publier eBay</button>
+        </td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4" class="p-8 text-center text-zinc-300">Aucun listing.</td></tr>`;
+}
+
+async function viewListing(id) {
+  const res = await fetch(API + "/api/listings/" + id);
+  const json = await res.json();
+  if (!json.success) return alert("Impossible de charger");
+  document.getElementById("modal-title").textContent = json.data.seo_title || "Listing";
+  document.getElementById("modal-content").innerHTML = json.data.html_description || "";
+  const m = document.getElementById("modal");
+  m.classList.remove("hidden");
+  m.classList.add("flex");
+}
+
+function closeModal() {
+  const m = document.getElementById("modal");
+  m.classList.add("hidden");
+  m.classList.remove("flex");
+}
+
+async function publishListing(id, btn) {
+  if (!confirm("Publier ce listing sur eBay Sandbox ?")) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "...";
+  try {
+    const res = await fetch(API + "/api/publish-to-ebay/" + id, { method: "POST" });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    btn.textContent = "Publié";
+    alert("Publié ! Listing ID: " + (json.data.listingId || "N/A"));
+  } catch (err) {
+    btn.textContent = original;
+    btn.disabled = false;
+    alert("Erreur: " + err.message);
   }
 }
 
-async function saveAutomationScheduleFromUi() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  const payload = buildAutomationRequestPayload();
-  if (!payload.q) {
-    setAutomationStatus("Ajoute une niche (champ découverte V2) avant d'activer l'auto-run.", true);
-    return;
-  }
-  const intervalMinutes = Math.max(5, Math.min(1440, Number(dom.automationIntervalMinutes?.value || 120)));
-  if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = true;
+async function runTitleBuilder() {
+  const query = document.getElementById("title-query").value.trim();
+  if (!query) return alert("Saisis un mot-clé");
+  const btn = document.getElementById("title-btn");
+  btn.disabled = true;
+  btn.textContent = "Analyse...";
   try {
-    const response = await fetch(apiUrl("/api/automation/schedule"), {
+    const exclude = document.getElementById("title-exclude").value.trim();
+    const res = await fetch(API + "/api/title-builder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        enabled: true,
-        intervalMinutes,
-        payload
-      })
+        query,
+        marketplace: document.getElementById("title-market").value,
+        exclude,
+      }),
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(result.error || "Impossible d'activer la planification.");
-    }
-    setAutomationStatus(`Auto-run activé toutes les ${intervalMinutes} min.`, false);
-    renderAutomationScheduleStatus(result.schedule || {});
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur activation auto-run.", true);
+    const json = await res.json();
+    if (!json.success && json.error) throw new Error(json.error);
+    titleData = json.data;
+    if (!titleData) throw new Error("Aucune donnée renvoyée");
+    selectedKeywords = [query];
+    kwPageIdx = 0;
+    document.getElementById("title-results").classList.remove("hidden");
+    document.getElementById("title-meta").textContent = `${titleData.analyzedListings || 0} annonces analysées${
+      titleData.live === false ? " (fallback)" : " (live)"
+    }`;
+    updateFinalTitle();
+    renderKeywords();
+  } catch (err) {
+    alert("Title Builder: " + err.message);
+    console.error(err);
   } finally {
-    if (dom.saveAutomationScheduleBtn) dom.saveAutomationScheduleBtn.disabled = false;
+    btn.disabled = false;
+    btn.textContent = "Générer";
   }
 }
 
-async function disableAutomationScheduleFromUi() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = true;
-  try {
-    const response = await fetch(apiUrl("/api/automation/schedule"), { method: "DELETE" });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(result.error || "Impossible de désactiver la planification.");
-    }
-    setAutomationStatus("Auto-run désactivé.", false);
-    renderAutomationScheduleStatus(result.schedule || {});
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur désactivation auto-run.", true);
-  } finally {
-    if (dom.disableAutomationScheduleBtn) dom.disableAutomationScheduleBtn.disabled = false;
-  }
-}
-
-async function runAutomationNowFromUi() {
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  if (!state.automationScheduleEnabled) {
-    setAutomationStatus("Active d'abord la planification pour utiliser “Lancer maintenant”.", true);
-    return;
-  }
-  if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = true;
-  setAutomationStatus("Run immédiat déclenché…", false);
-  try {
-    const response = await fetch(apiUrl("/api/automation/schedule/run-now"), { method: "POST" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de lancer le run immédiat.");
-    }
-    const run = payload.run || {};
-    renderAutomationItems(run.items || []);
-    const published = Number(run.clipsPublished || 0);
-    const failed = Number(run.publishFailed || 0);
-    setAutomationStatus(`Run immédiat terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
-    if (payload.schedule) {
-      renderAutomationScheduleStatus(payload.schedule);
-    } else {
-      await refreshAutomationScheduleStatus();
-    }
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur run immédiat.", true);
-  } finally {
-    if (dom.runAutomationNowBtn) dom.runAutomationNowBtn.disabled = false;
+function updateFinalTitle() {
+  const t = selectedKeywords.join(" ").slice(0, 80);
+  const input = document.getElementById("final-title");
+  const count = document.getElementById("title-count");
+  input.value = t;
+  count.textContent = `${t.length}/80`;
+  count.className =
+    t.length >= 80
+      ? "text-xs text-red-500 font-semibold"
+      : t.length >= 70
+        ? "text-xs text-amber-600 font-medium"
+        : "text-xs text-zinc-400";
+  const chips = document.getElementById("title-chips");
+  if (chips) {
+    chips.innerHTML = selectedKeywords.length
+      ? selectedKeywords
+          .map(
+            (k, i) =>
+              `<button type="button" data-remove-kw="${i}" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100 hover:bg-red-50">${escapeHtml(k)} ×</button>`
+          )
+          .join("")
+      : `<span class="text-xs text-zinc-400">Aucun mot-clé — clique dans le tableau</span>`;
   }
 }
 
-async function runFullAutomation() {
-  if (state.discoverRunning || state.batchRunning) return;
-  if (!state.backendAvailable) {
-    setAutomationStatus("Backend indisponible.", true);
-    return;
-  }
-  if (!state.youtubeApiAvailable) {
-    setAutomationStatus("YOUTUBE_API_KEY absente côté serveur.", true);
-    return;
-  }
-  const query = String(dom.discoverQuery?.value || "").trim();
-  if (!query) {
-    setAutomationStatus("Ajoute une niche dans le champ découverte V2.", true);
-    return;
-  }
-  const requestPayload = buildAutomationRequestPayload();
-  setDiscoverControlsDisabled(true);
-  setAutomationControlsDisabled(true);
-  setAutomationStatus("Automatisation complète en cours (découverte → génération → publication)…", false);
-  try {
-    const response = await fetch(apiUrl("/api/automation/discover-generate-publish"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestPayload)
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Automatisation complète échouée.");
-    }
-    const run = payload?.id ? payload : payload.run || {};
-    const published = Number(run.clipsPublished || 0);
-    const failed = Number(run.publishFailed || 0);
-    setAutomationStatus(`Auto-publish terminé · publiés: ${published} · échecs: ${failed}`, failed > 0);
-    renderAutomationItems(run.items || []);
-    if (Array.isArray(run.items) && run.items.length > 0) {
-      const lastDone = run.items
-        .slice()
-        .reverse()
-        .find((item) => item.jobId && item.status === "published");
-      if (lastDone?.jobId) {
-        await loadJobIntoWorkspace(lastDone.jobId);
-      }
-    }
-  } catch (error) {
-    setAutomationStatus(error instanceof Error ? error.message : "Erreur auto-publish.", true);
-  } finally {
-    setDiscoverControlsDisabled(false);
-    setAutomationControlsDisabled(false);
-    await refreshAutomationScheduleStatus();
+function onTitleEdit() {
+  const raw = document.getElementById("final-title").value.slice(0, 80);
+  document.getElementById("final-title").value = raw;
+  selectedKeywords = raw.trim() ? raw.trim().split(/\s+/) : [];
+  const count = document.getElementById("title-count");
+  count.textContent = `${raw.length}/80`;
+  count.className =
+    raw.length >= 80 ? "text-xs text-red-500 font-semibold" : raw.length >= 70 ? "text-xs text-amber-600" : "text-xs text-zinc-400";
+  const chips = document.getElementById("title-chips");
+  if (chips) {
+    chips.innerHTML = selectedKeywords
+      .map(
+        (k, i) =>
+          `<button type="button" data-remove-kw="${i}" class="text-xs px-2 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100">${escapeHtml(k)} ×</button>`
+      )
+      .join("");
   }
 }
 
-function parseBatchUrls(rawText) {
-  const lines = String(rawText || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const seen = new Set();
-  const urls = [];
-  for (const line of lines) {
-    let parsed;
-    try {
-      parsed = new URL(line);
-    } catch (_error) {
-      throw new Error(`Lien invalide dans le batch: ${line}`);
-    }
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      throw new Error(`Lien non supporté (http/https requis): ${line}`);
-    }
-    const normalized = parsed.toString();
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    urls.push(normalized);
-  }
-  return urls;
-}
-
-function renderBatchJobs() {
-  if (!dom.batchJobsList) return;
-  if (!state.batchJobs.length) {
-    dom.batchJobsList.innerHTML = `<li class="empty">Aucun batch lancé.</li>`;
-    return;
-  }
-
-  dom.batchJobsList.innerHTML = state.batchJobs
-    .map((item, idx) => {
-      const progress =
-        item.status === "processing" || item.status === "queued"
-          ? ` · ${Math.max(0, Math.min(100, Number(item.progress) || 0))}%`
-          : "";
-      const clipsLabel = item.clipsCount ? ` · clips: ${item.clipsCount}` : "";
-      const errorLabel = item.error ? `<p class="hint small note-error no-margin">${escapeHtml(item.error)}</p>` : "";
-      const actions = item.jobId
-        ? `
-          <div class="clip-actions">
-            <button class="mini-btn" data-action="open-job" data-job-id="${item.jobId}">Ouvrir</button>
-            ${
-              item.status === "completed"
-                ? `<button class="mini-btn" data-action="download-bundle" data-job-id="${item.jobId}">ZIP</button>`
-                : ""
-            }
-          </div>
-        `
-        : "";
-      return `
-        <li class="clip-item">
-          <div class="clip-top">
-            <h3 class="clip-title">Source ${idx + 1}</h3>
-            <span class="chip">${escapeHtml(item.status)}${progress}${clipsLabel}</span>
-          </div>
-          <p class="clip-snippet">${escapeHtml(item.sourceUrl)}</p>
-          ${actions}
-          ${errorLabel}
-        </li>
-      `;
+function renderKeywords() {
+  if (!titleData) return;
+  const list = titleData[titleTab] || [];
+  const start = kwPageIdx * KW_PER_PAGE;
+  const page = list.slice(start, start + KW_PER_PAGE);
+  const maxPage = Math.max(1, Math.ceil(list.length / KW_PER_PAGE));
+  document.getElementById("kw-page-label").textContent = `Page ${kwPageIdx + 1} / ${maxPage}`;
+  document.getElementById("kw-list").innerHTML = page
+    .map((k) => {
+      const selected = selectedKeywords.includes(k.keyword);
+      return `<tr class="keyword-row border-b border-zinc-50 cursor-pointer ${selected ? "bg-brand-50" : ""}" data-add-kw="${escapeHtml(k.keyword)}">
+          <td class="p-3 font-medium text-brand-700">${selected ? "✓ " : ""}${escapeHtml(k.keyword)}</td>
+          <td class="p-3 text-zinc-500">${Number(k.searches || 0).toLocaleString("fr-FR")}</td>
+          <td class="p-3 text-zinc-500">${Number(k.sales || 0).toLocaleString("fr-FR")}</td>
+        </tr>`;
     })
     .join("");
 }
 
-async function createBatchJobFromUrl(sourceUrl, clipsCount, ignoreIntroSec) {
-  const body = new FormData();
-  body.append("videoUrl", sourceUrl);
-  body.append("clipDuration", "120");
-  body.append("clipsCount", String(clipsCount));
-  body.append("aspectRatio", "9:16");
-  body.append("frameMode", "full-video");
-  body.append("languageMode", "no-added-audio");
-  body.append("transcript", "");
-  body.append("subtitleTheme", "classic");
-  body.append("highlightMode", "viral");
-  body.append("includeAutoTranscript", "false");
-  body.append("dubFrenchAudio", "false");
-  body.append("autoDubVoiceBySpeaker", "false");
-  body.append("includeSrtInZip", "false");
-  body.append("burnSubtitles", "false");
-  body.append("minGapSecBetweenClips", "6");
-  body.append("ignoreIntroSec", String(ignoreIntroSec));
-
-  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
-  if (youtubeCookies) {
-    body.append("youtubeCookies", youtubeCookies);
-  }
-
-  const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "Impossible de créer le job batch");
-  }
-  return payload;
+function kwPage(dir) {
+  if (!titleData) return;
+  const list = titleData[titleTab] || [];
+  const maxPage = Math.max(0, Math.ceil(list.length / KW_PER_PAGE) - 1);
+  kwPageIdx = Math.min(maxPage, Math.max(0, kwPageIdx + dir));
+  renderKeywords();
 }
 
-async function pollJobUntilDone(jobId, onUpdate) {
-  while (true) {
-    const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
-    if (!response.ok) {
-      throw new Error(`Job ${jobId.slice(0, 8)} introuvable`);
-    }
-    const job = await response.json();
-    if (typeof onUpdate === "function") onUpdate(job);
-    if (job.status === "completed" || job.status === "failed") {
-      return job;
-    }
-    await sleep(config.pollIntervalMs);
+function addKeyword(kw) {
+  const word = String(kw || "").trim();
+  if (!word) return;
+  if (!selectedKeywords.includes(word)) selectedKeywords.push(word);
+  updateFinalTitle();
+  renderKeywords();
+}
+
+function removeKeyword(idx) {
+  const i = Number(idx);
+  if (!Number.isFinite(i) || i < 0) return;
+  selectedKeywords.splice(i, 1);
+  updateFinalTitle();
+  renderKeywords();
+}
+
+// Délégation d'événements (évite les onclick cassés par les guillemets)
+document.getElementById("kw-list")?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-add-kw]");
+  if (!row) return;
+  addKeyword(row.getAttribute("data-add-kw"));
+});
+
+document.getElementById("title-chips")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove-kw]");
+  if (!btn) return;
+  removeKeyword(btn.getAttribute("data-remove-kw"));
+});
+
+
+function copyTitle() {
+  navigator.clipboard.writeText(document.getElementById("final-title").value);
+  alert("Titre copié");
+}
+
+document.getElementById("kw-tabs")?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".kw-tab");
+  if (!btn) return;
+  titleTab = btn.dataset.tab;
+  kwPageIdx = 0;
+  document.querySelectorAll(".kw-tab").forEach((b) => {
+    b.className = "kw-tab px-3 py-1.5 rounded-lg text-sm text-zinc-500";
+  });
+  btn.className = "kw-tab px-3 py-1.5 rounded-lg text-sm bg-brand-50 text-brand-700";
+  renderKeywords();
+});
+
+function setTheme(color, el) {
+  themeColor = color;
+  document.querySelectorAll(".theme-dot").forEach((d) => d.classList.remove("active"));
+  (el || document.querySelector(`.theme-dot[data-theme="${color}"]`))?.classList.add("active");
+  if (lastDesc) {
+    const tip = document.getElementById("desc-theme-status");
+    if (tip) tip.textContent = "Thème mis à jour…";
+    regenerateDescTheme().then(() => {
+      if (tip) tip.textContent = "Thème appliqué";
+    });
   }
 }
 
-async function loadJobIntoWorkspace(jobId) {
-  const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
-  if (!response.ok) throw new Error("Impossible de charger ce job");
-  const job = await response.json();
-  if (job.status !== "completed") {
-    throw new Error("Le job n'est pas encore terminé");
-  }
-  state.activeJobId = job.id;
-  applyCompletedJob(job, `Job ${job.id.slice(0, 8)} chargé`);
-}
-
-async function startBatchGeneration() {
-  if (state.batchRunning) return;
-  if (!state.backendAvailable) {
-    updateStatus("Backend indisponible — lance: npm start", false);
-    return;
-  }
-  if (state.batchRunning) {
-    updateStatus("Le batch est en cours. Attends la fin avant une génération unitaire.", false);
-    return;
-  }
-
-  let sources = [];
+async function regenerateDescTheme() {
+  const product =
+    lastDesc?.product ||
+    (lastDesc
+      ? {
+          title: lastDesc.product_name || lastDesc.seo_title || "Produit",
+          originalTitle: lastDesc.original_title || lastDesc.product_name,
+          images: descImages.length ? descImages : lastDesc.images || [],
+          bullets: lastDesc.product?.bullets || [],
+          benefits: lastDesc.product?.benefits || [],
+          sections: lastDesc.product?.sections || [],
+          specs: lastDesc.product?.specs || {},
+          description: lastDesc.product?.description || "",
+          short_pitch: lastDesc.product?.short_pitch || "",
+          price: lastDesc.suggested_price,
+          source: lastDesc.source || "generic",
+        }
+      : null);
+  if (!product) return;
   try {
-    sources = parseBatchUrls(dom.batchVideoUrlsInput?.value || "");
-  } catch (error) {
-    setBatchStatus(error instanceof Error ? error.message : "Batch invalide.", true);
-    return;
-  }
-  if (!sources.length) {
-    setBatchStatus("Ajoute au moins un lien vidéo dans la zone batch.", true);
-    return;
-  }
-
-  const clipsCount = Math.max(1, Math.min(8, Number(dom.batchClipsCount?.value || 4)));
-  const ignoreIntroSec = Math.max(0, Math.min(120, Number(dom.batchIgnoreIntroSec?.value || 20)));
-
-  state.batchStopRequested = false;
-  state.batchJobs = sources.map((sourceUrl) => ({
-    sourceUrl,
-    status: "queued",
-    progress: 0,
-    clipsCount: 0,
-    jobId: "",
-    error: ""
-  }));
-  renderBatchJobs();
-  setBatchControlsDisabled(true);
-  updateStatus("Batch V1 lancé…", false);
-  setBatchStatus(`Batch démarré (${sources.length} sources).`, false);
-
-  let completedCount = 0;
-  let failedCount = 0;
-  let stoppedCount = 0;
-  let lastCompletedJob = null;
-
-  for (let index = 0; index < state.batchJobs.length; index += 1) {
-    if (state.batchStopRequested) break;
-
-    const item = state.batchJobs[index];
-    item.status = "creating";
-    item.progress = 0;
-    renderBatchJobs();
-    setBatchStatus(`Création du job ${index + 1}/${state.batchJobs.length}…`, false);
-
-    try {
-      const created = await createBatchJobFromUrl(item.sourceUrl, clipsCount, ignoreIntroSec);
-      item.jobId = created.id;
-      item.status = "queued";
-      renderBatchJobs();
-
-      const finalJob = await pollJobUntilDone(created.id, (job) => {
-        item.status = job.status;
-        item.progress = Number(job.progress) || 0;
-        renderBatchJobs();
-      });
-
-      if (finalJob.status === "completed") {
-        item.status = "completed";
-        item.progress = 100;
-        item.clipsCount = (finalJob.clips || []).length;
-        completedCount += 1;
-        lastCompletedJob = finalJob;
-      } else {
-        item.status = "failed";
-        item.error = finalJob.error || "Traitement échoué";
-        failedCount += 1;
-      }
-    } catch (error) {
-      item.status = "failed";
-      item.error = error instanceof Error ? error.message : "Erreur batch";
-      failedCount += 1;
-    }
-
-    renderBatchJobs();
-    if (state.batchStopRequested) break;
-  }
-
-  if (state.batchStopRequested) {
-    for (const item of state.batchJobs) {
-      if (item.status === "queued") {
-        item.status = "stopped";
-        stoppedCount += 1;
-      }
-    }
-  }
-
-  renderBatchJobs();
-  setBatchControlsDisabled(false);
-  state.batchStopRequested = false;
-  const summary = `Batch terminé · OK: ${completedCount} · Erreurs: ${failedCount} · Arrêtés: ${stoppedCount}`;
-  setBatchStatus(summary, failedCount > 0);
-  updateStatus(summary, failedCount === 0);
-
-  if (lastCompletedJob) {
-    state.activeJobId = lastCompletedJob.id;
-    applyCompletedJob(lastCompletedJob, `${summary} · dernier job chargé`);
-  }
-}
-
-function updateSubtitleOverlay() {
-  if (!dom.subtitleOverlay) return;
-  if (state.selectedClipIndex < 0) {
-    dom.subtitleOverlay.innerHTML = "";
-    return;
-  }
-  const clip = state.clips[state.selectedClipIndex];
-  if (!clip) return;
-  if (clip.hasBurnedSubtitles) {
-    dom.subtitleOverlay.innerHTML = "";
-    dom.subtitleOverlay.style.display = "none";
-    return;
-  }
-  dom.subtitleOverlay.style.display = "block";
-  const t = dom.player.currentTime || 0;
-  const cue = (clip.captions || []).find((item) => t >= item.start && t <= item.end);
-  if (!cue) {
-    dom.subtitleOverlay.innerHTML = "";
-    return;
-  }
-  dom.subtitleOverlay.innerHTML = `<span>${cue.text}</span>`;
-}
-
-function selectClip(index, autoplay = false) {
-  if (index < 0 || index >= state.clips.length) return;
-  state.selectedClipIndex = index;
-  renderClips();
-
-  const clip = state.clips[index];
-  state.currentAspectRatio = clip.aspectRatio || state.currentAspectRatio;
-  applyPreviewAspectRatio(state.currentAspectRatio);
-  dom.player.pause();
-  dom.player.src = apiUrl(clip.streamUrl);
-  dom.player.currentTime = 0;
-  dom.player.load();
-  if (dom.subtitleOverlay) {
-    dom.subtitleOverlay.innerHTML = "";
-    dom.subtitleOverlay.style.display = clip.hasBurnedSubtitles ? "none" : "block";
-  }
-  if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = clip.title;
-  if (dom.selectedClipSummary) {
-    dom.selectedClipSummary.textContent =
-      `${secondsToClock(clip.start)} → ${secondsToClock(clip.end)} · ${Math.round(clip.duration)}s · ${clip.aspectRatio || state.currentAspectRatio}`;
-  }
-  updateStatus(`Clip sélectionné: ${clip.title} (${secondsToClock(clip.start)} → ${secondsToClock(clip.end)})`, true);
-
-  if (autoplay) dom.player.play().catch(() => {});
-}
-
-function triggerDownload(url, filenameHint = "") {
-  const link = document.createElement("a");
-  link.href = apiUrl(url);
-  if (filenameHint) link.download = filenameHint;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-function formatFrenchDate(isoDate) {
-  if (!isoDate) return "";
-  const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(date);
-}
-
-function setYoutubeCookiesButtonsDisabled(disabled) {
-  if (dom.saveYoutubeCookiesBtn) dom.saveYoutubeCookiesBtn.disabled = disabled;
-  if (dom.clearYoutubeCookiesBtn) dom.clearYoutubeCookiesBtn.disabled = disabled;
-}
-
-function renderYoutubeCookiesStatus(meta = {}) {
-  if (!dom.youtubeCookiesStatus) return;
-  const configured = Boolean(meta.configured);
-  const sizeBytes = Number(meta.sizeBytes || 0);
-  const updatedAt = formatFrenchDate(meta.updatedAt || "");
-  state.youtubeCookiesConfigured = configured;
-  state.youtubeCookiesUpdatedAt = meta.updatedAt || "";
-
-  if (configured) {
-    const details = updatedAt ? ` · MAJ ${updatedAt}` : "";
-    dom.youtubeCookiesStatus.textContent = `Cookies serveur: configurés (${sizeBytes} octets${details})`;
-    dom.youtubeCookiesStatus.classList.remove("note-error");
-    renderBackendMeta();
-    return;
-  }
-
-  dom.youtubeCookiesStatus.textContent = "Cookies serveur: non configurés";
-  dom.youtubeCookiesStatus.classList.add("note-error");
-  renderBackendMeta();
-}
-
-async function refreshYoutubeCookiesStatus() {
-  if (!state.backendAvailable) return;
-  const response = await fetch(apiUrl("/api/youtube-cookies/status"));
-  if (!response.ok) throw new Error("Impossible de lire le statut des cookies serveur");
-  const meta = await response.json();
-  renderYoutubeCookiesStatus(meta);
-}
-
-async function saveYoutubeCookies() {
-  if (!state.backendAvailable) {
-    updateStatus("Backend indisponible — lance: npm start", false);
-    return;
-  }
-  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
-  if (!youtubeCookies) {
-    updateStatus("Colle d'abord tes cookies YouTube avant de les enregistrer.", false);
-    return;
-  }
-
-  setYoutubeCookiesButtonsDisabled(true);
-  try {
-    const response = await fetch(apiUrl("/api/youtube-cookies"), {
+    const res = await fetch(API + "/api/rebuild-description", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ youtubeCookies })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible d'enregistrer les cookies YouTube");
-    }
-    renderYoutubeCookiesStatus(payload);
-    if (dom.youtubeCookiesInput) dom.youtubeCookiesInput.value = "";
-    updateStatus("Cookies YouTube enregistrés. Ils seront réutilisés automatiquement.", true);
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur lors de la sauvegarde des cookies", false);
-  } finally {
-    setYoutubeCookiesButtonsDisabled(false);
-  }
-}
-
-async function clearYoutubeCookies() {
-  if (!state.backendAvailable) {
-    updateStatus("Backend indisponible — lance: npm start", false);
-    return;
-  }
-  setYoutubeCookiesButtonsDisabled(true);
-  try {
-    const response = await fetch(apiUrl("/api/youtube-cookies"), { method: "DELETE" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || "Impossible de supprimer les cookies YouTube");
-    }
-    renderYoutubeCookiesStatus(payload);
-    updateStatus("Cookies YouTube supprimés du serveur.", true);
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur lors de la suppression des cookies", false);
-  } finally {
-    setYoutubeCookiesButtonsDisabled(false);
-  }
-}
-
-async function checkBackendHealth() {
-  try {
-    const [healthRes, cfgRes] = await Promise.all([
-      fetch(apiUrl("/api/health")),
-      fetch(apiUrl("/api/config"))
-    ]);
-    if (!healthRes.ok) throw new Error("health check failed");
-    const payload = await healthRes.json();
-    const serverConfig = cfgRes.ok ? await cfgRes.json() : null;
-    state.backendAvailable = true;
-    state.ytDlpAvailable = Boolean(payload.ytDlpAvailable);
-    state.youtubeApiAvailable = Boolean(
-      serverConfig?.capabilities?.youtubeDiscovery ?? payload.youtubeApiAvailable ?? false
-    );
-    setBatchControlsDisabled(state.batchRunning);
-    setDiscoverControlsDisabled(state.discoverRunning);
-    setAutomationControlsDisabled(false);
-    if (serverConfig?.defaults) {
-      const defaultsCfg = serverConfig.defaults;
-      if (typeof defaultsCfg.clipDuration === "number" && dom.clipDuration) {
-        dom.clipDuration.value = String(defaultsCfg.clipDuration);
-      }
-      if (typeof defaultsCfg.clipsCount === "number" && dom.clipsCount) {
-        dom.clipsCount.value = String(defaultsCfg.clipsCount);
-      }
-      if (typeof defaultsCfg.ignoreIntroSec === "number") {
-        state.ignoreIntroSec = defaultsCfg.ignoreIntroSec;
-      }
-    }
-    if (serverConfig?.youtubeCookies) {
-      renderYoutubeCookiesStatus(serverConfig.youtubeCookies);
-    } else {
-      renderYoutubeCookiesStatus({
-        configured: Boolean(payload.youtubeCookiesConfigured),
-        sizeBytes: 0,
-        updatedAt: null
-      });
-    }
-    renderBackendMeta();
-    renderYtDlpWarning();
-    void loadFalLimits();
-    if (!state.ytDlpAvailable) {
-      updateStatus("Installe les dépendances : npm install puis npm start (voir bandeau orange).", false);
-    } else {
-      updateStatus("Prêt à générer", true);
-    }
-    return;
-  } catch (_error) {
-    state.backendAvailable = false;
-    state.youtubeApiAvailable = false;
-    setBatchControlsDisabled(false);
-    setDiscoverControlsDisabled(false);
-    setAutomationControlsDisabled(true);
-    updateStatus("Backend indisponible — lance: npm start", false);
-    if (dom.backendMeta) dom.backendMeta.textContent = "Serveur non connecté — lance npm start";
-    renderYoutubeCookiesStatus({ configured: false, sizeBytes: 0, updatedAt: null });
-  }
-}
-
-async function createScriptVideoJob() {
-  const script = (dom.scriptVideoInput?.value || "").trim();
-  const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
-  const falApiKey = (dom.falApiKey?.value || "").trim();
-  const aspectRatio = dom.aspectRatio?.value || "9:16";
-  const durationMin = Number(dom.videoDurationMin?.value || 1);
-
-  if (!script) {
-    updateStatus("Collez votre script avant de générer.", false);
-    return;
-  }
-  if (!falApiKey) {
-    updateStatus("Ajoute ta clé API FAL.ai (crédits offerts sur fal.ai).", false);
-    return;
-  }
-  if (!state.backendAvailable) {
-    updateStatus("Backend indisponible — lance: npm start", false);
-    return;
-  }
-
-  saveAiKeysToStorage();
-  dom.analyzeBtn.disabled = true;
-  resetClipState();
-  state.sulphurJobId = "";
-  setGenerationProgress(5);
-  updateStatus("Envoi du script au studio FAL…", false);
-
-  try {
-    const response = await fetch(apiUrl("/api/sulphur/jobs/auto"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-fal-key": falApiKey,
-        ...(mistralApiKey ? { "x-mistral-key": mistralApiKey } : {})
-      },
       body: JSON.stringify({
-        provider: "fal",
-        script,
-        durationMin,
-        clipSec: 5,
-        aspectRatio,
-        plannerMode: mistralApiKey ? "mistral" : "free",
-        mistralKey: mistralApiKey || undefined,
-        falKey,
-        modelPath: "fal-ai/kling-video/v1.6/standard/text-to-video"
-      })
+        product: {
+          ...product,
+          originalTitle: product.originalTitle || lastDesc?.original_title || product.title,
+          images: descImages.length ? descImages : product.images || [],
+        },
+        themeColor,
+      }),
     });
-    if (!response.ok) {
-      const details = await response.json().catch(() => ({}));
-      throw new Error(details.error || "Impossible de créer le job vidéo");
-    }
-    const job = await response.json();
-    state.sulphurJobId = job.id;
-    updateStatus(`Vidéo IA #${job.id.slice(0, 8)}… génération FAL en cours`, false);
-    scheduleSulphurPolling();
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
-    dom.analyzeBtn.disabled = false;
+    const json = await res.json();
+    if (json.success) applyDescResult({ ...lastDesc, ...json.data, product: json.data.product || product });
+  } catch (err) {
+    console.error(err);
+    alert("Impossible d'appliquer le thème: " + err.message);
   }
 }
 
-function scheduleSulphurPolling() {
-  clearPolling();
-  state.pollTimer = setTimeout(() => {
-    void pollSulphurJob();
-  }, config.pollIntervalMs);
+function applyDescResult(data) {
+  const product =
+    data.product ||
+    {
+      title: data.product_name || data.seo_title || "Produit",
+      images: data.images || [],
+      bullets: [],
+      description: "",
+      price: data.suggested_price,
+      source: data.source || "generic",
+      url: data.source_url || "",
+    };
+  lastDesc = { ...data, product };
+  const html = data.html_description || "";
+  descImages = (data.images && data.images.length ? data.images : product.images) || descImages || [];
+  lastDesc.images = descImages;
+  lastDesc.product.images = descImages;
+
+  document.getElementById("desc-html").textContent = html;
+  const preview = document.getElementById("desc-preview");
+  preview.classList.remove("flex", "items-center", "justify-center", "text-zinc-300");
+  preview.innerHTML = html;
+  bindPreviewImages(preview);
+
+  const banner = document.getElementById("desc-banner");
+  banner.classList.remove("hidden");
+  document.getElementById("desc-detected").textContent =
+    "Produit détecté : " + (data.product_name || data.seo_title || "").slice(0, 80);
+  document.getElementById("desc-img-badge").textContent = `${descImages.length} images`;
+  const enrich = data.enrichment || {};
+  const sec = enrich.sections ?? (data.product?.sections || []).length;
+  const ben = enrich.benefits ?? (data.product?.benefits || data.product?.bullets || []).length;
+  let enrichEl = document.getElementById("desc-enrich-badge");
+  if (!enrichEl && banner) {
+    enrichEl = document.createElement("span");
+    enrichEl.id = "desc-enrich-badge";
+    enrichEl.className =
+      "text-xs bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-100";
+    banner.insertBefore(enrichEl, document.getElementById("desc-source-badge"));
+  }
+  if (enrichEl) {
+    enrichEl.textContent =
+      sec || ben
+        ? `${sec || 0} sections · ${ben || 0} bénéfices · desc-v2`
+        : "desc-v2 — régénère après restart serveur";
+  }
+  document.getElementById("desc-source-badge").textContent = data.source || "generic";
 }
 
-async function pollSulphurJob() {
-  if (!state.sulphurJobId) return;
-  try {
-    const response = await fetch(apiUrl(`/api/sulphur/jobs/${state.sulphurJobId}`));
-    if (!response.ok) throw new Error("Job vidéo introuvable");
-    const job = await response.json();
-
-    if (job.status === "queued" || job.status === "planning") {
-      setGenerationProgress(Math.max(8, Number(job.progress) || 0), job.status);
-      updateStatus(`Planification du script… ${job.progress || 0}%`, false);
-      scheduleSulphurPolling();
-      return;
-    }
-    if (job.status === "generating" || job.status === "assembling") {
-      setGenerationProgress(job.progress || 0, job.status);
-      updateStatus(
-        `Génération FAL… ${job.scenesDone || 0}/${job.sceneCount || "?"} scènes`,
-        false
-      );
-      scheduleSulphurPolling();
-      return;
-    }
-    if (job.status === "failed") {
-      setGenerationProgress(100);
-      updateStatus(job.error || "Génération vidéo échouée", false);
-      dom.analyzeBtn.disabled = false;
-      return;
-    }
-    if (job.status === "completed") {
-      const downloadUrl = apiUrl(job.downloadUrl || `/api/sulphur/download/${job.id}`);
-      setGenerationProgress(100, "terminé");
-      dom.player.src = downloadUrl;
-      if (dom.selectedClipTitle) dom.selectedClipTitle.textContent = job.title || "Vidéo générée";
-      if (dom.selectedClipSummary) {
-        dom.selectedClipSummary.innerHTML = `MP4 prêt · <a href="${downloadUrl}" download>Télécharger</a>`;
-      }
-      dom.downloadAllBtn.disabled = false;
-      dom.downloadAllBtn.onclick = () => triggerDownload(job.downloadUrl || `/api/sulphur/download/${job.id}`, `clipforge-${job.id}.mp4`);
-      dom.analyzeBtn.disabled = false;
-      updateStatus("Vidéo IA générée via FAL — prête à télécharger", true);
-      return;
-    }
-    scheduleSulphurPolling();
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur polling vidéo", false);
-    dom.analyzeBtn.disabled = false;
-  }
-}
-
-async function createJob() {
-  if (isScriptVideoMode()) {
-    return createScriptVideoJob();
-  }
-
-  const rawVideoUrl = (dom.videoUrlInput.value || "").trim();
-  if (!rawVideoUrl) {
-    updateStatus("Colle un lien YouTube avant de générer.", false);
-    return;
-  }
-  if (!state.backendAvailable) {
-    updateStatus("Backend indisponible — lance: npm start", false);
-    return;
-  }
-  if (isLikelyYouTubeUrl(rawVideoUrl) && !state.ytDlpAvailable) {
-    updateStatus("Installe les dépendances : npm install puis npm start", false);
-    return;
-  }
-
-  const clipDuration = Number(dom.clipDuration.value);
-  const clipsCount = Number(dom.clipsCount?.value || config.defaultClipsCount);
-  const aspectRatio = dom.aspectRatio.value;
-  const copyrightShield = dom.copyrightShield ? dom.copyrightShield.checked : true;
-  const aiRemixMode = isAiRemixMode();
-  state.currentAspectRatio = aspectRatio;
-  applyPreviewAspectRatio(aspectRatio);
-
-  if (aiRemixMode) {
-    const mistralApiKey = (dom.mistralApiKey?.value || "").trim();
-    const falApiKey = (dom.falApiKey?.value || "").trim();
-    if (!mistralApiKey) {
-      updateStatus("Ajoute ta clé API Mistral pour le mode Remix IA.", false);
-      return;
-    }
-    if (!falApiKey) {
-      updateStatus("Ajoute ta clé API FAL pour le mode Remix IA.", false);
-      return;
-    }
-    saveAiKeysToStorage();
-  }
-
-  const body = new FormData();
-  body.append("videoUrl", rawVideoUrl);
-  body.append("clipDuration", String(clipDuration));
-  body.append("clipsCount", String(clipsCount));
-  body.append("aspectRatio", aspectRatio);
-  body.append("copyrightShield", copyrightShield ? "true" : "false");
-  body.append("aiRemixMode", aiRemixMode ? "true" : "false");
-  if (aiRemixMode) {
-    body.append("mistralApiKey", (dom.mistralApiKey?.value || "").trim());
-    body.append("falApiKey", (dom.falApiKey?.value || "").trim());
-  }
-  body.append("frameMode", "full-video");
-  body.append("languageMode", "no-added-audio");
-  body.append("transcript", "");
-  body.append("subtitleTheme", copyrightShield ? "shorts" : "classic");
-  body.append("highlightMode", "viral");
-  body.append("includeAutoTranscript", copyrightShield ? "true" : "false");
-  body.append("dubFrenchAudio", "false");
-  body.append("autoDubVoiceBySpeaker", "false");
-  body.append("backgroundMusic", copyrightShield ? "true" : "false");
-  body.append("includeSrtInZip", "false");
-  body.append("burnSubtitles", copyrightShield ? "true" : "false");
-  body.append("minGapSecBetweenClips", String(config.defaultMinGapSec));
-  body.append("ignoreIntroSec", String(config.defaultIgnoreIntroSec));
-  const youtubeCookies = (dom.youtubeCookiesInput?.value || "").trim();
-  if (youtubeCookies) {
-    body.append("youtubeCookies", youtubeCookies);
-  }
-
-  dom.analyzeBtn.disabled = true;
-  resetClipState();
-  setGenerationProgress(5);
-  updateStatus(aiRemixMode ? "Analyse YouTube + scripts IA viraux…" : "Analyse du lien et création des shorts…", false);
-
-  try {
-    const response = await fetch(apiUrl("/api/jobs"), { method: "POST", body });
-    if (!response.ok) {
-      const details = await response.json().catch(() => ({}));
-      throw new Error(details.error || "Impossible de créer le job");
-    }
-    const payload = await response.json();
-    state.activeJobId = payload.id;
-    updateStatus(`Job créé (${payload.id.slice(0, 8)}...), démarrage…`, false);
-    scheduleJobPolling();
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur réseau", false);
-    dom.analyzeBtn.disabled = false;
-  }
-}
-
-function applyCompletedJob(job, readyStatusText = "") {
-  setGenerationProgress(100);
-  state.clips = job.clips || [];
-  state.bundleFilename = job.downloads?.bundleFilename || "";
-  state.subtitleTheme = job.params?.subtitleTheme || state.subtitleTheme;
-  state.burnSubtitles = Boolean(job.params?.burnSubtitles);
-  state.dubFrenchAudio = Boolean(job.params?.dubFrenchAudio);
-  state.autoDubVoiceBySpeaker = Boolean(job.params?.autoDubVoiceBySpeaker);
-  state.ignoreIntroSec = Number(job.params?.ignoreIntroSec || state.ignoreIntroSec || 0);
-  state.languageMode = job.params?.languageMode || state.languageMode;
-  state.frameMode = job.params?.frameMode || state.frameMode;
-  state.noAddedAudio = state.languageMode === "no-added-audio";
-  state.currentAspectRatio = job.params?.aspectRatio || state.currentAspectRatio;
-  applyPreviewAspectRatio(state.currentAspectRatio);
-
-  renderClips();
-  if (state.clips.length > 0) {
-    setButtonsEnabled(true);
-    selectClip(0, false);
-  }
-  dom.analyzeBtn.disabled = false;
-  updateStatus(readyStatusText || `${state.clips.length} shorts générés`, true);
-  if (job.autoTranscriptUsed && dom.backendMeta && !dom.backendMeta.textContent.includes("transcription auto utilisée")) {
-    dom.backendMeta.textContent = `${dom.backendMeta.textContent} · transcription auto utilisée`;
-  }
-}
-
-function scheduleJobPolling() {
-  clearPolling();
-  state.pollTimer = setTimeout(() => {
-    void pollJob();
-  }, config.pollIntervalMs);
-}
-
-async function pollJob() {
-  if (!state.activeJobId) return;
-  try {
-    const response = await fetch(apiUrl(`/api/jobs/${state.activeJobId}`));
-    if (!response.ok) throw new Error("Job introuvable");
-    const job = await response.json();
-
-    if (job.status === "queued") {
-      setGenerationProgress(Math.max(8, Number(job.progress) || 0));
-      updateStatus("Job en file d'attente…", false);
-      scheduleJobPolling();
-      return;
-    }
-    if (job.status === "processing") {
-      setGenerationProgress(job.progress || 0, job.aiRemixStage || "");
-      const stage = job.aiRemixStage ? ` — ${job.aiRemixStage}` : "";
-      updateStatus(`Traitement en cours… ${job.progress || 0}%${stage}`, false);
-      scheduleJobPolling();
-      return;
-    }
-    if (job.status === "failed") {
-      setGenerationProgress(100);
-      updateStatus(job.error || "Traitement échoué", false);
-      dom.analyzeBtn.disabled = false;
-      return;
-    }
-    if (job.status === "completed") {
-      applyCompletedJob(job, job.params?.aiRemixMode ? "Shorts IA viraux prêts pour YouTube" : "");
-      if (job.params?.aiRemixMode && dom.backendMeta && !dom.backendMeta.textContent.includes("mode Remix IA")) {
-        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · mode Remix IA VOANH`;
-      }
-      if (job.params?.copyrightShield && dom.backendMeta && !dom.backendMeta.textContent.includes("mode Shorts foot")) {
-        dom.backendMeta.textContent = `${dom.backendMeta.textContent} · mode Shorts foot actif`;
-      }
-      return;
-    }
-    scheduleJobPolling();
-  } catch (error) {
-    updateStatus(error instanceof Error ? error.message : "Erreur polling", false);
-    dom.analyzeBtn.disabled = false;
-  }
-}
-
-function useSampleTranscript() {
-  dom.transcriptInput.value = config.sampleTranscript;
-}
-
-function initFileInput() {
-  dom.videoUrlInput.addEventListener("input", () => {
-    state.sourceVideoUrl = dom.videoUrlInput.value.trim();
+function bindPreviewImages(preview) {
+  preview.querySelectorAll("img").forEach((img, idx) => {
+    img.style.cursor = "pointer";
+    img.style.outline = "2px solid transparent";
+    img.style.transition = "outline .15s";
+    img.title = "Cliquer pour changer l'image";
+    img.onmouseenter = () => {
+      img.style.outline = "2px solid #7c3aed";
+    };
+    img.onmouseleave = () => {
+      img.style.outline = "2px solid transparent";
+    };
+    img.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openImgModal(idx);
+    };
   });
 }
 
-function initEvents() {
-  if (dom.aspectRatio) {
-    dom.aspectRatio.addEventListener("change", () => {
-      state.currentAspectRatio = dom.aspectRatio.value;
-      applyPreviewAspectRatio(state.currentAspectRatio);
-    });
-  }
+function openImgModal(idx) {
+  replaceImgIdx = Number(idx) || 0;
+  const grid = document.getElementById("img-grid");
+  const hint = document.getElementById("img-modal-hint");
+  if (hint) hint.textContent = `Image #${replaceImgIdx + 1} de l’aperçu — choisis un visuel puis « Utiliser »`;
 
-  if (dom.generationMode) {
-    dom.generationMode.addEventListener("change", () => {
-      state.generationMode = resolveGenerationMode(dom.generationMode.value);
-      applyGenerationModeUi();
-    });
+  // Déduplique aussi côté client
+  const uniq = [];
+  const seen = new Set();
+  for (const src of descImages || []) {
+    const key = String(src).replace(/\._[^.\/]+_\./g, ".").split("?")[0].toLowerCase();
+    const id = (key.match(/\/images\/i\/([a-z0-9]+)/i) || [])[1] || key;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    uniq.push(src);
   }
-  for (const el of [dom.clipDuration, dom.clipsCount, dom.videoDurationMin, dom.aspectRatio]) {
-    el?.addEventListener("change", () => {
-      void updateFalCostEstimate();
-    });
-  }
-  if (dom.mistralApiKey) {
-    dom.mistralApiKey.addEventListener("change", saveAiKeysToStorage);
-  }
-  if (dom.falApiKey) {
-    dom.falApiKey.addEventListener("change", () => {
-      saveAiKeysToStorage();
-      void updateFalCostEstimate();
-    });
-  }
+  descImages = uniq;
 
-  if (dom.analyzeBtn) {
-    dom.analyzeBtn.addEventListener("click", () => {
-      void createJob();
-    });
+  if (!descImages.length) {
+    grid.innerHTML = `<p class="text-sm text-zinc-400 col-span-full">Aucune image scrapée — régénère avec une URL Amazon valide.</p>`;
+  } else {
+    grid.innerHTML = descImages
+      .map(
+        (src, i) =>
+          `<div class="rounded-xl overflow-hidden border bg-zinc-50 ${i === replaceImgIdx ? "ring-2 ring-brand-500" : ""}">
+            <img src="${escapeHtml(src)}" class="w-full h-36 object-cover" alt="Proposition ${i + 1}" />
+            <div class="p-2 flex items-center justify-between gap-2">
+              <span class="text-[11px] text-zinc-400">#${i + 1}</span>
+              <button type="button" data-pick-img="${i}" class="btn-primary !px-3 !py-1.5 text-xs">Utiliser</button>
+            </div>
+          </div>`
+      )
+      .join("");
   }
-
-  if (dom.saveYoutubeCookiesBtn) {
-    dom.saveYoutubeCookiesBtn.addEventListener("click", () => {
-      void saveYoutubeCookies();
-    });
-  }
-  if (dom.clearYoutubeCookiesBtn) {
-    dom.clearYoutubeCookiesBtn.addEventListener("click", () => {
-      void clearYoutubeCookies();
-    });
-  }
-
-  if (dom.downloadAllBtn) {
-    dom.downloadAllBtn.addEventListener("click", () => {
-      if (!state.activeJobId) return;
-      const zipName = state.bundleFilename || `clipforge-shorts-${state.activeJobId}.zip`;
-      updateStatus("Téléchargement du ZIP…", false);
-      triggerDownload(`/api/jobs/${state.activeJobId}/bundle`, zipName);
-    });
-  }
-
-  dom.player.addEventListener("timeupdate", updateSubtitleOverlay);
+  const m = document.getElementById("img-modal");
+  m.classList.remove("hidden");
+  m.classList.add("flex");
 }
 
-function initDefaults() {
-  if (dom.generationMode) {
-    state.generationMode = resolveGenerationMode(dom.generationMode.value);
-    applyGenerationModeUi();
-  }
-  loadAiKeysFromStorage();
-  if (dom.clipDuration) dom.clipDuration.value = String(config.defaultClipDuration);
-  if (dom.clipsCount) dom.clipsCount.value = String(config.defaultClipsCount);
-  if (dom.aspectRatio) dom.aspectRatio.value = state.currentAspectRatio;
-  applyPreviewAspectRatio(state.currentAspectRatio);
-  setGenerationProgress(0);
+function closeImgModal() {
+  const m = document.getElementById("img-modal");
+  m.classList.add("hidden");
+  m.classList.remove("flex");
 }
 
-async function init() {
-  initDefaults();
-  initEvents();
-  initFileInput();
-  setButtonsEnabled(false);
-  await checkBackendHealth();
-  if (state.backendAvailable) {
+async function pickImage(i) {
+  const idx = Number(i);
+  if (!descImages[idx]) return;
+  const chosen = descImages[idx];
+  const imgs = [...descImages];
+  // Remplace le slot cliqué dans l'aperçu (ou met en principal)
+  const slot = Math.min(replaceImgIdx, Math.max(0, imgs.length - 1));
+  imgs.splice(idx, 1);
+  imgs.splice(slot, 0, chosen);
+  // Assure que l'image choisie est aussi en première (visuel principal du template)
+  descImages = [chosen, ...imgs.filter((u) => u !== chosen)];
+  closeImgModal();
+  const tip = document.getElementById("desc-theme-status");
+  if (tip) tip.textContent = "Image mise à jour…";
+  await regenerateDescTheme();
+  if (tip) tip.textContent = "Image appliquée";
+}
+
+document.getElementById("img-grid")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-pick-img]");
+  if (!btn) return;
+  pickImage(btn.getAttribute("data-pick-img"));
+});
+
+async function generateFromUrl() {
+  const productUrl = document.getElementById("desc-url").value.trim();
+  if (!productUrl) return alert("URL requise");
+  const btn = document.getElementById("desc-btn");
+  btn.disabled = true;
+  btn.innerHTML =
+    '<span class="spinner inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span> Analyse et génération en cours...';
+  try {
+    const res = await fetch(API + "/api/generate-listing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productUrl, themeColor }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Erreur");
+    applyDescResult(json.data);
+  } catch (err) {
+    alert("Erreur: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Générer la description";
+  }
+}
+
+function copyHtml() {
+  navigator.clipboard.writeText(document.getElementById("desc-html").textContent);
+  alert("HTML copié");
+}
+
+async function runBulking() {
+  const raw = document.getElementById("bulk-urls").value.trim();
+  const urls = raw.split(/\n+/).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u));
+  const cons = document.getElementById("bulk-console");
+  const btn = document.getElementById("bulk-btn");
+  if (!urls.length) return alert("Ajoutez au moins une URL");
+  btn.disabled = true;
+  cons.innerHTML = "";
+  const margin = Number(document.getElementById("bulk-margin").value) || 25;
+  for (const url of urls) {
+    cons.innerHTML += colorizeLog(`[IMPORT] ${url.slice(0, 80)}`);
     try {
-      await refreshYoutubeCookiesStatus();
-    } catch (_error) {
-      // ignore: status already derived from /api/config or /api/health
+      const res = await fetch(API + "/api/generate-listing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productUrl: url, themeColor }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "fail");
+      const price = json.data.suggested_price
+        ? Number((json.data.suggested_price * (1 + margin / 100) / 1.8).toFixed(2))
+        : null;
+      cons.innerHTML += colorizeLog(
+        `[OK] ${String(json.data.seo_title || "").slice(0, 60)} — id ${json.data.id}${price ? " ~" + price + "€" : ""}`
+      );
+    } catch (err) {
+      cons.innerHTML += colorizeLog(`[ERROR] ${err.message}`);
+    }
+    cons.scrollTop = cons.scrollHeight;
+  }
+  cons.innerHTML += colorizeLog(`[DONE] Bulking terminé — ${urls.length} URL(s)`);
+  btn.disabled = false;
+}
+
+async function runSubstitution() {
+  const oldUrl = document.getElementById("sub-old").value.trim();
+  const newUrl = document.getElementById("sub-new").value.trim();
+  if (!newUrl) return alert("URL fournisseur requise");
+  const btn = document.getElementById("sub-btn");
+  btn.disabled = true;
+  btn.textContent = "Substitution...";
+  try {
+    const res = await fetch(API + "/api/generate-listing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productUrl: newUrl, themeColor }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Erreur");
+    const box = document.getElementById("sub-result");
+    box.classList.remove("hidden");
+    box.innerHTML = `<p class="font-medium text-emerald-700 mb-1">Substitution prête</p>
+      <p><span class="text-zinc-400">Ancien :</span> ${escapeHtml(oldUrl || "(non fourni)")}</p>
+      <p><span class="text-zinc-400">Nouveau :</span> ${escapeHtml(json.data.seo_title || "")}</p>
+      <p><span class="text-zinc-400">Listing local #${json.data.id}</span> — ${json.data.suggested_price?.toFixed?.(2) || "—"} €</p>
+      <button onclick="navigate('listings')" class="mt-3 text-brand-600 text-sm font-medium">Voir dans Mes Listings →</button>`;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Substituer";
+  }
+}
+
+function loadSettings() {
+  checkHealth();
+  loadSetupStatus();
+}
+
+async function loadSetupStatus() {
+  const box = document.getElementById("setup-checklist");
+  const sample = document.getElementById("setup-browse-sample");
+  if (!box) return;
+  box.innerHTML = `<p class="text-sm text-zinc-400">Vérification…</p>`;
+  try {
+    const res = await fetch(API + "/api/setup");
+    const json = await res.json();
+    const d = json.data || {};
+    const rows = [
+      ["Browse API Production (live)", d.prodKeys && d.browse?.ok, d.browse?.ok ? d.browse.api : d.browse?.error || "Ajoute EBAY_PROD_* dans .env"],
+      ["Clés Sandbox (publish)", d.sandboxKeys, d.sandboxKeys ? "OK" : "EBAY_CLIENT_ID / SECRET"],
+      ["User token eBay", d.userToken, d.userToken ? "OK" : "EBAY_USER_TOKEN (portail)"],
+      ["Business policies", d.policies, d.policies ? "OK" : "node create-policies.js"],
+      ["LLM local (optionnel)", d.llm?.ok, d.llm?.ok ? "LM Studio OK" : "Non requis pour scraper"],
+    ];
+    box.innerHTML = rows
+      .map(
+        ([label, ok, detail]) =>
+          `<div class="flex items-start gap-3 p-3 rounded-xl border ${ok ? "bg-green-50 border-green-100" : "bg-amber-50 border-amber-100"}">
+            <span class="text-lg leading-none">${ok ? "✅" : "⚠️"}</span>
+            <div class="min-w-0"><p class="text-sm font-medium">${label}</p><p class="text-xs text-zinc-500 truncate">${escapeHtml(String(detail || ""))}</p></div>
+          </div>`
+      )
+      .join("");
+    if (sample) {
+      if (d.browse?.sample) {
+        sample.classList.remove("hidden");
+        sample.textContent = "Exemple live : " + d.browse.sample;
+      } else {
+        sample.classList.add("hidden");
+      }
+    }
+    const mode = document.getElementById("settings-mode");
+    if (mode) mode.textContent = d.browse?.ok ? "live browse-api" : "fallback / scrape";
+  } catch (err) {
+    box.innerHTML = `<p class="text-sm text-red-500">Impossible de charger le statut : ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+checkHealth();
+loadDashboard();
+
+
+// Expose handlers for onclick + bind as backup
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","loadRankings","loadListings","loadOrders","loadSettings","viewListing","publishListing","closeModal","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory"].forEach((name) => {
+  if (typeof globalThis[name] === "function") window[name] = globalThis[name];
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const map = [
+    ["title-btn", "runTitleBuilder"],
+    ["desc-btn", "generateFromUrl"],
+    ["snipe-btn", "runSnipe"],
+    ["competitor-btn", "analyzeCompetitor"],
+  ];
+  for (const [id, fn] of map) {
+    const el = document.getElementById(id);
+    // Ne pas re-binder si onclick HTML est déjà présent (évite double exécution)
+    if (el && el.getAttribute("onclick")) continue;
+    if (el && typeof window[fn] === "function" && !el.dataset.bound) {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        window[fn]();
+      });
+      el.dataset.bound = "1";
     }
   }
-}
-
-void init();
+});
