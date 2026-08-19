@@ -12,8 +12,14 @@
   const logBox = document.getElementById("logBox");
   const statsBox = document.getElementById("statsBox");
   const companyList = document.getElementById("companyList");
+  const mailTemplate = document.getElementById("mailTemplate");
+  const previewMailBtn = document.getElementById("previewMailBtn");
+  const saveTemplateBtn = document.getElementById("saveTemplateBtn");
+  const mailPreview = document.getElementById("mailPreview");
+  const mailPreviewContent = document.getElementById("mailPreviewContent");
 
   const STORAGE_KEY = "prospection-sender";
+  const TEMPLATE_KEY = "prospection-mail-template";
   let companies = [];
   let eventSource = null;
 
@@ -230,10 +236,41 @@
     log(`Proposition copiée pour ${company.name}.`);
   });
 
+  function loadTemplate() {
+    const saved = localStorage.getItem(TEMPLATE_KEY);
+    if (saved) mailTemplate.value = saved;
+  }
+
+  function saveTemplate() {
+    localStorage.setItem(TEMPLATE_KEY, mailTemplate.value);
+    log("Mod\u00e8le de mail sauvegard\u00e9.");
+  }
+
+  function fillTemplate(template, company) {
+    return template
+      .replace(/\{entreprise\}/g, company.name || "")
+      .replace(/\{dirigeant\}/g, (company.directors || [])[0] || "Madame, Monsieur")
+      .replace(/\{activite\}/g, company.activity || "")
+      .replace(/\{adresse\}/g, company.address || "");
+  }
+
+  function previewMail() {
+    if (!companies.length) {
+      log("Lancez d\u2019abord une recherche pour pr\u00e9visualiser le mail.");
+      return;
+    }
+    const filled = fillTemplate(mailTemplate.value, companies[0]);
+    mailPreviewContent.textContent = filled;
+    mailPreview.classList.add("visible");
+  }
+
   runBtn.addEventListener("click", run);
   csvBtn.addEventListener("click", exportCsv);
+  previewMailBtn.addEventListener("click", previewMail);
+  saveTemplateBtn.addEventListener("click", saveTemplate);
   [senderName, senderEmail, senderPhone].forEach((input) => input.addEventListener("change", saveSender));
 
   loadSender();
+  loadTemplate();
   loadSectors().catch((error) => log(`Impossible de charger les secteurs : ${error.message}`));
 })();
