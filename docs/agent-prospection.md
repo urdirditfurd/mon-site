@@ -75,15 +75,17 @@ Experts-comptables, cabinets comptables et conseillers qui souhaitent **prospect
 
 ## Fichiers du projet
 
+Tout est regroupé dans **`agent-prospection/`** :
+
 | Fichier | Rôle |
 |---------|------|
-| `prospection.html` | Interface (HTML + CSS) |
-| `prospection.js` | Logique front (recherche, mails, export) |
-| `server/prospection-agent.js` | Agent IA (BODACC, contacts, SSE) |
-| `server/prospection-server.js` | Serveur minimal standalone (repo Agent-de-propspection) |
-| `server/index.js` | Serveur Express complet ClipForge (mon-site) |
+| `agent-prospection/index.html` | Interface (HTML + CSS) |
+| `agent-prospection/prospection.js` | Logique front (recherche, mails, export) |
+| `agent-prospection/favicon.png` | Icône onglet (tons orange du site) |
+| `agent-prospection/server/prospection-agent.js` | Agent IA (BODACC, contacts, SSE) |
+| `agent-prospection/server/standalone-server.js` | Serveur minimal (repo autonome) |
 
-Pour le repo **Agent-de-propspection** autonome, copiez `server/prospection-server.js` en `server/index.js` et lancez `npm start`.
+Le serveur principal ClipForge (`server/index.js`) monte les routes `/prospection` et `/api/prospection`.
 
 ---
 

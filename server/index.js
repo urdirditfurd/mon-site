@@ -14,10 +14,11 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
-const PROSPECTION_HTML_PATH = path.join(ROOT_DIR, "prospection.html");
+const PROSPECTION_DIR = path.join(ROOT_DIR, "agent-prospection");
+const PROSPECTION_HTML_PATH = path.join(PROSPECTION_DIR, "index.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
-const { createProspectionRouter } = require("./prospection-agent");
+const { createProspectionRouter } = require("../agent-prospection/server/prospection-agent");
 const { FAL_LIMITS, estimateFalJob, listFalModels, DEFAULT_FAL_MODEL } = require("./fal-limits");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
 const { isYtDlpAvailable, buildYtDlpArgs, getYtDlpSource, resolveYtDlpInvocation } = require("./ytdlp");
@@ -3901,10 +3902,11 @@ app.get("/studio", (_req, res) => {
 app.get("/prospection", (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!fs.existsSync(PROSPECTION_HTML_PATH)) {
-    return res.status(404).send("prospection.html introuvable");
+    return res.status(404).send("agent-prospection/index.html introuvable");
   }
   return res.sendFile(PROSPECTION_HTML_PATH);
 });
+app.use("/prospection", express.static(PROSPECTION_DIR, { index: false }));
 
 ensureDirs()
   .then(async () => {

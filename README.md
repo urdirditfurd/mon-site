@@ -39,14 +39,15 @@ Application fullstack de génération de clips courts “social-ready”, inspir
 
 Outil autonome pour **trouver les nouvelles entreprises** d'un secteur, **retrouver leurs contacts** (e-mail / téléphone) via des sources publiques gratuites, et **préparer des mails de prospection** comptables.
 
-- Interface : `/prospection` (fichiers `prospection.html`, `prospection.js`)
-- Backend : `server/prospection-agent.js` (BODACC, SIRENE, contacts)
-- Présentation complète : [`docs/agent-prospection.md`](docs/agent-prospection.md)
+- Dossier : [`agent-prospection/`](agent-prospection/) (interface, favicon, backend agent)
+- URL : **http://localhost:3000/prospection**
+- Présentation : [`docs/agent-prospection.md`](docs/agent-prospection.md)
 
 ```bash
 npm install
 npm start
-# → http://localhost:3000/prospection
+# ou uniquement l'agent :
+npm run start:prospection
 ```
 
 ## Pré-requis
