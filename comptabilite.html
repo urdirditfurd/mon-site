@@ -14,7 +14,6 @@
 html{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:15px}
 body{display:flex;min-height:100vh}
 
-/* Sidebar */
 .sidebar{width:240px;background:var(--sidebar);color:#fff;padding:20px 0;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform .25s}
 .sidebar .logo{padding:0 24px 28px;font-size:1.3rem;font-weight:700;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}
 .sidebar .logo span{background:var(--accent);border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
@@ -22,9 +21,12 @@ body{display:flex;min-height:100vh}
 .sidebar nav a:hover{background:var(--sidebar-hover);color:#fff}
 .sidebar nav a.active{background:var(--sidebar-hover);color:#fff;border-left-color:var(--accent)}
 .sidebar nav a svg{width:20px;height:20px;flex-shrink:0}
-.sidebar .version{margin-top:auto;padding:16px 24px;font-size:.75rem;color:rgba(255,255,255,.3)}
+.sidebar .sep{height:1px;background:rgba(255,255,255,.1);margin:10px 24px}
+.sidebar .bottom-links{margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
+.sidebar .bottom-links a{font-size:.82rem;color:rgba(255,255,255,.45)}
+.sidebar .bottom-links a:hover{color:#fff}
+.sidebar .version{padding:12px 24px 0;font-size:.72rem;color:rgba(255,255,255,.25)}
 
-/* Main */
 .main{margin-left:240px;flex:1;padding:28px 36px;max-width:1200px}
 .page{display:none;animation:fadeIn .2s}
 .page.active{display:block}
@@ -33,7 +35,6 @@ body{display:flex;min-height:100vh}
 h1{font-size:1.55rem;font-weight:700;margin-bottom:6px}
 .subtitle{color:var(--muted);font-size:.9rem;margin-bottom:24px}
 
-/* Cards KPI */
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
 .kpi{background:var(--card);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
 .kpi .label{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
@@ -41,16 +42,19 @@ h1{font-size:1.55rem;font-weight:700;margin-bottom:6px}
 .kpi .value.positive{color:var(--green)}
 .kpi .value.negative{color:var(--red)}
 
-/* Table card */
-.table-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-.table-header{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border)}
+.table-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:24px}
+.table-header{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px}
 .table-header h2{font-size:1.05rem;font-weight:600}
+.table-header .btn-group{display:flex;gap:8px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:.85rem;font-weight:500;transition:all .15s}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-primary:hover{background:var(--accent-light)}
+.btn-secondary{background:#e5e7eb;color:var(--text)}
+.btn-secondary:hover{background:#d1d5db}
 .btn-danger{background:var(--red);color:#fff}
 .btn-danger:hover{opacity:.85}
 .btn-sm{padding:5px 10px;font-size:.8rem}
+.btn-xs{padding:3px 8px;font-size:.75rem}
 table{width:100%;border-collapse:collapse}
 thead th{text-align:left;padding:12px 22px;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border)}
 tbody td{padding:12px 22px;border-bottom:1px solid var(--border);font-size:.9rem}
@@ -61,37 +65,49 @@ tbody tr:last-child td{border-bottom:none}
 .badge-red{background:#fee2e2;color:#991b1b}
 .badge-orange{background:#fef3c7;color:#92400e}
 .badge-blue{background:#dbeafe;color:#1e40af}
+.badge-purple{background:#ede9fe;color:#5b21b6}
 
-/* Modal */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
 .modal-overlay.show{display:flex}
-.modal{background:var(--card);border-radius:var(--radius);padding:28px;width:95%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,.15);animation:slideUp .2s}
+.modal{background:var(--card);border-radius:var(--radius);padding:28px;width:95%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15);animation:slideUp .2s}
 @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 .modal h3{font-size:1.15rem;font-weight:600;margin-bottom:20px}
 .form-group{margin-bottom:16px}
 .form-group label{display:block;font-size:.82rem;font-weight:500;margin-bottom:5px;color:var(--muted)}
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;font-family:inherit;transition:border .15s}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--accent)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
 
-/* Empty state */
 .empty{text-align:center;padding:48px 20px;color:var(--muted)}
-.empty svg{width:48px;height:48px;margin-bottom:12px;opacity:.4}
 .empty p{font-size:.95rem}
 
-/* Responsive */
+.amort-detail{background:#f9fafb;border-radius:8px;margin:8px 22px 16px;padding:16px;font-size:.85rem}
+.amort-detail table{font-size:.82rem}
+.amort-detail th,.amort-detail td{padding:6px 12px}
+.amort-detail .close-detail{float:right;cursor:pointer;color:var(--muted);font-size:1.1rem}
+.progress-bar{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin-top:4px}
+.progress-bar .fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+
+.save-banner{background:linear-gradient(135deg,#1e1b4b,#312e81);color:#fff;border-radius:var(--radius);padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.save-banner p{font-size:.88rem;opacity:.85}
+.save-banner .btn-group{display:flex;gap:8px}
+
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}
   .main{margin-left:0;padding:20px 16px}
   .kpi-row{grid-template-columns:1fr 1fr}
   .mobile-toggle{display:flex !important}
+  .form-row{grid-template-columns:1fr}
 }
 .mobile-toggle{display:none;position:fixed;top:12px;left:12px;z-index:150;background:var(--accent);color:#fff;border:none;border-radius:8px;width:40px;height:40px;align-items:center;justify-content:center;cursor:pointer;font-size:1.2rem}
 
-/* Toast */
 .toast{position:fixed;bottom:24px;right:24px;background:#1e1e2e;color:#fff;padding:12px 20px;border-radius:10px;font-size:.88rem;z-index:300;transform:translateY(80px);opacity:0;transition:all .3s}
 .toast.show{transform:translateY(0);opacity:1}
+
+.auto-save-indicator{position:fixed;bottom:24px;left:24px;font-size:.72rem;color:var(--muted);z-index:300;display:flex;align-items:center;gap:6px}
+.auto-save-indicator .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
 </style>
 </head>
 <body>
@@ -121,8 +137,19 @@ tbody tr:last-child td{border-bottom:none}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       Notes de frais
     </a>
+    <a href="#" data-page="immos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>
+      Immobilisations
+    </a>
+    <div class="sep"></div>
   </nav>
-  <div class="version">ComptaFlow v1.0 — Données locales</div>
+  <div class="bottom-links">
+    <a href="#" data-page="donnees">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;margin-left:2px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Sauvegardes
+    </a>
+  </div>
+  <div class="version">ComptaFlow v2.0 — Fichier JSON local</div>
 </aside>
 
 <main class="main">
@@ -142,6 +169,12 @@ tbody tr:last-child td{border-bottom:none}
       <div class="kpi"><div class="label">TVA collectée</div><div class="value" id="kpi-tva-col">0,00 €</div></div>
       <div class="kpi"><div class="label">TVA déductible</div><div class="value" id="kpi-tva-ded">0,00 €</div></div>
       <div class="kpi"><div class="label">TVA à reverser</div><div class="value" id="kpi-tva-net">0,00 €</div></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Immobilisations brutes</div><div class="value" id="kpi-immo-brut">0,00 €</div></div>
+      <div class="kpi"><div class="label">Amort. cumulés</div><div class="value negative" id="kpi-amort-cumul">0,00 €</div></div>
+      <div class="kpi"><div class="label">VNC totale</div><div class="value" id="kpi-vnc">0,00 €</div></div>
+      <div class="kpi"><div class="label">Dotation exercice</div><div class="value negative" id="kpi-dotation">0,00 €</div></div>
     </div>
   </section>
 
@@ -205,43 +238,209 @@ tbody tr:last-child td{border-bottom:none}
     </div>
   </section>
 
+  <!-- IMMOBILISATIONS -->
+  <section class="page" id="page-immos">
+    <h1>Immobilisations</h1>
+    <p class="subtitle">Biens amortissables — amortissement linéaire ou dégressif</p>
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Nb immobilisations</div><div class="value" id="immo-count">0</div></div>
+      <div class="kpi"><div class="label">Valeur brute</div><div class="value" id="immo-brut">0,00 €</div></div>
+      <div class="kpi"><div class="label">VNC totale</div><div class="value" id="immo-vnc">0,00 €</div></div>
+      <div class="kpi"><div class="label">Dotation exercice</div><div class="value negative" id="immo-dot">0,00 €</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-header">
+        <h2>Registre des immobilisations</h2>
+        <button class="btn btn-primary" onclick="openModal('immo')">+ Nouvelle immobilisation</button>
+      </div>
+      <table><thead><tr><th>Désignation</th><th>Catégorie</th><th>Mise en service</th><th>Valeur HT</th><th>Durée</th><th>Mode</th><th>VNC</th><th>Avancement</th><th></th></tr></thead>
+      <tbody id="table-immos"></tbody></table>
+      <div class="empty" id="empty-immos"><p>Aucune immobilisation enregistrée</p></div>
+    </div>
+  </section>
+
+  <!-- SAUVEGARDES -->
+  <section class="page" id="page-donnees">
+    <h1>Sauvegarde des données</h1>
+    <p class="subtitle">Exportez et importez vos données en fichier JSON pour ne jamais les perdre</p>
+    <div class="save-banner">
+      <div>
+        <p><strong>Mode Loop :</strong> Vos données sont sauvegardées en localStorage ET exportables en fichier JSON.</p>
+        <p>Téléchargez régulièrement votre sauvegarde, et réimportez-la si vous changez de navigateur ou de machine.</p>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="exportData()">⬇ Exporter JSON</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">⬆ Importer JSON</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h2>État des données</h2></div>
+      <table>
+        <tbody>
+          <tr><td>Factures de vente</td><td id="stat-ventes">0</td></tr>
+          <tr><td>Factures d'achat</td><td id="stat-achats">0</td></tr>
+          <tr><td>Opérations bancaires</td><td id="stat-banque">0</td></tr>
+          <tr><td>Notes de frais</td><td id="stat-ndf">0</td></tr>
+          <tr><td>Immobilisations</td><td id="stat-immos">0</td></tr>
+          <tr><td>Dernière sauvegarde auto</td><td id="stat-lastsave">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-card" style="margin-top:16px">
+      <div class="table-header"><h2>Réinitialisation</h2></div>
+      <div style="padding:20px 22px">
+        <p style="font-size:.88rem;color:var(--muted);margin-bottom:12px">Supprime toutes les données locales. Cette action est irréversible — exportez d'abord !</p>
+        <button class="btn btn-danger" onclick="if(confirm('Supprimer TOUTES les données ? Cette action est irréversible.')){data={ventes:[],achats:[],banque:[],ndf:[],immos:[],nextId:1};saveData(data);render();toast('Données réinitialisées');}">Tout supprimer</button>
+      </div>
+    </div>
+  </section>
+
 </main>
 
-<!-- MODALS -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal" id="modal-content"></div>
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="auto-save-indicator"><div class="dot"></div> Auto-save actif</div>
 
 <script>
 const STORAGE_KEY = 'comptaflow_data';
+const CURRENT_YEAR = new Date().getFullYear();
 
 function loadData() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) return JSON.parse(raw);
-  return { ventes: [], achats: [], banque: [], ndf: [], nextId: 1 };
+  if (raw) {
+    const d = JSON.parse(raw);
+    if (!d.immos) d.immos = [];
+    return d;
+  }
+  return { ventes: [], achats: [], banque: [], ndf: [], immos: [], nextId: 1 };
 }
-function saveData(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+function saveData(d) {
+  d._savedAt = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+}
 
 let data = loadData();
 
 function fmt(n) { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n); }
-function fmtNum(n) { return new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2 }).format(n); }
 function genId() { return data.nextId++; }
 function toast(msg) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
+  t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2200);
 }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-// Navigation
-document.querySelectorAll('.sidebar nav a').forEach(a => {
+// --- Amortissement ---
+function calcAmortLineaire(valeur, duree, dateMiseEnService) {
+  const annuite = valeur / duree;
+  const miseEnService = new Date(dateMiseEnService);
+  const anneeDebut = miseEnService.getFullYear();
+  const jourDansAnnee = (new Date(anneeDebut, 11, 31) - miseEnService) / (1000*60*60*24) + 1;
+  const joursTotal = (anneeDebut % 4 === 0 && (anneeDebut % 100 !== 0 || anneeDebut % 400 === 0)) ? 366 : 365;
+  const prorata1 = jourDansAnnee / joursTotal;
+  const lignes = [];
+  let vncDebut = valeur;
+  for (let i = 0; i < duree + 1; i++) {
+    if (vncDebut <= 0.005) break;
+    const annee = anneeDebut + i;
+    let dotation;
+    if (i === 0) {
+      dotation = Math.min(annuite * prorata1, vncDebut);
+    } else {
+      dotation = Math.min(annuite, vncDebut);
+    }
+    dotation = Math.round(dotation * 100) / 100;
+    if (dotation > vncDebut) dotation = vncDebut;
+    const vncFin = Math.round((vncDebut - dotation) * 100) / 100;
+    lignes.push({ annee, vncDebut: Math.round(vncDebut*100)/100, dotation, amortCumul: Math.round((valeur - vncFin)*100)/100, vncFin });
+    vncDebut = vncFin;
+  }
+  return lignes;
+}
+
+function calcAmortDegressif(valeur, duree, dateMiseEnService) {
+  const coefs = { 3: 1.25, 4: 1.25, 5: 1.75, 6: 2.25, 7: 2.25 };
+  const coef = duree <= 4 ? 1.25 : duree <= 6 ? 1.75 : 2.25;
+  const tauxLin = 1 / duree;
+  const tauxDeg = tauxLin * coef;
+  const miseEnService = new Date(dateMiseEnService);
+  const anneeDebut = miseEnService.getFullYear();
+  const moisRestants = 12 - miseEnService.getMonth();
+  const prorata1 = moisRestants / 12;
+  const lignes = [];
+  let vncDebut = valeur;
+  let dureeRestante = duree;
+  for (let i = 0; vncDebut > 0.005 && i < duree + 2; i++) {
+    const annee = anneeDebut + i;
+    const tauxLinRestant = dureeRestante > 0 ? 1 / dureeRestante : 1;
+    const useLineaire = tauxLinRestant >= tauxDeg;
+    let dotation;
+    if (i === 0) {
+      dotation = vncDebut * tauxDeg * prorata1;
+    } else if (useLineaire) {
+      dotation = vncDebut * tauxLinRestant;
+    } else {
+      dotation = vncDebut * tauxDeg;
+    }
+    dotation = Math.round(dotation * 100) / 100;
+    if (dotation > vncDebut) dotation = Math.round(vncDebut * 100) / 100;
+    const vncFin = Math.round((vncDebut - dotation) * 100) / 100;
+    lignes.push({
+      annee, vncDebut: Math.round(vncDebut*100)/100, dotation,
+      amortCumul: Math.round((valeur - vncFin)*100)/100, vncFin,
+      mode: useLineaire && i > 0 ? 'linéaire' : 'dégressif'
+    });
+    vncDebut = vncFin;
+    dureeRestante = Math.max(dureeRestante - (i === 0 ? prorata1 : 1), 0);
+  }
+  return lignes;
+}
+
+function getAmortTable(immo) {
+  return immo.mode === 'degressif'
+    ? calcAmortDegressif(immo.valeur, immo.duree, immo.dateMiseEnService)
+    : calcAmortLineaire(immo.valeur, immo.duree, immo.dateMiseEnService);
+}
+
+function getVNC(immo) {
+  const table = getAmortTable(immo);
+  const ligne = table.find(l => l.annee === CURRENT_YEAR);
+  if (ligne) return ligne.vncFin;
+  const last = table[table.length - 1];
+  if (last && last.annee < CURRENT_YEAR) return 0;
+  return immo.valeur;
+}
+
+function getDotationExercice(immo) {
+  const table = getAmortTable(immo);
+  const ligne = table.find(l => l.annee === CURRENT_YEAR);
+  return ligne ? ligne.dotation : 0;
+}
+
+function getAmortCumul(immo) {
+  const table = getAmortTable(immo);
+  const ligne = table.find(l => l.annee === CURRENT_YEAR);
+  if (ligne) return ligne.amortCumul;
+  const last = table[table.length - 1];
+  if (last && last.annee < CURRENT_YEAR) return immo.valeur;
+  return 0;
+}
+
+function getAvancement(immo) {
+  return Math.min(100, Math.round((getAmortCumul(immo) / immo.valeur) * 100));
+}
+
+// --- Navigation ---
+document.querySelectorAll('.sidebar nav a, .sidebar .bottom-links a').forEach(a => {
   a.addEventListener('click', e => {
     e.preventDefault();
     const page = a.dataset.page;
-    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+    if (!page) return;
+    document.querySelectorAll('.sidebar nav a, .sidebar .bottom-links a').forEach(x => x.classList.remove('active'));
     a.classList.add('active');
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
@@ -249,13 +448,9 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
   });
 });
 
-// Render
+// --- Render ---
 function render() {
-  renderVentes();
-  renderAchats();
-  renderBanque();
-  renderNdf();
-  renderKpis();
+  renderVentes(); renderAchats(); renderBanque(); renderNdf(); renderImmos(); renderKpis(); renderStats();
 }
 
 function renderVentes() {
@@ -264,16 +459,13 @@ function renderVentes() {
   if (!data.ventes.length) { tb.innerHTML = ''; em.style.display = ''; return; }
   em.style.display = 'none';
   tb.innerHTML = data.ventes.map(v => {
-    const tva = v.ht * v.tauxTva / 100;
-    const ttc = v.ht + tva;
+    const tva = v.ht * v.tauxTva / 100; const ttc = v.ht + tva;
     const badge = v.statut === 'payee' ? 'badge-green' : v.statut === 'envoyee' ? 'badge-orange' : 'badge-blue';
     const label = v.statut === 'payee' ? 'Payée' : v.statut === 'envoyee' ? 'Envoyée' : 'Brouillon';
-    return `<tr>
-      <td>FAC-${String(v.id).padStart(4,'0')}</td><td>${v.date}</td><td>${esc(v.client)}</td>
+    return `<tr><td>FAC-${String(v.id).padStart(4,'0')}</td><td>${v.date}</td><td>${esc(v.client)}</td>
       <td>${fmt(v.ht)}</td><td>${fmt(tva)}</td><td>${fmt(ttc)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="del('ventes',${v.id})">✕</button></td>
-    </tr>`;
+      <td><button class="btn btn-danger btn-sm" onclick="del('ventes',${v.id})">✕</button></td></tr>`;
   }).join('');
 }
 
@@ -283,16 +475,13 @@ function renderAchats() {
   if (!data.achats.length) { tb.innerHTML = ''; em.style.display = ''; return; }
   em.style.display = 'none';
   tb.innerHTML = data.achats.map(v => {
-    const tva = v.ht * v.tauxTva / 100;
-    const ttc = v.ht + tva;
+    const tva = v.ht * v.tauxTva / 100; const ttc = v.ht + tva;
     const badge = v.statut === 'payee' ? 'badge-green' : 'badge-orange';
     const label = v.statut === 'payee' ? 'Payée' : 'À payer';
-    return `<tr>
-      <td>ACH-${String(v.id).padStart(4,'0')}</td><td>${v.date}</td><td>${esc(v.fournisseur)}</td>
+    return `<tr><td>ACH-${String(v.id).padStart(4,'0')}</td><td>${v.date}</td><td>${esc(v.fournisseur)}</td>
       <td>${fmt(v.ht)}</td><td>${fmt(tva)}</td><td>${fmt(ttc)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="del('achats',${v.id})">✕</button></td>
-    </tr>`;
+      <td><button class="btn btn-danger btn-sm" onclick="del('achats',${v.id})">✕</button></td></tr>`;
   }).join('');
 }
 
@@ -307,13 +496,11 @@ function renderBanque() {
     solde += (o.credit || 0) - (o.debit || 0);
     const rapBadge = o.rapproche ? 'badge-green' : 'badge-orange';
     const rapLabel = o.rapproche ? 'Oui' : 'Non';
-    return `<tr>
-      <td>${o.date}</td><td>${esc(o.libelle)}</td>
+    return `<tr><td>${o.date}</td><td>${esc(o.libelle)}</td>
       <td>${o.debit ? fmt(o.debit) : '—'}</td><td>${o.credit ? fmt(o.credit) : '—'}</td>
       <td style="font-weight:600">${fmt(solde)}</td>
       <td><span class="badge ${rapBadge}" style="cursor:pointer" onclick="toggleRap(${o.id})">${rapLabel}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="del('banque',${o.id})">✕</button></td>
-    </tr>`;
+      <td><button class="btn btn-danger btn-sm" onclick="del('banque',${o.id})">✕</button></td></tr>`;
   }).join('');
 }
 
@@ -325,13 +512,67 @@ function renderNdf() {
   tb.innerHTML = data.ndf.map(n => {
     const badge = n.statut === 'remboursee' ? 'badge-green' : n.statut === 'validee' ? 'badge-blue' : 'badge-orange';
     const label = n.statut === 'remboursee' ? 'Remboursée' : n.statut === 'validee' ? 'Validée' : 'En attente';
-    return `<tr>
-      <td>${n.date}</td><td>${esc(n.description)}</td><td>${esc(n.categorie)}</td>
+    return `<tr><td>${n.date}</td><td>${esc(n.description)}</td><td>${esc(n.categorie)}</td>
       <td>${fmt(n.montant)}</td><td>${fmt(n.tvaRecup || 0)}</td>
       <td><span class="badge ${badge}">${label}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="del('ndf',${n.id})">✕</button></td>
-    </tr>`;
+      <td><button class="btn btn-danger btn-sm" onclick="del('ndf',${n.id})">✕</button></td></tr>`;
   }).join('');
+}
+
+function renderImmos() {
+  const tb = document.getElementById('table-immos');
+  const em = document.getElementById('empty-immos');
+  if (!data.immos.length) { tb.innerHTML = ''; em.style.display = ''; return; }
+  em.style.display = 'none';
+  const totalBrut = data.immos.reduce((s, i) => s + i.valeur, 0);
+  const totalVnc = data.immos.reduce((s, i) => s + getVNC(i), 0);
+  const totalDot = data.immos.reduce((s, i) => s + getDotationExercice(i), 0);
+  document.getElementById('immo-count').textContent = data.immos.length;
+  document.getElementById('immo-brut').textContent = fmt(totalBrut);
+  document.getElementById('immo-vnc').textContent = fmt(totalVnc);
+  document.getElementById('immo-dot').textContent = fmt(totalDot);
+
+  tb.innerHTML = data.immos.map(im => {
+    const vnc = getVNC(im);
+    const pct = getAvancement(im);
+    const modeLabel = im.mode === 'degressif' ? 'Dégressif' : 'Linéaire';
+    const modeBadge = im.mode === 'degressif' ? 'badge-purple' : 'badge-blue';
+    return `<tr>
+      <td><strong>${esc(im.designation)}</strong></td>
+      <td>${esc(im.categorie)}</td>
+      <td>${im.dateMiseEnService}</td>
+      <td>${fmt(im.valeur)}</td>
+      <td>${im.duree} ans</td>
+      <td><span class="badge ${modeBadge}">${modeLabel}</span></td>
+      <td>${fmt(vnc)}</td>
+      <td style="min-width:100px"><div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div><span style="font-size:.72rem;color:var(--muted)">${pct}%</span></td>
+      <td>
+        <button class="btn btn-secondary btn-xs" onclick="showAmortDetail(${im.id})">Tableau</button>
+        <button class="btn btn-danger btn-xs" onclick="del('immos',${im.id})">✕</button>
+      </td>
+    </tr>
+    <tr id="amort-row-${im.id}" style="display:none"><td colspan="9" style="padding:0"></td></tr>`;
+  }).join('');
+}
+
+function showAmortDetail(id) {
+  const row = document.getElementById('amort-row-' + id);
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  const im = data.immos.find(x => x.id === id);
+  const table = getAmortTable(im);
+  const cell = row.querySelector('td');
+  cell.innerHTML = `<div class="amort-detail">
+    <span class="close-detail" onclick="document.getElementById('amort-row-${id}').style.display='none'">✕</span>
+    <strong>Tableau d'amortissement — ${esc(im.designation)} (${im.mode === 'degressif' ? 'dégressif' : 'linéaire'})</strong>
+    <table style="margin-top:10px"><thead><tr><th>Année</th><th>VNC début</th><th>Dotation</th><th>Amort. cumulé</th><th>VNC fin</th>${im.mode === 'degressif' ? '<th>Mode</th>' : ''}</tr></thead><tbody>
+    ${table.map(l => `<tr style="${l.annee === CURRENT_YEAR ? 'background:#eef2ff;font-weight:600' : ''}">
+      <td>${l.annee}</td><td>${fmt(l.vncDebut)}</td><td>${fmt(l.dotation)}</td><td>${fmt(l.amortCumul)}</td><td>${fmt(l.vncFin)}</td>
+      ${im.mode === 'degressif' ? `<td><span class="badge ${l.mode === 'linéaire' ? 'badge-blue' : 'badge-purple'}">${l.mode}</span></td>` : ''}
+    </tr>`).join('')}
+    </tbody></table>
+    <p style="margin-top:8px;color:var(--muted);font-size:.78rem">Valeur résiduelle : ${fmt(im.valeurResiduelle || 0)} — Date de cession : ${im.dateCession || 'En cours'}</p>
+  </div>`;
+  row.style.display = '';
 }
 
 function renderKpis() {
@@ -341,7 +582,11 @@ function renderKpis() {
   const tvaCol = data.ventes.reduce((s, v) => s + v.ht * v.tauxTva / 100, 0);
   const tvaDed = data.achats.reduce((s, v) => s + v.ht * v.tauxTva / 100, 0) + data.ndf.reduce((s, n) => s + (n.tvaRecup || 0), 0);
   const soldeBanque = data.banque.reduce((s, o) => s + (o.credit || 0) - (o.debit || 0), 0);
-  const resultat = ca - totalAchats - totalNdf;
+  const totalDot = data.immos.reduce((s, i) => s + getDotationExercice(i), 0);
+  const resultat = ca - totalAchats - totalNdf - totalDot;
+  const immoBrut = data.immos.reduce((s, i) => s + i.valeur, 0);
+  const amortCumul = data.immos.reduce((s, i) => s + getAmortCumul(i), 0);
+  const vnc = data.immos.reduce((s, i) => s + getVNC(i), 0);
 
   document.getElementById('kpi-ca').textContent = fmt(ca);
   document.getElementById('kpi-achats').textContent = fmt(totalAchats);
@@ -355,23 +600,64 @@ function renderKpis() {
   const tvaNet = tvaCol - tvaDed;
   document.getElementById('kpi-tva-net').textContent = fmt(tvaNet);
   document.getElementById('kpi-tva-net').className = 'value ' + (tvaNet > 0 ? 'negative' : 'positive');
+  document.getElementById('kpi-immo-brut').textContent = fmt(immoBrut);
+  document.getElementById('kpi-amort-cumul').textContent = fmt(amortCumul);
+  document.getElementById('kpi-vnc').textContent = fmt(vnc);
+  document.getElementById('kpi-dotation').textContent = fmt(totalDot);
+}
+
+function renderStats() {
+  document.getElementById('stat-ventes').textContent = data.ventes.length;
+  document.getElementById('stat-achats').textContent = data.achats.length;
+  document.getElementById('stat-banque').textContent = data.banque.length;
+  document.getElementById('stat-ndf').textContent = data.ndf.length;
+  document.getElementById('stat-immos').textContent = (data.immos || []).length;
+  document.getElementById('stat-lastsave').textContent = data._savedAt ? new Date(data._savedAt).toLocaleString('fr-FR') : '—';
 }
 
 function del(type, id) {
   data[type] = data[type].filter(x => x.id !== id);
-  saveData(data);
-  render();
-  toast('Supprimé');
+  saveData(data); render(); toast('Supprimé');
 }
-
 function toggleRap(id) {
   const o = data.banque.find(x => x.id === id);
   if (o) { o.rapproche = !o.rapproche; saveData(data); render(); }
 }
 
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// --- Export / Import ---
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `comptaflow-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Sauvegarde exportée');
+}
 
-// Modals
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const imported = JSON.parse(ev.target.result);
+      if (!imported.ventes && !imported.achats) throw new Error('Format invalide');
+      if (!imported.immos) imported.immos = [];
+      data = imported;
+      saveData(data);
+      render();
+      toast('Données importées avec succès');
+    } catch (err) {
+      toast('Erreur : fichier JSON invalide');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// --- Modals ---
 function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
 document.getElementById('modal-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 
@@ -386,8 +672,10 @@ function openModal(type) {
         <div class="form-group"><label>Date</label><input type="date" name="date" value="${today}" required></div>
         <div class="form-group"><label>Client</label><input type="text" name="client" placeholder="Nom du client" required></div>
         <div class="form-group"><label>Montant HT (€)</label><input type="number" step="0.01" name="ht" placeholder="0.00" required></div>
-        <div class="form-group"><label>Taux TVA (%)</label><select name="tva"><option value="20">20%</option><option value="10">10%</option><option value="5.5">5,5%</option><option value="0">0% (exonéré)</option></select></div>
-        <div class="form-group"><label>Statut</label><select name="statut"><option value="brouillon">Brouillon</option><option value="envoyee">Envoyée</option><option value="payee">Payée</option></select></div>
+        <div class="form-row">
+          <div class="form-group"><label>Taux TVA (%)</label><select name="tva"><option value="20">20%</option><option value="10">10%</option><option value="5.5">5,5%</option><option value="0">0%</option></select></div>
+          <div class="form-group"><label>Statut</label><select name="statut"><option value="brouillon">Brouillon</option><option value="envoyee">Envoyée</option><option value="payee">Payée</option></select></div>
+        </div>
         <div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Ajouter</button></div>
       </form>`,
     achat: `<h3>Nouvelle facture d'achat</h3>
@@ -395,46 +683,82 @@ function openModal(type) {
         <div class="form-group"><label>Date</label><input type="date" name="date" value="${today}" required></div>
         <div class="form-group"><label>Fournisseur</label><input type="text" name="fournisseur" placeholder="Nom du fournisseur" required></div>
         <div class="form-group"><label>Montant HT (€)</label><input type="number" step="0.01" name="ht" placeholder="0.00" required></div>
-        <div class="form-group"><label>Taux TVA (%)</label><select name="tva"><option value="20">20%</option><option value="10">10%</option><option value="5.5">5,5%</option><option value="0">0% (exonéré)</option></select></div>
-        <div class="form-group"><label>Statut</label><select name="statut"><option value="a_payer">À payer</option><option value="payee">Payée</option></select></div>
+        <div class="form-row">
+          <div class="form-group"><label>Taux TVA (%)</label><select name="tva"><option value="20">20%</option><option value="10">10%</option><option value="5.5">5,5%</option><option value="0">0%</option></select></div>
+          <div class="form-group"><label>Statut</label><select name="statut"><option value="a_payer">À payer</option><option value="payee">Payée</option></select></div>
+        </div>
         <div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Ajouter</button></div>
       </form>`,
     banque: `<h3>Nouvelle opération bancaire</h3>
       <form onsubmit="return addBanque(this)">
         <div class="form-group"><label>Date</label><input type="date" name="date" value="${today}" required></div>
         <div class="form-group"><label>Libellé</label><input type="text" name="libelle" placeholder="Description de l'opération" required></div>
-        <div class="form-group"><label>Type</label><select name="type" onchange="this.form.querySelector('[name=montant]').placeholder=this.value==='debit'?'Montant débit':'Montant crédit'"><option value="debit">Débit (sortie)</option><option value="credit">Crédit (entrée)</option></select></div>
-        <div class="form-group"><label>Montant (€)</label><input type="number" step="0.01" name="montant" placeholder="Montant débit" required></div>
+        <div class="form-row">
+          <div class="form-group"><label>Type</label><select name="type"><option value="debit">Débit (sortie)</option><option value="credit">Crédit (entrée)</option></select></div>
+          <div class="form-group"><label>Montant (€)</label><input type="number" step="0.01" name="montant" placeholder="0.00" required></div>
+        </div>
         <div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Ajouter</button></div>
       </form>`,
     ndf: `<h3>Nouvelle note de frais</h3>
       <form onsubmit="return addNdf(this)">
         <div class="form-group"><label>Date</label><input type="date" name="date" value="${today}" required></div>
         <div class="form-group"><label>Description</label><input type="text" name="description" placeholder="Objet de la dépense" required></div>
-        <div class="form-group"><label>Catégorie</label><select name="categorie"><option>Déplacement</option><option>Repas</option><option>Hébergement</option><option>Fournitures</option><option>Télécom</option><option>Autre</option></select></div>
-        <div class="form-group"><label>Montant TTC (€)</label><input type="number" step="0.01" name="montant" placeholder="0.00" required></div>
-        <div class="form-group"><label>TVA récupérable (€)</label><input type="number" step="0.01" name="tva" placeholder="0.00" value="0"></div>
-        <div class="form-group"><label>Statut</label><select name="statut"><option value="en_attente">En attente</option><option value="validee">Validée</option><option value="remboursee">Remboursée</option></select></div>
+        <div class="form-row">
+          <div class="form-group"><label>Catégorie</label><select name="categorie"><option>Déplacement</option><option>Repas</option><option>Hébergement</option><option>Fournitures</option><option>Télécom</option><option>Autre</option></select></div>
+          <div class="form-group"><label>Statut</label><select name="statut"><option value="en_attente">En attente</option><option value="validee">Validée</option><option value="remboursee">Remboursée</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Montant TTC (€)</label><input type="number" step="0.01" name="montant" placeholder="0.00" required></div>
+          <div class="form-group"><label>TVA récupérable (€)</label><input type="number" step="0.01" name="tva" placeholder="0.00" value="0"></div>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Ajouter</button></div>
+      </form>`,
+    immo: `<h3>Nouvelle immobilisation</h3>
+      <form onsubmit="return addImmo(this)">
+        <div class="form-group"><label>Désignation</label><input type="text" name="designation" placeholder="Ex: MacBook Pro M3" required></div>
+        <div class="form-row">
+          <div class="form-group"><label>Catégorie</label><select name="categorie">
+            <option>Matériel informatique</option><option>Mobilier</option><option>Véhicule</option>
+            <option>Matériel industriel</option><option>Agencements</option><option>Logiciel</option>
+            <option>Brevet / Licence</option><option>Construction</option><option>Terrain</option><option>Autre</option>
+          </select></div>
+          <div class="form-group"><label>Date mise en service</label><input type="date" name="dateMiseEnService" value="${today}" required></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Valeur d'acquisition HT (€)</label><input type="number" step="0.01" name="valeur" placeholder="0.00" required></div>
+          <div class="form-group"><label>Valeur résiduelle (€)</label><input type="number" step="0.01" name="valeurResiduelle" value="0" placeholder="0.00"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Durée d'amortissement (années)</label><select name="duree">
+            <option value="3">3 ans</option><option value="4">4 ans</option><option value="5" selected>5 ans</option>
+            <option value="6">6 ans</option><option value="7">7 ans</option><option value="8">8 ans</option>
+            <option value="10">10 ans</option><option value="15">15 ans</option><option value="20">20 ans</option>
+            <option value="25">25 ans</option><option value="30">30 ans</option><option value="40">40 ans</option>
+          </select></div>
+          <div class="form-group"><label>Mode d'amortissement</label><select name="mode">
+            <option value="lineaire">Linéaire</option><option value="degressif">Dégressif</option>
+          </select></div>
+        </div>
+        <div class="form-group"><label>Date de cession (optionnel)</label><input type="date" name="dateCession"></div>
         <div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Ajouter</button></div>
       </form>`
   };
 
   content.innerHTML = forms[type];
   overlay.classList.add('show');
-  content.querySelector('input:not([type=date])').focus();
+  const firstInput = content.querySelector('input:not([type=date])');
+  if (firstInput) firstInput.focus();
 }
 
 function addVente(f) {
   const fd = new FormData(f);
   data.ventes.push({ id: genId(), date: fd.get('date'), client: fd.get('client'), ht: parseFloat(fd.get('ht')), tauxTva: parseFloat(fd.get('tva')), statut: fd.get('statut') });
-  saveData(data); closeModal(); render(); toast('Facture ajoutée');
-  return false;
+  saveData(data); closeModal(); render(); toast('Facture ajoutée'); return false;
 }
 function addAchat(f) {
   const fd = new FormData(f);
   data.achats.push({ id: genId(), date: fd.get('date'), fournisseur: fd.get('fournisseur'), ht: parseFloat(fd.get('ht')), tauxTva: parseFloat(fd.get('tva')), statut: fd.get('statut') });
-  saveData(data); closeModal(); render(); toast('Achat ajouté');
-  return false;
+  saveData(data); closeModal(); render(); toast('Achat ajouté'); return false;
 }
 function addBanque(f) {
   const fd = new FormData(f);
@@ -442,14 +766,27 @@ function addBanque(f) {
   const op = { id: genId(), date: fd.get('date'), libelle: fd.get('libelle'), debit: 0, credit: 0, rapproche: false };
   if (fd.get('type') === 'debit') op.debit = mt; else op.credit = mt;
   data.banque.push(op);
-  saveData(data); closeModal(); render(); toast('Opération ajoutée');
-  return false;
+  saveData(data); closeModal(); render(); toast('Opération ajoutée'); return false;
 }
 function addNdf(f) {
   const fd = new FormData(f);
   data.ndf.push({ id: genId(), date: fd.get('date'), description: fd.get('description'), categorie: fd.get('categorie'), montant: parseFloat(fd.get('montant')), tvaRecup: parseFloat(fd.get('tva') || 0), statut: fd.get('statut') });
-  saveData(data); closeModal(); render(); toast('Note de frais ajoutée');
-  return false;
+  saveData(data); closeModal(); render(); toast('Note de frais ajoutée'); return false;
+}
+function addImmo(f) {
+  const fd = new FormData(f);
+  data.immos.push({
+    id: genId(),
+    designation: fd.get('designation'),
+    categorie: fd.get('categorie'),
+    dateMiseEnService: fd.get('dateMiseEnService'),
+    valeur: parseFloat(fd.get('valeur')),
+    valeurResiduelle: parseFloat(fd.get('valeurResiduelle') || 0),
+    duree: parseInt(fd.get('duree')),
+    mode: fd.get('mode'),
+    dateCession: fd.get('dateCession') || null
+  });
+  saveData(data); closeModal(); render(); toast('Immobilisation ajoutée'); return false;
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
