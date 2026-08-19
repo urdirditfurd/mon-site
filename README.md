@@ -35,6 +35,20 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - plan JSON
   - bundle ZIP (clips + SRT + plan)
 
+## Agent de prospection
+
+Outil autonome pour **trouver les nouvelles entreprises** d'un secteur, **retrouver leurs contacts** (e-mail / téléphone) via des sources publiques gratuites, et **préparer des mails de prospection** comptables.
+
+- Interface : `/prospection` (fichiers `prospection.html`, `prospection.js`)
+- Backend : `server/prospection-agent.js` (BODACC, SIRENE, contacts)
+- Présentation complète : [`docs/agent-prospection.md`](docs/agent-prospection.md)
+
+```bash
+npm install
+npm start
+# → http://localhost:3000/prospection
+```
+
 ## Pré-requis
 
 - Node.js 18+
