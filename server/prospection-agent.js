@@ -547,8 +547,8 @@ async function fetchText(url, options = {}) {
 async function fetchViaJina(targetUrl) {
   const wrapped = `${JINA_PREFIX}${targetUrl}`;
   return fetchText(wrapped, {
-    timeoutMs: 25000,
-    retries: 1,
+    timeoutMs: 12000,
+    retries: 0,
     headers: { "X-No-Cache": "true", Accept: "text/markdown" }
   });
 }
@@ -710,11 +710,10 @@ async function enrichFromDomainGuess(company) {
   const parts = base.split("-").filter(Boolean);
   const forms = new Set([base, parts.join("")]);
   if (parts.length >= 3) {
-    forms.add(`${parts.slice(0, 2).join("")}-${parts.slice(2).join("-")}`);
     forms.add(parts.filter((part) => part !== "le" && part !== "la" && part !== "les").join("-"));
   }
   if (city) forms.add(`${base}-${city}`);
-  const unique = [...forms].filter((form) => form.length >= 4).slice(0, 8);
+  const unique = [...forms].filter((form) => form.length >= 4).slice(0, 5);
   for (const form of unique) {
     for (const tld of [".fr", ".com"]) {
       const host = form + tld;
@@ -723,32 +722,52 @@ async function enrichFromDomainGuess(company) {
       } catch {
         continue;
       }
-      const urls = [`https://${host}`, `https://www.${host}`];
-      for (const url of urls) {
-        try {
-          const scraped = await scrapeWebsite(url, company);
-          if (scraped.email || scraped.phone) {
-            applyContact(company, {
-              email: scraped.email,
-              phone: scraped.phone,
-              website: scraped.website || url,
-              source: `site ${hostOf(url) || host}`,
-              confidence: scraped.confidence || "medium"
-            });
-            return true;
-          }
-        } catch {
-          // domaine squatté / parking
+      const url = `https://${host}`;
+      try {
+        const scraped = await scrapeWebsiteQuick(url, company);
+        if (scraped.email || scraped.phone) {
+          applyContact(company, {
+            email: scraped.email,
+            phone: scraped.phone,
+            website: scraped.website || url,
+            source: `site ${hostOf(url) || host}`,
+            confidence: scraped.confidence || "medium"
+          });
+          return true;
         }
+      } catch {
+        // skip
       }
-      await sleep(150);
+      await sleep(100);
     }
   }
   return false;
 }
 
+async function scrapeWebsiteQuick(url, company) {
+  const paths = ["", "/contact"];
+  let combined = "";
+  for (const p of paths) {
+    const target = p ? new URL(p, url).toString() : url;
+    let html = "";
+    try {
+      html = await fetchText(target, { timeoutMs: 8000, retries: 0 });
+    } catch {
+      continue;
+    }
+    if (!html) continue;
+    combined += `\n${html}`;
+    const picked = pickBestFromText(combined, company, `site ${hostOf(url)}`, target, { fullText: true });
+    if (picked && (picked.email || picked.phone)) {
+      return { ...picked, website: url };
+    }
+  }
+  return { website: pageMatchesCompany(combined, company) ? url : "" };
+}
+
 function pickBestFromText(text, company, source, href = "", options = {}) {
-  if (!pageMatchesCompany(text, company)) return null;
+  if (!options.lenient && !pageMatchesCompany(text, company)) return null;
+  if (options.lenient && nameSimilarity(company.name, String(text || "").slice(0, 6000)) < 0.2) return null;
   const hay = String(text || "");
   const lowered = hay.toLowerCase();
   const tokens = tokenize(searchName(company)).sort((a, b) => b.length - a.length);
@@ -786,7 +805,7 @@ function discoverContactUrls(html, baseUrl) {
 }
 
 async function scrapeWebsite(url, company) {
-  const paths = ["", "/contact", "/contactez-nous", "/access-contact", "/mentions-legales", "/mentions_legales"];
+  const paths = ["", "/contact", "/mentions-legales"];
   let combined = "";
   let baseText = "";
   const visited = new Set();
@@ -797,7 +816,7 @@ async function scrapeWebsite(url, company) {
     visited.add(target);
     let html = "";
     try {
-      html = await fetchText(target, { timeoutMs: 12000, retries: 0 });
+      html = await fetchText(target, { timeoutMs: 8000, retries: 0 });
     } catch {
       try {
         html = await fetchViaJina(target);
@@ -820,6 +839,95 @@ async function scrapeWebsite(url, company) {
     await sleep(150);
   }
   return { website: pageMatchesCompany(combined, company) ? url : "", html: combined };
+}
+
+async function enrichFromSociete(company) {
+  if (!company.siren) return false;
+  const target = `https://www.societe.com/societe/${slugify(company.name)}-${company.siren}.html`;
+  try {
+    const markdown = await fetchViaJina(target);
+    if (!markdown || markdown.length < 200) return false;
+    const phones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
+    const emails = extractEmails(markdown);
+    if (phones[0] || emails[0]) {
+      applyContact(company, {
+        email: emails[0] || "",
+        phone: phones[0] || "",
+        source: "societe.com",
+        confidence: "medium"
+      });
+      return true;
+    }
+  } catch {
+    // societe.com might block Jina
+  }
+  return false;
+}
+
+async function enrichFromDirectorSearch(company) {
+  const director = (company.directors || [])[0];
+  if (!director || director.length < 4) return false;
+  const query = `"${director}" ${company.name} email OR téléphone OR contact ${company.city || ""}`;
+  const target = `https://search.brave.com/search?q=${encodeURIComponent(query)}`;
+  let markdown = "";
+  try {
+    markdown = await fetchViaJina(target);
+  } catch {
+    return false;
+  }
+  const allEmails = extractEmails(markdown);
+  const allPhones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
+  const relevantEmails = allEmails.filter((e) => {
+    const local = e.split("@")[0];
+    const dirTokens = tokenize(director);
+    return dirTokens.some((t) => local.includes(t)) || nameSimilarity(company.name, e) > 0.3;
+  });
+  if (relevantEmails[0] || allPhones[0]) {
+    applyContact(company, {
+      email: relevantEmails[0] || "",
+      phone: allPhones[0] || "",
+      source: "recherche dirigeant",
+      confidence: "medium"
+    });
+    return true;
+  }
+  return false;
+}
+
+async function enrichFromEmailGuess(company) {
+  const base = slugify(searchName(company));
+  if (!base || base.length < 3) return false;
+  const parts = base.split("-").filter(Boolean);
+  const forms = new Set([base, parts.join("")]);
+  if (parts.length >= 2) {
+    forms.add(parts.slice(0, 2).join(""));
+  }
+  const tlds = [".fr", ".com"];
+  for (const form of forms) {
+    if (form.length < 3) continue;
+    for (const tld of tlds) {
+      const domain = form + tld;
+      try {
+        const mx = await dns.resolveMx(domain);
+        if (!mx || !mx.length) continue;
+      } catch {
+        continue;
+      }
+      const prefixes = ["contact", "info", "hello", "bonjour"];
+      for (const prefix of prefixes) {
+        const email = `${prefix}@${domain}`;
+        applyContact(company, {
+          email,
+          phone: "",
+          website: `https://${domain}`,
+          source: `devin\u00e9 (MX ${domain})`,
+          confidence: "low"
+        });
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 async function enrichFromPagesJaunes(company) {
@@ -884,7 +992,7 @@ async function enrichFromSearch(company) {
       candidates.push({ ...link, score });
     }
     candidates.sort((a, b) => b.score - a.score);
-    for (const candidate of candidates.slice(0, 3)) {
+    for (const candidate of candidates.slice(0, 2)) {
       if (company.email && company.phone) break;
       try {
         const scraped = await scrapeWebsite(candidate.href, company);
@@ -1002,18 +1110,29 @@ async function runProspection(params = {}, onEvent = () => {}) {
     for (const company of selected) {
       onEvent({ type: "status", message: `Recherche de contact — ${company.name}` });
       if (!isGenericCompanyName(company)) {
-        await enrichFromNominatim(company);
-        await sleep(400);
+        await enrichFromEmailGuess(company);
+        if (!company.email && !company.phone) {
+          await enrichFromNominatim(company);
+          await sleep(250);
+        }
         if (!company.email && !company.phone) {
           await enrichFromDomainGuess(company);
         }
         if (!company.email && !company.phone) {
           await enrichFromPagesJaunes(company);
-          await sleep(700);
+          await sleep(400);
         }
         if (!company.email && !company.phone) {
           await enrichFromSearch(company);
-          await sleep(700);
+          await sleep(400);
+        }
+        if (!company.email && !company.phone) {
+          await enrichFromSociete(company);
+          await sleep(400);
+        }
+        if (!company.email && !company.phone) {
+          await enrichFromDirectorSearch(company);
+          await sleep(400);
         }
       }
       onEvent({ type: "contact", siren: company.siren, company: publicCompany(company, sender) });
@@ -1029,7 +1148,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
     totalBodacc: total,
     found: results.length,
     withContact,
-    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "Brave Search + PagesJaunes via Jina Reader (gratuit)"]
+    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "Brave Search + Google + PagesJaunes via Jina Reader (gratuit)", "Societe.com (gratuit)", "Devinette email MX (gratuit)", "Recherche dirigeant (gratuit)"]
   };
   onEvent({ type: "done", summary, companies: results });
   return { summary, companies: results };
@@ -1037,6 +1156,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
 
 function writeSse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  if (typeof res.flush === "function") res.flush();
 }
 
 function createProspectionRouter() {
