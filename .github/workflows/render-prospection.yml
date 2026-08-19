@@ -1,0 +1,41 @@
+name: Render — déploiement prospection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - render.yaml
+      - agent-prospection/**
+      - clipforge/**
+      - server/index.js
+
+jobs:
+  resume-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reprendre le service Render (si suspendu)
+        if: ${{ secrets.RENDER_API_KEY != '' && secrets.RENDER_SERVICE_ID != '' }}
+        run: |
+          curl -sf -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/resume" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Accept: application/json" || true
+
+      - name: Déclencher un déploiement (Deploy Hook)
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        run: curl -sf -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+      - name: Vérifier la santé (boucle 5 min)
+        if: ${{ secrets.RENDER_URL != '' }}
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "${RENDER_URL}/api/health" || echo "000")
+            echo "Tentative $i/30 — HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Service toujours indisponible — reprenez manuellement sur dashboard.render.com"
+          exit 1

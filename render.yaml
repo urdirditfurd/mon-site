@@ -3,6 +3,7 @@ services:
     name: clipforge-studio
     runtime: docker
     plan: free
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -10,10 +11,22 @@ services:
       - key: PORT
         value: "3000"
       - key: PUBLIC_BASE_URL
-        sync: false
+        value: https://clipforge-studio.onrender.com
       - key: YOUTUBE_API_KEY
         sync: false
       - key: REDIS_URL
         sync: false
       - key: QUEUE_MODE
         value: memory
+
+  - type: web
+    name: agent-prospection
+    runtime: docker
+    plan: free
+    dockerfilePath: ./agent-prospection/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
