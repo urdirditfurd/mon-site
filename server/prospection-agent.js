@@ -579,7 +579,7 @@ async function fetchBodaccCreations(sector, days, department, needed) {
   const seen = new Set();
   let offset = 0;
   let total = Infinity;
-  while (collected.length < needed * 3 && offset < total && offset < 400) {
+  while (collected.length < needed * 3 && offset < total && offset < 2000) {
     const url = `${BODACC_URL}?${new URLSearchParams({
       where,
       limit: String(BODACC_PAGE_SIZE),
@@ -975,7 +975,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
     throw new Error("Choisissez un secteur d'activité.");
   }
   const days = Math.min(180, Math.max(7, Number(params.days) || 30));
-  const limit = Math.min(20, Math.max(3, Number(params.limit) || 8));
+  const limit = Math.max(3, Number(params.limit) || 200);
   const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
   const sender = {
     name: String(params.senderName || "").trim(),

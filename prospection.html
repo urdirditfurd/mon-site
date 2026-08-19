@@ -8,11 +8,117 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
   <style>
-    .prospect-layout {
-      grid-template-columns: 380px 1fr;
+    :root {
+      --bg: #faf8f5;
+      --panel: #ffffff;
+      --panel-2: #fff7ed;
+      --text: #2d2a26;
+      --muted: #7a7268;
+      --primary: #e08a1e;
+      --primary-2: #f5a623;
+      --accent: #d97706;
+      --line: #e8e0d4;
+      --success: #16a34a;
+      --success-bg: rgba(22,163,74,.08);
+      --success-border: rgba(22,163,74,.25);
+      --warn-bg: rgba(234,179,8,.08);
+      --warn-border: rgba(234,179,8,.3);
     }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Inter", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .topbar {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 24px 12px;
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    h1 { margin: 0; font-size: clamp(1.7rem, 2.8vw, 2.4rem); color: var(--text); }
+    h2 { margin: 0 0 14px; font-size: 1.03rem; }
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      max-width: 760px;
+      font-size: .93rem;
+      line-height: 1.45;
+    }
+    .layout {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 14px 24px 24px;
+      display: grid;
+      gap: 18px;
+    }
+    .prospect-layout { grid-template-columns: 380px 1fr; }
+    .panel, .timeline-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    }
+    .panel { padding: 16px; }
+    .workspace { display: grid; gap: 18px; }
+    .field { display: block; margin-bottom: 12px; }
+    .field > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: .9rem; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font-family: inherit;
+      font-size: .9rem;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(224,138,30,.12);
+    }
+    textarea { resize: vertical; line-height: 1.45; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      font-size: .9rem;
+      transition: transform .14s ease, opacity .14s ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: #fff;
+    }
+    .btn-ghost {
+      background: var(--bg);
+      color: var(--text);
+      border-color: var(--line);
+    }
+    .btn-danger {
+      background: #fef2f2;
+      color: #b91c1c;
+      border-color: #fecaca;
+    }
+    .btn-block { width: 100%; margin-top: 4px; }
+    .hint { color: var(--muted); font-size: .8rem; margin: 8px 0 0; }
+    .small { font-size: .78rem; }
     .results-head {
       display: flex;
       justify-content: space-between;
@@ -22,7 +128,7 @@
     }
     .results-head h2 { margin: 0; }
     .log-box {
-      background: #0d1430;
+      background: var(--bg);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 10px 12px;
@@ -35,7 +141,7 @@
     }
     .company-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
     .company-card {
-      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 14px;
@@ -46,12 +152,13 @@
       margin-top: 10px;
       padding: 10px;
       border-radius: 10px;
-      background: rgba(63, 209, 127, .08);
-      border: 1px solid rgba(63, 209, 127, .25);
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
     }
+    .contact-row a { color: var(--accent); }
     .contact-row.missing {
-      background: rgba(255, 212, 138, .08);
-      border-color: rgba(255, 212, 138, .28);
+      background: var(--warn-bg);
+      border-color: var(--warn-border);
     }
     .contact-row strong { display: block; margin-bottom: 4px; }
     .chip {
@@ -62,15 +169,15 @@
       text-transform: uppercase;
       padding: 3px 8px;
       border-radius: 999px;
-      background: #1a2447;
-      color: var(--primary-2);
+      background: var(--warn-bg);
+      color: var(--accent);
       margin-left: 8px;
     }
-    .chip.ok { background: rgba(63, 209, 127, .15); color: #3fd17f; }
+    .chip.ok { background: var(--success-bg); color: var(--success); }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
     .stat {
-      background: #151e3f;
+      background: var(--panel-2);
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 8px 12px;
@@ -80,28 +187,64 @@
     .stat b { color: var(--text); }
     .mail-template-box {
       margin-top: 16px;
-      background: #0d1430;
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 14px;
     }
     .mail-template-box h3 { margin: 0 0 10px; font-size: .95rem; }
     .mail-template-box textarea {
-      width: 100%;
       min-height: 180px;
-      background: #0a0f24;
-      color: var(--text);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      font-family: inherit;
-      font-size: .82rem;
-      line-height: 1.5;
-      resize: vertical;
+      background: var(--bg);
     }
     .mail-template-box .actions { margin-top: 8px; }
     .mail-preview { display: none; }
     .mail-preview.visible { display: block; }
+    .mass-mail-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 12px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+    .mass-mail-bar .count { font-weight: 700; color: var(--accent); }
+    .select-cb {
+      width: auto;
+      margin: 0 6px 0 0;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+    .company-card-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .company-card-header h3 { flex: 1; }
+    .mail-edit-area {
+      margin-top: 10px;
+      display: none;
+    }
+    .mail-edit-area.visible { display: block; }
+    .mail-edit-area textarea {
+      min-height: 140px;
+      font-size: .82rem;
+    }
+    .mail-edit-area .actions { margin-top: 6px; }
+    .empty { color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: var(--bg); padding: 10px; }
+    .site-footer {
+      padding: 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .site-footer a { color: var(--muted); text-decoration: none; }
+    .site-footer a:hover { color: var(--text); }
+    .site-footer span { margin: 0 8px; }
+    code { background: var(--panel-2); padding: 2px 5px; border-radius: 4px; font-size: .82rem; }
     @media (max-width: 900px) {
       .prospect-layout { grid-template-columns: 1fr; }
     }
@@ -129,7 +272,7 @@
         <span>Ou saisir un secteur libre</span>
         <input id="sectorCustom" type="text" placeholder="ex. plomberie, auto-école, boulangerie" autocomplete="off">
       </label>
-      <div class="grid-3">
+      <div class="grid-2">
         <label class="field">
           <span>Créées depuis</span>
           <select id="daysSelect">
@@ -138,14 +281,6 @@
             <option value="30" selected>30 jours</option>
             <option value="60">60 jours</option>
             <option value="90">90 jours</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Nb max de résultats</span>
-          <select id="limitSelect">
-            <option value="5">5</option>
-            <option value="8" selected>8</option>
-            <option value="12">12</option>
           </select>
         </label>
         <label class="field">
@@ -277,7 +412,17 @@
       <div class="timeline-card" style="padding:16px">
         <div class="results-head">
           <h2>Nouvelles entreprises trouvées</h2>
-          <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
+          <div class="actions" style="margin:0">
+            <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
+          </div>
+        </div>
+        <div class="mass-mail-bar" id="massMailBar" style="display:none">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="selectAllCb" class="select-cb"> Tout sélectionner
+          </label>
+          <span class="count" id="selectedCount">0</span> sélectionné(es)
+          <button id="massEditBtn" class="btn btn-ghost" type="button">Relire / modifier les mails</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer les mails sélectionnés</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
@@ -313,7 +458,7 @@ Cordialement,
         </div>
         <div class="mail-preview" id="mailPreview">
           <h3 style="margin-top:12px">Aperçu</h3>
-          <div id="mailPreviewContent" style="background:#0a0f24;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:.82rem;white-space:pre-wrap;line-height:1.5"></div>
+          <div id="mailPreviewContent" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:.82rem;white-space:pre-wrap;line-height:1.5"></div>
         </div>
       </div>
     </section>

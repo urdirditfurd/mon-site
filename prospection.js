@@ -2,7 +2,6 @@
   const sectorSelect = document.getElementById("sectorSelect");
   const sectorCustom = document.getElementById("sectorCustom");
   const daysSelect = document.getElementById("daysSelect");
-  const limitSelect = document.getElementById("limitSelect");
   const departmentInput = document.getElementById("departmentInput");
   const senderName = document.getElementById("senderName");
   const senderEmail = document.getElementById("senderEmail");
@@ -17,10 +16,17 @@
   const saveTemplateBtn = document.getElementById("saveTemplateBtn");
   const mailPreview = document.getElementById("mailPreview");
   const mailPreviewContent = document.getElementById("mailPreviewContent");
+  const massMailBar = document.getElementById("massMailBar");
+  const selectAllCb = document.getElementById("selectAllCb");
+  const selectedCount = document.getElementById("selectedCount");
+  const massEditBtn = document.getElementById("massEditBtn");
+  const massSendBtn = document.getElementById("massSendBtn");
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
   let companies = [];
+  let selectedKeys = new Set();
+  let editedMails = {};
   let eventSource = null;
 
   function loadSender() {
@@ -45,7 +51,7 @@
   function log(message) {
     const stamp = new Date().toLocaleTimeString("fr-FR");
     const line = `[${stamp}] ${message}`;
-    const current = logBox.textContent === "En attente d’un secteur…" ? "" : `${logBox.textContent}\n`;
+    const current = logBox.textContent === "En attente d\u2019un secteur\u2026" ? "" : `${logBox.textContent}\n`;
     logBox.textContent = `${current}${line}`.trim();
     logBox.scrollTop = logBox.scrollHeight;
   }
@@ -58,50 +64,90 @@
       .replace(/"/g, "&quot;");
   }
 
+  function companyKey(c) {
+    return c.siren || c.name;
+  }
+
+  function fillTemplate(template, company) {
+    return template
+      .replace(/\{entreprise\}/g, company.name || "")
+      .replace(/\{dirigeant\}/g, (company.directors || [])[0] || "Madame, Monsieur")
+      .replace(/\{activite\}/g, company.activity || "")
+      .replace(/\{adresse\}/g, company.address || "");
+  }
+
+  function getMailForCompany(company) {
+    const key = companyKey(company);
+    if (editedMails[key]) return editedMails[key];
+    return fillTemplate(mailTemplate.value, company);
+  }
+
   function contactBlock(company) {
     if (company.email || company.phone) {
       const bits = [];
       if (company.email) bits.push(`<a href="mailto:${escapeHtml(company.email)}">${escapeHtml(company.email)}</a>`);
       if (company.phone) bits.push(`<a href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">${escapeHtml(company.phone)}</a>`);
-      return `<div class="contact-row"><strong>Contact</strong>${bits.join(" · ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")}</div></div>`;
+      return `<div class="contact-row"><strong>Contact</strong>${bits.join(" \u00b7 ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")}</div></div>`;
     }
-    return `<div class="contact-row missing"><strong>Contact non publié</strong><span class="meta">Aucun e-mail / téléphone trouvé en source ouverte. Utilisez l’adresse postale ou l’annuaire officiel.</span></div>`;
+    return `<div class="contact-row missing"><strong>Contact non publi\u00e9</strong><span class="meta">Aucun e-mail / t\u00e9l\u00e9phone trouv\u00e9 en source ouverte.</span></div>`;
   }
 
   function renderCompany(company) {
+    const key = companyKey(company);
+    const checked = selectedKeys.has(key) ? "checked" : "";
+    const canSelect = company.hasContact;
     const chip = company.hasContact
       ? `<span class="chip ok">contact</span>`
-      : `<span class="chip">à qualifier</span>`;
+      : `<span class="chip">\u00e0 qualifier</span>`;
     const directors = (company.directors || []).length ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>` : "";
     const activity = company.nafLabel
       ? `${escapeHtml(company.activity)} (${escapeHtml(company.naf)} ${escapeHtml(company.nafLabel)})`
       : escapeHtml(company.activity);
     const links = [];
-    if (company.proposal && company.proposal.mailto) {
-      links.push(`<a class="btn btn-primary" href="${company.proposal.mailto}">Envoyer la proposition</a>`);
-    } else {
-      links.push(`<button class="btn btn-ghost" type="button" data-copy="${escapeHtml(company.siren || company.name)}">Copier la proposition</button>`);
-    }
     if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire officiel</a>`);
     if (company.bodaccUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.bodaccUrl)}" target="_blank" rel="noopener">Annonce BODACC</a>`);
     if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
-    return `<li class="company-card" data-key="${escapeHtml(company.siren || company.name)}">
-      <h3>${escapeHtml(company.name)}${chip}</h3>
+    if (canSelect) links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le mail</button>`);
+
+    const mailContent = getMailForCompany(company);
+    const editId = `mail-edit-${escapeHtml(key).replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+    return `<li class="company-card" data-key="${escapeHtml(key)}">
+      <div class="company-card-header">
+        ${canSelect ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked}>` : ""}
+        <h3>${escapeHtml(company.name)}${chip}</h3>
+      </div>
       <div class="meta">
-        <div>Activité : ${activity}</div>
-        <div>Création : ${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` · SIREN ${escapeHtml(company.siren)}` : ""}</div>
+        <div>Activit\u00e9 : ${activity}</div>
+        <div>Cr\u00e9ation : ${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` \u00b7 SIREN ${escapeHtml(company.siren)}` : ""}</div>
         <div>Adresse : ${escapeHtml(company.address || `${company.postalCode || ""} ${company.city || ""}`.trim() || "n.c.")}</div>
         ${directors}
       </div>
       ${contactBlock(company)}
       <div class="actions">${links.join("")}</div>
+      <div class="mail-edit-area" id="${editId}">
+        <textarea data-mail-key="${escapeHtml(key)}" style="width:100%;min-height:140px;font-size:.82rem">${escapeHtml(mailContent)}</textarea>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer les modifications</button>
+          ${company.email ? `<a class="btn btn-primary" href="mailto:${escapeHtml(company.email)}?subject=${encodeURIComponent("Proposition d\u2019accompagnement comptable \u2014 " + company.name)}&body=${encodeURIComponent(mailContent)}">Envoyer ce mail</a>` : ""}
+        </div>
+      </div>
     </li>`;
+  }
+
+  function updateSelectionUI() {
+    const contactCompanies = companies.filter((c) => c.hasContact);
+    selectedCount.textContent = String(selectedKeys.size);
+    massMailBar.style.display = companies.length ? "" : "none";
+    massSendBtn.disabled = selectedKeys.size === 0;
+    selectAllCb.checked = contactCompanies.length > 0 && contactCompanies.every((c) => selectedKeys.has(companyKey(c)));
   }
 
   function renderList() {
     if (!companies.length) {
-      companyList.innerHTML = `<li class="empty">Aucun résultat pour le moment. Choisissez un secteur puis lancez l’agent.</li>`;
+      companyList.innerHTML = `<li class="empty">Aucun r\u00e9sultat pour le moment. Choisissez un secteur puis lancez l\u2019agent.</li>`;
       csvBtn.disabled = true;
+      massMailBar.style.display = "none";
       return;
     }
     companyList.innerHTML = companies.map(renderCompany).join("");
@@ -109,13 +155,14 @@
     const withContact = companies.filter((c) => c.hasContact).length;
     statsBox.innerHTML = `
       <div class="stat"><b>${companies.length}</b> entreprises</div>
-      <div class="stat"><b>${withContact}</b> avec e-mail ou téléphone</div>
+      <div class="stat"><b>${withContact}</b> avec e-mail ou t\u00e9l\u00e9phone</div>
     `;
+    updateSelectionUI();
   }
 
   function upsertCompany(company) {
-    const key = company.siren || company.name;
-    const index = companies.findIndex((row) => (row.siren || row.name) === key);
+    const key = companyKey(company);
+    const index = companies.findIndex((row) => companyKey(row) === key);
     if (index >= 0) companies[index] = company;
     else companies.push(company);
     renderList();
@@ -143,7 +190,7 @@
       upsertCompany(event.company);
       if (event.type === "contact") {
         log(event.company.hasContact
-          ? `Contact trouvé pour ${event.company.name}`
+          ? `Contact trouv\u00e9 pour ${event.company.name}`
           : `Pas de contact public pour ${event.company.name}`);
       }
       return;
@@ -157,7 +204,7 @@
         <div class="stat"><b>${summary.withContact || 0}</b> avec contact</div>
         <div class="stat">BODACC brut : <b>${summary.totalBodacc || 0}</b></div>
       `;
-      log(`Terminé — ${summary.found || 0} entreprises, ${summary.withContact || 0} contacts publics.`);
+      log(`Termin\u00e9 \u2014 ${summary.found || 0} entreprises, ${summary.withContact || 0} contacts publics.`);
       runBtn.disabled = false;
       return;
     }
@@ -179,6 +226,8 @@
       eventSource = null;
     }
     companies = [];
+    selectedKeys.clear();
+    editedMails = {};
     renderList();
     statsBox.innerHTML = "";
     logBox.textContent = "";
@@ -186,23 +235,23 @@
     const params = new URLSearchParams({
       sector,
       days: daysSelect.value,
-      limit: limitSelect.value,
+      limit: "9999",
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
-    log(`Démarrage — secteur « ${sector} ».`);
+    log(`D\u00e9marrage \u2014 secteur \u00ab ${sector} \u00bb.`);
     eventSource = new EventSource(`/api/prospection/stream?${params.toString()}`);
     eventSource.onmessage = (message) => {
       try {
         handleEvent(JSON.parse(message.data));
       } catch (error) {
-        log(`Événement illisible : ${error instanceof Error ? error.message : "inconnue"}`);
+        log(`\u00c9v\u00e9nement illisible : ${error instanceof Error ? error.message : "inconnue"}`);
       }
     };
     eventSource.onerror = () => {
-      if (runBtn.disabled) log("Connexion interrompue. Relancez si la liste est incomplète.");
+      if (runBtn.disabled) log("Connexion interrompue. Relancez si la liste est incompl\u00e8te.");
       runBtn.disabled = false;
       eventSource.close();
     };
@@ -226,16 +275,6 @@
     URL.revokeObjectURL(url);
   }
 
-  companyList.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-copy]");
-    if (!button) return;
-    const key = button.getAttribute("data-copy");
-    const company = companies.find((row) => (row.siren || row.name) === key);
-    if (!company || !company.proposal) return;
-    navigator.clipboard.writeText(`${company.proposal.subject}\n\n${company.proposal.body}`);
-    log(`Proposition copiée pour ${company.name}.`);
-  });
-
   function loadTemplate() {
     const saved = localStorage.getItem(TEMPLATE_KEY);
     if (saved) mailTemplate.value = saved;
@@ -244,14 +283,6 @@
   function saveTemplate() {
     localStorage.setItem(TEMPLATE_KEY, mailTemplate.value);
     log("Mod\u00e8le de mail sauvegard\u00e9.");
-  }
-
-  function fillTemplate(template, company) {
-    return template
-      .replace(/\{entreprise\}/g, company.name || "")
-      .replace(/\{dirigeant\}/g, (company.directors || [])[0] || "Madame, Monsieur")
-      .replace(/\{activite\}/g, company.activity || "")
-      .replace(/\{adresse\}/g, company.address || "");
   }
 
   function previewMail() {
@@ -263,6 +294,79 @@
     mailPreviewContent.textContent = filled;
     mailPreview.classList.add("visible");
   }
+
+  companyList.addEventListener("change", (event) => {
+    const cb = event.target.closest("[data-select]");
+    if (!cb) return;
+    const key = cb.getAttribute("data-select");
+    if (cb.checked) selectedKeys.add(key);
+    else selectedKeys.delete(key);
+    updateSelectionUI();
+  });
+
+  companyList.addEventListener("click", (event) => {
+    const editBtn = event.target.closest("[data-edit-mail]");
+    if (editBtn) {
+      const key = editBtn.getAttribute("data-edit-mail");
+      const safeId = `mail-edit-${key.replace(/[^a-zA-Z0-9]/g, "_")}`;
+      const area = document.getElementById(safeId);
+      if (area) area.classList.toggle("visible");
+      return;
+    }
+    const saveBtn = event.target.closest("[data-save-mail]");
+    if (saveBtn) {
+      const key = saveBtn.getAttribute("data-save-mail");
+      const textarea = companyList.querySelector(`textarea[data-mail-key="${key}"]`);
+      if (textarea) {
+        editedMails[key] = textarea.value;
+        log(`Mail modifi\u00e9 pour ${key}.`);
+      }
+    }
+  });
+
+  selectAllCb.addEventListener("change", () => {
+    const contactCompanies = companies.filter((c) => c.hasContact);
+    if (selectAllCb.checked) {
+      contactCompanies.forEach((c) => selectedKeys.add(companyKey(c)));
+    } else {
+      selectedKeys.clear();
+    }
+    renderList();
+  });
+
+  massEditBtn.addEventListener("click", () => {
+    const areas = companyList.querySelectorAll(".mail-edit-area");
+    const anyVisible = [...areas].some((a) => a.classList.contains("visible"));
+    areas.forEach((a) => {
+      const key = a.id.replace("mail-edit-", "");
+      const company = companies.find((c) => companyKey(c).replace(/[^a-zA-Z0-9]/g, "_") === key);
+      if (company && company.hasContact) {
+        if (anyVisible) a.classList.remove("visible");
+        else a.classList.add("visible");
+      }
+    });
+  });
+
+  massSendBtn.addEventListener("click", () => {
+    const toSend = companies.filter((c) => c.hasContact && c.email && selectedKeys.has(companyKey(c)));
+    if (!toSend.length) {
+      log("Aucune entreprise s\u00e9lectionn\u00e9e avec un e-mail.");
+      return;
+    }
+    let sent = 0;
+    for (const company of toSend) {
+      const body = getMailForCompany(company);
+      const subject = `Proposition d\u2019accompagnement comptable \u2014 ${company.name}`;
+      const mailto = `mailto:${company.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const a = document.createElement("a");
+      a.href = mailto;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.click();
+      sent += 1;
+    }
+    log(`${sent} fen\u00eatre(s) mailto ouverte(s). V\u00e9rifiez et envoyez depuis votre client mail.`);
+  });
 
   runBtn.addEventListener("click", run);
   csvBtn.addEventListener("click", exportCsv);
