@@ -100,9 +100,11 @@
       ? `<span class="chip ok">contact</span>`
       : `<span class="chip">\u00e0 qualifier</span>`;
     const directors = (company.directors || []).length ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>` : "";
+    const rawActivity = company.activity || "";
+    const shortActivity = rawActivity.length > 180 ? `${rawActivity.slice(0, 180)}\u2026` : rawActivity;
     const activity = company.nafLabel
-      ? `${escapeHtml(company.activity)} (${escapeHtml(company.naf)} ${escapeHtml(company.nafLabel)})`
-      : escapeHtml(company.activity);
+      ? `${escapeHtml(shortActivity)} (${escapeHtml(company.naf)} ${escapeHtml(company.nafLabel)})`
+      : escapeHtml(shortActivity);
     const links = [];
     if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire officiel</a>`);
     if (company.bodaccUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.bodaccUrl)}" target="_blank" rel="noopener">Annonce BODACC</a>`);
@@ -373,6 +375,14 @@
   previewMailBtn.addEventListener("click", previewMail);
   saveTemplateBtn.addEventListener("click", saveTemplate);
   [senderName, senderEmail, senderPhone].forEach((input) => input.addEventListener("change", saveSender));
+
+  const scrollTopBtn = document.getElementById("scrollTopBtn");
+  window.addEventListener("scroll", () => {
+    scrollTopBtn.classList.toggle("visible", window.scrollY > 400);
+  }, { passive: true });
+  scrollTopBtn.addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
 
   loadSender();
   loadTemplate();
