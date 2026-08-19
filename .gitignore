@@ -1,4 +1,5 @@
 node_modules/
+agent-de-prospection/
 storage/uploads/*
 storage/jobs/*
 storage/jobs-db.json

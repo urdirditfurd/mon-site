@@ -11,10 +11,14 @@ const { spawn, spawnSync, execSync } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
-const INDEX_HTML_PATH = path.join(ROOT_DIR, "index.html");
-const VOANH_HTML_PATH = path.join(ROOT_DIR, "voanh.html");
-const VIDEO_FACTORY_HTML_PATH = path.join(ROOT_DIR, "video-factory.html");
+const CLIPFORGE_DIR = path.join(ROOT_DIR, "clipforge");
+const VIDEO_FACTORY_DIR = path.join(ROOT_DIR, "video-factory");
+const VOANH_DIR = path.join(ROOT_DIR, "voanh");
+const LEGAL_DIR = path.join(ROOT_DIR, "legal");
 const PROSPECTION_DIR = path.join(ROOT_DIR, "agent-prospection");
+const INDEX_HTML_PATH = path.join(CLIPFORGE_DIR, "index.html");
+const VOANH_HTML_PATH = path.join(VOANH_DIR, "index.html");
+const VIDEO_FACTORY_HTML_PATH = path.join(VIDEO_FACTORY_DIR, "index.html");
 const PROSPECTION_HTML_PATH = path.join(PROSPECTION_DIR, "index.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
@@ -3881,24 +3885,31 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
 });
 
 app.use(express.static(ROOT_DIR, { index: false }));
+
 app.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
-  res.sendFile(INDEX_HTML_PATH);
+  return res.sendFile(INDEX_HTML_PATH);
 });
+app.use("/clipforge", express.static(CLIPFORGE_DIR, { index: false }));
+
 app.get("/voanh", (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!fs.existsSync(VOANH_HTML_PATH)) {
-    return res.status(404).send("voanh.html introuvable");
+    return res.status(404).send("voanh/index.html introuvable");
   }
   return res.sendFile(VOANH_HTML_PATH);
 });
+app.use("/voanh", express.static(VOANH_DIR, { index: false }));
+
 app.get("/studio", (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!fs.existsSync(VIDEO_FACTORY_HTML_PATH)) {
-    return res.status(404).send("video-factory.html introuvable");
+    return res.status(404).send("video-factory/index.html introuvable");
   }
   return res.sendFile(VIDEO_FACTORY_HTML_PATH);
 });
+app.use("/studio", express.static(VIDEO_FACTORY_DIR, { index: false }));
+
 app.get("/prospection", (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!fs.existsSync(PROSPECTION_HTML_PATH)) {
@@ -3906,7 +3917,15 @@ app.get("/prospection", (_req, res) => {
   }
   return res.sendFile(PROSPECTION_HTML_PATH);
 });
+app.get("/prospection.html", (_req, res) => res.redirect(301, "/prospection"));
 app.use("/prospection", express.static(PROSPECTION_DIR, { index: false }));
+
+app.use("/legal", express.static(LEGAL_DIR, { index: false }));
+app.get("/privacy.html", (_req, res) => res.redirect(301, "/legal/privacy.html"));
+app.get("/terms.html", (_req, res) => res.redirect(301, "/legal/terms.html"));
+
+app.get("/tiktok-callback.html", (_req, res) => res.redirect(301, "/tiktok/callback.html"));
+app.use("/tiktok", express.static(path.join(ROOT_DIR, "tiktok"), { index: false }));
 
 ensureDirs()
   .then(async () => {

@@ -35,6 +35,18 @@ Application fullstack de génération de clips courts “social-ready”, inspir
   - plan JSON
   - bundle ZIP (clips + SRT + plan)
 
+## Structure des projets
+
+Chaque outil est dans son dossier. Voir [`docs/projets.md`](docs/projets.md) pour la liste complète.
+
+| Dossier | URL après `npm start` |
+|---------|------------------------|
+| `clipforge/` | http://localhost:3000/ |
+| `video-factory/` | http://localhost:3000/studio |
+| `voanh/` | http://localhost:3000/voanh |
+| `agent-prospection/` | **http://localhost:3000/prospection** |
+| `legal/` | http://localhost:3000/legal/privacy.html |
+
 ## Agent de prospection
 
 Outil autonome pour **trouver les nouvelles entreprises** d'un secteur, **retrouver leurs contacts** (e-mail / téléphone) via des sources publiques gratuites, et **préparer des mails de prospection** comptables.

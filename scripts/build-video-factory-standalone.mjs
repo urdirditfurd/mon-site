@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 
-const htmlPath = path.join(root, "video-factory.html");
+const htmlPath = path.join(root, "video-factory", "index.html");
 const cssPath = path.join(root, "video-factory.css");
 const jsPath = path.join(root, "video-factory.js");
 const outPath = path.join(root, "video-factory-standalone.html");

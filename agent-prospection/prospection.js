@@ -39,7 +39,7 @@
     { id: "services", label: "Services aux entreprises" }
   ];
   const IS_FILE_MODE = window.location.protocol === "file:";
-  const API_BASE = IS_FILE_MODE ? "http://localhost:3000" : window.location.origin;
+  const API_PREFIX = IS_FILE_MODE ? "http://localhost:3000" : "";
   let companies = [];
   let selectedKeys = new Set();
   let editedMails = {};
@@ -194,7 +194,7 @@
 
   async function loadSectors() {
     try {
-      const response = await fetch(`${API_BASE}/api/prospection/sectors`);
+      const response = await fetch(`${API_PREFIX}/api/prospection/sectors`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       renderSectorOptions(data.sectors?.length ? data.sectors : FALLBACK_SECTORS);
@@ -208,7 +208,7 @@
 
   async function isServerReady() {
     try {
-      const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+      const response = await fetch(`${API_PREFIX}/api/health`, { cache: "no-store" });
       return response.ok;
     } catch {
       return false;
@@ -300,7 +300,7 @@
       senderPhone: senderPhone.value.trim()
     });
     log(`D\u00e9marrage \u2014 secteur \u00ab ${sector} \u00bb.`);
-    eventSource = new EventSource(`${API_BASE}/api/prospection/stream?${params.toString()}`);
+    eventSource = new EventSource(`${API_PREFIX}/api/prospection/stream?${params.toString()}`);
     eventSource.onmessage = (message) => {
       try {
         handleEvent(JSON.parse(message.data));
