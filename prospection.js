@@ -38,6 +38,8 @@
     { id: "arts", label: "Arts, spectacles, sport" },
     { id: "services", label: "Services aux entreprises" }
   ];
+  const IS_FILE_MODE = window.location.protocol === "file:";
+  const API_BASE = IS_FILE_MODE ? "http://localhost:3000" : window.location.origin;
   let companies = [];
   let selectedKeys = new Set();
   let editedMails = {};
@@ -192,14 +194,38 @@
 
   async function loadSectors() {
     try {
-      const response = await fetch("/api/prospection/sectors");
+      const response = await fetch(`${API_BASE}/api/prospection/sectors`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       renderSectorOptions(data.sectors?.length ? data.sectors : FALLBACK_SECTORS);
     } catch (error) {
       renderSectorOptions(FALLBACK_SECTORS);
-      log(`Secteurs disponibles (API indisponible : ${error.message})`);
+      if (!IS_FILE_MODE) {
+        log(`Secteurs disponibles (API indisponible : ${error.message})`);
+      }
     }
+  }
+
+  async function isServerReady() {
+    try {
+      const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function warnIfFileModeWithoutServer() {
+    if (!IS_FILE_MODE) return;
+    const ready = await isServerReady();
+    const banner = document.getElementById("fileModeBanner");
+    if (banner) banner.hidden = ready;
+    if (ready) {
+      log("Fichier local détecté — serveur trouvé sur http://localhost:3000");
+      return;
+    }
+    log("Fichier HTML ouvert sans serveur. Lancez : npm install && npm start");
+    log("Puis ouvrez http://localhost:3000/prospection (recommandé).");
   }
 
   function selectedSector() {
@@ -240,11 +266,17 @@
     }
   }
 
-  function run() {
+  async function run() {
     saveSender();
     const sector = selectedSector();
     if (!sector) {
       log("Choisissez un secteur.");
+      return;
+    }
+    if (!(await isServerReady())) {
+      log("Serveur inaccessible.");
+      log("Dans le dossier du projet : npm install && npm start");
+      log("Puis ouvrez http://localhost:3000/prospection");
       return;
     }
     if (eventSource) {
@@ -268,7 +300,7 @@
       senderPhone: senderPhone.value.trim()
     });
     log(`D\u00e9marrage \u2014 secteur \u00ab ${sector} \u00bb.`);
-    eventSource = new EventSource(`/api/prospection/stream?${params.toString()}`);
+    eventSource = new EventSource(`${API_BASE}/api/prospection/stream?${params.toString()}`);
     eventSource.onmessage = (message) => {
       try {
         handleEvent(JSON.parse(message.data));
@@ -277,7 +309,9 @@
       }
     };
     eventSource.onerror = () => {
-      if (runBtn.disabled) log("Connexion interrompue. Relancez si la liste est incompl\u00e8te.");
+      if (runBtn.disabled) {
+        log("Connexion interrompue. V\u00e9rifiez que npm start tourne, puis relancez.");
+      }
       runBtn.disabled = false;
       eventSource.close();
     };
@@ -411,4 +445,5 @@
   loadSender();
   loadTemplate();
   loadSectors();
+  warnIfFileModeWithoutServer();
 })();

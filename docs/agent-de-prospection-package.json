@@ -1,0 +1,21 @@
+{
+  "name": "agent-de-prospection",
+  "version": "1.0.0",
+  "description": "Agent IA de prospection — nouvelles entreprises, contacts publics, mails comptables",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "check": "node --check server/index.js && node --check server/prospection-agent.js && node --check prospection.js",
+    "test": "node --test server/prospection-agent.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/urdirditfurd/Agent-de-propspection.git"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}

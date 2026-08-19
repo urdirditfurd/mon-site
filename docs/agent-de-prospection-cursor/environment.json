@@ -1,0 +1,17 @@
+{
+  "name": "Agent de prospection",
+  "install": "npm install",
+  "start": "npm start",
+  "terminals": [
+    {
+      "name": "agent-prospection",
+      "command": "npm start"
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 3000
+    }
+  ]
+}
