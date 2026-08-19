@@ -24,6 +24,20 @@
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
+  const FALLBACK_SECTORS = [
+    { id: "restauration", label: "Restauration, cafés, bars" },
+    { id: "btp", label: "BTP / artisanat du bâtiment" },
+    { id: "commerce", label: "Commerce de détail" },
+    { id: "immobilier", label: "Immobilier" },
+    { id: "informatique", label: "Informatique / digital" },
+    { id: "conseil", label: "Conseil, gestion, juridique" },
+    { id: "sante", label: "Santé / médical" },
+    { id: "beaute", label: "Beauté / coiffure" },
+    { id: "transport", label: "Transport / logistique" },
+    { id: "enseignement", label: "Formation / enseignement" },
+    { id: "arts", label: "Arts, spectacles, sport" },
+    { id: "services", label: "Services aux entreprises" }
+  ];
   let companies = [];
   let selectedKeys = new Set();
   let editedMails = {};
@@ -170,12 +184,22 @@
     renderList();
   }
 
-  async function loadSectors() {
-    const response = await fetch("/api/prospection/sectors");
-    const data = await response.json();
-    sectorSelect.innerHTML = (data.sectors || []).map((sector) => (
+  function renderSectorOptions(sectors) {
+    sectorSelect.innerHTML = sectors.map((sector) => (
       `<option value="${escapeHtml(sector.id)}">${escapeHtml(sector.label)}</option>`
     )).join("");
+  }
+
+  async function loadSectors() {
+    try {
+      const response = await fetch("/api/prospection/sectors");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      renderSectorOptions(data.sectors?.length ? data.sectors : FALLBACK_SECTORS);
+    } catch (error) {
+      renderSectorOptions(FALLBACK_SECTORS);
+      log(`Secteurs disponibles (API indisponible : ${error.message})`);
+    }
   }
 
   function selectedSector() {
@@ -386,5 +410,5 @@
 
   loadSender();
   loadTemplate();
-  loadSectors().catch((error) => log(`Impossible de charger les secteurs : ${error.message}`));
+  loadSectors();
 })();

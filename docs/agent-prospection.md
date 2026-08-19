@@ -80,7 +80,10 @@ Experts-comptables, cabinets comptables et conseillers qui souhaitent **prospect
 | `prospection.html` | Interface (HTML + CSS) |
 | `prospection.js` | Logique front (recherche, mails, export) |
 | `server/prospection-agent.js` | Agent IA (BODACC, contacts, SSE) |
-| `server/index.js` | Serveur Express (route `/prospection` et `/api/prospection`) |
+| `server/prospection-server.js` | Serveur minimal standalone (repo Agent-de-propspection) |
+| `server/index.js` | Serveur Express complet ClipForge (mon-site) |
+
+Pour le repo **Agent-de-propspection** autonome, copiez `server/prospection-server.js` en `server/index.js` et lancez `npm start`.
 
 ---
 

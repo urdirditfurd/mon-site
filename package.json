@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "node server/index.js",
     "start": "node server/index.js",
+    "start:prospection": "node server/prospection-server.js",
     "start:v4": "QUEUE_MODE=bullmq node server/index.js",
     "start:v4:workers4": "QUEUE_MODE=bullmq WORKER_CONCURRENCY=4 node server/index.js",
-    "check": "node --check app.js && node --check server/index.js && node --check server/fal-limits.js && node --check server/sulphur-video-pipeline.js && node --check server/sulphur-video.js && node --check server/hf-video-models.js && node --check server/free-scene-planner.js && node --check video-factory.js && node --check server/prospection-agent.js && node --check prospection.js",
+    "check": "node --check app.js && node --check server/index.js && node --check server/fal-limits.js && node --check server/sulphur-video-pipeline.js && node --check server/sulphur-video.js && node --check server/hf-video-models.js && node --check server/free-scene-planner.js && node --check video-factory.js && node --check server/prospection-agent.js && node --check server/prospection-server.js && node --check prospection.js",
     "test:prospection": "node --test server/prospection-agent.test.js",
     "build:studio": "node scripts/build-video-factory-standalone.mjs",
     "setup": "npm install",
