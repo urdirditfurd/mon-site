@@ -1,0 +1,16 @@
+node_modules/
+.env
+*.db
+*.db-shm
+*.db-wal
+env.example
+data/images/
+data/trending-cache.json
+data/ops.json
+data/live-cache.json
+live-cache.json
+clients/*/
+clients/registry.json
+!clients/.gitkeep
+!clients/README.md
+ecosystem.config.cjs
