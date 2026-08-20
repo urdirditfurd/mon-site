@@ -7,3 +7,8 @@ storage/jobs-db.json
 !storage/jobs/.gitkeep
 **/__pycache__/
 *.pyc
+.env
+.env.runpod
+.env.*
+!.env.runpod.example
+!.env*.example
