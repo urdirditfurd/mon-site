@@ -686,12 +686,21 @@ function applyContact(company, { email, phone, website, source, confidence }) {
 function matchesDepartment(company, department) {
   if (!department) return true;
   const dep = String(department).padStart(2, "0");
-  const companyDep = String(company.department || "").padStart(2, "0");
-  if (companyDep === dep) return true;
   const cp = String(company.postalCode || "");
-  if (dep.length === 2 && cp.startsWith(dep)) return true;
-  if (dep.length === 3 && cp.startsWith(dep)) return true;
-  return false;
+  // Priorité au code postal français réel (évite les succursales étrangères marquées Paris).
+  if (/^\d{5}$/.test(cp)) {
+    if (dep.length === 3) return cp.startsWith(dep);
+    return cp.startsWith(dep);
+  }
+  const companyDep = String(company.department || "").padStart(2, "0");
+  return companyDep === dep;
+}
+
+function writeSse(res, payload) {
+  // Padding anti-buffer Cloudflare / proxies (~2 Ko) pour forcer le flush immédiat.
+  res.write(`: ${" ".repeat(2048)}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  if (typeof res.flush === "function") res.flush();
 }
 
 async function enrichFromNominatim(company) {
@@ -985,7 +994,7 @@ async function enrichFromPagesJaunes(company) {
     if (!pageMatchesCompany(markdown, company)) {
       return false;
     }
-      const phones = extractPhones(markdown).filter((phone) => phoneFitsCompany(phone, company));
+    const phones = extractPhones(markdown).filter((phone) => phoneFitsCompany(phone, company));
     const emails = extractEmails(markdown);
     const links = parseMarkdownLinks(markdown)
       .map((l) => l.href)
@@ -1004,6 +1013,113 @@ async function enrichFromPagesJaunes(company) {
     return false;
   }
   return false;
+}
+
+/** Directories locaux publics (téléphones souvent publiés même pour jeunes structures). */
+async function enrichFromLocalDirectories(company) {
+  const name = searchName(company);
+  const city = company.city || company.postalCode || "";
+  if (!name || name.length < 3) return false;
+  const targets = [
+    {
+      url: `https://www.118712.fr/recherche?what=${encodeURIComponent(name)}&where=${encodeURIComponent(city)}`,
+      source: "118712"
+    },
+    {
+      url: `https://www.cylex.fr/france/search/?q=${encodeURIComponent(`${name} ${city}`)}`,
+      source: "Cylex"
+    },
+    {
+      url: `https://www.google.com/maps/search/${encodeURIComponent(`${name} ${city} France`)}`,
+      source: "Google Maps (public)"
+    }
+  ];
+  for (const target of targets) {
+    let text = "";
+    try {
+      text = await fetchViaJina(target.url);
+    } catch {
+      continue;
+    }
+    if (!text || text.length < 80) continue;
+    if (!pageMatchesCompany(text, company) && !(company.postalCode && text.includes(company.postalCode))) {
+      continue;
+    }
+    const hit = pickBestFromText(text, company, target.source, target.url, { fullText: false, lenient: true });
+    if (hit && (hit.email || hit.phone)) {
+      applyContact(company, {
+        ...hit,
+        source: target.source,
+        confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+      });
+      return true;
+    }
+    await sleep(60);
+  }
+  return false;
+}
+
+/** DuckDuckGo HTML direct (sans Jina) — snippets téléphone / e-mail + liens site. */
+async function enrichFromDuckDuckGoHtml(company) {
+  const queries = [
+    `"${searchName(company)}" ${company.city || ""} téléphone OR email OR contact`,
+    `"${searchName(company)}" ${company.postalCode || ""} contact`
+  ];
+  for (const query of queries) {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    let html = "";
+    try {
+      html = await fetchText(url, { timeoutMs: 10000, retries: 1, accept: "text/html" });
+    } catch {
+      continue;
+    }
+    if (!html || html.length < 200) continue;
+    const hit = pickBestFromText(html, company, "DuckDuckGo (snippet)", url, { fullText: false, lenient: true });
+    if (hit && (hit.email || hit.phone)) {
+      applyContact(company, {
+        ...hit,
+        source: "DuckDuckGo (snippet public)",
+        confidence: company.postalCode && html.includes(company.postalCode) ? "high" : "medium"
+      });
+      return true;
+    }
+    const hrefRe = /uddg=([^&"]+)/g;
+    const candidates = [];
+    let match;
+    while ((match = hrefRe.exec(html))) {
+      try {
+        const href = decodeURIComponent(match[1]);
+        const host = hostOf(href);
+        if (!host || isDirectoryHost(href) || isRelayHost(href)) continue;
+        if (/duckduckgo\.|google\.|facebook\.|linkedin\.|instagram\.|youtube\./.test(host)) continue;
+        if (nameSimilarity(searchName(company), `${host} ${href}`) < 0.18) continue;
+        if (!candidates.includes(href)) candidates.push(href);
+      } catch {
+        // ignore
+      }
+      if (candidates.length >= 3) break;
+    }
+    for (const href of candidates.slice(0, 2)) {
+      try {
+        const scraped = await scrapeWebsiteQuick(href, company);
+        if (scraped.email || scraped.phone) {
+          applyContact(company, {
+            email: scraped.email,
+            phone: scraped.phone,
+            website: scraped.website || href,
+            source: `site ${hostOf(href)}`,
+            confidence: scraped.confidence || "medium"
+          });
+          return true;
+        }
+        if (scraped.website && !company.website) company.website = scraped.website;
+      } catch {
+        // suivant
+      }
+    }
+    await sleep(80);
+  }
+  return isVerifiedContact(company);
 }
 
 async function enrichFromSearch(company) {
@@ -1137,13 +1253,174 @@ function publicCompany(company, sender) {
   };
 }
 
+async function enrichFromWebSnippets(company) {
+  const queries = [
+    `"${searchName(company)}" ${company.city || ""} téléphone OR email OR contact`,
+    `"${searchName(company)}" ${company.postalCode || ""} téléphone`,
+    (company.directors || [])[0]
+      ? `"${(company.directors || [])[0]}" "${searchName(company)}" email OR téléphone`
+      : ""
+  ].filter(Boolean);
+  const engines = [
+    (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+    (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}&hl=fr&num=8`,
+    (q) => `https://search.brave.com/search?q=${encodeURIComponent(q)}`
+  ];
+  for (const query of queries.slice(0, 2)) {
+    for (const build of engines) {
+      let markdown = "";
+      try {
+        markdown = await fetchViaJina(build(query));
+      } catch {
+        continue;
+      }
+      if (!markdown || markdown.length < 80) continue;
+      const hit = pickBestFromText(markdown, company, "moteur de recherche public", "", { fullText: false });
+      if (hit && (hit.email || hit.phone)) {
+        applyContact(company, {
+          ...hit,
+          source: hit.source || "moteur de recherche public",
+          confidence: company.postalCode && markdown.includes(company.postalCode) ? "high" : "medium"
+        });
+        return true;
+      }
+      // Sites candidats dans les résultats → scrape rapide
+      const links = parseMarkdownLinks(markdown)
+        .map((l) => l.href)
+        .filter((href) => {
+          const host = hostOf(href);
+          if (!host || isDirectoryHost(href) || isRelayHost(href)) return false;
+          if (/google\.|duckduckgo\.|brave\.|bing\.|facebook\.|linkedin\.|instagram\./.test(host)) return false;
+          return nameSimilarity(searchName(company), `${host} ${href}`) >= 0.18;
+        })
+        .slice(0, 2);
+      for (const href of links) {
+        try {
+          const scraped = await scrapeWebsiteQuick(href, company);
+          if (scraped.email || scraped.phone) {
+            applyContact(company, {
+              email: scraped.email,
+              phone: scraped.phone,
+              website: scraped.website || href,
+              source: `site ${hostOf(href)}`,
+              confidence: scraped.confidence || "medium"
+            });
+            return true;
+          }
+        } catch {
+          // suivant
+        }
+      }
+      await sleep(80);
+    }
+  }
+  return isVerifiedContact(company);
+}
+
+async function enrichFromOverpass(company) {
+  if (!company.latitude || !company.longitude) return false;
+  const name = searchName(company).replace(/"/g, "");
+  if (!name || name.length < 3) return false;
+  const lat = Number(company.latitude);
+  const lon = Number(company.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  const query = `
+    [out:json][timeout:8];
+    (
+      node(around:250,${lat},${lon})["name"~"${name.split(/\s+/).slice(0, 2).join(".*")}",i]["phone"];
+      way(around:250,${lat},${lon})["name"~"${name.split(/\s+/).slice(0, 2).join(".*")}",i]["phone"];
+      node(around:250,${lat},${lon})["name"~"${name.split(/\s+/).slice(0, 2).join(".*")}",i]["contact:phone"];
+    );
+    out tags 8;
+  `.replace(/\s+/g, " ").trim();
+  try {
+    const payload = await fetchJson(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
+      timeoutMs: 10000,
+      retries: 0
+    });
+    for (const el of payload.elements || []) {
+      const tags = el.tags || {};
+      if (nameSimilarity(name, tags.name || "") < 0.4) continue;
+      const phone = normalizeFrPhone(tags.phone || tags["contact:phone"] || "");
+      const email = extractEmails(tags.email || tags["contact:email"] || "")[0] || "";
+      const website = tags.website || tags["contact:website"] || "";
+      if ((phone && phoneFitsCompany(phone, company)) || email) {
+        applyContact(company, {
+          email,
+          phone: phone && phoneFitsCompany(phone, company) ? phone : "",
+          website,
+          source: "OpenStreetMap Overpass",
+          confidence: "high"
+        });
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function mapPool(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let index = 0;
+  async function next() {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      results[current] = await worker(items[current], current);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => next()));
+  return results;
+}
+
+async function enrichCompanyContacts(company, onEvent) {
+  onEvent({ type: "status", message: `Recherche de contact v\u00e9rifi\u00e9 — ${company.name}` });
+  if (!isGenericCompanyName(company)) {
+    // Ordre optimisé : snippets / annuaires locaux d'abord (souvent le seul signal pour les créations récentes).
+    const steps = [
+      enrichFromDuckDuckGoHtml,
+      enrichFromWebSnippets,
+      enrichFromPagesJaunes,
+      enrichFromLocalDirectories,
+      enrichFromDomainGuess,
+      enrichFromOverpass,
+      enrichFromNominatim,
+      enrichFromPappers,
+      enrichFromSociete,
+      enrichFromDirectorSearch,
+      enrichFromAnnuaireEntreprises,
+      enrichFromSearch
+    ];
+    for (const step of steps) {
+      if (isVerifiedContact(company)) break;
+      try {
+        await step(company);
+      } catch {
+        // source suivante
+      }
+    }
+  }
+  const published = publicCompany(company);
+  onEvent({ type: "contact", siren: company.siren, company: published });
+  onEvent({
+    type: "status",
+    message: published.hasContact
+      ? `Contact v\u00e9rifi\u00e9 (${published.contactSource}) pour ${company.name}`
+      : `Pas de contact public v\u00e9rifi\u00e9 pour ${company.name}`
+  });
+  return published;
+}
+
 async function runProspection(params = {}, onEvent = () => {}) {
   const sector = resolveSector(params.sector);
   if (!sector) {
     throw new Error("Choisissez un secteur d'activité.");
   }
   const days = Math.min(180, Math.max(7, Number(params.days) || 30));
-  const limit = Math.max(3, Number(params.limit) || 200);
+  // Plafond raisonnable pour rester utilisable (contacts vérifiés = plus lent).
+  const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
   const sender = {
     name: String(params.senderName || "").trim(),
@@ -1161,57 +1438,36 @@ async function runProspection(params = {}, onEvent = () => {}) {
   const localized = companies.filter((company) => matchesDepartment(company, department));
   onEvent({
     type: "status",
-    message: `${total} annonces BODACC, ${localized.length} entreprises du secteur${zoneLabel || " (France)"} (contacts uniquement s'ils sont v\u00e9rifi\u00e9s).`
+    message: `${total} annonces BODACC, ${localized.length} entreprises du secteur${zoneLabel || " (France)"}. Affichage imm\u00e9diat, contacts v\u00e9rifi\u00e9s ensuite.`
   });
 
   const selected = [];
   for (const company of localized) {
     if (selected.length >= limit) break;
+    // Affiche tout de suite la fiche BODACC (évite l'écran vide).
+    onEvent({ type: "company", company: publicCompany(company, sender) });
     onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
     await enrichSirene(company);
-    await sleep(180);
+    await sleep(80);
     if (!matchesDepartment(company, department)) continue;
+    // Filtre NAF si on a le code et des préfixes secteur
+    if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
+      const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
+      const okKw = activityMatchesSector(company.activity || company.nafLabel || "", sector);
+      if (!okNaf && !okKw) continue;
+    }
     selected.push(company);
     onEvent({ type: "company", company: publicCompany(company, sender) });
   }
 
-  if (enrichContacts) {
-    for (const company of selected) {
-      onEvent({ type: "status", message: `Recherche de contact v\u00e9rifi\u00e9 — ${company.name}` });
-      if (!isGenericCompanyName(company)) {
-        const steps = [
-          enrichFromAnnuaireEntreprises,
-          enrichFromPappers,
-          enrichFromNominatim,
-          enrichFromPagesJaunes,
-          enrichFromDomainGuess,
-          enrichFromSociete,
-          enrichFromSearch,
-          enrichFromDirectorSearch
-        ];
-        for (const step of steps) {
-          if (isVerifiedContact(company)) break;
-          try {
-            await step(company);
-          } catch {
-            // source suivante
-          }
-          await sleep(120);
-        }
-      }
-      const published = publicCompany(company, sender);
-      onEvent({
-        type: "contact",
-        siren: company.siren,
-        company: published
-      });
-      onEvent({
-        type: "status",
-        message: published.hasContact
-          ? `Contact v\u00e9rifi\u00e9 (${published.contactSource}) pour ${company.name}`
-          : `Pas de contact public v\u00e9rifi\u00e9 pour ${company.name}`
-      });
-    }
+  if (enrichContacts && selected.length) {
+    onEvent({
+      type: "status",
+      message: `Recherche parall\u00e8le de contacts v\u00e9rifi\u00e9s (${selected.length} entreprises)…`
+    });
+    await mapPool(selected, 4, async (company) => {
+      await enrichCompanyContacts(company, onEvent);
+    });
   }
 
   const results = selected.map((company) => publicCompany(company, sender));
@@ -1226,22 +1482,18 @@ async function runProspection(params = {}, onEvent = () => {}) {
     sources: [
       "BODACC DILA",
       "API Recherche d'entreprises",
-      "Annuaire entreprises (officiel)",
-      "Pappers (page publique)",
-      "OpenStreetMap Nominatim",
+      "DuckDuckGo / Google / Brave (snippets publics)",
       "PagesJaunes",
-      "Site officiel de l'entreprise",
+      "118712 / Cylex / Google Maps",
+      "OpenStreetMap / Overpass",
+      "Site officiel",
+      "Pappers (page publique)",
       "Societe.com"
     ],
-    note: "Seuls les contacts publi\u00e9s et v\u00e9rifi\u00e9s sont retenus. Aucun e-mail n'est invent\u00e9 via MX/DNS."
+    note: "Contacts publi\u00e9s uniquement (pas de conjecture MX). LinkedIn non scrap\u00e9 (CGU)."
   };
   onEvent({ type: "done", summary, companies: results });
   return { summary, companies: results };
-}
-
-function writeSse(res, payload) {
-  res.write(`data: ${JSON.stringify(payload)}\n\n`);
-  if (typeof res.flush === "function") res.flush();
 }
 
 function createProspectionRouter() {
@@ -1264,7 +1516,18 @@ function createProspectionRouter() {
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders?.();
+    // Heartbeat pour empêcher les proxies de couper / bufferiser le flux.
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: ping ${Date.now()}\n\n`);
+        if (typeof res.flush === "function") res.flush();
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 4000);
+    req.on("close", () => clearInterval(heartbeat));
     try {
       await runProspection({
         sector: req.query.sector,
@@ -1279,6 +1542,7 @@ function createProspectionRouter() {
     } catch (error) {
       writeSse(res, { type: "error", message: error instanceof Error ? error.message : "Recherche impossible" });
     }
+    clearInterval(heartbeat);
     res.end();
   });
 

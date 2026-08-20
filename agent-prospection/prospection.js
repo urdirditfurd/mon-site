@@ -43,7 +43,7 @@
   let companies = [];
   let selectedKeys = new Set();
   let editedMails = {};
-  let eventSource = null;
+  let streamAbort = null;
 
   function loadSender() {
     try {
@@ -267,6 +267,27 @@
     }
   }
 
+  function consumeSseChunk(buffer, chunk) {
+    const next = `${buffer}${chunk}`;
+    const parts = next.split(/\n\n/);
+    const rest = parts.pop() || "";
+    for (const part of parts) {
+      const dataLine = part
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .find((line) => line.startsWith("data:"));
+      if (!dataLine) continue;
+      const raw = dataLine.replace(/^data:\s?/, "");
+      if (!raw || raw === "[DONE]") continue;
+      try {
+        handleEvent(JSON.parse(raw));
+      } catch (error) {
+        log(`\u00c9v\u00e9nement illisible : ${error instanceof Error ? error.message : "inconnue"}`);
+      }
+    }
+    return rest;
+  }
+
   async function run() {
     saveSender();
     const sector = selectedSector();
@@ -280,9 +301,9 @@
       log("Puis ouvrez http://localhost:3000/prospection");
       return;
     }
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
+    if (streamAbort) {
+      streamAbort.abort();
+      streamAbort = null;
     }
     companies = [];
     selectedKeys.clear();
@@ -294,28 +315,43 @@
     const params = new URLSearchParams({
       sector,
       days: daysSelect.value,
-      limit: "9999",
+      limit: "40",
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
     log(`D\u00e9marrage \u2014 secteur \u00ab ${sector} \u00bb.`);
-    eventSource = new EventSource(`${API_PREFIX}/api/prospection/stream?${params.toString()}`);
-    eventSource.onmessage = (message) => {
-      try {
-        handleEvent(JSON.parse(message.data));
-      } catch (error) {
-        log(`\u00c9v\u00e9nement illisible : ${error instanceof Error ? error.message : "inconnue"}`);
+    const controller = new AbortController();
+    streamAbort = controller;
+    try {
+      // fetch + ReadableStream traverse mieux Cloudflare que EventSource (moins de buffering).
+      const response = await fetch(`${API_PREFIX}/api/prospection/stream?${params.toString()}`, {
+        headers: { Accept: "text/event-stream" },
+        cache: "no-store",
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    };
-    eventSource.onerror = () => {
-      if (runBtn.disabled) {
-        log("Connexion interrompue. V\u00e9rifiez que npm start tourne, puis relancez.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer = consumeSseChunk(buffer, decoder.decode(value, { stream: true }));
       }
+      if (buffer.trim()) consumeSseChunk(`${buffer}\n\n`, "");
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        log(`Connexion interrompue : ${error instanceof Error ? error.message : "inconnue"}`);
+        log("V\u00e9rifiez que npm start tourne, puis relancez.");
+      }
+    } finally {
+      if (streamAbort === controller) streamAbort = null;
       runBtn.disabled = false;
-      eventSource.close();
-    };
+    }
   }
 
   function exportCsv() {
