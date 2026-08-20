@@ -99,22 +99,22 @@
   }
 
   function contactBlock(company) {
-    if (company.email || company.phone) {
+    if (company.hasContact && (company.email || company.phone)) {
       const bits = [];
       if (company.email) bits.push(`<a href="mailto:${escapeHtml(company.email)}">${escapeHtml(company.email)}</a>`);
       if (company.phone) bits.push(`<a href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">${escapeHtml(company.phone)}</a>`);
-      return `<div class="contact-row"><strong>Contact</strong>${bits.join(" \u00b7 ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")}</div></div>`;
+      return `<div class="contact-row"><strong>Contact v\u00e9rifi\u00e9</strong>${bits.join(" \u00b7 ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")} \u00b7 confiance ${escapeHtml(company.contactConfidence || "medium")}</div></div>`;
     }
-    return `<div class="contact-row missing"><strong>Contact non publi\u00e9</strong><span class="meta">Aucun e-mail / t\u00e9l\u00e9phone trouv\u00e9 en source ouverte.</span></div>`;
+    return `<div class="contact-row missing"><strong>Contact non v\u00e9rifi\u00e9</strong><span class="meta">Aucun e-mail / t\u00e9l\u00e9phone publi\u00e9 trouv\u00e9 (pas de conjecture MX). Pappers / PagesJaunes / site officiel vides.</span></div>`;
   }
 
   function renderCompany(company) {
     const key = companyKey(company);
     const checked = selectedKeys.has(key) ? "checked" : "";
-    const canSelect = company.hasContact;
+    const canSelect = Boolean(company.hasContact && company.email);
     const chip = company.hasContact
-      ? `<span class="chip ok">contact</span>`
-      : `<span class="chip">\u00e0 qualifier</span>`;
+      ? `<span class="chip ok">v\u00e9rifi\u00e9</span>`
+      : `<span class="chip">sans contact public</span>`;
     const directors = (company.directors || []).length ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>` : "";
     const rawActivity = company.activity || "";
     const shortActivity = rawActivity.length > 180 ? `${rawActivity.slice(0, 180)}\u2026` : rawActivity;
@@ -123,6 +123,7 @@
       : escapeHtml(shortActivity);
     const links = [];
     if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire officiel</a>`);
+    if (company.pappersUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
     if (company.bodaccUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.bodaccUrl)}" target="_blank" rel="noopener">Annonce BODACC</a>`);
     if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
     if (canSelect) links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le mail</button>`);
@@ -154,9 +155,9 @@
   }
 
   function updateSelectionUI() {
-    const contactCompanies = companies.filter((c) => c.hasContact);
+    const contactCompanies = companies.filter((c) => c.hasContact && c.email);
     selectedCount.textContent = String(selectedKeys.size);
-    massMailBar.style.display = companies.length ? "" : "none";
+    massMailBar.style.display = contactCompanies.length ? "flex" : "none";
     massSendBtn.disabled = selectedKeys.size === 0;
     selectAllCb.checked = contactCompanies.length > 0 && contactCompanies.every((c) => selectedKeys.has(companyKey(c)));
   }
@@ -173,7 +174,7 @@
     const withContact = companies.filter((c) => c.hasContact).length;
     statsBox.innerHTML = `
       <div class="stat"><b>${companies.length}</b> entreprises</div>
-      <div class="stat"><b>${withContact}</b> avec e-mail ou t\u00e9l\u00e9phone</div>
+      <div class="stat"><b>${withContact}</b> contacts v\u00e9rifi\u00e9s</div>
     `;
     updateSelectionUI();
   }
@@ -242,8 +243,8 @@
       upsertCompany(event.company);
       if (event.type === "contact") {
         log(event.company.hasContact
-          ? `Contact trouv\u00e9 pour ${event.company.name}`
-          : `Pas de contact public pour ${event.company.name}`);
+          ? `Contact v\u00e9rifi\u00e9 pour ${event.company.name}`
+          : `Pas de contact public v\u00e9rifi\u00e9 pour ${event.company.name}`);
       }
       return;
     }
@@ -253,7 +254,7 @@
       const summary = event.summary || {};
       statsBox.innerHTML = `
         <div class="stat"><b>${summary.found || companies.length}</b> entreprises</div>
-        <div class="stat"><b>${summary.withContact || 0}</b> avec contact</div>
+        <div class="stat"><b>${summary.withContact || 0}</b> contacts v\u00e9rifi\u00e9s</div>
         <div class="stat">BODACC brut : <b>${summary.totalBodacc || 0}</b></div>
       `;
       log(`Termin\u00e9 \u2014 ${summary.found || 0} entreprises, ${summary.withContact || 0} contacts publics.`);
@@ -385,7 +386,7 @@
   });
 
   selectAllCb.addEventListener("change", () => {
-    const contactCompanies = companies.filter((c) => c.hasContact);
+    const contactCompanies = companies.filter((c) => c.hasContact && c.email);
     if (selectAllCb.checked) {
       contactCompanies.forEach((c) => selectedKeys.add(companyKey(c)));
     } else {
@@ -410,7 +411,7 @@
   massSendBtn.addEventListener("click", () => {
     const toSend = companies.filter((c) => c.hasContact && c.email && selectedKeys.has(companyKey(c)));
     if (!toSend.length) {
-      log("Aucune entreprise s\u00e9lectionn\u00e9e avec un e-mail.");
+      log("Aucun contact v\u00e9rifi\u00e9 s\u00e9lectionn\u00e9. Les e-mails conjecturaux ne sont plus propos\u00e9s.");
       return;
     }
     let sent = 0;
@@ -425,7 +426,7 @@
       a.click();
       sent += 1;
     }
-    log(`${sent} fen\u00eatre(s) mailto ouverte(s). V\u00e9rifiez et envoyez depuis votre client mail.`);
+    log(`${sent} mail(s) pr\u00eats (contacts v\u00e9rifi\u00e9s uniquement). V\u00e9rifiez encore une fois avant d\u2019envoyer.`);
   });
 
   runBtn.addEventListener("click", run);

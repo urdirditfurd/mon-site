@@ -378,14 +378,28 @@ function normalizeFrPhone(raw) {
     digits = digits.slice(0, 10);
   }
   if (digits.length !== 10 || !digits.startsWith("0")) return "";
-  if (digits.startsWith("089") || (digits.startsWith("08") && digits[2] === "9")) return "";
+  // 08xx = surtaxés / numéros teaser Pappers (souvent dérivés du SIREN) — jamais retenus.
+  if (digits.startsWith("08")) return "";
   if (digits.startsWith("0033")) return "";
   return `${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
+}
+
+function isSirenTeaserPhone(phone, company) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  const siren = String(company?.siren || "").replace(/\D/g, "");
+  if (digits.length !== 10 || siren.length !== 9) return false;
+  if (digits.slice(1, 10) === siren) return true;
+  if (digits.slice(0, 9) === siren) return true;
+  if (`0${siren.slice(1)}0` === digits) return true;
+  if (digits.includes(siren.slice(0, 8))) return true;
+  return false;
 }
 
 function phoneFitsCompany(phone, company) {
   const digits = String(phone || "").replace(/\D/g, "");
   if (digits.length !== 10) return false;
+  if (digits.startsWith("08")) return false;
+  if (isSirenTeaserPhone(phone, company)) return false;
   const prefix = digits.slice(0, 2);
   if (prefix === "06" || prefix === "07" || prefix === "09") return true;
   const dep = String(company.department || "").padStart(2, "0");
@@ -547,7 +561,7 @@ async function fetchText(url, options = {}) {
 async function fetchViaJina(targetUrl) {
   const wrapped = `${JINA_PREFIX}${targetUrl}`;
   return fetchText(wrapped, {
-    timeoutMs: 12000,
+    timeoutMs: 8000,
     retries: 0,
     headers: { "X-No-Cache": "true", Accept: "text/markdown" }
   });
@@ -651,13 +665,33 @@ async function enrichSirene(company) {
 }
 
 function applyContact(company, { email, phone, website, source, confidence }) {
-  if (email && !company.email) company.email = email;
-  if (phone && !company.phone) company.phone = phone;
-  if (website && !company.website) company.website = website;
-  if ((email || phone) && !company.contactSource) {
-    company.contactSource = source;
-    company.contactConfidence = confidence || "medium";
+  const level = confidence || "medium";
+  const rank = { high: 3, medium: 2, low: 1 };
+  const currentRank = rank[company.contactConfidence] || 0;
+  const nextRank = rank[level] || 0;
+  if (level === "low") {
+    // Ne jamais valider un contact conjectural (ex. email MX deviné).
+    return;
   }
+  if (email && (!company.email || nextRank >= currentRank)) company.email = email;
+  if (phone && (!company.phone || nextRank >= currentRank)) company.phone = phone;
+  if (website && !company.website) company.website = website;
+  if ((email || phone) && nextRank >= currentRank) {
+    company.contactSource = source;
+    company.contactConfidence = level;
+    company.contactVerified = level === "high" || level === "medium";
+  }
+}
+
+function matchesDepartment(company, department) {
+  if (!department) return true;
+  const dep = String(department).padStart(2, "0");
+  const companyDep = String(company.department || "").padStart(2, "0");
+  if (companyDep === dep) return true;
+  const cp = String(company.postalCode || "");
+  if (dep.length === 2 && cp.startsWith(dep)) return true;
+  if (dep.length === 3 && cp.startsWith(dep)) return true;
+  return false;
 }
 
 async function enrichFromNominatim(company) {
@@ -886,46 +920,59 @@ async function enrichFromDirectorSearch(company) {
     applyContact(company, {
       email: relevantEmails[0] || "",
       phone: allPhones[0] || "",
-      source: "recherche dirigeant",
-      confidence: "medium"
+      source: "recherche dirigeant (snippet public)",
+      confidence: relevantEmails[0] && allPhones[0] ? "high" : "medium"
     });
     return true;
   }
   return false;
 }
 
-async function enrichFromEmailGuess(company) {
-  const base = slugify(searchName(company));
-  if (!base || base.length < 3) return false;
-  const parts = base.split("-").filter(Boolean);
-  const forms = new Set([base, parts.join("")]);
-  if (parts.length >= 2) {
-    forms.add(parts.slice(0, 2).join(""));
-  }
-  const tlds = [".fr", ".com"];
-  for (const form of forms) {
-    if (form.length < 3) continue;
-    for (const tld of tlds) {
-      const domain = form + tld;
-      try {
-        const mx = await dns.resolveMx(domain);
-        if (!mx || !mx.length) continue;
-      } catch {
-        continue;
-      }
-      const prefixes = ["contact", "info", "hello", "bonjour"];
-      for (const prefix of prefixes) {
-        const email = `${prefix}@${domain}`;
-        applyContact(company, {
-          email,
-          phone: "",
-          website: `https://${domain}`,
-          source: `devin\u00e9 (MX ${domain})`,
-          confidence: "low"
-        });
-        return true;
-      }
+async function enrichFromPappers(company) {
+  if (!company.siren) return false;
+  const target = `https://www.pappers.fr/entreprise/${company.siren}`;
+  try {
+    const markdown = await fetchViaJina(target);
+    if (!markdown || markdown.length < 150) return false;
+    if (!pageMatchesCompany(markdown, company) && !markdown.includes(company.siren)) return false;
+    const phones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
+    const emails = extractEmails(markdown);
+    if (phones[0] || emails[0]) {
+      applyContact(company, {
+        email: emails[0] || "",
+        phone: phones[0] || "",
+        website: target,
+        source: "Pappers (page publique)",
+        confidence: phones[0] ? "high" : "medium"
+      });
+      return true;
     }
+  } catch {
+    // page publique parfois limitée
+  }
+  return false;
+}
+
+async function enrichFromAnnuaireEntreprises(company) {
+  if (!company.siren) return false;
+  const target = `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}`;
+  try {
+    const markdown = await fetchViaJina(target);
+    if (!markdown || !markdown.includes(company.siren)) return false;
+    // L'annuaire officiel n'affiche presque jamais d'e-mail ; on récupère seulement un téléphone s'il est public.
+    const phones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
+    if (phones[0]) {
+      applyContact(company, {
+        email: "",
+        phone: phones[0],
+        website: target,
+        source: "Annuaire entreprises (officiel)",
+        confidence: "high"
+      });
+      return true;
+    }
+  } catch {
+    return false;
   }
   return false;
 }
@@ -984,6 +1031,7 @@ async function enrichFromSearch(company) {
       if (seenHref.has(link.href)) continue;
       const host = hostOf(link.href);
       if (host.includes("brave.com") || host.includes("search.brave")) continue;
+      if (host.includes("linkedin.com") || host.includes("facebook.com") || host.includes("instagram.com")) continue;
       if (isDirectoryHost(link.href) && !link.href.includes("pagesjaunes.fr/pros/")) continue;
       if (isRelayHost(link.href)) continue;
       const score = nameSimilarity(searchName(company), `${link.title} ${link.href}`);
@@ -1050,8 +1098,17 @@ ${sender.phone || ""}`.replace(/\n{3,}/g, "\n\n").trim();
   return { subject, body, mailto };
 }
 
+function isVerifiedContact(company) {
+  return Boolean(
+    company.contactVerified
+    && (company.email || company.phone)
+    && company.contactConfidence !== "low"
+  );
+}
+
 function publicCompany(company, sender) {
-  const proposal = buildProposal(company, sender);
+  const verified = isVerifiedContact(company);
+  const proposal = verified && company.email ? buildProposal(company, sender) : null;
   return {
     name: company.name,
     legalName: company.legalName,
@@ -1066,13 +1123,16 @@ function publicCompany(company, sender) {
     postalCode: company.postalCode,
     department: company.department,
     directors: company.directors,
-    email: company.email || "",
-    phone: company.phone || "",
+    email: verified ? (company.email || "") : "",
+    phone: verified ? (company.phone || "") : "",
     website: company.website || "",
-    contactSource: company.contactSource || "",
-    hasContact: Boolean(company.email || company.phone),
+    contactSource: verified ? (company.contactSource || "") : "",
+    contactConfidence: verified ? (company.contactConfidence || "") : "",
+    contactVerified: verified,
+    hasContact: verified,
     bodaccUrl: company.bodaccUrl,
     sireneUrl: company.sireneUrl || (company.siren ? `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}` : ""),
+    pappersUrl: company.siren ? `https://www.pappers.fr/entreprise/${company.siren}` : "",
     proposal
   };
 }
@@ -1092,50 +1152,65 @@ async function runProspection(params = {}, onEvent = () => {}) {
   };
   const enrichContacts = params.enrichContacts !== false;
 
-  onEvent({ type: "status", message: `Recherche BODACC — créations ${sector.label}, ${days} derniers jours.` });
+  const zoneLabel = department ? ` · d\u00e9partement ${department}` : "";
+  onEvent({
+    type: "status",
+    message: `Recherche BODACC — cr\u00e9ations ${sector.label}, ${days} derniers jours${zoneLabel}.`
+  });
   const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
-  onEvent({ type: "status", message: `${total} annonces brutes, ${companies.length} entreprises du secteur.` });
+  const localized = companies.filter((company) => matchesDepartment(company, department));
+  onEvent({
+    type: "status",
+    message: `${total} annonces BODACC, ${localized.length} entreprises du secteur${zoneLabel || " (France)"} (contacts uniquement s'ils sont v\u00e9rifi\u00e9s).`
+  });
 
   const selected = [];
-  for (const company of companies) {
+  for (const company of localized) {
     if (selected.length >= limit) break;
     onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
     await enrichSirene(company);
     await sleep(180);
+    if (!matchesDepartment(company, department)) continue;
     selected.push(company);
     onEvent({ type: "company", company: publicCompany(company, sender) });
   }
 
   if (enrichContacts) {
     for (const company of selected) {
-      onEvent({ type: "status", message: `Recherche de contact — ${company.name}` });
+      onEvent({ type: "status", message: `Recherche de contact v\u00e9rifi\u00e9 — ${company.name}` });
       if (!isGenericCompanyName(company)) {
-        await enrichFromEmailGuess(company);
-        if (!company.email && !company.phone) {
-          await enrichFromNominatim(company);
-          await sleep(250);
-        }
-        if (!company.email && !company.phone) {
-          await enrichFromDomainGuess(company);
-        }
-        if (!company.email && !company.phone) {
-          await enrichFromPagesJaunes(company);
-          await sleep(400);
-        }
-        if (!company.email && !company.phone) {
-          await enrichFromSearch(company);
-          await sleep(400);
-        }
-        if (!company.email && !company.phone) {
-          await enrichFromSociete(company);
-          await sleep(400);
-        }
-        if (!company.email && !company.phone) {
-          await enrichFromDirectorSearch(company);
-          await sleep(400);
+        const steps = [
+          enrichFromAnnuaireEntreprises,
+          enrichFromPappers,
+          enrichFromNominatim,
+          enrichFromPagesJaunes,
+          enrichFromDomainGuess,
+          enrichFromSociete,
+          enrichFromSearch,
+          enrichFromDirectorSearch
+        ];
+        for (const step of steps) {
+          if (isVerifiedContact(company)) break;
+          try {
+            await step(company);
+          } catch {
+            // source suivante
+          }
+          await sleep(120);
         }
       }
-      onEvent({ type: "contact", siren: company.siren, company: publicCompany(company, sender) });
+      const published = publicCompany(company, sender);
+      onEvent({
+        type: "contact",
+        siren: company.siren,
+        company: published
+      });
+      onEvent({
+        type: "status",
+        message: published.hasContact
+          ? `Contact v\u00e9rifi\u00e9 (${published.contactSource}) pour ${company.name}`
+          : `Pas de contact public v\u00e9rifi\u00e9 pour ${company.name}`
+      });
     }
   }
 
@@ -1148,7 +1223,17 @@ async function runProspection(params = {}, onEvent = () => {}) {
     totalBodacc: total,
     found: results.length,
     withContact,
-    sources: ["BODACC DILA (gratuit)", "API Recherche d'entreprises (gratuit)", "OpenStreetMap Nominatim (gratuit)", "Brave Search + Google + PagesJaunes via Jina Reader (gratuit)", "Societe.com (gratuit)", "Devinette email MX (gratuit)", "Recherche dirigeant (gratuit)"]
+    sources: [
+      "BODACC DILA",
+      "API Recherche d'entreprises",
+      "Annuaire entreprises (officiel)",
+      "Pappers (page publique)",
+      "OpenStreetMap Nominatim",
+      "PagesJaunes",
+      "Site officiel de l'entreprise",
+      "Societe.com"
+    ],
+    note: "Seuls les contacts publi\u00e9s et v\u00e9rifi\u00e9s sont retenus. Aucun e-mail n'est invent\u00e9 via MX/DNS."
   };
   onEvent({ type: "done", summary, companies: results });
   return { summary, companies: results };

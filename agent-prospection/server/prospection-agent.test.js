@@ -18,6 +18,14 @@ test("normalise les téléphones français et ignore les numéros surtaxés", ()
   assert.equal(normalizeFrPhone("+33 1 64 21 02 02"), "01 64 21 02 02");
   assert.equal(normalizeFrPhone("06.12.34.56.78"), "06 12 34 56 78");
   assert.equal(normalizeFrPhone("0895853832"), "");
+  assert.equal(normalizeFrPhone("0875548900"), ""); // teaser 08 / Pappers
+});
+
+test("rejette un téléphone teaser dérivé du SIREN", () => {
+  const company = { department: "14", siren: "108755489" };
+  assert.equal(phoneFitsCompany("02 31 68 53 35", company), true);
+  assert.equal(phoneFitsCompany("08 75 54 89 00", company), false);
+  assert.equal(phoneFitsCompany("0875548900", company), false);
 });
 
 test("extrait e-mails utiles et filtre les faux positifs", () => {
