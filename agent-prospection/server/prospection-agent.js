@@ -27,7 +27,14 @@ const DIRECTORY_HOSTS = new Set([
   "infogreffe.fr", "www.infogreffe.fr", "verif.com", "www.verif.com",
   "manageo.fr", "www.manageo.fr", "score3.fr", "www.score3.fr",
   "annuaire-entreprises.data.gouv.fr", "bodacc.fr", "www.bodacc.fr",
-  "entreprise.lefigaro.fr", "www.societeinfo.com", "societeinfo.com"
+  "entreprise.lefigaro.fr", "entreprises.lefigaro.fr", "www.societeinfo.com", "societeinfo.com",
+  "preqin.com", "www.preqin.com", "crunchbase.com", "www.crunchbase.com",
+  "pitchbook.com", "www.pitchbook.com", "bloomberg.com", "www.bloomberg.com",
+  "opencorporates.com", "www.opencorporates.com", "companieshouse.gov.uk",
+  "www.companieshouse.gov.uk", "kompass.com", "fr.kompass.com",
+  "europages.fr", "www.europages.fr", "linkedin.com", "www.linkedin.com",
+  "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com",
+  "google.com", "www.google.com", "maps.google.com", "privateaser.com", "www.privateaser.com"
 ]);
 
 const RELAY_HOSTS = new Set([
@@ -40,7 +47,9 @@ const EMAIL_BLOCK_DOMAINS = [
   "jina.ai", "google.com", "gstatic.com", "schema.org", "societe.com", "pappers.fr",
   "facebook.com", "cloudflare.com", "w3.org", "googleapis.com", "microsoft.com",
   "bing.com", "yahoo.com", "gravatar.com", "treatwell.fr", "treatwell.com",
-  "planity.com", "planity.fr", "wavy.co", "booksy.com", "cloudinary.com"
+  "planity.com", "planity.fr", "wavy.co", "booksy.com", "cloudinary.com",
+  "privateaser.com", "thefork.com", "lafourchette.com", "tripadvisor.fr",
+  "lefigaro.fr", "figaro.fr"
 ];
 
 const NAF_LABELS = {
@@ -381,6 +390,14 @@ function normalizeFrPhone(raw) {
   // 08xx = surtaxés / numéros teaser Pappers (souvent dérivés du SIREN) — jamais retenus.
   if (digits.startsWith("08")) return "";
   if (digits.startsWith("0033")) return "";
+  // Placeholders / numéros fictifs fréquents dans les pages d'annuaire.
+  if (/^0([1-9])\1{8}$/.test(digits)) return "";
+  if (digits.slice(1) === "123456789" || digits.slice(1) === "987654321") return "";
+  if (/^0[1-9](?:00){4}$/.test(digits)) return "";
+  if (/^0[1-9]99(?:99){3}$/.test(digits) || digits === "0999999977" || digits === "0900000000") return "";
+  if (/(\d)\1{5,}/.test(digits.slice(2))) return "";
+  const FAKE = new Set(["0601020304", "0102030405", "0909090909", "0999999977"]);
+  if (FAKE.has(digits)) return "";
   return `${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
 }
 
@@ -476,7 +493,14 @@ function hostOf(url) {
 
 function isDirectoryHost(url) {
   const host = hostOf(url);
-  return DIRECTORY_HOSTS.has(host) || (host.endsWith(".gouv.fr") && host.includes("annuaire"));
+  if (DIRECTORY_HOSTS.has(host)) return true;
+  if (host.endsWith(".gouv.fr") && host.includes("annuaire")) return true;
+  // Bases B2B / data providers / plateformes (téléphone générique fréquent).
+  if (/(^|\.)(preqin|crunchbase|pitchbook|bloomberg|reuters|kompass|europages|dnb|creditsafe|ellisphere|privateaser|thefork|lafourchette|tripadvisor|lefigaro)\./.test(host)) {
+    return true;
+  }
+  if (/(^|\.)google\./.test(host) && !/maps\.google\./.test(host)) return true;
+  return false;
 }
 
 function isRelayHost(url) {
@@ -686,12 +710,14 @@ function applyContact(company, { email, phone, website, source, confidence }) {
 function matchesDepartment(company, department) {
   if (!department) return true;
   const dep = String(department).padStart(2, "0");
-  const cp = String(company.postalCode || "");
+  const cp = String(company.postalCode || "").trim();
   // Priorité au code postal français réel (évite les succursales étrangères marquées Paris).
   if (/^\d{5}$/.test(cp)) {
     if (dep.length === 3) return cp.startsWith(dep);
     return cp.startsWith(dep);
   }
+  // Code postal présent mais non FR (ex. Irlande "D08", "99") → hors zone.
+  if (cp) return false;
   const companyDep = String(company.department || "").padStart(2, "0");
   return companyDep === dep;
 }
@@ -788,7 +814,10 @@ async function enrichFromDomainGuess(company) {
 }
 
 async function scrapeWebsiteQuick(url, company) {
-  const paths = ["", "/contact"];
+  if (isDirectoryHost(url) || isRelayHost(url)) {
+    return { website: "" };
+  }
+  const paths = ["", "/contact", "/mentions-legales"];
   let combined = "";
   for (const p of paths) {
     const target = p ? new URL(p, url).toString() : url;
@@ -802,6 +831,8 @@ async function scrapeWebsiteQuick(url, company) {
     combined += `\n${html}`;
     const picked = pickBestFromText(combined, company, `site ${hostOf(url)}`, target, { fullText: true });
     if (picked && (picked.email || picked.phone)) {
+      // Exige un ancrage fort : le nom (ou la ville+SIREN) doit apparaître près du contact.
+      if (!pageMatchesCompany(combined, company)) continue;
       return { ...picked, website: url };
     }
   }

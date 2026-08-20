@@ -19,6 +19,8 @@ test("normalise les téléphones français et ignore les numéros surtaxés", ()
   assert.equal(normalizeFrPhone("06.12.34.56.78"), "06 12 34 56 78");
   assert.equal(normalizeFrPhone("0895853832"), "");
   assert.equal(normalizeFrPhone("0875548900"), ""); // teaser 08 / Pappers
+  assert.equal(normalizeFrPhone("09 99 99 99 77"), "");
+  assert.equal(normalizeFrPhone("01 23 45 67 89"), "");
 });
 
 test("rejette un téléphone teaser dérivé du SIREN", () => {
