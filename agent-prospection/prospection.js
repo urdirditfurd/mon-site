@@ -159,10 +159,19 @@
     return "";
   }
 
+  function smsHref(company, body) {
+    const digits = String(company.phone || "").replace(/\D/g, "");
+    if (!digits) return "";
+    let intl = digits;
+    if (intl.startsWith("0") && intl.length === 10) intl = `33${intl.slice(1)}`;
+    return `sms:+${intl}?body=${encodeURIComponent(body)}`;
+  }
+
   function renderCompany(company) {
     const key = companyKey(company);
     const checked = selectedKeys.has(key) ? "checked" : "";
     const canMail = Boolean(company.hasContact && company.email);
+    const canSms = Boolean(company.hasContact && company.phone);
     const chip = `<span class="chip ok">prêt à contacter</span>`;
     const directors = (company.directors || []).length
       ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>`
@@ -172,18 +181,24 @@
     const activity = company.nafLabel
       ? `${escapeHtml(shortActivity)} (${escapeHtml(company.naf)} ${escapeHtml(company.nafLabel)})`
       : escapeHtml(shortActivity);
-    const links = [];
-    if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
-    if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
-    if (canMail) {
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Modifier le mail</button>`);
-      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>`);
-    } else if (company.phone) {
-      links.push(`<a class="btn btn-primary" href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">Appeler</a>`);
-    }
 
     const mailContent = getMailForCompany(company);
     const editId = `mail-edit-${escapeHtml(key).replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const links = [];
+
+    // Message d'abord (SMS), puis e-mail — priorité au premier contact humain.
+    if (canSms) {
+      const href = smsHref(company, mailContent);
+      links.push(`<a class="btn btn-primary" href="${escapeHtml(href)}">Message</a>`);
+    }
+    if (canMail) {
+      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>`);
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le message</button>`);
+    } else if (canSms) {
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le message</button>`);
+    }
+    if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
+    if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
 
     return `<li class="company-card" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
@@ -199,10 +214,12 @@
       ${contactBlock(company)}
       <div class="actions">${links.join("")}</div>
       <div class="mail-edit-area" id="${editId}">
-        <textarea data-mail-key="${escapeHtml(key)}" style="width:100%;min-height:140px;font-size:.82rem">${escapeHtml(mailContent)}</textarea>
+        <label class="field" style="margin-bottom:8px"><span>Message personnalisé</span></label>
+        <textarea data-mail-key="${escapeHtml(key)}">${escapeHtml(mailContent)}</textarea>
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer</button>
-          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer ce mail</button>` : ""}
+          ${canSms ? `<a class="btn btn-primary" data-sms-key="${escapeHtml(key)}" href="${escapeHtml(smsHref(company, mailContent))}">Message</a>` : ""}
+          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>` : ""}
         </div>
       </div>
     </li>`;
@@ -509,7 +526,12 @@
       const textarea = companyList.querySelector(`textarea[data-mail-key="${key}"]`);
       if (textarea) {
         editedMails[key] = textarea.value;
-        log("Mail enregistré.", { quiet: true });
+        const company = companies.find((c) => companyKey(c) === key);
+        const smsLink = companyList.querySelector(`a[data-sms-key="${key}"]`);
+        if (company && smsLink && company.phone) {
+          smsLink.href = smsHref(company, textarea.value);
+        }
+        log("Message enregistré.", { quiet: true });
       }
     }
   });

@@ -116,7 +116,17 @@
       border-color: var(--primary);
       box-shadow: 0 0 0 3px var(--primary-soft);
     }
-    textarea { resize: vertical; line-height: 1.45; }
+    textarea { resize: vertical; line-height: 1.5; min-height: 220px; }
+    #mailTemplate {
+      min-height: 340px;
+      font-size: .92rem;
+      line-height: 1.55;
+    }
+    .mail-edit-area textarea {
+      min-height: 280px !important;
+      font-size: .9rem !important;
+      line-height: 1.5;
+    }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .btn {
       border: 1px solid transparent;
@@ -288,10 +298,13 @@
     .mail-edit-area {
       display: none;
       margin-top: 12px;
-      padding-top: 12px;
+      padding: 14px;
       border-top: 1px dashed var(--line);
+      border-radius: 0 0 12px 12px;
+      background: #f7fbfb;
     }
     .mail-edit-area.visible { display: block; }
+    .mail-edit-area .actions { margin-top: 12px; }
     .empty {
       color: var(--muted);
       border: 1px dashed var(--line);
@@ -308,15 +321,23 @@
     }
     .mail-preview {
       display: none;
-      margin-top: 10px;
-      padding: 12px;
-      border-radius: 10px;
+      margin-top: 12px;
+      padding: 14px 16px;
+      border-radius: 12px;
       background: #f7fafc;
       border: 1px solid var(--line);
       white-space: pre-wrap;
-      font-size: .86rem;
+      font-size: .9rem;
+      line-height: 1.5;
+      max-height: none;
+      overflow: visible;
     }
     .mail-preview.visible { display: block; }
+    #mailPreviewContent {
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: none;
+    }
     .scroll-top {
       position: fixed;
       right: 20px;
@@ -454,8 +475,8 @@
             <input type="checkbox" id="selectAllCb" class="select-cb"> Tout sélectionner
           </label>
           <span><span class="count" id="selectedCount">0</span> sélectionné(s)</span>
-          <button id="massEditBtn" class="btn btn-ghost" type="button">Préparer les mails</button>
-          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer en masse</button>
+          <button id="massEditBtn" class="btn btn-ghost" type="button">Voir les messages</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer les mails en masse</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
