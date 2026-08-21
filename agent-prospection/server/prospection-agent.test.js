@@ -41,6 +41,17 @@ test("filtre l'activité restauration et exclut les livreurs", () => {
   assert.equal(activityMatchesSector("livraison de commandes restaurants en vélo", sector), false);
 });
 
+test("secteur cinéma couvre production audiovisuelle et NAF 59", () => {
+  const sector = resolveSector("cinema");
+  assert.equal(sector.id, "cinema");
+  assert.ok(sector.nafPrefixes.includes("59"));
+  assert.ok(sector.nafPrefixes.includes("60"));
+  assert.equal(activityMatchesSector("Production cinématographique et audiovisuelle", sector), true);
+  assert.equal(activityMatchesSector("Salle de sport et fitness", sector), false);
+  const byLabel = resolveSector("cinéma");
+  assert.equal(byLabel.id, "cinema");
+});
+
 test("parse une annonce BODACC personne morale", () => {
   const record = {
     id: "A1",

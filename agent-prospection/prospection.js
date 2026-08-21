@@ -35,6 +35,7 @@
     { id: "beaute", label: "Beauté / coiffure" },
     { id: "transport", label: "Transport / logistique" },
     { id: "enseignement", label: "Formation / enseignement" },
+    { id: "cinema", label: "Cinéma / audiovisuel / production" },
     { id: "arts", label: "Arts, spectacles, sport" },
     { id: "services", label: "Services aux entreprises" }
   ];

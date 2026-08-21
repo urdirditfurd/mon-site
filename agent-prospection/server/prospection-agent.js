@@ -65,6 +65,8 @@ const NAF_LABELS = {
   "52": "Entreposage et services auxiliaires de transport",
   "55": "Hébergement",
   "56": "Restauration",
+  "59": "Cinéma / audiovisuel / vidéo",
+  "60": "Programmation radio / télévision",
   "62": "Programmation, conseil et autres activités informatiques",
   "63": "Services d'information",
   "64": "Activités financières",
@@ -164,11 +166,26 @@ const SECTORS = [
     exclude: []
   },
   {
+    id: "cinema",
+    label: "Cinéma / audiovisuel / production",
+    nafPrefixes: ["59", "60"],
+    keywords: [
+      "cinéma", "cinema", "audiovisuel", "audiovisuelle",
+      "tournage", "production audiovisuelle", "production cinématographique",
+      "production de films", "réalisation de films", "société de production",
+      "post-production", "postproduction", "effets spéciaux",
+      "distribution de films", "salle de cinéma", "projection cinématographique",
+      "documentaire", "studio de production", "captation audiovisuelle",
+      "programme de télévision", "production télévisuelle"
+    ],
+    exclude: ["salle de sport", "fitness", "yoga", "édition de livres", "application mobile"]
+  },
+  {
     id: "arts",
     label: "Arts, spectacles, sport",
     nafPrefixes: ["90", "93"],
-    keywords: ["spectacle", "audiovisuel", "salle de sport", "fitness", "yoga", "production"],
-    exclude: []
+    keywords: ["spectacle", "théâtre", "theatre", "danse", "musique", "concert", "salle de sport", "fitness", "yoga", "artiste"],
+    exclude: ["cinéma", "audiovisuel", "production cinématographique"]
   },
   {
     id: "services",
@@ -941,7 +958,7 @@ async function enrichFromSociete(company) {
 async function enrichFromDirectorSearch(company) {
   const director = (company.directors || [])[0];
   if (!director || director.length < 4) return false;
-  const query = `"${director}" ${company.name} email OR téléphone OR contact ${company.city || ""}`;
+  const query = `"${director}" "${searchName(company)}" email OR téléphone OR contact ${company.city || ""}`;
   const target = `https://search.brave.com/search?q=${encodeURIComponent(query)}`;
   let markdown = "";
   try {
@@ -949,14 +966,24 @@ async function enrichFromDirectorSearch(company) {
   } catch {
     return false;
   }
+  if (!pageMatchesCompany(markdown, company) && !markdown.toLowerCase().includes(searchName(company).toLowerCase())) {
+    return false;
+  }
   const allEmails = extractEmails(markdown);
   const allPhones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
+  const dirTokens = tokenize(director).filter((t) => t.length >= 3);
+  const companyTokens = tokenize(searchName(company)).filter((t) => t.length >= 3);
   const relevantEmails = allEmails.filter((e) => {
-    const local = e.split("@")[0];
-    const dirTokens = tokenize(director);
-    return dirTokens.some((t) => local.includes(t)) || nameSimilarity(company.name, e) > 0.3;
+    const [local = "", domain = ""] = e.split("@");
+    const dirHit = dirTokens.some((t) => local.includes(t));
+    const companyHit = companyTokens.some((t) => local.includes(t) || domain.includes(t));
+    // Refuse les domaines clairement d'une autre activité / marque.
+    if (/couture|avocat|notaire|immobilier|assurance|banque|clinique|docteur/.test(domain) && !companyHit) {
+      return false;
+    }
+    return (dirHit && companyHit) || (companyHit && dirHit);
   });
-  if (relevantEmails[0] || allPhones[0]) {
+  if (relevantEmails[0] || (allPhones[0] && dirTokens.some((t) => markdown.toLowerCase().includes(t)))) {
     applyContact(company, {
       email: relevantEmails[0] || "",
       phone: allPhones[0] || "",
@@ -1284,8 +1311,97 @@ function publicCompany(company, sender) {
   };
 }
 
+function looksLikeCinemaCompany(company) {
+  const naf = String(company.naf || "");
+  if (naf.startsWith("59") || naf.startsWith("60")) return true;
+  const hay = `${company.activity || ""} ${company.nafLabel || ""} ${company.name || ""}`.toLowerCase();
+  return /cin[eé]ma|audiovis|film|tournage|post-?\s*prod|t[eé]l[eé]vision|documentaire|vid[eé]o\s|production\s+(cin|audio)/i.test(hay);
+}
+
+/** Directories / pages métier cinéma-audiovisuel (contacts souvent publics). */
+async function enrichFromCinemaDirectories(company) {
+  if (!looksLikeCinemaCompany(company)) return false;
+  const name = searchName(company);
+  const city = company.city || "";
+  const targets = [
+    {
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`"${name}" ${city} (unifrance OR "film france" OR cnc OR "société de production") (téléphone OR email OR contact)`)}`,
+      source: "recherche filière cinéma"
+    },
+    {
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:unifrance.org "${name}"`)}`,
+      source: "Unifrance (public)"
+    },
+    {
+      url: `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodeURIComponent(`${name} production audiovisuelle`)}&ou=${encodeURIComponent(city)}`,
+      source: "PagesJaunes audiovisuel"
+    }
+  ];
+  for (const target of targets) {
+    let text = "";
+    try {
+      if (target.url.includes("duckduckgo.com")) {
+        text = await fetchText(target.url, { timeoutMs: 10000, retries: 1 });
+      } else {
+        text = await fetchViaJina(target.url);
+      }
+    } catch {
+      continue;
+    }
+    if (!text || text.length < 80) continue;
+    if (!pageMatchesCompany(text, company) && !(company.siren && text.includes(company.siren))) {
+      continue;
+    }
+    const hit = pickBestFromText(text, company, target.source, target.url, { fullText: false, lenient: true });
+    if (hit && (hit.email || hit.phone)) {
+      applyContact(company, {
+        ...hit,
+        source: target.source,
+        confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+      });
+      return true;
+    }
+    // Liens candidats vers le site de la boîte de prod
+    const links = [
+      ...parseMarkdownLinks(text).map((l) => l.href),
+      ...((text.match(/https?:\/\/[^\s"'<>]+/g) || []).map((href) => decodeDuckDuckGoUrl(href)))
+    ].filter((href) => {
+      const host = hostOf(href);
+      if (!host || isDirectoryHost(href) || isRelayHost(href)) return false;
+      if (/duckduckgo\.|google\.|facebook\.|linkedin\.|instagram\.|youtube\.|imdb\./.test(host)) return false;
+      return nameSimilarity(name, `${host} ${href}`) >= 0.18;
+    }).slice(0, 2);
+    for (const href of links) {
+      try {
+        const scraped = await scrapeWebsiteQuick(href, company);
+        if (scraped.email || scraped.phone) {
+          applyContact(company, {
+            email: scraped.email,
+            phone: scraped.phone,
+            website: scraped.website || href,
+            source: `site ${hostOf(href)}`,
+            confidence: scraped.confidence || "medium"
+          });
+          return true;
+        }
+      } catch {
+        // suivant
+      }
+    }
+    await sleep(60);
+  }
+  return false;
+}
+
 async function enrichFromWebSnippets(company) {
+  const cinemaBoost = looksLikeCinemaCompany(company)
+    ? [
+      `"${searchName(company)}" production audiovisuelle téléphone OR email OR contact`,
+      `"${searchName(company)}" cinéma OR film contact ${company.city || ""}`
+    ]
+    : [];
   const queries = [
+    ...cinemaBoost,
     `"${searchName(company)}" ${company.city || ""} téléphone OR email OR contact`,
     `"${searchName(company)}" ${company.postalCode || ""} téléphone`,
     (company.directors || [])[0]
@@ -1412,6 +1528,7 @@ async function enrichCompanyContacts(company, onEvent) {
     // Ordre optimisé : snippets / annuaires locaux d'abord (souvent le seul signal pour les créations récentes).
     const steps = [
       enrichFromDuckDuckGoHtml,
+      enrichFromCinemaDirectories,
       enrichFromWebSnippets,
       enrichFromPagesJaunes,
       enrichFromLocalDirectories,
@@ -1516,6 +1633,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
       "DuckDuckGo / Google / Brave (snippets publics)",
       "PagesJaunes",
       "118712 / Cylex / Google Maps",
+      "Filière cinéma (Unifrance / Film France / CNC — pages publiques)",
       "OpenStreetMap / Overpass",
       "Site officiel",
       "Pappers (page publique)",
