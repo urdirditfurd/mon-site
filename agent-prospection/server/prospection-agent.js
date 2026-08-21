@@ -1598,11 +1598,10 @@ async function runProspection(params = {}, onEvent = () => {}) {
     await enrichSirene(company);
     await sleep(80);
     if (!matchesDepartment(company, department)) continue;
-    // Filtre NAF si on a le code et des préfixes secteur
+    // Filtre NAF : si le code est connu, il doit coller au secteur (évite formation/conseil glissés via mots-clés).
     if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
       const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
-      const okKw = activityMatchesSector(company.activity || company.nafLabel || "", sector);
-      if (!okNaf && !okKw) continue;
+      if (!okNaf) continue;
     }
     selected.push(company);
     onEvent({ type: "company", company: publicCompany(company, sender) });
