@@ -1591,7 +1591,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
   if (!sector) {
     throw new Error("Choisissez un secteur d'activité.");
   }
-  const days = Math.min(180, Math.max(7, Number(params.days) || 30));
+  const days = Math.min(365, Math.max(7, Number(params.days) || 30));
   // Plafond raisonnable pour rester utilisable (contacts vérifiés = plus lent).
   const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
