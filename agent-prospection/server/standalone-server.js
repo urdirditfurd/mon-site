@@ -9,6 +9,7 @@ const { createProspectionRouter } = require("./prospection-agent");
 const PROSPECTION_DIR = path.resolve(__dirname, "..");
 const PROSPECTION_HTML_PATH = path.join(PROSPECTION_DIR, "index.html");
 const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
 app.use(cors());
@@ -31,6 +32,7 @@ app.get("/", (_req, res) => {
   res.redirect(302, "/prospection");
 });
 
-app.listen(PORT, () => {
-  console.log(`Agent de prospection : http://localhost:${PORT}/prospection`);
+app.listen(PORT, HOST, () => {
+  console.log(`Agent de prospection : http://${HOST}:${PORT}/prospection`);
+  console.log(`Depuis l'extérieur : http://<IP-du-VPS>:${PORT}/prospection`);
 });
