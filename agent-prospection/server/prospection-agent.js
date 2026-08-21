@@ -1676,6 +1676,8 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
   const perStep = Math.min(25, Math.max(8, Number(params.limit) || 18));
   const seenKeys = new Set();
   const withContact = [];
+  const usedPhones = new Set();
+  const usedEmails = new Set();
   let totalBodacc = 0;
   let scanned = 0;
   let daysUsed = AUTO_STEPS[0];
@@ -1715,28 +1717,37 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
       if (withContact.length >= targetContacts) return;
       scanned += 1;
       await enrichCompanyContacts(company, (event) => {
-        if (event.type === "contact") {
-          const published = event.company;
-          if (published && published.hasContact) {
-            onEvent({ type: "company", company: published });
-            onEvent({ type: "contact", siren: published.siren, company: published });
-            onEvent({
-              type: "status",
-              message: `Contact validé — ${published.name} (${published.contactSource || "public"})`
-            });
-          } else {
-            onEvent({
-              type: "status",
-              message: `Pas de contact public pour ${company.name}`
-            });
-          }
-          return;
-        }
         if (event.type === "status") onEvent(event);
       });
-      if (isVerifiedContact(company) && isWithinCreationWindow(company, 365)) {
-        withContact.push(company);
+      if (!isVerifiedContact(company) || !isWithinCreationWindow(company, 365)) {
+        onEvent({ type: "status", message: `Pas de contact public pour ${company.name}` });
+        return;
       }
+      const phoneKey = String(company.phone || "").replace(/\D/g, "");
+      const emailKey = String(company.email || "").toLowerCase();
+      // Évite de recycler le même numéro/e-mail sur plusieurs fiches (faux positifs snippets).
+      if (phoneKey && usedPhones.has(phoneKey)) {
+        company.phone = "";
+      }
+      if (emailKey && usedEmails.has(emailKey)) {
+        company.email = "";
+      }
+      if (!company.phone && !company.email) {
+        company.contactVerified = false;
+        onEvent({ type: "status", message: `Contact doublon ignoré pour ${company.name}` });
+        return;
+      }
+      if (phoneKey && company.phone) usedPhones.add(phoneKey);
+      if (emailKey && company.email) usedEmails.add(emailKey);
+      const published = publicCompany(company, sender);
+      if (!published.hasContact) return;
+      withContact.push(company);
+      onEvent({ type: "company", company: published });
+      onEvent({ type: "contact", siren: published.siren, company: published });
+      onEvent({
+        type: "status",
+        message: `Contact validé — ${published.name} (${published.contactSource || "public"})`
+      });
     });
     onEvent({
       type: "status",
