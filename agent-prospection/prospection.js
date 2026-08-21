@@ -1,6 +1,5 @@
 (() => {
   const sectorSelect = document.getElementById("sectorSelect");
-  const sectorCustom = document.getElementById("sectorCustom");
   const daysSelect = document.getElementById("daysSelect");
   const departmentInput = document.getElementById("departmentInput");
   const senderName = document.getElementById("senderName");
@@ -21,6 +20,11 @@
   const selectedCount = document.getElementById("selectedCount");
   const massEditBtn = document.getElementById("massEditBtn");
   const massSendBtn = document.getElementById("massSendBtn");
+  const progressWrap = document.getElementById("progressWrap");
+  const progressBar = document.getElementById("progressBar");
+  const progressPct = document.getElementById("progressPct");
+  const progressLabel = document.getElementById("progressLabel");
+  const statusLine = document.getElementById("statusLine");
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
@@ -42,11 +46,13 @@
   ];
   const IS_FILE_MODE = window.location.protocol === "file:";
   const API_PREFIX = IS_FILE_MODE ? "http://localhost:3000" : "";
+
   let companies = [];
   let selectedKeys = new Set();
   let editedMails = {};
   let streamAbort = null;
   let runToken = 0;
+  let searchDone = false;
 
   function loadSender() {
     try {
@@ -67,12 +73,36 @@
     }));
   }
 
-  function log(message) {
+  function setProgress(percent, label) {
+    const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    progressWrap.classList.add("active");
+    progressBar.style.width = `${value}%`;
+    progressPct.textContent = `${value}%`;
+    if (label) {
+      progressLabel.textContent = label;
+      statusLine.textContent = label;
+    }
+  }
+
+  function hideProgressSoon() {
+    setTimeout(() => {
+      if (!runBtn.textContent.includes("Relancer")) {
+        progressWrap.classList.remove("active");
+      }
+    }, 1800);
+  }
+
+  function log(message, { quiet } = {}) {
+    if (quiet) {
+      statusLine.textContent = message;
+      return;
+    }
     const stamp = new Date().toLocaleTimeString("fr-FR");
     const line = `[${stamp}] ${message}`;
-    const current = logBox.textContent === "En attente d\u2019un secteur\u2026" ? "" : `${logBox.textContent}\n`;
-    logBox.textContent = `${current}${line}`.trim();
+    logBox.textContent = `${logBox.textContent ? `${logBox.textContent}\n` : ""}${line}`.trim();
+    logBox.classList.add("visible");
     logBox.scrollTop = logBox.scrollHeight;
+    statusLine.textContent = message;
   }
 
   function escapeHtml(value) {
@@ -92,7 +122,10 @@
       .replace(/\{entreprise\}/g, company.name || "")
       .replace(/\{dirigeant\}/g, (company.directors || [])[0] || "Madame, Monsieur")
       .replace(/\{activite\}/g, company.activity || "")
-      .replace(/\{adresse\}/g, company.address || "");
+      .replace(/\{adresse\}/g, company.address || "")
+      .replace(/\[Votre nom\]/g, senderName.value.trim() || "")
+      .replace(/\[Votre email\]/g, senderEmail.value.trim() || "")
+      .replace(/\[Votre téléphone\]/g, senderPhone.value.trim() || "");
   }
 
   function getMailForCompany(company) {
@@ -101,47 +134,65 @@
     return fillTemplate(mailTemplate.value, company);
   }
 
+  function mailSubject(company) {
+    return `Proposition d’accompagnement comptable — ${company.name}`;
+  }
+
+  function openMailto(company, body) {
+    if (!company.email) return false;
+    const mailto = `mailto:${company.email}?subject=${encodeURIComponent(mailSubject(company))}&body=${encodeURIComponent(body)}`;
+    const a = document.createElement("a");
+    a.href = mailto;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.click();
+    return true;
+  }
+
   function contactBlock(company) {
     if (company.hasContact && (company.email || company.phone)) {
       const bits = [];
       if (company.email) bits.push(`<a href="mailto:${escapeHtml(company.email)}">${escapeHtml(company.email)}</a>`);
       if (company.phone) bits.push(`<a href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">${escapeHtml(company.phone)}</a>`);
-      return `<div class="contact-row"><strong>Contact v\u00e9rifi\u00e9</strong>${bits.join(" \u00b7 ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")} \u00b7 confiance ${escapeHtml(company.contactConfidence || "medium")}</div></div>`;
+      return `<div class="contact-row"><strong>Contact validé</strong> · ${bits.join(" · ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")}</div></div>`;
     }
-    return `<div class="contact-row missing"><strong>Contact non v\u00e9rifi\u00e9</strong><span class="meta">Aucun e-mail / t\u00e9l\u00e9phone publi\u00e9 trouv\u00e9 (pas de conjecture MX). Pappers / PagesJaunes / site officiel vides.</span></div>`;
+    return "";
   }
 
   function renderCompany(company) {
     const key = companyKey(company);
     const checked = selectedKeys.has(key) ? "checked" : "";
-    const canSelect = Boolean(company.hasContact && company.email);
-    const chip = company.hasContact
-      ? `<span class="chip ok">v\u00e9rifi\u00e9</span>`
-      : `<span class="chip">sans contact public</span>`;
-    const directors = (company.directors || []).length ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>` : "";
+    const canMail = Boolean(company.hasContact && company.email);
+    const chip = `<span class="chip ok">prêt à contacter</span>`;
+    const directors = (company.directors || []).length
+      ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>`
+      : "";
     const rawActivity = company.activity || "";
-    const shortActivity = rawActivity.length > 180 ? `${rawActivity.slice(0, 180)}\u2026` : rawActivity;
+    const shortActivity = rawActivity.length > 160 ? `${rawActivity.slice(0, 160)}…` : rawActivity;
     const activity = company.nafLabel
       ? `${escapeHtml(shortActivity)} (${escapeHtml(company.naf)} ${escapeHtml(company.nafLabel)})`
       : escapeHtml(shortActivity);
     const links = [];
-    if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire officiel</a>`);
-    if (company.pappersUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
-    if (company.bodaccUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.bodaccUrl)}" target="_blank" rel="noopener">Annonce BODACC</a>`);
     if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
-    if (canSelect) links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le mail</button>`);
+    if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
+    if (canMail) {
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Modifier le mail</button>`);
+      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>`);
+    } else if (company.phone) {
+      links.push(`<a class="btn btn-primary" href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">Appeler</a>`);
+    }
 
     const mailContent = getMailForCompany(company);
     const editId = `mail-edit-${escapeHtml(key).replace(/[^a-zA-Z0-9]/g, "_")}`;
 
     return `<li class="company-card" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
-        ${canSelect ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked}>` : ""}
+        ${canMail ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked}>` : ""}
         <h3>${escapeHtml(company.name)}${chip}</h3>
       </div>
       <div class="meta">
-        <div>Activit\u00e9 : ${activity}</div>
-        <div>Cr\u00e9ation : ${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` \u00b7 SIREN ${escapeHtml(company.siren)}` : ""}</div>
+        <div>Activité : ${activity}</div>
+        <div>Création : ${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` · SIREN ${escapeHtml(company.siren)}` : ""}</div>
         <div>Adresse : ${escapeHtml(company.address || `${company.postalCode || ""} ${company.city || ""}`.trim() || "n.c.")}</div>
         ${directors}
       </div>
@@ -150,39 +201,40 @@
       <div class="mail-edit-area" id="${editId}">
         <textarea data-mail-key="${escapeHtml(key)}" style="width:100%;min-height:140px;font-size:.82rem">${escapeHtml(mailContent)}</textarea>
         <div class="actions">
-          <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer les modifications</button>
-          ${company.email ? `<a class="btn btn-primary" href="mailto:${escapeHtml(company.email)}?subject=${encodeURIComponent("Proposition d\u2019accompagnement comptable \u2014 " + company.name)}&body=${encodeURIComponent(mailContent)}">Envoyer ce mail</a>` : ""}
+          <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer</button>
+          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer ce mail</button>` : ""}
         </div>
       </div>
     </li>`;
   }
 
   function updateSelectionUI() {
-    const contactCompanies = companies.filter((c) => c.hasContact && c.email);
+    const mailable = companies.filter((c) => c.hasContact && c.email);
     selectedCount.textContent = String(selectedKeys.size);
-    massMailBar.style.display = contactCompanies.length ? "flex" : "none";
+    massMailBar.style.display = mailable.length && searchDone ? "flex" : "none";
     massSendBtn.disabled = selectedKeys.size === 0;
-    selectAllCb.checked = contactCompanies.length > 0 && contactCompanies.every((c) => selectedKeys.has(companyKey(c)));
+    selectAllCb.checked = mailable.length > 0 && mailable.every((c) => selectedKeys.has(companyKey(c)));
   }
 
   function renderList() {
     if (!companies.length) {
-      companyList.innerHTML = `<li class="empty">Aucun contact valid\u00e9 pour le moment. Choisissez un secteur (ou Tous), laissez \u00ab Auto \u00bb, puis lancez le sondage.</li>`;
+      companyList.innerHTML = `<li class="empty">Choisissez un secteur, laissez Auto, puis lancez le sondage. Seuls les contacts validés apparaîtront ici, prêts à être contactés.</li>`;
       csvBtn.disabled = true;
       massMailBar.style.display = "none";
       return;
     }
     companyList.innerHTML = companies.map(renderCompany).join("");
     csvBtn.disabled = false;
-    const withContact = companies.filter((c) => c.hasContact).length;
+    const withMail = companies.filter((c) => c.email).length;
     statsBox.innerHTML = `
-      <div class="stat"><b>${companies.length}</b> entreprises</div>
-      <div class="stat"><b>${withContact}</b> contacts v\u00e9rifi\u00e9s</div>
+      <div class="stat"><b>${companies.length}</b> contacts validés</div>
+      <div class="stat"><b>${withMail}</b> e-mails prêts</div>
     `;
     updateSelectionUI();
   }
 
   function upsertCompany(company) {
+    if (!company || !company.hasContact) return;
     const key = companyKey(company);
     const index = companies.findIndex((row) => companyKey(row) === key);
     if (index >= 0) companies[index] = company;
@@ -191,19 +243,13 @@
   }
 
   function renderSectorOptions(sectors) {
-    const current = sectorSelect.value || "tous";
+    const current = sectorSelect.value || "cinema";
     const list = [...sectors];
-    if (!list.some((s) => s.id === "tous")) {
-      list.unshift({ id: "tous", label: "Tous les secteurs" });
-    }
+    if (!list.some((s) => s.id === "tous")) list.unshift({ id: "tous", label: "Tous les secteurs" });
     sectorSelect.innerHTML = list.map((sector) => (
       `<option value="${escapeHtml(sector.id)}">${escapeHtml(sector.label)}</option>`
     )).join("");
-    if ([...sectorSelect.options].some((o) => o.value === current)) {
-      sectorSelect.value = current;
-    } else {
-      sectorSelect.value = "tous";
-    }
+    sectorSelect.value = [...sectorSelect.options].some((o) => o.value === current) ? current : "cinema";
   }
 
   async function loadSectors() {
@@ -212,11 +258,8 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       renderSectorOptions(data.sectors?.length ? data.sectors : FALLBACK_SECTORS);
-    } catch (error) {
+    } catch {
       renderSectorOptions(FALLBACK_SECTORS);
-      if (!IS_FILE_MODE) {
-        log(`Secteurs disponibles (API indisponible : ${error.message})`);
-      }
     }
   }
 
@@ -234,63 +277,50 @@
     const ready = await isServerReady();
     const banner = document.getElementById("fileModeBanner");
     if (banner) banner.hidden = ready;
-    if (ready) {
-      log("Fichier local détecté — serveur trouvé sur http://localhost:3000");
-      return;
-    }
-    log("Fichier HTML ouvert sans serveur. Lancez : npm install && npm start");
-    log("Puis ouvrez http://localhost:3000/prospection (recommandé).");
   }
 
   function selectedSector() {
-    const custom = sectorCustom.value.trim();
-    // Le champ libre ne prime que s'il est rempli — sinon on prend la liste (évite un scan fantôme).
-    if (custom) return custom;
     return sectorSelect.value;
   }
 
   function handleEvent(event) {
+    if (event.type === "progress") {
+      setProgress(event.percent, event.label || progressLabel.textContent);
+      return;
+    }
     if (event.type === "status") {
-      log(event.message);
+      log(event.message, { quiet: true });
       return;
     }
     if (event.type === "company" || event.type === "contact") {
       upsertCompany(event.company);
-      if (event.type === "contact") {
-        log(event.company.hasContact
-          ? `Contact v\u00e9rifi\u00e9 pour ${event.company.name}`
-          : `Pas de contact public v\u00e9rifi\u00e9 pour ${event.company.name}`);
-      }
       return;
     }
     if (event.type === "done") {
-      companies = (event.companies || companies).filter((c) => {
-        // En mode auto / sondage on ne garde que les contacts validés.
-        if (event.summary && event.summary.auto) return Boolean(c.hasContact);
-        return true;
-      });
+      companies = (event.companies || companies).filter((c) => c.hasContact);
+      searchDone = true;
       renderList();
       const summary = event.summary || {};
-      const daysLabel = summary.auto
-        ? `auto → ${summary.daysUsed || "?"} j`
-        : `${summary.days || "?"} j`;
+      const daysLabel = summary.auto ? `auto → ${summary.daysUsed || "?"} j` : `${summary.days || "?"} j`;
       statsBox.innerHTML = `
         <div class="stat"><b>${summary.withContact || companies.length}</b> contacts validés</div>
-        <div class="stat"><b>${summary.scanned || summary.found || 0}</b> scannées</div>
+        <div class="stat"><b>${summary.scanned || 0}</b> scannées</div>
         <div class="stat">Fenêtre : <b>${daysLabel}</b></div>
       `;
-      log(`Termin\u00e9 \u2014 ${summary.withContact || 0} contacts publics validés (${daysLabel}, ${summary.scanned || 0} scannées).`);
-      if (!(summary.withContact || companies.length)) {
-        log("Astuce : choisissez \u00ab Tous les secteurs \u00bb ou videz le d\u00e9partement, puis relancez en Auto.");
+      setProgress(100, `${summary.withContact || companies.length} contact(s) validé(s) — mails prêts`);
+      hideProgressSoon();
+      if (companies.some((c) => c.email)) {
+        massMailBar.style.display = "flex";
+        log(`Sondage terminé — ${companies.filter((c) => c.email).length} e-mail(s) prêts à envoyer.`, { quiet: true });
+      } else if (!companies.length) {
+        log("Aucun contact validé. Essayez Tous les secteurs ou France entière.", { quiet: true });
       }
-      runBtn.disabled = false;
       runBtn.textContent = "Lancer le sondage";
       return;
     }
     if (event.type === "error") {
-      log(`Erreur : ${event.message}`);
-      runBtn.disabled = false;
-      runBtn.textContent = "Lancer la prospection";
+      setProgress(0, event.message || "Erreur");
+      runBtn.textContent = "Lancer le sondage";
     }
   }
 
@@ -308,8 +338,8 @@
       if (!raw || raw === "[DONE]") continue;
       try {
         handleEvent(JSON.parse(raw));
-      } catch (error) {
-        log(`\u00c9v\u00e9nement illisible : ${error instanceof Error ? error.message : "inconnue"}`);
+      } catch {
+        // ignore malformed chunks
       }
     }
     return rest;
@@ -318,14 +348,9 @@
   async function run() {
     saveSender();
     const sector = selectedSector();
-    if (!sector) {
-      log("Choisissez un secteur.");
-      return;
-    }
+    if (!sector) return;
     if (!(await isServerReady())) {
-      log("Serveur inaccessible.");
-      log("Dans le dossier du projet : npm install && npm start");
-      log("Puis ouvrez http://localhost:3000/prospection");
+      setProgress(0, "Serveur inaccessible — npm start requis");
       return;
     }
 
@@ -333,33 +358,32 @@
     if (streamAbort) {
       streamAbort.abort();
       streamAbort = null;
-      log("Scan pr\u00e9c\u00e9dent interrompu \u2014 nouveau lancement…");
     }
 
     companies = [];
     selectedKeys.clear();
     editedMails = {};
+    searchDone = false;
     renderList();
     statsBox.innerHTML = "";
-    // On conserve l'historique des scans pour enchaîner plusieurs recherches.
-    if (logBox.textContent === "En attente d\u2019un secteur\u2026") logBox.textContent = "";
-    runBtn.disabled = false;
-    runBtn.textContent = "Relancer (interrompt le scan en cours)";
+    logBox.textContent = "";
+    logBox.classList.remove("visible");
+    runBtn.textContent = "Relancer";
+    setProgress(3, "Démarrage du sondage…");
+
     const daysValue = daysSelect.value || "auto";
     const isAuto = daysValue === "auto";
     const params = new URLSearchParams({
       sector,
       days: daysValue,
-      limit: isAuto ? "18" : (sector === "tous" ? "60" : "40"),
+      limit: isAuto ? "18" : "40",
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
     if (isAuto) params.set("targetContacts", "15");
-    const sectorLabel = ([...sectorSelect.options].find((o) => o.value === sector) || {}).textContent || sector;
-    const daysLabel = isAuto ? "Auto < 1 an" : `${daysValue} j`;
-    log(`D\u00e9marrage sondage \u2014 \u00ab ${sectorLabel} \u00bb (${daysLabel}${params.get("department") ? `, d\u00e9p. ${params.get("department")}` : ", France"})${isAuto ? " · contacts validés uniquement" : ""}.`);
+
     const controller = new AbortController();
     streamAbort = controller;
     try {
@@ -368,9 +392,7 @@
         cache: "no-store",
         signal: controller.signal
       });
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -382,16 +404,12 @@
       }
       if (myToken === runToken && buffer.trim()) consumeSseChunk(`${buffer}\n\n`, "");
     } catch (error) {
-      if (error?.name === "AbortError") {
-        if (myToken === runToken) log("Scan interrompu.");
-      } else if (myToken === runToken) {
-        log(`Connexion interrompue : ${error instanceof Error ? error.message : "inconnue"}`);
-        log("V\u00e9rifiez que npm start tourne, puis relancez.");
+      if (error?.name !== "AbortError" && myToken === runToken) {
+        setProgress(0, `Connexion interrompue : ${error instanceof Error ? error.message : "inconnue"}`);
       }
     } finally {
       if (myToken === runToken) {
         streamAbort = null;
-        runBtn.disabled = false;
         runBtn.textContent = "Lancer le sondage";
       }
     }
@@ -410,7 +428,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "prospection-entreprises.csv";
+    link.download = "prospection-contacts.csv";
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -422,17 +440,44 @@
 
   function saveTemplate() {
     localStorage.setItem(TEMPLATE_KEY, mailTemplate.value);
-    log("Mod\u00e8le de mail sauvegard\u00e9.");
+    log("Modèle sauvegardé.", { quiet: true });
   }
 
   function previewMail() {
     if (!companies.length) {
-      log("Lancez d\u2019abord une recherche pour pr\u00e9visualiser le mail.");
+      log("Lancez d’abord un sondage.", { quiet: true });
       return;
     }
-    const filled = fillTemplate(mailTemplate.value, companies[0]);
-    mailPreviewContent.textContent = filled;
+    mailPreviewContent.textContent = getMailForCompany(companies[0]);
     mailPreview.classList.add("visible");
+  }
+
+  function sendOne(key) {
+    const company = companies.find((c) => companyKey(c) === key);
+    if (!company || !company.email) {
+      log("Pas d’e-mail public pour cette entreprise.", { quiet: true });
+      return;
+    }
+    const body = getMailForCompany(company);
+    openMailto(company, body);
+    log(`Mail prêt pour ${company.name}`, { quiet: true });
+  }
+
+  async function sendMass() {
+    const toSend = companies.filter((c) => c.hasContact && c.email && selectedKeys.has(companyKey(c)));
+    if (!toSend.length) {
+      log("Sélectionnez au moins un contact avec e-mail.", { quiet: true });
+      return;
+    }
+    const ok = window.confirm(`Ouvrir ${toSend.length} mail(s) personnalisé(s) dans votre client mail ?\n(un onglet / fenêtre par entreprise)`);
+    if (!ok) return;
+    let sent = 0;
+    for (const company of toSend) {
+      openMailto(company, getMailForCompany(company));
+      sent += 1;
+      await new Promise((r) => setTimeout(r, 450));
+    }
+    log(`${sent} mail(s) ouverts — vérifiez avant d’envoyer.`, { quiet: true });
   }
 
   companyList.addEventListener("change", (event) => {
@@ -445,6 +490,11 @@
   });
 
   companyList.addEventListener("click", (event) => {
+    const sendBtn = event.target.closest("[data-send-one]");
+    if (sendBtn) {
+      sendOne(sendBtn.getAttribute("data-send-one"));
+      return;
+    }
     const editBtn = event.target.closest("[data-edit-mail]");
     if (editBtn) {
       const key = editBtn.getAttribute("data-edit-mail");
@@ -459,60 +509,28 @@
       const textarea = companyList.querySelector(`textarea[data-mail-key="${key}"]`);
       if (textarea) {
         editedMails[key] = textarea.value;
-        log(`Mail modifi\u00e9 pour ${key}.`);
+        log("Mail enregistré.", { quiet: true });
       }
     }
   });
 
   selectAllCb.addEventListener("change", () => {
-    const contactCompanies = companies.filter((c) => c.hasContact && c.email);
-    if (selectAllCb.checked) {
-      contactCompanies.forEach((c) => selectedKeys.add(companyKey(c)));
-    } else {
-      selectedKeys.clear();
-    }
+    const mailable = companies.filter((c) => c.hasContact && c.email);
+    if (selectAllCb.checked) mailable.forEach((c) => selectedKeys.add(companyKey(c)));
+    else selectedKeys.clear();
     renderList();
   });
 
   massEditBtn.addEventListener("click", () => {
-    const areas = companyList.querySelectorAll(".mail-edit-area");
-    const anyVisible = [...areas].some((a) => a.classList.contains("visible"));
-    areas.forEach((a) => {
-      const key = a.id.replace("mail-edit-", "");
+    companyList.querySelectorAll(".mail-edit-area").forEach((area) => {
+      const key = area.id.replace("mail-edit-", "");
       const company = companies.find((c) => companyKey(c).replace(/[^a-zA-Z0-9]/g, "_") === key);
-      if (company && company.hasContact) {
-        if (anyVisible) a.classList.remove("visible");
-        else a.classList.add("visible");
-      }
+      if (company && company.email) area.classList.add("visible");
     });
   });
 
-  massSendBtn.addEventListener("click", () => {
-    const toSend = companies.filter((c) => c.hasContact && c.email && selectedKeys.has(companyKey(c)));
-    if (!toSend.length) {
-      log("Aucun contact v\u00e9rifi\u00e9 s\u00e9lectionn\u00e9. Les e-mails conjecturaux ne sont plus propos\u00e9s.");
-      return;
-    }
-    let sent = 0;
-    for (const company of toSend) {
-      const body = getMailForCompany(company);
-      const subject = `Proposition d\u2019accompagnement comptable \u2014 ${company.name}`;
-      const mailto = `mailto:${company.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      const a = document.createElement("a");
-      a.href = mailto;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.click();
-      sent += 1;
-    }
-    log(`${sent} mail(s) pr\u00eats (contacts v\u00e9rifi\u00e9s uniquement). V\u00e9rifiez encore une fois avant d\u2019envoyer.`);
-  });
-
+  massSendBtn.addEventListener("click", () => { sendMass(); });
   runBtn.addEventListener("click", run);
-  sectorSelect.addEventListener("change", () => {
-    // Évite qu'un texte libre résiduel écrase le choix de la liste au prochain scan.
-    sectorCustom.value = "";
-  });
   csvBtn.addEventListener("click", exportCsv);
   previewMailBtn.addEventListener("click", previewMail);
   saveTemplateBtn.addEventListener("click", saveTemplate);

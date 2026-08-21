@@ -1682,14 +1682,22 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
   let scanned = 0;
   let daysUsed = AUTO_STEPS[0];
 
+  const emitProgress = (percent, label) => {
+    onEvent({ type: "progress", percent, label });
+  };
+
+  emitProgress(4, `Sondage ${sector.label} — démarrage`);
   onEvent({
     type: "status",
     message: `Sondage auto — ${sector.label} : entreprises < 1 an, contacts publics uniquement (objectif ${targetContacts}).`
   });
 
-  for (const days of AUTO_STEPS) {
+  for (let stepIndex = 0; stepIndex < AUTO_STEPS.length; stepIndex += 1) {
+    const days = AUTO_STEPS[stepIndex];
     daysUsed = days;
     if (withContact.length >= targetContacts) break;
+    const stepBase = (stepIndex / AUTO_STEPS.length) * 88;
+    emitProgress(stepBase + 2, `Fenêtre ${days} j — recherche d’entreprises…`);
     onEvent({
       type: "status",
       message: `Fenêtre auto ${days} j — ${withContact.length}/${targetContacts} contacts validés…`
@@ -1706,32 +1714,37 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
     );
     totalBodacc = Math.max(totalBodacc, total);
     if (!selected.length) {
+      emitProgress(stepBase + 10, `Fenêtre ${days} j — aucune nouvelle, élargissement…`);
       onEvent({ type: "status", message: `Aucune nouvelle entreprise à ${days} j — élargissement…` });
       continue;
     }
+    emitProgress(stepBase + 12, `Vérification de ${selected.length} contacts (${days} j)…`);
     onEvent({
       type: "status",
       message: `Vérification des contacts (${selected.length} nouvelles, fenêtre ${days} j)…`
     });
+    let stepDone = 0;
     await mapPool(selected, 4, async (company) => {
       if (withContact.length >= targetContacts) return;
       scanned += 1;
       await enrichCompanyContacts(company, (event) => {
         if (event.type === "status") onEvent(event);
       });
+      stepDone += 1;
+      const localPct = stepBase + 12 + (stepDone / Math.max(selected.length, 1)) * (88 / AUTO_STEPS.length - 12);
+      const contactBoost = Math.min(8, (withContact.length / targetContacts) * 8);
+      emitProgress(
+        Math.min(96, localPct + contactBoost),
+        `${withContact.length}/${targetContacts} contacts · ${company.name.slice(0, 42)}`
+      );
       if (!isVerifiedContact(company) || !isWithinCreationWindow(company, 365)) {
         onEvent({ type: "status", message: `Pas de contact public pour ${company.name}` });
         return;
       }
       const phoneKey = String(company.phone || "").replace(/\D/g, "");
       const emailKey = String(company.email || "").toLowerCase();
-      // Évite de recycler le même numéro/e-mail sur plusieurs fiches (faux positifs snippets).
-      if (phoneKey && usedPhones.has(phoneKey)) {
-        company.phone = "";
-      }
-      if (emailKey && usedEmails.has(emailKey)) {
-        company.email = "";
-      }
+      if (phoneKey && usedPhones.has(phoneKey)) company.phone = "";
+      if (emailKey && usedEmails.has(emailKey)) company.email = "";
       if (!company.phone && !company.email) {
         company.contactVerified = false;
         onEvent({ type: "status", message: `Contact doublon ignoré pour ${company.name}` });
@@ -1766,6 +1779,7 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
     });
   }
 
+  emitProgress(100, results.length ? `${results.length} contact(s) validé(s)` : "Aucun contact validé");
   const summary = buildProspectionSummary({
     sector,
     days: daysUsed,
