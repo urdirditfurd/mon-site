@@ -1683,7 +1683,7 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
   let daysUsed = AUTO_STEPS[0];
 
   const emitProgress = (percent, label) => {
-    onEvent({ type: "progress", percent, label });
+    onEvent({ type: "progress", percent: Math.max(0, Math.min(100, Math.round(percent))), label });
   };
 
   emitProgress(4, `Sondage ${sector.label} — démarrage`);
