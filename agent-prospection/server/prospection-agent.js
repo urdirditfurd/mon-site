@@ -451,16 +451,25 @@ function isSirenTeaserPhone(phone, company) {
   const digits = String(phone || "").replace(/\D/g, "");
   const siren = String(company?.siren || "").replace(/\D/g, "");
   if (digits.length !== 10 || siren.length !== 9) return false;
+  // Motif Pappers / societe.com dominant : 0 + SIREN[2..8] + 00  (ex. 107935108 → 07 93 51 08 00)
+  if (digits === `0${siren.slice(2)}00`) return true;
+  if (digits === `0${siren.slice(1)}`.slice(0, 10)) return true;
   if (digits.slice(1, 10) === siren) return true;
   if (digits.slice(0, 9) === siren) return true;
   if (`0${siren.slice(1)}0` === digits) return true;
   if (digits.includes(siren.slice(0, 8))) return true;
-  // Teaser type Pappers : 0 + SIREN[2..] + padding de zéros (ex. JUICE 107630113 → 0763011300).
   const fromSlice2 = `0${siren.slice(2)}`;
   if (digits.startsWith(fromSlice2) && /^0+$/.test(digits.slice(fromSlice2.length) || "0")) return true;
   const fromSlice1 = `0${siren.slice(1)}`;
   if (fromSlice1.length <= 10 && digits.startsWith(fromSlice1) && /^0*$/.test(digits.slice(fromSlice1.length))) {
     return true;
+  }
+  // Mobile 06/07 + gros morceau du SIREN (teasers « déguisés »)
+  if (/^0[67]/.test(digits)) {
+    const body = digits.slice(2); // 8 digits
+    if (siren.includes(body) || body.includes(siren.slice(2)) || body.includes(siren.slice(1, 9))) {
+      return true;
+    }
   }
   // Tout segment SIREN de 6+ chiffres présent dans le numéro (hors 0 initial).
   const phoneBody = digits.slice(1);
@@ -472,11 +481,22 @@ function isSirenTeaserPhone(phone, company) {
   return false;
 }
 
+/** Sources qui publient quasi uniquement des teasers dérivés du SIREN — jamais de téléphone. */
+function sourceForbidsPhone(source) {
+  const s = String(source || "").toLowerCase();
+  return /pappers|societe\.com|societe com|manageo|score3|verif\.com|infogreffe|creditsafe|ellisphere|societeinfo/.test(s);
+}
+
 function phoneFitsCompany(phone, company) {
   const digits = String(phone || "").replace(/\D/g, "");
   if (digits.length !== 10) return false;
   if (digits.startsWith("08")) return false;
   if (isSirenTeaserPhone(phone, company)) return false;
+  // Beaucoup de teasers se terminent par 00 et recyclent le SIREN — déjà couvert, filet large :
+  if (/^0[67]\d{6}00$/.test(digits) && company?.siren) {
+    const siren = String(company.siren).replace(/\D/g, "");
+    if (siren.length === 9 && digits.slice(1, 8) === siren.slice(2)) return false;
+  }
   const prefix = digits.slice(0, 2);
   if (prefix === "06" || prefix === "07" || prefix === "09") return true;
   const dep = String(company.department || "").padStart(2, "0");
@@ -860,7 +880,10 @@ function applyContact(company, { email, phone, website, source, confidence }) {
     // Ne jamais valider un contact conjectural (ex. email MX deviné).
     return;
   }
-  const safePhone = phone && phoneFitsCompany(phone, company) ? (normalizeFrPhone(phone) || "") : "";
+  let safePhone = phone && phoneFitsCompany(phone, company) ? (normalizeFrPhone(phone) || "") : "";
+  // Pappers / societe.com / etc. : jamais de téléphone (teasers SIREN).
+  if (safePhone && sourceForbidsPhone(source)) safePhone = "";
+  if (safePhone && isSirenTeaserPhone(safePhone, company)) safePhone = "";
   const safeEmail = email ? (extractEmails(email)[0] || "") : "";
   if (!safeEmail && !safePhone && !(website && isRealCompanyWebsite(website))) {
     return;
@@ -1025,6 +1048,10 @@ function pickBestFromText(text, company, source, href = "", options = {}) {
   if (options.lenient && nameSimilarity(company.name, String(text || "").slice(0, 6000)) < 0.2) return null;
   const hay = String(text || "");
   const lowered = hay.toLowerCase();
+  // Snippets qui ne font que renvoyer une fiche Pappers/societe → ignorer les téléphones.
+  const directorySnippet = /pappers\.fr|societe\.com|manageo\.fr|score3\.fr|verif\.com/.test(lowered)
+    || sourceForbidsPhone(source)
+    || isDirectoryHost(href);
   const tokens = tokenize(searchName(company)).sort((a, b) => b.length - a.length);
   const needle = tokens[0] || "";
   const idx = needle ? lowered.indexOf(needle) : 0;
@@ -1033,14 +1060,15 @@ function pickBestFromText(text, company, source, href = "", options = {}) {
     : (idx >= 0 ? hay.slice(Math.max(0, idx - 120), idx + 900) : hay.slice(0, 1800));
   const relayPage = /2,99\s*€|mise en relation|n'est pas le numéro du destinataire/i.test(sample) || isRelayHost(href);
   const emails = extractEmails(sample);
-  const phones = (relayPage ? [] : extractPhonesNearEvidence(sample, company));
+  let phones = (relayPage || directorySnippet) ? [] : extractPhonesNearEvidence(sample, company);
+  phones = phones.filter((p) => phoneFitsCompany(p, company) && !isSirenTeaserPhone(p, company));
   if (!emails.length && !phones.length) return null;
   const hasSiren = pageCitesSiren(sample, company) || pageCitesSiren(hay, company);
   return {
     email: emails[0] || "",
     phone: phones[0] || "",
     source,
-    confidence: hasSiren ? "high" : (company.postalCode && sample.includes(company.postalCode) ? "medium" : "medium")
+    confidence: hasSiren ? "high" : "medium"
   };
 }
 
@@ -1098,18 +1126,19 @@ async function scrapeWebsite(url, company) {
 }
 
 async function enrichFromSociete(company) {
+  // societe.com affiche des teasers dérivés du SIREN : on ne prend JAMAIS le téléphone.
   if (!company.siren) return false;
   const target = `https://www.societe.com/societe/${slugify(company.name)}-${company.siren}.html`;
   try {
     const markdown = await fetchViaJina(target);
     if (!markdown || markdown.length < 200) return false;
-    const phones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
-    const emails = extractEmails(markdown);
-    if (phones[0] || emails[0]) {
+    if (!markdown.includes(company.siren) && !pageMatchesCompany(markdown, company)) return false;
+    const emails = extractEmails(markdown).filter((e) => !/@societe\.com$/i.test(e));
+    if (emails[0]) {
       applyContact(company, {
-        email: emails[0] || "",
-        phone: phones[0] || "",
-        source: "societe.com",
+        email: emails[0],
+        phone: "",
+        source: "societe.com (e-mail)",
         confidence: "medium"
       });
       return true;
@@ -1161,20 +1190,19 @@ async function enrichFromDirectorSearch(company) {
 }
 
 async function enrichFromPappers(company) {
+  // Pappers publie des numéros teaser (0 + SIREN[2..] + 00) : téléphone interdit.
   if (!company.siren) return false;
   const target = `https://www.pappers.fr/entreprise/${company.siren}`;
   try {
     const markdown = await fetchViaJina(target);
     if (!markdown || markdown.length < 150) return false;
     if (!pageMatchesCompany(markdown, company) && !markdown.includes(company.siren)) return false;
-    const phones = extractPhones(markdown).filter((p) => phoneFitsCompany(p, company));
-    const emails = extractEmails(markdown);
-    if (phones[0] || emails[0]) {
+    const emails = extractEmails(markdown).filter((e) => !/@pappers\.fr$/i.test(e));
+    if (emails[0]) {
       applyContact(company, {
-        email: emails[0] || "",
-        phone: phones[0] || "",
-        source: "Pappers (page publique)",
-        // Téléphones Pappers souvent teasers : déjà filtrés ; rester prudent (medium).
+        email: emails[0],
+        phone: "",
+        source: "Pappers (e-mail public)",
         confidence: "medium"
       });
       return true;
@@ -1456,7 +1484,12 @@ function sanitizeCompanyContact(company) {
   if (!company) return company;
   if (company.phone) {
     const normalized = normalizeFrPhone(company.phone);
-    if (!normalized || !phoneFitsCompany(normalized, company)) {
+    if (
+      !normalized
+      || !phoneFitsCompany(normalized, company)
+      || isSirenTeaserPhone(normalized, company)
+      || sourceForbidsPhone(company.contactSource)
+    ) {
       company.phone = "";
     } else {
       company.phone = normalized;
@@ -1734,21 +1767,21 @@ async function mapPool(items, concurrency, worker) {
 async function enrichCompanyContacts(company, onEvent) {
   onEvent({ type: "status", message: `Recherche de contact v\u00e9rifi\u00e9 — ${company.name}` });
   if (!isGenericCompanyName(company)) {
-    // Ordre optimisé : snippets / annuaires locaux d'abord (souvent le seul signal pour les créations récentes).
+    // Priorité aux vrais canaux (site, OSM, recherche web) — Pappers/societe en dernier et e-mail only.
     const steps = [
+      enrichFromDomainGuess,
       enrichFromDuckDuckGoHtml,
       enrichFromCinemaDirectories,
       enrichFromWebSnippets,
-      enrichFromPagesJaunes,
-      enrichFromLocalDirectories,
-      enrichFromDomainGuess,
       enrichFromOverpass,
       enrichFromNominatim,
-      enrichFromPappers,
-      enrichFromSociete,
+      enrichFromPagesJaunes,
+      enrichFromLocalDirectories,
       enrichFromDirectorSearch,
+      enrichFromSearch,
       enrichFromAnnuaireEntreprises,
-      enrichFromSearch
+      enrichFromPappers,
+      enrichFromSociete
     ];
     for (const step of steps) {
       if (isVerifiedContact(company)) break;
@@ -1757,8 +1790,11 @@ async function enrichCompanyContacts(company, onEvent) {
       } catch {
         // source suivante
       }
+      // Si un teaser a fuité, on le purge avant la source suivante.
+      sanitizeCompanyContact(company);
     }
   }
+  sanitizeCompanyContact(company);
   const published = publicCompany(company);
   onEvent({ type: "contact", siren: company.siren, company: published });
   onEvent({
@@ -2133,6 +2169,7 @@ module.exports = {
   activityConflictsWithPage,
   directoryEvidenceOk,
   sanitizeCompanyContact,
+  sourceForbidsPhone,
   searchName,
   isGenericCompanyName,
   enrichFromDomainGuess

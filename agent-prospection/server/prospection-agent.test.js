@@ -13,7 +13,9 @@ const {
   pageMatchesCompany,
   phoneFitsCompany,
   isSirenTeaserPhone,
-  listSectors
+  listSectors,
+  sanitizeCompanyContact,
+  sourceForbidsPhone
 } = require("./prospection-agent");
 
 test("normalise les téléphones français et ignore les numéros surtaxés", () => {
@@ -32,20 +34,41 @@ test("rejette un téléphone teaser dérivé du SIREN", () => {
   assert.equal(phoneFitsCompany("0875548900", company), false);
 });
 
-test("JUICE PROD — teaser 0+SIREN[2..]+00 rejeté", () => {
-  const juice = {
-    name: "JUICE PROD",
-    siren: "107630113",
+test("rejette tous les teasers Pappers signalés (cinéma Paris)", () => {
+  const cases = [
+    ["NATISTORY MEDIA", "107935108", "07 93 51 08 00"],
+    ["HERITAGE CORP", "107413627", "07 41 36 27 00"],
+    ["OSBC PROD", "107684813", "07 68 48 13 00"],
+    ["Louboutin Simon", "107569964", "07 56 99 64 00"],
+    ["CULTURE RAPIDE", "107463853", "07 46 38 53 00"],
+    ["SATOSHI PRAKASH CRUZ", "107541567", "07 54 15 67 00"],
+    ["JUICE PROD", "107630113", "07 63 01 13 00"]
+  ];
+  for (const [name, siren, phone] of cases) {
+    const company = { name, siren, department: "75", city: "Paris" };
+    assert.equal(isSirenTeaserPhone(phone, company), true, `${name} teaser`);
+    assert.equal(phoneFitsCompany(phone, company), false, `${name} fits`);
+  }
+  // Vrai mobile hors motif SIREN
+  assert.equal(phoneFitsCompany("06 89 89 83 10", { siren: "107552028", department: "75" }), true);
+});
+
+test("Pappers / societe.com interdisent le téléphone même si fourni", () => {
+  assert.equal(sourceForbidsPhone("Pappers (page publique)"), true);
+  assert.equal(sourceForbidsPhone("societe.com"), true);
+  assert.equal(sourceForbidsPhone("site trajectoire360.fr"), false);
+  const company = {
+    siren: "107935108",
     department: "75",
-    city: "Paris",
-    postalCode: "75011"
+    phone: "07 93 51 08 00",
+    email: "",
+    contactSource: "Pappers (page publique)",
+    contactVerified: true,
+    contactConfidence: "medium"
   };
-  assert.equal(isSirenTeaserPhone("0763011300", juice), true);
-  assert.equal(isSirenTeaserPhone("07 63 01 13 00", juice), true);
-  assert.equal(phoneFitsCompany("07 63 01 13 00", juice), false);
-  assert.equal(phoneFitsCompany("0763011300", juice), false);
-  // Vrai mobile hors SIREN reste accepté.
-  assert.equal(phoneFitsCompany("06 12 34 56 78", juice), true);
+  sanitizeCompanyContact(company);
+  assert.equal(company.phone, "");
+  assert.equal(company.contactVerified, false);
 });
 
 test("CULTURE RAPIDE — homonyme Paris sans adresse rejetée", () => {
