@@ -12,6 +12,7 @@ const {
   decodeDuckDuckGoUrl,
   pageMatchesCompany,
   phoneFitsCompany,
+  isSirenTeaserPhone,
   listSectors
 } = require("./prospection-agent");
 
@@ -29,6 +30,45 @@ test("rejette un téléphone teaser dérivé du SIREN", () => {
   assert.equal(phoneFitsCompany("02 31 68 53 35", company), true);
   assert.equal(phoneFitsCompany("08 75 54 89 00", company), false);
   assert.equal(phoneFitsCompany("0875548900", company), false);
+});
+
+test("JUICE PROD — teaser 0+SIREN[2..]+00 rejeté", () => {
+  const juice = {
+    name: "JUICE PROD",
+    siren: "107630113",
+    department: "75",
+    city: "Paris",
+    postalCode: "75011"
+  };
+  assert.equal(isSirenTeaserPhone("0763011300", juice), true);
+  assert.equal(isSirenTeaserPhone("07 63 01 13 00", juice), true);
+  assert.equal(phoneFitsCompany("07 63 01 13 00", juice), false);
+  assert.equal(phoneFitsCompany("0763011300", juice), false);
+  // Vrai mobile hors SIREN reste accepté.
+  assert.equal(phoneFitsCompany("06 12 34 56 78", juice), true);
+});
+
+test("CULTURE RAPIDE — homonyme Paris sans adresse rejetée", () => {
+  const culture = {
+    name: "CULTURE RAPIDE",
+    siren: "107463853",
+    city: "Paris",
+    postalCode: "75020",
+    address: "12 Rue des Pyrénées 75020 Paris",
+    department: "75"
+  };
+  assert.equal(
+    pageMatchesCompany("Culture Rapide Paris téléphone café bar cocktail", culture),
+    false
+  );
+  assert.equal(
+    pageMatchesCompany("Culture Rapide 75020 Paris Rue des Pyrénées", culture),
+    true
+  );
+  assert.equal(
+    pageMatchesCompany(`Culture Rapide SIREN ${culture.siren}`, culture),
+    true
+  );
 });
 
 test("extrait e-mails utiles et filtre les faux positifs", () => {

@@ -34,7 +34,13 @@ const DIRECTORY_HOSTS = new Set([
   "www.companieshouse.gov.uk", "kompass.com", "fr.kompass.com",
   "europages.fr", "www.europages.fr", "linkedin.com", "www.linkedin.com",
   "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com",
-  "google.com", "www.google.com", "maps.google.com", "privateaser.com", "www.privateaser.com"
+  "google.com", "www.google.com", "maps.google.com", "privateaser.com", "www.privateaser.com",
+  "pagesjaunes.fr", "www.pagesjaunes.fr", "118712.fr", "www.118712.fr",
+  "cylex.fr", "www.cylex.fr"
+]);
+
+const HUGE_CITIES = new Set([
+  "paris", "lyon", "marseille", "toulouse", "lille", "bordeaux", "nantes", "nice", "strasbourg"
 ]);
 
 const RELAY_HOSTS = new Set([
@@ -447,6 +453,20 @@ function isSirenTeaserPhone(phone, company) {
   if (digits.slice(0, 9) === siren) return true;
   if (`0${siren.slice(1)}0` === digits) return true;
   if (digits.includes(siren.slice(0, 8))) return true;
+  // Teaser type Pappers : 0 + SIREN[2..] + padding de zéros (ex. JUICE 107630113 → 0763011300).
+  const fromSlice2 = `0${siren.slice(2)}`;
+  if (digits.startsWith(fromSlice2) && /^0+$/.test(digits.slice(fromSlice2.length) || "0")) return true;
+  const fromSlice1 = `0${siren.slice(1)}`;
+  if (fromSlice1.length <= 10 && digits.startsWith(fromSlice1) && /^0*$/.test(digits.slice(fromSlice1.length))) {
+    return true;
+  }
+  // Tout segment SIREN de 6+ chiffres présent dans le numéro (hors 0 initial).
+  const phoneBody = digits.slice(1);
+  for (let len = 6; len <= siren.length; len += 1) {
+    for (let i = 0; i <= siren.length - len; i += 1) {
+      if (phoneBody.includes(siren.slice(i, i + len))) return true;
+    }
+  }
   return false;
 }
 
@@ -489,22 +509,44 @@ function extractEmails(text) {
   return out;
 }
 
+function streetTokensForCompany(company) {
+  const city = String(company.city || "").toLowerCase();
+  return tokenize(company.address).filter((token) => (
+    token !== city
+    && !/^\d+$/.test(token)
+    && token !== "rue" && token !== "av" && token !== "avenue"
+    && token !== "bd" && token !== "boulevard" && token !== "chemin" && token !== "place"
+  ));
+}
+
+function hasStrongAddressMatch(text, company) {
+  const hay = String(text || "").toLowerCase();
+  if (company.postalCode && hay.includes(String(company.postalCode).toLowerCase())) return true;
+  const streetTokens = streetTokensForCompany(company);
+  return streetTokens.length >= 2 && streetTokens.filter((token) => hay.includes(token)).length >= 2;
+}
+
 function pageMatchesCompany(text, company) {
   const hay = String(text || "").toLowerCase();
   if (company.siren && hay.includes(company.siren)) return true;
   const city = String(company.city || "").toLowerCase();
-  const hugeCities = new Set(["paris", "lyon", "marseille", "toulouse", "lille", "bordeaux", "nantes", "nice", "strasbourg"]);
-  const streetTokens = tokenize(company.address).filter((token) => token !== city && !/^\d+$/.test(token) && token !== "rue" && token !== "av" && token !== "avenue" && token !== "bd" && token !== "boulevard" && token !== "chemin" && token !== "place");
+  const isHugeCity = HUGE_CITIES.has(city);
+  const hasPostal = Boolean(company.postalCode && hay.includes(String(company.postalCode).toLowerCase()));
+  const streetTokens = streetTokensForCompany(company);
   const hasStreet = streetTokens.length >= 2 && streetTokens.filter((token) => hay.includes(token)).length >= 2;
   const hasPlace = Boolean(
-    (company.postalCode && hay.includes(String(company.postalCode).toLowerCase()))
+    hasPostal
     || hasStreet
-    || (city && hay.includes(city) && !hugeCities.has(city))
+    || (city && hay.includes(city) && !isHugeCity)
   );
   const nameScore = nameSimilarity(company.name, hay.slice(0, 4000));
   const tokens = tokenize(company.name);
   if (tokens.length <= 1) {
     return hasPlace && nameScore >= 0.99;
+  }
+  // Grandes villes : jamais de match nom seul (homonymes fréquents) — SIREN / CP / rue forte requis.
+  if (isHugeCity) {
+    return (hasPostal || hasStreet) && nameScore >= 0.34;
   }
   if (hasPlace && nameScore >= 0.34) return true;
   if (nameScore >= 0.8) return true;
@@ -532,6 +574,7 @@ function hostOf(url) {
 function isDirectoryHost(url) {
   const host = hostOf(url);
   if (DIRECTORY_HOSTS.has(host)) return true;
+  if (host.endsWith(".pagesjaunes.fr")) return true;
   if (host.endsWith(".gouv.fr") && host.includes("annuaire")) return true;
   // Bases B2B / data providers / plateformes (téléphone générique fréquent).
   if (/(^|\.)(preqin|crunchbase|pitchbook|bloomberg|reuters|kompass|europages|dnb|creditsafe|ellisphere|privateaser|thefork|lafourchette|tripadvisor|lefigaro)\./.test(host)) {
@@ -539,6 +582,14 @@ function isDirectoryHost(url) {
   }
   if (/(^|\.)google\./.test(host) && !/maps\.google\./.test(host)) return true;
   return false;
+}
+
+function isRealCompanyWebsite(url) {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return false;
+  if (isDirectoryHost(trimmed) || isRelayHost(trimmed)) return false;
+  return true;
 }
 
 function isRelayHost(url) {
@@ -741,7 +792,8 @@ function applyContact(company, { email, phone, website, source, confidence }) {
   }
   if (email && (!company.email || nextRank >= currentRank)) company.email = email;
   if (phone && (!company.phone || nextRank >= currentRank)) company.phone = phone;
-  if (website && !company.website) company.website = website;
+  // Jamais d'URL d'annuaire (Pappers, PagesJaunes, societe.com, etc.) comme site entreprise.
+  if (website && isRealCompanyWebsite(website) && !company.website) company.website = website;
   if ((email || phone) && nextRank >= currentRank) {
     company.contactSource = source;
     company.contactConfidence = level;
@@ -878,7 +930,13 @@ async function scrapeWebsiteQuick(url, company) {
       return { ...picked, website: url };
     }
   }
-  return { website: pageMatchesCompany(combined, company) ? url : "" };
+  // Attacher le site seulement avec SIREN ou adresse forte (même règle que pageMatches durci).
+  const canAttachSite = Boolean(
+    (company.siren && combined.includes(company.siren))
+    || hasStrongAddressMatch(combined, company)
+    || pageMatchesCompany(combined, company)
+  );
+  return { website: canAttachSite && isRealCompanyWebsite(url) ? url : "" };
 }
 
 function pickBestFromText(text, company, source, href = "", options = {}) {
@@ -954,7 +1012,7 @@ async function scrapeWebsite(url, company) {
     }
     await sleep(150);
   }
-  return { website: pageMatchesCompany(combined, company) ? url : "", html: combined };
+  return { website: pageMatchesCompany(combined, company) && isRealCompanyWebsite(url) ? url : "", html: combined };
 }
 
 async function enrichFromSociete(company) {
@@ -1033,7 +1091,6 @@ async function enrichFromPappers(company) {
       applyContact(company, {
         email: emails[0] || "",
         phone: phones[0] || "",
-        website: target,
         source: "Pappers (page publique)",
         confidence: phones[0] ? "high" : "medium"
       });
@@ -1057,7 +1114,6 @@ async function enrichFromAnnuaireEntreprises(company) {
       applyContact(company, {
         email: "",
         phone: phones[0],
-        website: target,
         source: "Annuaire entreprises (officiel)",
         confidence: "high"
       });
@@ -1077,16 +1133,22 @@ async function enrichFromPagesJaunes(company) {
     if (!pageMatchesCompany(markdown, company)) {
       return false;
     }
+    // Exige CP ou tokens de rue (pas seulement nom+ville) avant d'accepter un téléphone PJ.
+    if (!hasStrongAddressMatch(markdown, company)) {
+      return false;
+    }
     const phones = extractPhones(markdown).filter((phone) => phoneFitsCompany(phone, company));
     const emails = extractEmails(markdown);
     const links = parseMarkdownLinks(markdown)
       .map((l) => l.href)
       .filter((href) => href.includes("pagesjaunes.fr/pros/"));
+    // Ne jamais poser le lien PJ /pros comme site, sauf si la page cite le SIREN (et encore : filtré par applyContact).
+    const pjWebsite = (company.siren && markdown.includes(company.siren) && links[0]) ? links[0] : "";
     if (phones[0] || emails[0]) {
       applyContact(company, {
         email: emails[0] || "",
         phone: phones[0] || "",
-        website: links[0] || "",
+        website: pjWebsite,
         source: "PagesJaunes",
         confidence: "medium"
       });
@@ -1195,7 +1257,9 @@ async function enrichFromDuckDuckGoHtml(company) {
           });
           return true;
         }
-        if (scraped.website && !company.website) company.website = scraped.website;
+        if (scraped.website && isRealCompanyWebsite(scraped.website) && !company.website) {
+          company.website = scraped.website;
+        }
       } catch {
         // suivant
       }
@@ -1251,7 +1315,7 @@ async function enrichFromSearch(company) {
             source: scraped.source || `web ${hostOf(candidate.href)}`,
             confidence: scraped.confidence || "medium"
           });
-        } else if (scraped.website && !company.website) {
+        } else if (scraped.website && isRealCompanyWebsite(scraped.website) && !company.website) {
           company.website = scraped.website;
         }
       } catch {
@@ -1945,6 +2009,7 @@ module.exports = {
   decodeDuckDuckGoUrl,
   pageMatchesCompany,
   phoneFitsCompany,
+  isSirenTeaserPhone,
   searchName,
   isGenericCompanyName,
   enrichFromDomainGuess
