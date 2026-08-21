@@ -749,6 +749,48 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
+  function seedDemoCompanies() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") !== "1") return;
+    companies = [
+      {
+        name: "Lune Prod SARL",
+        siren: "900111222",
+        activity: "Production de films",
+        naf: "5911C",
+        nafLabel: "Production de films",
+        createdAt: "2026-06-01",
+        address: "12 rue du Soleil, 75011 Paris",
+        city: "Paris",
+        postalCode: "75011",
+        directors: ["Alice Martin"],
+        phone: "06 12 34 56 78",
+        email: "contact@lune-prod.example",
+        hasContact: true,
+        contactSource: "démo"
+      },
+      {
+        name: "Soleil Cinéma",
+        siren: "900333444",
+        activity: "Projection cinématographique",
+        naf: "5914Z",
+        nafLabel: "Projection",
+        createdAt: "2026-07-15",
+        address: "8 avenue Orange, 75010 Paris",
+        city: "Paris",
+        postalCode: "75010",
+        directors: ["Bruno Dupont"],
+        phone: "07 98 76 54 32",
+        email: "",
+        hasContact: true,
+        contactSource: "démo"
+      }
+    ];
+    searchDone = true;
+    renderList();
+    log("Mode démo — 2 entreprises fictives pour tester Message et les filtres.", { quiet: true });
+  }
+
   loadSender();
   loadTemplate();
   loadContacted();
@@ -756,4 +798,5 @@
   loadSectors();
   warnIfFileModeWithoutServer();
   updateFilterTabs();
+  seedDemoCompanies();
 })();
