@@ -340,11 +340,12 @@
         <label class="field">
           <span>Créées depuis</span>
           <select id="daysSelect">
+            <option value="auto" selected>Auto (sondage &lt; 1 an, contacts validés)</option>
             <option value="7">7 jours</option>
             <option value="15">15 jours</option>
             <option value="30">30 jours</option>
             <option value="60">60 jours</option>
-            <option value="90" selected>90 jours</option>
+            <option value="90">90 jours</option>
             <option value="120">120 jours</option>
             <option value="180">180 jours (6 mois)</option>
             <option value="365">365 jours (1 an)</option>
@@ -458,7 +459,7 @@
           </select>
         </label>
       </div>
-      <p class="hint small">Plus la fenêtre est longue (6–12 mois), plus il y a d’entreprises — et plus elles ont souvent un téléphone / site public (surtout cinéma &amp; services).</p>
+      <p class="hint small">Mode <strong>Auto</strong> : l’agent élargit la période (30 → 365 j) jusqu’à trouver assez de <strong>contacts publics validés</strong> (création &lt; 1 an). Les fiches sans contact sont masquées.</p>
       <label class="field">
         <span>Votre nom (signature du mail)</span>
         <input id="senderName" type="text" placeholder="Eva Moreau">
@@ -471,7 +472,7 @@
         <span>Votre téléphone</span>
         <input id="senderPhone" type="tel" placeholder="06 12 34 56 78">
       </label>
-      <button id="runBtn" class="btn btn-primary btn-block" type="button">Lancer la prospection</button>
+      <button id="runBtn" class="btn btn-primary btn-block" type="button">Lancer le sondage</button>
       <p class="hint small">Sources : BODACC, Annuaire officiel, Pappers, PagesJaunes, 118712, Cylex, Google Maps, DuckDuckGo/Brave, Unifrance/Film France (cinéma), site de l’entreprise, OSM. <strong>Aucun e-mail inventé</strong> — seuls les contacts publiés et vérifiés permettent l’envoi.</p>
       <div class="log-box" id="logBox">En attente d’un secteur…</div>
     </section>
@@ -479,7 +480,7 @@
     <section class="workspace">
       <div class="timeline-card" style="padding:16px">
         <div class="results-head">
-          <h2>Nouvelles entreprises trouvées</h2>
+          <h2>Contacts validés trouvés</h2>
           <div class="actions" style="margin:0">
             <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
           </div>
@@ -494,7 +495,7 @@
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Aucun résultat pour le moment. Choisissez un secteur puis lancez l’agent.</li>
+          <li class="empty">Aucun contact validé pour le moment. Choisissez un secteur (ou Tous), laissez « Auto », puis lancez le sondage.</li>
         </ul>
       </div>
       <div class="timeline-card mail-template-box" style="padding:16px; margin-top:16px">

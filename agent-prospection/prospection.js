@@ -167,7 +167,7 @@
 
   function renderList() {
     if (!companies.length) {
-      companyList.innerHTML = `<li class="empty">Aucun r\u00e9sultat pour le moment. Choisissez un secteur puis lancez l\u2019agent.</li>`;
+      companyList.innerHTML = `<li class="empty">Aucun contact valid\u00e9 pour le moment. Choisissez un secteur (ou Tous), laissez \u00ab Auto \u00bb, puis lancez le sondage.</li>`;
       csvBtn.disabled = true;
       massMailBar.style.display = "none";
       return;
@@ -264,20 +264,27 @@
       return;
     }
     if (event.type === "done") {
-      companies = event.companies || companies;
+      companies = (event.companies || companies).filter((c) => {
+        // En mode auto / sondage on ne garde que les contacts validés.
+        if (event.summary && event.summary.auto) return Boolean(c.hasContact);
+        return true;
+      });
       renderList();
       const summary = event.summary || {};
+      const daysLabel = summary.auto
+        ? `auto → ${summary.daysUsed || "?"} j`
+        : `${summary.days || "?"} j`;
       statsBox.innerHTML = `
-        <div class="stat"><b>${summary.found || companies.length}</b> entreprises</div>
-        <div class="stat"><b>${summary.withContact || 0}</b> contacts v\u00e9rifi\u00e9s</div>
-        <div class="stat">BODACC brut : <b>${summary.totalBodacc || 0}</b></div>
+        <div class="stat"><b>${summary.withContact || companies.length}</b> contacts validés</div>
+        <div class="stat"><b>${summary.scanned || summary.found || 0}</b> scannées</div>
+        <div class="stat">Fenêtre : <b>${daysLabel}</b></div>
       `;
-      log(`Termin\u00e9 \u2014 ${summary.found || 0} entreprises, ${summary.withContact || 0} contacts publics.`);
-      if (!(summary.found || companies.length)) {
-        log("Astuce : choisissez \u00ab Tous les secteurs \u00bb, passez \u00e0 60/90 jours, ou laissez le d\u00e9partement vide, puis relancez.");
+      log(`Termin\u00e9 \u2014 ${summary.withContact || 0} contacts publics validés (${daysLabel}, ${summary.scanned || 0} scannées).`);
+      if (!(summary.withContact || companies.length)) {
+        log("Astuce : choisissez \u00ab Tous les secteurs \u00bb ou videz le d\u00e9partement, puis relancez en Auto.");
       }
       runBtn.disabled = false;
-      runBtn.textContent = "Lancer la prospection";
+      runBtn.textContent = "Lancer le sondage";
       return;
     }
     if (event.type === "error") {
@@ -338,17 +345,21 @@
     if (logBox.textContent === "En attente d\u2019un secteur\u2026") logBox.textContent = "";
     runBtn.disabled = false;
     runBtn.textContent = "Relancer (interrompt le scan en cours)";
+    const daysValue = daysSelect.value || "auto";
+    const isAuto = daysValue === "auto";
     const params = new URLSearchParams({
       sector,
-      days: daysSelect.value,
-      limit: sector === "tous" ? "60" : "40",
+      days: daysValue,
+      limit: isAuto ? "18" : (sector === "tous" ? "60" : "40"),
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
+    if (isAuto) params.set("targetContacts", "15");
     const sectorLabel = ([...sectorSelect.options].find((o) => o.value === sector) || {}).textContent || sector;
-    log(`D\u00e9marrage \u2014 secteur \u00ab ${sectorLabel} \u00bb (${daysSelect.value} j${params.get("department") ? `, d\u00e9p. ${params.get("department")}` : ", France"}).`);
+    const daysLabel = isAuto ? "Auto < 1 an" : `${daysValue} j`;
+    log(`D\u00e9marrage sondage \u2014 \u00ab ${sectorLabel} \u00bb (${daysLabel}${params.get("department") ? `, d\u00e9p. ${params.get("department")}` : ", France"})${isAuto ? " · contacts validés uniquement" : ""}.`);
     const controller = new AbortController();
     streamAbort = controller;
     try {
@@ -381,7 +392,7 @@
       if (myToken === runToken) {
         streamAbort = null;
         runBtn.disabled = false;
-        runBtn.textContent = "Lancer la prospection";
+        runBtn.textContent = "Lancer le sondage";
       }
     }
   }

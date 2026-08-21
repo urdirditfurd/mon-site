@@ -1586,59 +1586,238 @@ async function enrichCompanyContacts(company, onEvent) {
   return published;
 }
 
+function isWithinCreationWindow(company, maxDays) {
+  const raw = company.createdAt || company.publishedAt || "";
+  if (!raw) return true;
+  const stamp = Date.parse(String(raw).slice(0, 10));
+  if (!Number.isFinite(stamp)) return true;
+  const ageDays = (Date.now() - stamp) / 86400000;
+  return ageDays >= 0 && ageDays <= maxDays;
+}
+
+function companyDedupeKey(company) {
+  return company.siren || `${company.name}|${company.city}|${company.createdAt}`;
+}
+
+async function selectSectorCompanies(sector, days, department, limit, sender, onEvent, seenKeys, options = {}) {
+  const maxAgeDays = options.maxAgeDays || days;
+  const emitCompanies = options.emitCompanies !== false;
+  const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
+  const localized = companies.filter((company) => matchesDepartment(company, department));
+  const selected = [];
+  for (const company of localized) {
+    if (selected.length >= limit) break;
+    const key = companyDedupeKey(company);
+    if (seenKeys.has(key)) continue;
+    onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
+    await enrichSirene(company);
+    await sleep(60);
+    if (!matchesDepartment(company, department)) continue;
+    if (!isWithinCreationWindow(company, maxAgeDays)) continue;
+    if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
+      const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
+      if (!okNaf) {
+        // Sondage auto : NAF strict pour éviter les hors-secteur.
+        if (options.strictNaf) continue;
+        const okKw = !sector.allSectors && activityMatchesSector(company.activity || company.nafLabel || "", sector);
+        if (!okKw) continue;
+      }
+    }
+    seenKeys.add(key);
+    selected.push(company);
+    if (emitCompanies) {
+      onEvent({ type: "company", company: publicCompany(company, sender) });
+    }
+  }
+  return { total, selected };
+}
+
+function buildProspectionSummary({
+  sector,
+  days,
+  department,
+  totalBodacc,
+  results,
+  auto = false,
+  daysUsed = null,
+  scanned = 0
+}) {
+  return {
+    sector: { id: sector.id, label: sector.label },
+    days: auto ? "auto" : days,
+    daysUsed: daysUsed || days,
+    auto,
+    department: department || null,
+    totalBodacc,
+    scanned,
+    found: results.length,
+    withContact: results.filter((row) => row.hasContact).length,
+    sources: [
+      "BODACC DILA",
+      "API Recherche d'entreprises",
+      "DuckDuckGo / Google / Brave (snippets publics)",
+      "PagesJaunes",
+      "118712 / Cylex / Google Maps",
+      "Filière cinéma (Unifrance / Film France / CNC — pages publiques)",
+      "OpenStreetMap / Overpass",
+      "Site officiel",
+      "Pappers (page publique)",
+      "Societe.com"
+    ],
+    note: auto
+      ? "Sondage auto (< 1 an) : seuls les contacts publics v\u00e9rifi\u00e9s sont list\u00e9s."
+      : "Contacts publi\u00e9s uniquement (pas de conjecture MX). LinkedIn non scrap\u00e9 (CGU)."
+  };
+}
+
+async function runProspectionAuto(params, onEvent, sector, department, sender) {
+  const AUTO_STEPS = [30, 60, 90, 180, 365];
+  const targetContacts = Math.min(40, Math.max(5, Number(params.targetContacts) || 15));
+  const perStep = Math.min(25, Math.max(8, Number(params.limit) || 18));
+  const seenKeys = new Set();
+  const withContact = [];
+  let totalBodacc = 0;
+  let scanned = 0;
+  let daysUsed = AUTO_STEPS[0];
+
+  onEvent({
+    type: "status",
+    message: `Sondage auto — ${sector.label} : entreprises < 1 an, contacts publics uniquement (objectif ${targetContacts}).`
+  });
+
+  for (const days of AUTO_STEPS) {
+    daysUsed = days;
+    if (withContact.length >= targetContacts) break;
+    onEvent({
+      type: "status",
+      message: `Fenêtre auto ${days} j — ${withContact.length}/${targetContacts} contacts validés…`
+    });
+    const { total, selected } = await selectSectorCompanies(
+      sector,
+      days,
+      department,
+      perStep,
+      sender,
+      onEvent,
+      seenKeys,
+      { maxAgeDays: 365, emitCompanies: false, strictNaf: true }
+    );
+    totalBodacc = Math.max(totalBodacc, total);
+    if (!selected.length) {
+      onEvent({ type: "status", message: `Aucune nouvelle entreprise à ${days} j — élargissement…` });
+      continue;
+    }
+    onEvent({
+      type: "status",
+      message: `Vérification des contacts (${selected.length} nouvelles, fenêtre ${days} j)…`
+    });
+    await mapPool(selected, 4, async (company) => {
+      if (withContact.length >= targetContacts) return;
+      scanned += 1;
+      await enrichCompanyContacts(company, (event) => {
+        if (event.type === "contact") {
+          const published = event.company;
+          if (published && published.hasContact) {
+            onEvent({ type: "company", company: published });
+            onEvent({ type: "contact", siren: published.siren, company: published });
+            onEvent({
+              type: "status",
+              message: `Contact validé — ${published.name} (${published.contactSource || "public"})`
+            });
+          } else {
+            onEvent({
+              type: "status",
+              message: `Pas de contact public pour ${company.name}`
+            });
+          }
+          return;
+        }
+        if (event.type === "status") onEvent(event);
+      });
+      if (isVerifiedContact(company) && isWithinCreationWindow(company, 365)) {
+        withContact.push(company);
+      }
+    });
+    onEvent({
+      type: "status",
+      message: `Après ${days} j : ${withContact.length} contact(s) validé(s) / ${scanned} scanné(s).`
+    });
+  }
+
+  const results = withContact
+    .map((company) => publicCompany(company, sender))
+    .filter((row) => row.hasContact);
+
+  if (!results.length) {
+    onEvent({
+      type: "status",
+      message: "Aucun contact public validé sous 1 an. Essayez un autre secteur, « Tous », ou videz le département."
+    });
+  }
+
+  const summary = buildProspectionSummary({
+    sector,
+    days: daysUsed,
+    department,
+    totalBodacc,
+    results,
+    auto: true,
+    daysUsed,
+    scanned
+  });
+  onEvent({ type: "done", summary, companies: results });
+  return { summary, companies: results };
+}
+
 async function runProspection(params = {}, onEvent = () => {}) {
   const sector = resolveSector(params.sector);
   if (!sector) {
     throw new Error("Choisissez un secteur d'activité.");
   }
-  const days = Math.min(365, Math.max(7, Number(params.days) || 30));
-  // Plafond raisonnable pour rester utilisable (contacts vérifiés = plus lent).
-  const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
   const sender = {
     name: String(params.senderName || "").trim(),
     email: String(params.senderEmail || "").trim(),
     phone: String(params.senderPhone || "").trim()
   };
+  const daysRaw = String(params.days || "auto").trim().toLowerCase();
+  const autoMode = daysRaw === "auto" || params.mode === "sondage" || params.auto === true || params.auto === "1";
+
+  if (autoMode) {
+    return runProspectionAuto(params, onEvent, sector, department, sender);
+  }
+
+  const days = Math.min(365, Math.max(7, Number(params.days) || 30));
+  const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const enrichContacts = params.enrichContacts !== false;
+  const contactsOnly = params.contactsOnly === true || params.contactsOnly === "1";
 
   const zoneLabel = department ? ` · d\u00e9partement ${department}` : "";
   onEvent({
     type: "status",
     message: `Recherche BODACC — cr\u00e9ations ${sector.label}, ${days} derniers jours${zoneLabel}.`
   });
-  const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
-  const localized = companies.filter((company) => matchesDepartment(company, department));
+
+  const seenKeys = new Set();
+  const { total, selected } = await selectSectorCompanies(
+    sector,
+    days,
+    department,
+    limit,
+    sender,
+    onEvent,
+    seenKeys,
+    { maxAgeDays: days, emitCompanies: true }
+  );
   onEvent({
     type: "status",
-    message: `${total} annonces BODACC, ${localized.length} entreprises du secteur${zoneLabel || " (France)"}. Affichage imm\u00e9diat, contacts v\u00e9rifi\u00e9s ensuite.`
+    message: `${total} annonces BODACC, ${selected.length} entreprises retenues${zoneLabel || " (France)"}.`
   });
-
-  const selected = [];
-  for (const company of localized) {
-    if (selected.length >= limit) break;
-    // Affiche tout de suite la fiche BODACC (évite l'écran vide).
-    onEvent({ type: "company", company: publicCompany(company, sender) });
-    onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
-    await enrichSirene(company);
-    await sleep(80);
-    if (!matchesDepartment(company, department)) continue;
-    // NAF connu : doit coller au secteur. Sinon on garde si l'activité BODACC matche (évite listes vides).
-    if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
-      const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
-      if (!okNaf) {
-        const okKw = !sector.allSectors && activityMatchesSector(company.activity || company.nafLabel || "", sector);
-        if (!okKw) continue;
-      }
-    }
-    selected.push(company);
-    onEvent({ type: "company", company: publicCompany(company, sender) });
-  }
 
   if (!selected.length) {
     onEvent({
       type: "status",
-      message: "Aucun r\u00e9sultat avec ces filtres. Essayez \u00ab Tous les secteurs \u00bb, \u00e9largissez la p\u00e9riode, ou videz le d\u00e9partement."
+      message: "Aucun r\u00e9sultat avec ces filtres. Passez en \u00ab Auto \u00bb, \u00ab Tous les secteurs \u00bb, ou videz le d\u00e9partement."
     });
   }
 
@@ -1652,29 +1831,18 @@ async function runProspection(params = {}, onEvent = () => {}) {
     });
   }
 
-  const results = selected.map((company) => publicCompany(company, sender));
-  const withContact = results.filter((row) => row.hasContact).length;
-  const summary = {
-    sector: { id: sector.id, label: sector.label },
+  let results = selected.map((company) => publicCompany(company, sender));
+  if (contactsOnly) {
+    results = results.filter((row) => row.hasContact);
+  }
+  const summary = buildProspectionSummary({
+    sector,
     days,
-    department: department || null,
+    department,
     totalBodacc: total,
-    found: results.length,
-    withContact,
-    sources: [
-      "BODACC DILA",
-      "API Recherche d'entreprises",
-      "DuckDuckGo / Google / Brave (snippets publics)",
-      "PagesJaunes",
-      "118712 / Cylex / Google Maps",
-      "Filière cinéma (Unifrance / Film France / CNC — pages publiques)",
-      "OpenStreetMap / Overpass",
-      "Site officiel",
-      "Pappers (page publique)",
-      "Societe.com"
-    ],
-    note: "Contacts publi\u00e9s uniquement (pas de conjecture MX). LinkedIn non scrap\u00e9 (CGU)."
-  };
+    results,
+    scanned: selected.length
+  });
   onEvent({ type: "done", summary, companies: results });
   return { summary, companies: results };
 }
@@ -1720,7 +1888,11 @@ function createProspectionRouter() {
         senderName: req.query.senderName,
         senderEmail: req.query.senderEmail,
         senderPhone: req.query.senderPhone,
-        enrichContacts: req.query.enrichContacts !== "0"
+        enrichContacts: req.query.enrichContacts !== "0",
+        targetContacts: req.query.targetContacts,
+        mode: req.query.mode,
+        auto: req.query.auto,
+        contactsOnly: req.query.contactsOnly
       }, (event) => writeSse(res, event));
     } catch (error) {
       writeSse(res, { type: "error", message: error instanceof Error ? error.message : "Recherche impossible" });
