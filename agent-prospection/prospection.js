@@ -38,6 +38,7 @@
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
   const CONTACTED_KEY = "prospection-contacted";
+  const SCAN_MEMORY_KEY = "prospection-scan-memory";
   const FILTER_KEY = "prospection-filter";
   const FALLBACK_SECTORS = [
     { id: "tous", label: "Tous les secteurs" },
@@ -59,6 +60,7 @@
   const API_PREFIX = IS_FILE_MODE ? "http://localhost:3000" : "";
 
   let companies = [];
+  let companyMemory = {};
   let selectedKeys = new Set();
   let editedMails = {};
   let contactedMap = {};
@@ -79,8 +81,61 @@
     localStorage.setItem(CONTACTED_KEY, JSON.stringify(contactedMap));
   }
 
+  function loadScanMemory() {
+    try {
+      companyMemory = JSON.parse(localStorage.getItem(SCAN_MEMORY_KEY) || "{}") || {};
+    } catch {
+      companyMemory = {};
+    }
+  }
+
+  function saveScanMemory() {
+    const keys = Object.keys(companyMemory);
+    // Garde les 400 plus récentes pour ne pas saturer localStorage.
+    if (keys.length > 400) {
+      const ranked = keys
+        .map((key) => ({ key, at: companyMemory[key]?.lastSeenAt || "" }))
+        .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+      const keep = new Set(ranked.slice(0, 400).map((row) => row.key));
+      companyMemory = Object.fromEntries(
+        Object.entries(companyMemory).filter(([key]) => keep.has(key))
+      );
+    }
+    localStorage.setItem(SCAN_MEMORY_KEY, JSON.stringify(companyMemory));
+  }
+
   function isContacted(key) {
     return Boolean(contactedMap[key]);
+  }
+
+  function rememberCompany(company, { fromScan } = {}) {
+    if (!company || !company.hasContact) return;
+    const key = companyKey(company);
+    const prev = companyMemory[key] || {};
+    companyMemory[key] = {
+      ...prev,
+      ...company,
+      // Ne pas écraser un meilleur contact déjà mémorisé par un vide.
+      email: company.email || prev.email || "",
+      phone: company.phone || prev.phone || "",
+      website: company.website || prev.website || "",
+      contactSource: company.contactSource || prev.contactSource || "",
+      lastSeenAt: new Date().toISOString(),
+      scanCount: Number(prev.scanCount || 0) + (fromScan ? 1 : 0)
+    };
+    saveScanMemory();
+  }
+
+  function rebuildCompaniesList() {
+    companies = Object.values(companyMemory)
+      .filter((c) => c && c.hasContact && (c.email || c.phone))
+      .map((c) => ({ ...c }))
+      .sort((a, b) => {
+        const aDone = isContacted(companyKey(a)) ? 1 : 0;
+        const bDone = isContacted(companyKey(b)) ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone; // à contacter d'abord
+        return String(b.lastSeenAt || "").localeCompare(String(a.lastSeenAt || ""));
+      });
   }
 
   function markContacted(company, channel) {
@@ -97,6 +152,7 @@
       at: new Date().toISOString()
     };
     saveContacted();
+    rememberCompany(company, { fromScan: false });
   }
 
   function unmarkContacted(key) {
@@ -327,7 +383,9 @@
     const checked = selectedKeys.has(key) ? "checked" : "";
     const chip = done
       ? `<span class="chip done">déjà contacté</span>`
-      : `<span class="chip ok">à contacter</span>`;
+      : (Number(company.scanCount || 0) > 1
+        ? `<span class="chip ok">à contacter · déjà scannée</span>`
+        : `<span class="chip ok">à contacter</span>`);
     const directors = (company.directors || []).length
       ? `<div>Dirigeant : ${escapeHtml(company.directors.join(", "))}</div>`
       : "";
@@ -388,13 +446,13 @@
 
   function emptyMessage() {
     if (!companies.length) {
-      return "Choisissez un secteur, laissez Auto, puis lancez le sondage. Les nouvelles à contacter apparaissent ici ; les déjà contactées restent en mémoire.";
+      return "Choisissez un secteur, laissez Auto, puis lancez le sondage. Les contacts validés restent en mémoire : les non contactés réapparaissent, les déjà contactés sont signalés automatiquement.";
     }
     if (listFilter === "todo") {
-      return "Toutes les entreprises de ce sondage sont déjà marquées contactées. Passez à « Déjà contactées » ou relancez pour trouver de nouvelles.";
+      return "Plus aucune entreprise à contacter en mémoire. Relancez un sondage pour en trouver de nouvelles, ou ouvrez « Déjà contactées » / Historique.";
     }
     if (listFilter === "done") {
-      return "Aucune entreprise marquée contactée pour ce sondage. Cliquez Message ou Envoyer le mail pour les enregistrer.";
+      return "Aucune entreprise marquée contactée. Dès que vous ouvrez Message/Mail, elle passe ici automatiquement.";
     }
     return "Aucun contact à afficher.";
   }
@@ -412,7 +470,7 @@
         statsBox.innerHTML = `
           <div class="stat"><b>${todo}</b> à contacter</div>
           <div class="stat"><b>${done}</b> déjà contactées</div>
-          <div class="stat"><b>${companies.length}</b> au total</div>
+          <div class="stat"><b>${companies.length}</b> en mémoire</div>
         `;
       }
       return;
@@ -426,17 +484,32 @@
       <div class="stat"><b>${todo}</b> à contacter</div>
       <div class="stat"><b>${done}</b> déjà contactées</div>
       <div class="stat"><b>${withMail}</b> e-mails prêts</div>
+      <div class="stat"><b>${companies.length}</b> en mémoire</div>
     `;
     updateSelectionUI();
   }
 
   function upsertCompany(company) {
     if (!company || !company.hasContact) return;
+    if (!company.email && !company.phone) return;
     const key = companyKey(company);
+    const already = isContacted(key);
+    rememberCompany(company, { fromScan: true });
     const index = companies.findIndex((row) => companyKey(row) === key);
-    if (index >= 0) companies[index] = company;
-    else companies.push(company);
+    const merged = companyMemory[key] || company;
+    if (index >= 0) companies[index] = { ...merged };
+    else companies.push({ ...merged });
+    // Re-trier : non contactées d'abord
+    companies.sort((a, b) => {
+      const aDone = isContacted(companyKey(a)) ? 1 : 0;
+      const bDone = isContacted(companyKey(b)) ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      return String(b.lastSeenAt || "").localeCompare(String(a.lastSeenAt || ""));
+    });
     renderList();
+    if (already) {
+      log(`${company.name} — déjà contactée (signalée automatiquement).`, { quiet: true });
+    }
   }
 
   function renderSectorOptions(sectors) {
@@ -494,28 +567,35 @@
       return;
     }
     if (event.type === "done") {
-      companies = (event.companies || companies).filter((c) => c.hasContact);
+      const incoming = (event.companies || []).filter((c) => c.hasContact && (c.email || c.phone));
+      incoming.forEach((c) => rememberCompany(c, { fromScan: true }));
+      rebuildCompaniesList();
       searchDone = true;
+      listFilter = "todo";
+      saveFilter();
       renderList();
       const summary = event.summary || {};
       const daysLabel = summary.auto ? `auto → ${summary.daysUsed || "?"} j` : `${summary.days || "?"} j`;
       const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
-      const done = companies.length - todo;
+      const done = companies.filter((c) => isContacted(companyKey(c))).length;
+      const newThisRun = incoming.filter((c) => !isContacted(companyKey(c))).length;
+      const alreadyThisRun = incoming.filter((c) => isContacted(companyKey(c))).length;
       statsBox.innerHTML = `
         <div class="stat"><b>${todo}</b> à contacter</div>
         <div class="stat"><b>${done}</b> déjà contactées</div>
-        <div class="stat"><b>${summary.scanned || 0}</b> scannées</div>
+        <div class="stat"><b>${summary.scanned || 0}</b> scannées (run)</div>
         <div class="stat">Fenêtre : <b>${daysLabel}</b></div>
       `;
-      setProgress(100, `${todo} à contacter · ${done} déjà vues`);
+      setProgress(100, `${todo} à contacter · ${done} déjà contactées`);
       hideProgressSoon();
-      if (todo) {
-        massMailBar.style.display = listFilter === "done" ? "none" : "flex";
-        log(`Sondage terminé — ${todo} nouvelle(s) à contacter.`, { quiet: true });
+      if (alreadyThisRun) {
+        log(`Sondage : ${alreadyThisRun} déjà contactée(s) signalée(s) auto · ${newThisRun} à traiter.`, { quiet: true });
+      } else if (todo) {
+        log(`Sondage terminé — ${todo} entreprise(s) à contacter en mémoire.`, { quiet: true });
       } else if (!companies.length) {
         log("Aucun contact validé. Essayez Tous les secteurs ou France entière.", { quiet: true });
       } else {
-        log("Tous les contacts de ce sondage étaient déjà contactés.", { quiet: true });
+        log("Toutes les entreprises en mémoire sont déjà contactées.", { quiet: true });
       }
       runBtn.textContent = "Lancer le sondage";
       return;
@@ -562,16 +642,25 @@
       streamAbort = null;
     }
 
-    companies = [];
+    // Ne pas effacer la mémoire : on garde les non contactées déjà scannées
+    // et on signale automatiquement les déjà contactées.
     selectedKeys.clear();
     editedMails = {};
     searchDone = false;
     listFilter = "todo";
     saveFilter();
+    rebuildCompaniesList();
     renderList();
-    statsBox.innerHTML = "";
+    const keptTodo = companies.filter((c) => !isContacted(companyKey(c))).length;
+    const keptDone = companies.filter((c) => isContacted(companyKey(c))).length;
+    statsBox.innerHTML = keptTodo || keptDone
+      ? `<div class="stat"><b>${keptTodo}</b> encore à contacter</div><div class="stat"><b>${keptDone}</b> déjà contactées</div>`
+      : "";
     logBox.textContent = "";
     logBox.classList.remove("visible");
+    if (keptTodo || keptDone) {
+      log(`Mémoire : ${keptTodo} à contacter · ${keptDone} déjà contactées — recherche de nouveaux contacts…`, { quiet: true });
+    }
     runBtn.textContent = "Relancer";
     setProgress(3, "Démarrage du sondage…");
 
@@ -810,7 +899,7 @@
   function seedDemoCompanies() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("demo") !== "1") return;
-    companies = [
+    const demoRows = [
       {
         name: "Lune Prod SARL",
         siren: "900111222",
@@ -844,21 +933,26 @@
         contactSource: "démo e-mail"
       }
     ];
+    demoRows.forEach((c) => rememberCompany(c, { fromScan: true }));
+    rebuildCompaniesList();
     searchDone = true;
     renderList();
-    log("Mode démo — téléphone → Message, e-mail → Mail.", { quiet: true });
+    log("Mode démo — mémoire + Message/Mail adaptatif.", { quiet: true });
   }
 
   historyBtn.addEventListener("click", () => toggleHistory());
   historyCloseBtn.addEventListener("click", () => toggleHistory(false));
   historyClearBtn.addEventListener("click", () => {
-    if (!contactedEntries().length) return;
-    if (!window.confirm("Vider tout l’historique des entreprises contactées ?")) return;
+    if (!contactedEntries().length && !Object.keys(companyMemory).length) return;
+    if (!window.confirm("Vider l’historique des contactées ET la mémoire des entreprises scannées ?")) return;
     contactedMap = {};
+    companyMemory = {};
     saveContacted();
+    saveScanMemory();
+    rebuildCompaniesList();
     renderHistory();
     renderList();
-    log("Historique vidé.", { quiet: true });
+    log("Historique et mémoire des scans vidés.", { quiet: true });
   });
   historyList.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-history-remove]");
@@ -872,9 +966,15 @@
   loadSender();
   loadTemplate();
   loadContacted();
+  loadScanMemory();
   loadFilter();
   loadSectors();
   warnIfFileModeWithoutServer();
+  rebuildCompaniesList();
   updateFilterTabs();
+  if (companies.length) {
+    searchDone = true;
+    renderList();
+  }
   seedDemoCompanies();
 })();

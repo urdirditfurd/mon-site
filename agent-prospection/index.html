@@ -433,7 +433,8 @@
     <h1>Prospection</h1>
     <p class="subtitle">
       Trouve les <strong>nouvelles entreprises</strong> d’un secteur, récupère un <strong>contact public validé</strong>,
-      puis envoie une proposition comptable personnalisée — une par une ou en masse.
+      puis envoie une proposition comptable personnalisée. Les déjà contactées sont signalées automatiquement ;
+      les non contactées restent en mémoire même après un nouveau sondage.
     </p>
   </header>
 
@@ -537,10 +538,10 @@
         </div>
         <div class="history-panel" id="historyPanel" hidden>
           <h3>Historique — entreprises déjà contactées</h3>
-          <p class="hint" style="margin-top:0">Mémoire locale du navigateur (tous sondages). Vous pouvez retirer une entrée.</p>
+          <p class="hint" style="margin-top:0">Mémoire locale : contactées + entreprises scannées non contactées (réaffichées à chaque sondage). Vider efface les deux.</p>
           <ul class="history-list" id="historyList"></ul>
           <div class="actions" style="margin-top:10px">
-            <button id="historyClearBtn" class="btn btn-ghost" type="button">Vider l’historique</button>
+            <button id="historyClearBtn" class="btn btn-ghost" type="button">Vider historique + mémoire</button>
             <button id="historyCloseBtn" class="btn btn-ghost" type="button">Fermer</button>
           </div>
         </div>
