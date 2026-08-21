@@ -29,6 +29,11 @@
   const countTodo = document.getElementById("countTodo");
   const countDone = document.getElementById("countDone");
   const countAll = document.getElementById("countAll");
+  const historyBtn = document.getElementById("historyBtn");
+  const historyPanel = document.getElementById("historyPanel");
+  const historyList = document.getElementById("historyList");
+  const historyClearBtn = document.getElementById("historyClearBtn");
+  const historyCloseBtn = document.getElementById("historyCloseBtn");
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
@@ -83,7 +88,12 @@
     contactedMap[key] = {
       name: company.name || key,
       siren: company.siren || "",
-      channel: channel || "message",
+      activity: company.activity || company.nafLabel || "",
+      email: company.email || "",
+      phone: company.phone || "",
+      address: company.address || "",
+      channel: channel || (company.phone ? "sms" : "mail"),
+      source: company.contactSource || "",
       at: new Date().toISOString()
     };
     saveContacted();
@@ -92,6 +102,43 @@
   function unmarkContacted(key) {
     delete contactedMap[key];
     saveContacted();
+  }
+
+  function contactedEntries() {
+    return Object.entries(contactedMap)
+      .map(([key, row]) => ({ key, ...(row || {}) }))
+      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  }
+
+  function renderHistory() {
+    const rows = contactedEntries();
+    if (!rows.length) {
+      historyList.innerHTML = `<li class="history-empty">Aucune entreprise contactée pour l’instant.</li>`;
+      return;
+    }
+    historyList.innerHTML = rows.map((row) => {
+      const when = row.at ? new Date(row.at).toLocaleString("fr-FR") : "n.c.";
+      const channelLabel = row.channel === "mail" ? "Mail" : (row.channel === "sms" ? "Message" : (row.channel || "manuel"));
+      const bits = [
+        row.siren ? `SIREN ${escapeHtml(row.siren)}` : "",
+        row.email ? escapeHtml(row.email) : "",
+        row.phone ? escapeHtml(row.phone) : "",
+        escapeHtml(channelLabel),
+        escapeHtml(when)
+      ].filter(Boolean);
+      return `<li class="history-item" data-history-key="${escapeHtml(row.key)}">
+        <strong>${escapeHtml(row.name || row.key)}</strong>
+        <span class="meta">${bits.join(" · ")}</span>
+        <button class="btn btn-ghost" type="button" data-history-remove="${escapeHtml(row.key)}">Retirer</button>
+      </li>`;
+    }).join("");
+  }
+
+  function toggleHistory(force) {
+    const open = typeof force === "boolean" ? force : historyPanel.hidden;
+    historyPanel.hidden = !open;
+    historyPanel.classList.toggle("visible", open);
+    if (open) renderHistory();
   }
 
   function loadFilter() {
@@ -255,12 +302,29 @@
     });
   }
 
+  function primaryActions(company, key, mailContent) {
+    const canMail = Boolean(company.hasContact && company.email);
+    const canSms = Boolean(company.hasContact && company.phone);
+    const links = [];
+    // S'adapte à ce que l'agent a trouvé : téléphone → Message, sinon e-mail → Mail.
+    if (canSms && canMail) {
+      links.push(`<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>`);
+      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>`);
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
+    } else if (canSms) {
+      links.push(`<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>`);
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
+    } else if (canMail) {
+      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>`);
+      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
+    }
+    return { canMail, canSms, links };
+  }
+
   function renderCompany(company) {
     const key = companyKey(company);
     const done = isContacted(key);
     const checked = selectedKeys.has(key) ? "checked" : "";
-    const canMail = Boolean(company.hasContact && company.email);
-    const canSms = Boolean(company.hasContact && company.phone);
     const chip = done
       ? `<span class="chip done">déjà contacté</span>`
       : `<span class="chip ok">à contacter</span>`;
@@ -275,23 +339,16 @@
 
     const mailContent = getMailForCompany(company);
     const editId = `mail-edit-${escapeHtml(key).replace(/[^a-zA-Z0-9]/g, "_")}`;
-    const links = [];
+    const { canMail, canSms, links } = primaryActions(company, key, mailContent);
 
-    if (canSms) {
-      links.push(`<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>`);
-    }
-    if (canMail) {
-      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>`);
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le message</button>`);
-    } else if (canSms) {
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier le message</button>`);
-    }
     if (done) {
       links.push(`<button class="btn btn-ghost" type="button" data-unmark="${escapeHtml(key)}">Remettre à contacter</button>`);
     } else {
       links.push(`<button class="btn btn-ghost" type="button" data-mark="${escapeHtml(key)}">Marquer contacté</button>`);
     }
-                  if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener" title="Site trouvé et rattaché à cette entreprise">Site</a>`);
+    if (company.website) {
+      links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener" title="Site rattaché à cette entreprise">Site</a>`);
+    }
     if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
     if (company.pappersUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
 
@@ -309,12 +366,12 @@
       ${contactBlock(company)}
       <div class="actions">${links.join("")}</div>
       <div class="mail-edit-area" id="${editId}">
-        <label class="field" style="margin-bottom:8px"><span>Message personnalisé (brouillon Messages / mail)</span></label>
+        <label class="field" style="margin-bottom:8px"><span>Message personnalisé (brouillon ${canSms ? "Messages" : "mail"})</span></label>
         <textarea data-mail-key="${escapeHtml(key)}">${escapeHtml(mailContent)}</textarea>
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer</button>
           ${canSms ? `<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>` : ""}
-          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer le mail</button>` : ""}
+          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>` : ""}
         </div>
       </div>
     </li>`;
@@ -766,31 +823,51 @@
         postalCode: "75011",
         directors: ["Alice Martin"],
         phone: "06 12 34 56 78",
-        email: "contact@lune-prod.example",
+        email: "",
         hasContact: true,
-        contactSource: "démo"
+        contactSource: "démo téléphone"
       },
       {
-        name: "Soleil Cinéma",
+        name: "Soleil Édition",
         siren: "900333444",
-        activity: "Projection cinématographique",
-        naf: "5914Z",
-        nafLabel: "Projection",
+        activity: "Édition audiovisuelle",
+        naf: "5913A",
+        nafLabel: "Édition",
         createdAt: "2026-07-15",
         address: "8 avenue Orange, 75010 Paris",
         city: "Paris",
         postalCode: "75010",
         directors: ["Bruno Dupont"],
-        phone: "07 98 76 54 32",
-        email: "",
+        phone: "",
+        email: "contact@soleil-edition.example",
         hasContact: true,
-        contactSource: "démo"
+        contactSource: "démo e-mail"
       }
     ];
     searchDone = true;
     renderList();
-    log("Mode démo — 2 entreprises fictives pour tester Message et les filtres.", { quiet: true });
+    log("Mode démo — téléphone → Message, e-mail → Mail.", { quiet: true });
   }
+
+  historyBtn.addEventListener("click", () => toggleHistory());
+  historyCloseBtn.addEventListener("click", () => toggleHistory(false));
+  historyClearBtn.addEventListener("click", () => {
+    if (!contactedEntries().length) return;
+    if (!window.confirm("Vider tout l’historique des entreprises contactées ?")) return;
+    contactedMap = {};
+    saveContacted();
+    renderHistory();
+    renderList();
+    log("Historique vidé.", { quiet: true });
+  });
+  historyList.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-history-remove]");
+    if (!btn) return;
+    const key = btn.getAttribute("data-history-remove");
+    unmarkContacted(key);
+    renderHistory();
+    renderList();
+  });
 
   loadSender();
   loadTemplate();

@@ -858,15 +858,21 @@ function applyContact(company, { email, phone, website, source, confidence }) {
     // Ne jamais valider un contact conjectural (ex. email MX deviné).
     return;
   }
-  if (email && (!company.email || nextRank >= currentRank)) company.email = email;
-  if (phone && (!company.phone || nextRank >= currentRank)) company.phone = phone;
+  const safePhone = phone && phoneFitsCompany(phone, company) ? (normalizeFrPhone(phone) || "") : "";
+  const safeEmail = email ? (extractEmails(email)[0] || "") : "";
+  if (!safeEmail && !safePhone && !(website && isRealCompanyWebsite(website))) {
+    return;
+  }
+  if (safeEmail && (!company.email || nextRank >= currentRank)) company.email = safeEmail;
+  if (safePhone && (!company.phone || nextRank >= currentRank)) company.phone = safePhone;
   // Jamais d'URL d'annuaire (Pappers, PagesJaunes, societe.com, etc.) comme site entreprise.
   if (website && isRealCompanyWebsite(website) && !company.website) company.website = website;
-  if ((email || phone) && nextRank >= currentRank) {
+  if ((safeEmail || safePhone) && nextRank >= currentRank) {
     company.contactSource = source;
     company.contactConfidence = level;
     company.contactVerified = level === "high" || level === "medium";
   }
+  sanitizeCompanyContact(company);
 }
 
 function matchesDepartment(company, department) {
@@ -1435,6 +1441,7 @@ ${sender.phone || ""}`.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function isVerifiedContact(company) {
+  sanitizeCompanyContact(company);
   return Boolean(
     company.contactVerified
     && (company.email || company.phone)
@@ -1442,7 +1449,34 @@ function isVerifiedContact(company) {
   );
 }
 
+/** Filet final : retire teasers / sites d'annuaire avant publication. */
+function sanitizeCompanyContact(company) {
+  if (!company) return company;
+  if (company.phone) {
+    const normalized = normalizeFrPhone(company.phone);
+    if (!normalized || !phoneFitsCompany(normalized, company)) {
+      company.phone = "";
+    } else {
+      company.phone = normalized;
+    }
+  }
+  if (company.email) {
+    const emails = extractEmails(company.email);
+    company.email = emails[0] || "";
+  }
+  if (company.website && !isRealCompanyWebsite(company.website)) {
+    company.website = "";
+  }
+  if (!company.email && !company.phone) {
+    company.contactVerified = false;
+    company.contactConfidence = "none";
+    company.contactSource = "";
+  }
+  return company;
+}
+
 function publicCompany(company, sender) {
+  sanitizeCompanyContact(company);
   const verified = isVerifiedContact(company);
   const proposal = verified && company.email ? buildProposal(company, sender) : null;
   return {
@@ -1461,11 +1495,14 @@ function publicCompany(company, sender) {
     directors: company.directors,
     email: verified ? (company.email || "") : "",
     phone: verified ? (company.phone || "") : "",
-    website: company.website || "",
+    website: verified && company.website ? company.website : (company.website && isRealCompanyWebsite(company.website) ? company.website : ""),
     contactSource: verified ? (company.contactSource || "") : "",
     contactConfidence: verified ? (company.contactConfidence || "") : "",
     contactVerified: verified,
     hasContact: verified,
+    preferredChannel: verified
+      ? (company.phone ? "sms" : (company.email ? "mail" : ""))
+      : "",
     bodaccUrl: company.bodaccUrl,
     sireneUrl: company.sireneUrl || (company.siren ? `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}` : ""),
     pappersUrl: company.siren ? `https://www.pappers.fr/entreprise/${company.siren}` : "",
@@ -1514,12 +1551,20 @@ async function enrichFromCinemaDirectories(company) {
     if (!pageMatchesCompany(text, company) && !(company.siren && text.includes(company.siren))) {
       continue;
     }
-    const hit = pickBestFromText(text, company, target.source, target.url, { fullText: false, lenient: true });
+    // PagesJaunes filière : mêmes garde-fous SIREN / activité que l'annuaire général.
+    if (/pagesjaunes\.fr/i.test(target.url) && !directoryEvidenceOk(text, company)) {
+      continue;
+    }
+    const hit = pickBestFromText(text, company, target.source, target.url, {
+      fullText: false,
+      lenient: !/pagesjaunes\.fr/i.test(target.url)
+    });
     if (hit && (hit.email || hit.phone)) {
       applyContact(company, {
         ...hit,
+        website: "",
         source: target.source,
-        confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+        confidence: pageCitesSiren(text, company) ? "high" : "medium"
       });
       return true;
     }
@@ -2085,6 +2130,7 @@ module.exports = {
   isSirenTeaserPhone,
   activityConflictsWithPage,
   directoryEvidenceOk,
+  sanitizeCompanyContact,
   searchName,
   isGenericCompanyName,
   enrichFromDomainGuess

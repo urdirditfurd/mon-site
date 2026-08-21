@@ -397,6 +397,31 @@
     .scroll-top.visible { opacity: 1; pointer-events: auto; }
     .scroll-top:hover { transform: translateY(-3px); }
     .select-cb { width: auto; accent-color: var(--primary); }
+    .history-panel {
+      display: none;
+      margin-bottom: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fffdf9, #fff7ed);
+    }
+    .history-panel.visible { display: block; }
+    .history-panel h3 { margin: 0 0 10px; font-size: .95rem; color: var(--ink); }
+    .history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+    .history-item {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: baseline;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      font-size: .86rem;
+    }
+    .history-item strong { color: var(--ink); }
+    .history-item .meta { color: var(--muted); font-size: .8rem; }
+    .history-empty { color: var(--muted); font-size: .88rem; padding: 8px 0; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .panel { position: static; }
@@ -506,7 +531,17 @@
         <div class="results-head">
           <h2>Contacts validés</h2>
           <div class="actions" style="margin:0">
+            <button id="historyBtn" class="btn btn-ghost" type="button">Historique</button>
             <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
+          </div>
+        </div>
+        <div class="history-panel" id="historyPanel" hidden>
+          <h3>Historique — entreprises déjà contactées</h3>
+          <p class="hint" style="margin-top:0">Mémoire locale du navigateur (tous sondages). Vous pouvez retirer une entrée.</p>
+          <ul class="history-list" id="historyList"></ul>
+          <div class="actions" style="margin-top:10px">
+            <button id="historyClearBtn" class="btn btn-ghost" type="button">Vider l’historique</button>
+            <button id="historyCloseBtn" class="btn btn-ghost" type="button">Fermer</button>
           </div>
         </div>
         <div class="filter-tabs" id="filterTabs" role="tablist" aria-label="Filtrer les contacts">
@@ -526,7 +561,7 @@
           </label>
           <span><span class="count" id="selectedCount">0</span> sélectionné(s)</span>
           <button id="massEditBtn" class="btn btn-ghost" type="button">Voir les messages</button>
-          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer les mails en masse</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Ouvrir les mails en masse</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
