@@ -231,7 +231,7 @@
       const bits = [];
       if (company.email) bits.push(`<a href="mailto:${escapeHtml(company.email)}">${escapeHtml(company.email)}</a>`);
       if (company.phone) bits.push(`<a href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">${escapeHtml(company.phone)}</a>`);
-      return `<div class="contact-row"><strong>Contact validé</strong> · ${bits.join(" · ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")}</div></div>`;
+      return `<div class="contact-row"><strong>Contact validé</strong> · ${bits.join(" · ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")} — à recouper avec l’Annuaire / Pappers (SIREN)</div></div>`;
     }
     return "";
   }
