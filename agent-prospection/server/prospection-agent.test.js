@@ -11,7 +11,8 @@ const {
   buildProposal,
   decodeDuckDuckGoUrl,
   pageMatchesCompany,
-  phoneFitsCompany
+  phoneFitsCompany,
+  listSectors
 } = require("./prospection-agent");
 
 test("normalise les téléphones français et ignore les numéros surtaxés", () => {
@@ -50,6 +51,17 @@ test("secteur cinéma couvre production audiovisuelle et NAF 59", () => {
   assert.equal(activityMatchesSector("Salle de sport et fitness", sector), false);
   const byLabel = resolveSector("cinéma");
   assert.equal(byLabel.id, "cinema");
+});
+
+test("secteur tous agrège les NAF de la liste", () => {
+  const sector = resolveSector("tous");
+  assert.equal(sector.id, "tous");
+  assert.equal(sector.allSectors, true);
+  assert.ok(sector.nafPrefixes.includes("56"));
+  assert.ok(sector.nafPrefixes.includes("59"));
+  assert.equal(activityMatchesSector("n'importe quoi", sector), true);
+  const listed = listSectors();
+  assert.equal(listed[0].id, "tous");
 });
 
 test("parse une annonce BODACC personne morale", () => {

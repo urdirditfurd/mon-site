@@ -25,6 +25,7 @@
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
   const FALLBACK_SECTORS = [
+    { id: "tous", label: "Tous les secteurs" },
     { id: "restauration", label: "Restauration, cafés, bars" },
     { id: "btp", label: "BTP / artisanat du bâtiment" },
     { id: "commerce", label: "Commerce de détail" },
@@ -45,6 +46,7 @@
   let selectedKeys = new Set();
   let editedMails = {};
   let streamAbort = null;
+  let runToken = 0;
 
   function loadSender() {
     try {
@@ -189,9 +191,19 @@
   }
 
   function renderSectorOptions(sectors) {
-    sectorSelect.innerHTML = sectors.map((sector) => (
+    const current = sectorSelect.value || "tous";
+    const list = [...sectors];
+    if (!list.some((s) => s.id === "tous")) {
+      list.unshift({ id: "tous", label: "Tous les secteurs" });
+    }
+    sectorSelect.innerHTML = list.map((sector) => (
       `<option value="${escapeHtml(sector.id)}">${escapeHtml(sector.label)}</option>`
     )).join("");
+    if ([...sectorSelect.options].some((o) => o.value === current)) {
+      sectorSelect.value = current;
+    } else {
+      sectorSelect.value = "tous";
+    }
   }
 
   async function loadSectors() {
@@ -232,7 +244,9 @@
 
   function selectedSector() {
     const custom = sectorCustom.value.trim();
-    return custom || sectorSelect.value;
+    // Le champ libre ne prime que s'il est rempli — sinon on prend la liste (évite un scan fantôme).
+    if (custom) return custom;
+    return sectorSelect.value;
   }
 
   function handleEvent(event) {
@@ -259,12 +273,17 @@
         <div class="stat">BODACC brut : <b>${summary.totalBodacc || 0}</b></div>
       `;
       log(`Termin\u00e9 \u2014 ${summary.found || 0} entreprises, ${summary.withContact || 0} contacts publics.`);
+      if (!(summary.found || companies.length)) {
+        log("Astuce : choisissez \u00ab Tous les secteurs \u00bb, passez \u00e0 60/90 jours, ou laissez le d\u00e9partement vide, puis relancez.");
+      }
       runBtn.disabled = false;
+      runBtn.textContent = "Lancer la prospection";
       return;
     }
     if (event.type === "error") {
       log(`Erreur : ${event.message}`);
       runBtn.disabled = false;
+      runBtn.textContent = "Lancer la prospection";
     }
   }
 
@@ -302,31 +321,37 @@
       log("Puis ouvrez http://localhost:3000/prospection");
       return;
     }
+
+    const myToken = ++runToken;
     if (streamAbort) {
       streamAbort.abort();
       streamAbort = null;
+      log("Scan pr\u00e9c\u00e9dent interrompu \u2014 nouveau lancement…");
     }
+
     companies = [];
     selectedKeys.clear();
     editedMails = {};
     renderList();
     statsBox.innerHTML = "";
-    logBox.textContent = "";
-    runBtn.disabled = true;
+    // On conserve l'historique des scans pour enchaîner plusieurs recherches.
+    if (logBox.textContent === "En attente d\u2019un secteur\u2026") logBox.textContent = "";
+    runBtn.disabled = false;
+    runBtn.textContent = "Relancer (interrompt le scan en cours)";
     const params = new URLSearchParams({
       sector,
       days: daysSelect.value,
-      limit: "40",
+      limit: sector === "tous" ? "60" : "40",
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
-    log(`D\u00e9marrage \u2014 secteur \u00ab ${sector} \u00bb.`);
+    const sectorLabel = ([...sectorSelect.options].find((o) => o.value === sector) || {}).textContent || sector;
+    log(`D\u00e9marrage \u2014 secteur \u00ab ${sectorLabel} \u00bb (${daysSelect.value} j${params.get("department") ? `, d\u00e9p. ${params.get("department")}` : ", France"}).`);
     const controller = new AbortController();
     streamAbort = controller;
     try {
-      // fetch + ReadableStream traverse mieux Cloudflare que EventSource (moins de buffering).
       const response = await fetch(`${API_PREFIX}/api/prospection/stream?${params.toString()}`, {
         headers: { Accept: "text/event-stream" },
         cache: "no-store",
@@ -341,17 +366,23 @@
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (myToken !== runToken) break;
         buffer = consumeSseChunk(buffer, decoder.decode(value, { stream: true }));
       }
-      if (buffer.trim()) consumeSseChunk(`${buffer}\n\n`, "");
+      if (myToken === runToken && buffer.trim()) consumeSseChunk(`${buffer}\n\n`, "");
     } catch (error) {
-      if (error?.name !== "AbortError") {
+      if (error?.name === "AbortError") {
+        if (myToken === runToken) log("Scan interrompu.");
+      } else if (myToken === runToken) {
         log(`Connexion interrompue : ${error instanceof Error ? error.message : "inconnue"}`);
         log("V\u00e9rifiez que npm start tourne, puis relancez.");
       }
     } finally {
-      if (streamAbort === controller) streamAbort = null;
-      runBtn.disabled = false;
+      if (myToken === runToken) {
+        streamAbort = null;
+        runBtn.disabled = false;
+        runBtn.textContent = "Lancer la prospection";
+      }
     }
   }
 
@@ -467,6 +498,10 @@
   });
 
   runBtn.addEventListener("click", run);
+  sectorSelect.addEventListener("change", () => {
+    // Évite qu'un texte libre résiduel écrase le choix de la liste au prochain scan.
+    sectorCustom.value = "";
+  });
   csvBtn.addEventListener("click", exportCsv);
   previewMailBtn.addEventListener("click", previewMail);
   saveTemplateBtn.addEventListener("click", saveTemplate);

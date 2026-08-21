@@ -196,20 +196,40 @@ const SECTORS = [
   }
 ];
 
+function buildAllSectorsMeta() {
+  const nafPrefixes = [...new Set(SECTORS.flatMap((s) => s.nafPrefixes || []))];
+  const keywords = [...new Set(SECTORS.flatMap((s) => s.keywords || []))];
+  const exclude = [...new Set(SECTORS.flatMap((s) => s.exclude || []))];
+  return {
+    id: "tous",
+    label: "Tous les secteurs",
+    nafPrefixes,
+    keywords,
+    exclude,
+    allSectors: true
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function listSectors() {
-  return SECTORS.map(({ id, label }) => ({ id, label }));
+  return [
+    { id: "tous", label: "Tous les secteurs" },
+    ...SECTORS.map(({ id, label }) => ({ id, label }))
+  ];
 }
 
 function resolveSector(raw) {
   const value = String(raw || "").trim();
   if (!value) return null;
+  const lowered = value.toLowerCase();
+  if (lowered === "tous" || lowered === "all" || lowered.includes("tous les secteurs")) {
+    return buildAllSectorsMeta();
+  }
   const byId = SECTORS.find((s) => s.id === value);
   if (byId) return byId;
-  const lowered = value.toLowerCase();
   const byLabel = SECTORS.find((s) => lowered.includes(s.id) || s.label.toLowerCase().includes(lowered) || s.keywords.some((k) => lowered.includes(k.trim())));
   if (byLabel) {
     return {
@@ -279,6 +299,7 @@ function nameSimilarity(a, b) {
 }
 
 function activityMatchesSector(activity, sector) {
+  if (sector && sector.allSectors) return true;
   const text = String(activity || "").toLowerCase();
   if (!text) return false;
   const excluded = (sector.exclude || []).some((needle) => text.includes(needle.toLowerCase()));
@@ -619,6 +640,10 @@ function buildBodaccWhere(sector, days, department) {
   if (department) {
     const dep = String(department).padStart(2, "0");
     clauses.push(`numerodepartement='${dep}'`);
+  }
+  // "Tous" : pas de filtre mot-clé BODACC (on filtre ensuite par NAF des secteurs listés).
+  if (sector.allSectors) {
+    return clauses.join(" AND ");
   }
   const keywords = [...(sector.keywords || [])].slice(0, 6);
   if (keywords.length) {
@@ -1598,13 +1623,23 @@ async function runProspection(params = {}, onEvent = () => {}) {
     await enrichSirene(company);
     await sleep(80);
     if (!matchesDepartment(company, department)) continue;
-    // Filtre NAF : si le code est connu, il doit coller au secteur (évite formation/conseil glissés via mots-clés).
+    // NAF connu : doit coller au secteur. Sinon on garde si l'activité BODACC matche (évite listes vides).
     if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
       const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
-      if (!okNaf) continue;
+      if (!okNaf) {
+        const okKw = !sector.allSectors && activityMatchesSector(company.activity || company.nafLabel || "", sector);
+        if (!okKw) continue;
+      }
     }
     selected.push(company);
     onEvent({ type: "company", company: publicCompany(company, sender) });
+  }
+
+  if (!selected.length) {
+    onEvent({
+      type: "status",
+      message: "Aucun r\u00e9sultat avec ces filtres. Essayez \u00ab Tous les secteurs \u00bb, \u00e9largissez la p\u00e9riode, ou videz le d\u00e9partement."
+    });
   }
 
   if (enrichContacts && selected.length) {
