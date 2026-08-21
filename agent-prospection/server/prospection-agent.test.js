@@ -54,21 +54,63 @@ test("CULTURE RAPIDE — homonyme Paris sans adresse rejetée", () => {
     siren: "107463853",
     city: "Paris",
     postalCode: "75020",
-    address: "12 Rue des Pyrénées 75020 Paris",
-    department: "75"
+    address: "103 Rue Julien Lacroix 75020 Paris",
+    department: "75",
+    naf: "5920Z",
+    activity: "Production audiovisuelle"
   };
   assert.equal(
     pageMatchesCompany("Culture Rapide Paris téléphone café bar cocktail", culture),
     false
   );
   assert.equal(
-    pageMatchesCompany("Culture Rapide 75020 Paris Rue des Pyrénées", culture),
+    pageMatchesCompany("Culture Rapide 75020 Paris Rue Julien Lacroix", culture),
     true
   );
   assert.equal(
     pageMatchesCompany(`Culture Rapide SIREN ${culture.siren}`, culture),
     true
   );
+});
+
+test("CULTURE RAPIDE — fiche café même adresse rejetée sans SIREN", () => {
+  const { activityConflictsWithPage, directoryEvidenceOk } = require("./prospection-agent");
+  const culture = {
+    name: "CULTURE RAPIDE",
+    siren: "107463853",
+    city: "Paris",
+    postalCode: "75020",
+    address: "103 Rue Julien Lacroix 75020 Paris",
+    department: "75",
+    naf: "5920Z",
+    activity: "création production édition œuvres audiovisuelles"
+  };
+  const pjCafe = `
+### Culture Rapide
+103 rue Julien Lacroix 75020 Paris
+terrasse · concert · bar à bière
+Dans l'activité **Cafés, bars**, ces résultats peuvent vous intéresser
+tél 06 63 00 00 10
+`;
+  assert.equal(activityConflictsWithPage(pjCafe, culture), true);
+  assert.equal(directoryEvidenceOk(pjCafe, culture), false);
+  assert.equal(directoryEvidenceOk(`${pjCafe}\nSIREN ${culture.siren}`, culture), true);
+  assert.equal(
+    directoryEvidenceOk(`Culture Rapide SIREN ${culture.siren} 103 rue Julien Lacroix 75020 production audiovisuelle`, culture),
+    true
+  );
+});
+
+test("JUICE PROD — teaser Pappers filtré", () => {
+  const juice = {
+    name: "JUICE PROD",
+    siren: "107630113",
+    department: "75",
+    city: "Paris",
+    postalCode: "75002"
+  };
+  assert.equal(isSirenTeaserPhone("07 63 01 13 00", juice), true);
+  assert.equal(phoneFitsCompany("07 63 01 13 00", juice), false);
 });
 
 test("extrait e-mails utiles et filtre les faux positifs", () => {

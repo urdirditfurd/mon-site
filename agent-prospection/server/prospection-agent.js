@@ -526,6 +526,74 @@ function hasStrongAddressMatch(text, company) {
   return streetTokens.length >= 2 && streetTokens.filter((token) => hay.includes(token)).length >= 2;
 }
 
+function pageCitesSiren(text, company) {
+  const siren = String(company?.siren || "").replace(/\D/g, "");
+  return Boolean(siren && String(text || "").includes(siren));
+}
+
+/**
+ * Détecte un conflit d'activité évident (ex. fiche café/bar pour une société NAF 59 audiovisuel).
+ * Utile contre les homonymes à la même adresse (CULTURE RAPIDE).
+ */
+function activityConflictsWithPage(text, company) {
+  const hay = String(text || "").toLowerCase();
+  if (!hay) return false;
+  const naf = String(company.naf || company.nafCode || "").replace(/\D/g, "");
+  const activity = `${company.activity || ""} ${company.nafLabel || ""}`.toLowerCase();
+  const isAv = /^(59|60)/.test(naf)
+    || /cin[eé]ma|audiovisuel|vid[eé]o|production\s+(de\s+)?film|post[\s-]?production|captation/.test(activity);
+  const isFoodishCompany = /^(56)/.test(naf)
+    || /restaurant|caf[eé]|bar\b|brasserie|traiteur|d[eé]bit de boisson/.test(activity);
+  const pageIsCafeBar = /\b(caf[eé]s?(?:,|\s+bars?)?|bar\s+[àa]\s+bi[eè]re|bar\s+[àa]\s+vin|brasserie|restaurant|cocktail|terrasse|happy\s*hour)\b/.test(hay)
+    || /dans l'activit[eé]\s+\*\*caf[eé]s?,?\s*bars?\*\*/i.test(hay);
+  const pageIsAv = /\b(cin[eé]ma|audiovisuel|production\s+(de\s+)?film|soci[eé]t[eé]\s+de\s+production|post[\s-]?production|captation)\b/.test(hay);
+  if (isAv && pageIsCafeBar && !pageIsAv) return true;
+  if (isFoodishCompany && pageIsAv && !pageIsCafeBar) return true;
+  return false;
+}
+
+/**
+ * Sources annuaire (PJ, 118712…) : en grande ville, exiger le SIREN sur la page.
+ * Sinon homonymes / commerces historiques à la même adresse polluent le contact.
+ */
+function directoryEvidenceOk(text, company) {
+  // SIREN cité = même entité juridique (même si la fiche parle aussi d'un café).
+  if (pageCitesSiren(text, company)) return true;
+  if (activityConflictsWithPage(text, company)) return false;
+  const city = String(company.city || "").toLowerCase();
+  if (HUGE_CITIES.has(city)) return false;
+  return hasStrongAddressMatch(text, company);
+}
+
+/** Extrait un téléphone proche d'une ancre (SIREN ou tokens d'adresse), pas le 1er de la page. */
+function extractPhonesNearEvidence(text, company) {
+  const hay = String(text || "");
+  const anchors = [];
+  if (company.siren) {
+    const idx = hay.indexOf(company.siren);
+    if (idx >= 0) anchors.push(idx);
+  }
+  for (const token of streetTokensForCompany(company).slice(0, 4)) {
+    const idx = hay.toLowerCase().indexOf(token);
+    if (idx >= 0) anchors.push(idx);
+  }
+  if (company.postalCode) {
+    const idx = hay.indexOf(String(company.postalCode));
+    if (idx >= 0) anchors.push(idx);
+  }
+  if (!anchors.length) {
+    return extractPhones(hay).filter((phone) => phoneFitsCompany(phone, company));
+  }
+  const windows = anchors.map((idx) => hay.slice(Math.max(0, idx - 500), idx + 900));
+  const out = [];
+  for (const win of windows) {
+    for (const phone of extractPhones(win)) {
+      if (phoneFitsCompany(phone, company) && !out.includes(phone)) out.push(phone);
+    }
+  }
+  return out;
+}
+
 function pageMatchesCompany(text, company) {
   const hay = String(text || "").toLowerCase();
   if (company.siren && hay.includes(company.siren)) return true;
@@ -930,16 +998,21 @@ async function scrapeWebsiteQuick(url, company) {
       return { ...picked, website: url };
     }
   }
-  // Attacher le site seulement avec SIREN ou adresse forte (même règle que pageMatches durci).
+  // Site entreprise : SIREN obligatoire en grande ville (homonymes à la même adresse).
+  const city = String(company.city || "").toLowerCase();
+  const identityOk = company.siren && combined.includes(company.siren)
+    ? true
+    : (!HUGE_CITIES.has(city) && hasStrongAddressMatch(combined, company));
   const canAttachSite = Boolean(
-    (company.siren && combined.includes(company.siren))
-    || hasStrongAddressMatch(combined, company)
-    || pageMatchesCompany(combined, company)
+    identityOk
+    && !activityConflictsWithPage(combined, company)
+    && pageMatchesCompany(combined, company)
   );
   return { website: canAttachSite && isRealCompanyWebsite(url) ? url : "" };
 }
 
 function pickBestFromText(text, company, source, href = "", options = {}) {
+  if (activityConflictsWithPage(text, company)) return null;
   if (!options.lenient && !pageMatchesCompany(text, company)) return null;
   if (options.lenient && nameSimilarity(company.name, String(text || "").slice(0, 6000)) < 0.2) return null;
   const hay = String(text || "");
@@ -952,13 +1025,14 @@ function pickBestFromText(text, company, source, href = "", options = {}) {
     : (idx >= 0 ? hay.slice(Math.max(0, idx - 120), idx + 900) : hay.slice(0, 1800));
   const relayPage = /2,99\s*€|mise en relation|n'est pas le numéro du destinataire/i.test(sample) || isRelayHost(href);
   const emails = extractEmails(sample);
-  const phones = (relayPage ? [] : extractPhones(sample)).filter((phone) => phoneFitsCompany(phone, company));
+  const phones = (relayPage ? [] : extractPhonesNearEvidence(sample, company));
   if (!emails.length && !phones.length) return null;
+  const hasSiren = pageCitesSiren(sample, company) || pageCitesSiren(hay, company);
   return {
     email: emails[0] || "",
     phone: phones[0] || "",
     source,
-    confidence: company.postalCode && sample.includes(company.postalCode) ? "high" : "medium"
+    confidence: hasSiren ? "high" : (company.postalCode && sample.includes(company.postalCode) ? "medium" : "medium")
   };
 }
 
@@ -1012,7 +1086,7 @@ async function scrapeWebsite(url, company) {
     }
     await sleep(150);
   }
-  return { website: pageMatchesCompany(combined, company) && isRealCompanyWebsite(url) ? url : "", html: combined };
+  return { website: pageMatchesCompany(combined, company) && !activityConflictsWithPage(combined, company) && isRealCompanyWebsite(url) ? url : "", html: combined };
 }
 
 async function enrichFromSociete(company) {
@@ -1092,7 +1166,8 @@ async function enrichFromPappers(company) {
         email: emails[0] || "",
         phone: phones[0] || "",
         source: "Pappers (page publique)",
-        confidence: phones[0] ? "high" : "medium"
+        // Téléphones Pappers souvent teasers : déjà filtrés ; rester prudent (medium).
+        confidence: "medium"
       });
       return true;
     }
@@ -1133,24 +1208,20 @@ async function enrichFromPagesJaunes(company) {
     if (!pageMatchesCompany(markdown, company)) {
       return false;
     }
-    // Exige CP ou tokens de rue (pas seulement nom+ville) avant d'accepter un téléphone PJ.
-    if (!hasStrongAddressMatch(markdown, company)) {
+    // Grande ville / homonymes : SIREN obligatoire ; sinon adresse forte + activité cohérente.
+    if (!directoryEvidenceOk(markdown, company)) {
       return false;
     }
-    const phones = extractPhones(markdown).filter((phone) => phoneFitsCompany(phone, company));
+    const phones = extractPhonesNearEvidence(markdown, company);
     const emails = extractEmails(markdown);
-    const links = parseMarkdownLinks(markdown)
-      .map((l) => l.href)
-      .filter((href) => href.includes("pagesjaunes.fr/pros/"));
-    // Ne jamais poser le lien PJ /pros comme site, sauf si la page cite le SIREN (et encore : filtré par applyContact).
-    const pjWebsite = (company.siren && markdown.includes(company.siren) && links[0]) ? links[0] : "";
+    // Jamais de lien PJ comme « site » entreprise (filtrable aussi par applyContact).
     if (phones[0] || emails[0]) {
       applyContact(company, {
         email: emails[0] || "",
         phone: phones[0] || "",
-        website: pjWebsite,
-        source: "PagesJaunes",
-        confidence: "medium"
+        website: "",
+        source: pageCitesSiren(markdown, company) ? "PagesJaunes (SIREN)" : "PagesJaunes",
+        confidence: pageCitesSiren(markdown, company) ? "high" : "medium"
       });
       return true;
     }
@@ -1190,12 +1261,14 @@ async function enrichFromLocalDirectories(company) {
     if (!pageMatchesCompany(text, company) && !(company.postalCode && text.includes(company.postalCode))) {
       continue;
     }
-    const hit = pickBestFromText(text, company, target.source, target.url, { fullText: false, lenient: true });
+    if (!directoryEvidenceOk(text, company)) continue;
+    const hit = pickBestFromText(text, company, target.source, target.url, { fullText: false, lenient: false });
     if (hit && (hit.email || hit.phone)) {
       applyContact(company, {
         ...hit,
-        source: target.source,
-        confidence: company.postalCode && text.includes(company.postalCode) ? "high" : "medium"
+        website: "",
+        source: pageCitesSiren(text, company) ? `${target.source} (SIREN)` : target.source,
+        confidence: pageCitesSiren(text, company) ? "high" : "medium"
       });
       return true;
     }
@@ -2010,6 +2083,8 @@ module.exports = {
   pageMatchesCompany,
   phoneFitsCompany,
   isSirenTeaserPhone,
+  activityConflictsWithPage,
+  directoryEvidenceOk,
   searchName,
   isGenericCompanyName,
   enrichFromDomainGuess

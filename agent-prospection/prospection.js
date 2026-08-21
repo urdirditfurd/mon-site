@@ -291,8 +291,9 @@
     } else {
       links.push(`<button class="btn btn-ghost" type="button" data-mark="${escapeHtml(key)}">Marquer contacté</button>`);
     }
-    if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
+                  if (company.website) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener" title="Site trouvé et rattaché à cette entreprise">Site</a>`);
     if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
+    if (company.pappersUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
 
     return `<li class="company-card${done ? " contacted" : ""}" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
