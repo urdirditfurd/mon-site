@@ -1881,12 +1881,11 @@ function buildProspectionSummary({
       "Filière cinéma (Unifrance / Film France / CNC — pages publiques)",
       "OpenStreetMap / Overpass",
       "Site officiel",
-      "Pappers (page publique)",
-      "Societe.com"
+      "Pappers / Societe.com (e-mail public uniquement — téléphones teaser exclus)"
     ],
     note: auto
-      ? "Sondage auto (< 1 an) : seuls les contacts publics v\u00e9rifi\u00e9s sont list\u00e9s."
-      : "Contacts publi\u00e9s uniquement (pas de conjecture MX). LinkedIn non scrap\u00e9 (CGU)."
+      ? "Sondage auto (< 1 an) : contacts publics vérifiés uniquement. Tél. Pappers/Societe.com exclus."
+      : "Contacts publiés uniquement (pas de conjecture MX). Tél. dérivés du SIREN exclus. LinkedIn non scrapé (CGU)."
   };
 }
 
