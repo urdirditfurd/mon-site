@@ -55,7 +55,9 @@ const EMAIL_BLOCK_DOMAINS = [
   "bing.com", "yahoo.com", "gravatar.com", "treatwell.fr", "treatwell.com",
   "planity.com", "planity.fr", "wavy.co", "booksy.com", "cloudinary.com",
   "privateaser.com", "thefork.com", "lafourchette.com", "tripadvisor.fr",
-  "lefigaro.fr", "figaro.fr"
+  "lefigaro.fr", "figaro.fr",
+  "cylex.fr", "cylex-france.fr", "118712.fr", "googleusercontent.com",
+  "talabat.com", "sentry.wixpress.com"
 ];
 
 const NAF_LABELS = {
