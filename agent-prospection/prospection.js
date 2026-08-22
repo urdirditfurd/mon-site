@@ -549,6 +549,18 @@
     if (banner) banner.hidden = ready;
   }
 
+  async function refreshServerStatus() {
+    const offlineBanner = document.getElementById("serverOfflineBanner");
+    if (IS_FILE_MODE || !offlineBanner) return;
+    const ready = await isServerReady();
+    offlineBanner.hidden = ready;
+    if (ready) {
+      statusLine.textContent = "Serveur connecté — prêt pour le sondage.";
+    } else {
+      statusLine.textContent = "Serveur inaccessible — contactez l’administrateur ou relancez PM2.";
+    }
+  }
+
   function selectedSector() {
     return sectorSelect.value;
   }
@@ -632,7 +644,8 @@
     const sector = selectedSector();
     if (!sector) return;
     if (!(await isServerReady())) {
-      setProgress(0, "Serveur inaccessible — npm start requis");
+      setProgress(0, "Serveur inaccessible — backend prospection arrêté");
+      await refreshServerStatus();
       return;
     }
 
@@ -970,6 +983,7 @@
   loadFilter();
   loadSectors();
   warnIfFileModeWithoutServer();
+  refreshServerStatus();
   rebuildCompaniesList();
   updateFilterTabs();
   if (companies.length) {

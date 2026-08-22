@@ -439,8 +439,13 @@
   </header>
 
   <div class="file-mode-banner" id="fileModeBanner" hidden>
-    <strong>Mode fichier local.</strong> Lancez <code>npm install && npm start</code> puis ouvrez
+    <strong>Mode fichier local.</strong> Lancez <code>npm install && npm run start:prospection</code> puis ouvrez
     <a href="http://localhost:3000/prospection">http://localhost:3000/prospection</a>.
+  </div>
+
+  <div class="file-mode-banner server-offline-banner" id="serverOfflineBanner" hidden>
+    <strong>Serveur arrêté.</strong> Le backend prospection ne répond pas. Sur le VPS :
+    <code>bash scripts/vps-prospection-setup.sh</code> ou <code>pm2 restart prospection</code>.
   </div>
 
   <main class="layout">
