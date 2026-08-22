@@ -44,10 +44,17 @@ Let's Encrypt **ne délivre pas** de certificat pour une IP seule (`51.254.135.1
 
 ### Option A — Domaine sslip.io (sans acheter de nom)
 
-Le script peut utiliser `51-254-135-158.sslip.io` (pointe vers votre IP) :
+Une seule commande (depuis n'importe quel dossier, en root) :
 
 ```bash
-ENABLE_HTTPS=1 PROSPECTION_DOMAIN=51-254-135-158.sslip.io bash scripts/vps-prospection-setup.sh
+curl -fsSL "https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/prospection-contacts-stream-0325/scripts/vps-prospection-https.sh" | bash
+```
+
+Ou manuellement :
+
+```bash
+cd /root/mon-site
+ENABLE_HTTPS=1 PUBLIC_IP=51.254.135.158 PROSPECTION_DOMAIN=51-254-135-158.sslip.io bash scripts/vps-prospection-setup.sh
 ```
 
 URL sécurisée :

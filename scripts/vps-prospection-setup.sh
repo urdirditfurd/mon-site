@@ -7,13 +7,17 @@ set -euo pipefail
 # Usage (root sur le VPS) :
 #   curl -fsSL "https://raw.githubusercontent.com/urdirditfurd/mon-site/cursor/prospection-contacts-stream-0325/scripts/vps-prospection-setup.sh" | bash
 #
+# HTTPS (cadenas) :
+#   curl -fsSL ".../scripts/vps-prospection-https.sh" | bash
+#
 # Variables optionnelles :
 #   APP_DIR=/root/mon-site
 #   GIT_BRANCH=cursor/prospection-contacts-stream-0325
-#   PUBLIC_PORT=3010          # port externe (navigateur)
-#   INTERNAL_PORT=3011        # port Node (localhost)
-#   PROSPECTION_DOMAIN=51-254-135-158.sslip.io   # pour HTTPS Let's Encrypt
-#   ENABLE_HTTPS=1            # 1 = certbot + nginx SSL sur PUBLIC_PORT
+#   PUBLIC_PORT=3010
+#   INTERNAL_PORT=3011
+#   PUBLIC_IP=51.254.135.158
+#   PROSPECTION_DOMAIN=51-254-135-158.sslip.io
+#   ENABLE_HTTPS=1
 
 APP_DIR="${APP_DIR:-/root/mon-site}"
 REPO_URL="${REPO_URL:-https://github.com/urdirditfurd/mon-site.git}"
@@ -22,7 +26,24 @@ PUBLIC_PORT="${PUBLIC_PORT:-3010}"
 INTERNAL_PORT="${INTERNAL_PORT:-3011}"
 PROSPECTION_DOMAIN="${PROSPECTION_DOMAIN:-}"
 ENABLE_HTTPS="${ENABLE_HTTPS:-0}"
+PUBLIC_IP="${PUBLIC_IP:-}"
 ACME_ROOT="/var/www/acme-prospection"
+
+detect_public_ipv4() {
+  local ip=""
+  ip="$(curl -4 -s ifconfig.me 2>/dev/null || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(curl -4 -s icanhazip.com 2>/dev/null || true)"
+  fi
+  if [[ -z "$ip" ]]; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+  fi
+  echo "$ip"
+}
+
+ipv4_to_sslip() {
+  echo "${1//./-}.sslip.io"
+}
 
 echo "==> Agent de prospection — installation VPS"
 echo "    Dossier:       $APP_DIR"
@@ -49,10 +70,13 @@ if ! command -v pm2 >/dev/null 2>&1; then
   npm install -g pm2
 fi
 
-PUBLIC_IP="$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
-if [[ -z "$PROSPECTION_DOMAIN" && -n "$PUBLIC_IP" ]]; then
-  PROSPECTION_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
+if [[ -z "$PUBLIC_IP" ]]; then
+  PUBLIC_IP="$(detect_public_ipv4)"
 fi
+if [[ -z "$PROSPECTION_DOMAIN" && -n "$PUBLIC_IP" ]]; then
+  PROSPECTION_DOMAIN="$(ipv4_to_sslip "$PUBLIC_IP")"
+fi
+echo "    IP publique:   ${PUBLIC_IP:-inconnue}"
 echo "    Domaine SSL:   ${PROSPECTION_DOMAIN:-aucun}"
 
 if [[ -d "$APP_DIR/.git" ]]; then
@@ -80,14 +104,39 @@ export PORT="$INTERNAL_PORT"
 export TRUST_PROXY="1"
 pm2 start ecosystem.prospection.config.cjs
 pm2 save
-pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash || true
+
+STARTUP_LINE="$(pm2 startup systemd -u root --hp /root 2>/dev/null | grep -E '^sudo env' | tail -n 1 || true)"
+if [[ -n "$STARTUP_LINE" ]]; then
+  eval "$STARTUP_LINE" || true
+fi
 
 mkdir -p "$ACME_ROOT"
 NGINX_SITE="/etc/nginx/sites-available/prospection"
 
-if [[ "$ENABLE_HTTPS" == "1" && -n "$PROSPECTION_DOMAIN" ]]; then
-  apt-get install -y certbot python3-certbot-nginx
+write_http_proxy_config() {
+  cat > "$NGINX_SITE" <<EOF
+server {
+    listen ${PUBLIC_PORT};
+    listen [::]:${PUBLIC_PORT};
+    server_name _;
 
+    client_max_body_size 20M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${INTERNAL_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 600s;
+        proxy_buffering off;
+    }
+}
+EOF
+}
+
+write_https_config() {
   cat > "$NGINX_SITE" <<EOF
 server {
     listen 80;
@@ -120,55 +169,59 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 600s;
         proxy_buffering off;
     }
 }
 EOF
+}
 
-  ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/prospection
+if [[ "$ENABLE_HTTPS" == "1" && -n "$PROSPECTION_DOMAIN" ]]; then
+  apt-get install -y certbot python3-certbot-nginx
 
-  if [[ ! -f "/etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem" ]]; then
-    cat > /etc/nginx/sites-available/prospection-http-bootstrap <<EOF
+  CERT_PATH="/etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem"
+  if [[ ! -f "$CERT_PATH" ]]; then
+    echo "==> Obtention certificat Let's Encrypt pour ${PROSPECTION_DOMAIN}"
+    cat > /etc/nginx/sites-available/prospection-acme <<EOF
 server {
     listen 80;
     server_name ${PROSPECTION_DOMAIN};
-    location /.well-known/acme-challenge/ { root ${ACME_ROOT}; }
-    location / { return 200 'ok'; add_header Content-Type text/plain; }
-}
-EOF
-    ln -sf /etc/nginx/sites-available/prospection-http-bootstrap /etc/nginx/sites-enabled/prospection-http-bootstrap
-    nginx -t
-    systemctl reload nginx
-    certbot certonly --webroot -w "$ACME_ROOT" -d "$PROSPECTION_DOMAIN" --non-interactive --agree-tos -m "admin@${PROSPECTION_DOMAIN}" || \
-      certbot certonly --webroot -w "$ACME_ROOT" -d "$PROSPECTION_DOMAIN" --register-unsafely-without-email --non-interactive --agree-tos
-    rm -f /etc/nginx/sites-enabled/prospection-http-bootstrap
-  fi
-else
-  cat > "$NGINX_SITE" <<EOF
-server {
-    listen ${PUBLIC_PORT};
-    listen [::]:${PUBLIC_PORT};
-    server_name _;
 
-    client_max_body_size 20M;
+    location /.well-known/acme-challenge/ {
+        root ${ACME_ROOT};
+    }
 
     location / {
-        proxy_pass http://127.0.0.1:${INTERNAL_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 600s;
-        proxy_buffering off;
+        return 200 'ok';
+        add_header Content-Type text/plain;
     }
 }
 EOF
-  ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/prospection
+    ln -sf /etc/nginx/sites-available/prospection-acme /etc/nginx/sites-enabled/prospection-acme
+    nginx -t
+    systemctl reload nginx
+
+    certbot certonly --webroot -w "$ACME_ROOT" -d "$PROSPECTION_DOMAIN" \
+      --non-interactive --agree-tos --register-unsafely-without-email \
+      || certbot certonly --webroot -w "$ACME_ROOT" -d "$PROSPECTION_DOMAIN" \
+      --non-interactive --agree-tos -m "admin@${PROSPECTION_DOMAIN}"
+
+    rm -f /etc/nginx/sites-enabled/prospection-acme
+  fi
+
+  if [[ ! -f "$CERT_PATH" ]]; then
+    echo "ERREUR: certificat introuvable pour ${PROSPECTION_DOMAIN}"
+    echo "       Vérifiez que le port 80 est ouvert et que le DNS pointe vers ${PUBLIC_IP}"
+    write_http_proxy_config
+  else
+    write_https_config
+  fi
+else
+  write_http_proxy_config
 fi
 
+ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/prospection
 nginx -t
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl reload nginx
@@ -185,7 +238,7 @@ echo " PM2:      pm2 status prospection"
 echo " Logs:     pm2 logs prospection --lines 50"
 echo " Health:   $HEALTH_PUBLIC"
 echo ""
-if [[ "$ENABLE_HTTPS" == "1" && -n "$PROSPECTION_DOMAIN" ]]; then
+if [[ "$ENABLE_HTTPS" == "1" && -f "/etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem" ]]; then
   echo " URL sécurisée (cadenas) :"
   echo "   https://${PROSPECTION_DOMAIN}:${PUBLIC_PORT}/prospection"
   echo ""
