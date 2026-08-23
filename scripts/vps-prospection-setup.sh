@@ -228,7 +228,16 @@ systemctl reload nginx
 
 sleep 2
 HEALTH_INTERNAL="$(curl -sS "http://127.0.0.1:${INTERNAL_PORT}/api/health" 2>/dev/null || echo ERREUR)"
-HEALTH_PUBLIC="$(curl -sS "http://127.0.0.1:${PUBLIC_PORT}/api/health" 2>/dev/null || echo ERREUR)"
+HEALTH_PUBLIC="$(curl -sS -k "https://127.0.0.1:${PUBLIC_PORT}/api/health" 2>/dev/null || curl -sS "http://127.0.0.1:${PUBLIC_PORT}/api/health" 2>/dev/null || echo ERREUR)"
+
+WATCHDOG="$APP_DIR/scripts/vps-prospection-watchdog.sh"
+if [[ -x "$WATCHDOG" ]]; then
+  CRON_LINE="*/5 * * * * $WATCHDOG >> /var/log/prospection-watchdog.log 2>&1"
+  if ! crontab -l 2>/dev/null | grep -Fq "vps-prospection-watchdog.sh"; then
+    (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+    echo "==> Watchdog cron installé (toutes les 5 min)"
+  fi
+fi
 
 echo ""
 echo "=========================================="

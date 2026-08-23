@@ -533,13 +533,19 @@
     }
   }
 
-  async function isServerReady() {
-    try {
-      const response = await fetch(`${API_PREFIX}/api/health`, { cache: "no-store" });
-      return response.ok;
-    } catch {
-      return false;
+  async function isServerReady({ retries = 4, delayMs = 750 } = {}) {
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      try {
+        const response = await fetch(`${API_PREFIX}/api/health`, { cache: "no-store" });
+        if (response.ok) return true;
+      } catch {
+        // réseau instable ou serveur momentanément indisponible
+      }
+      if (attempt < retries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
+    return false;
   }
 
   async function warnIfFileModeWithoutServer() {
@@ -549,16 +555,34 @@
     if (banner) banner.hidden = ready;
   }
 
-  async function refreshServerStatus() {
+  async function refreshServerStatus({ silent } = {}) {
     const offlineBanner = document.getElementById("serverOfflineBanner");
-    if (IS_FILE_MODE || !offlineBanner) return;
+    if (IS_FILE_MODE || !offlineBanner) return false;
+    if (!silent) {
+      statusLine.textContent = "Vérification de la connexion au serveur…";
+    }
     const ready = await isServerReady();
     offlineBanner.hidden = ready;
     if (ready) {
       statusLine.textContent = "Serveur connecté — prêt pour le sondage.";
-    } else {
-      statusLine.textContent = "Serveur inaccessible — contactez l’administrateur ou relancez PM2.";
+    } else if (!silent) {
+      statusLine.textContent = "Connexion impossible pour le moment — vérifiez le réseau ou réessayez.";
     }
+    return ready;
+  }
+
+  function startServerWatch() {
+    if (IS_FILE_MODE) return;
+    window.addEventListener("online", () => {
+      refreshServerStatus();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshServerStatus({ silent: true });
+    });
+    window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      refreshServerStatus({ silent: true });
+    }, 45000);
   }
 
   function selectedSector() {
@@ -976,6 +1000,13 @@
     renderList();
   });
 
+  const serverRetryBtn = document.getElementById("serverRetryBtn");
+  if (serverRetryBtn) {
+    serverRetryBtn.addEventListener("click", () => {
+      refreshServerStatus();
+    });
+  }
+
   loadSender();
   loadTemplate();
   loadContacted();
@@ -984,6 +1015,7 @@
   loadSectors();
   warnIfFileModeWithoutServer();
   refreshServerStatus();
+  startServerWatch();
   rebuildCompaniesList();
   updateFilterTabs();
   if (companies.length) {

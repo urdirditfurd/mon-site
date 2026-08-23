@@ -12,8 +12,10 @@ module.exports = {
       cwd: __dirname,
       instances: 1,
       autorestart: true,
-      max_restarts: 20,
-      min_uptime: "5s",
+      max_restarts: 50,
+      min_uptime: "10s",
+      max_memory_restart: "300M",
+      exp_backoff_restart_delay: 200,
       env: {
         NODE_ENV: "production",
         HOST: "127.0.0.1",

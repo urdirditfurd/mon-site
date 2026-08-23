@@ -444,8 +444,9 @@
   </div>
 
   <div class="file-mode-banner server-offline-banner" id="serverOfflineBanner" hidden>
-    <strong>Serveur arrêté.</strong> Le backend prospection ne répond pas. Sur le VPS :
-    <code>bash scripts/vps-prospection-setup.sh</code> ou <code>pm2 restart prospection</code>.
+    <strong>Connexion interrompue.</strong> Vérifiez votre réseau (Wi‑Fi / 4G), puis
+    <button class="btn btn-ghost" type="button" id="serverRetryBtn">Réessayer</button>
+    ou rafraîchissez la page. Le service est hébergé en ligne — aucune installation locale requise.
   </div>
 
   <main class="layout">
