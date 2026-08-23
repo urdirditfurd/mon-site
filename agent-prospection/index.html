@@ -257,6 +257,22 @@
       color: var(--muted);
     }
     .stat b { color: var(--ink); }
+    .stat-action {
+      cursor: pointer;
+      font: inherit;
+      transition: border-color .15s, background .15s;
+    }
+    .stat-action:hover,
+    .stat-action:focus-visible {
+      border-color: var(--accent);
+      background: #fff;
+      outline: none;
+    }
+    .stat-action.active {
+      border-color: var(--accent);
+      background: #fff;
+      box-shadow: 0 0 0 2px rgba(234, 88, 12, .15);
+    }
     .mass-mail-bar {
       display: none;
       flex-wrap: wrap;

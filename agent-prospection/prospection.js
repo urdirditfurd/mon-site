@@ -206,6 +206,51 @@
     localStorage.setItem(FILTER_KEY, listFilter);
   }
 
+  function setListFilter(filter, { closeHistory = true, scrollToList = false } = {}) {
+    if (filter !== "todo" && filter !== "done" && filter !== "all") return;
+    listFilter = filter;
+    saveFilter();
+    if (closeHistory) toggleHistory(false);
+    renderList();
+    if (scrollToList && filteredCompanies().length) {
+      companyList.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  function renderStats(extra = {}) {
+    const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
+    const done = companies.filter((c) => isContacted(companyKey(c))).length;
+    const withMail = companies.filter((c) => c.email && !isContacted(companyKey(c))).length;
+    if (!companies.length) {
+      statsBox.innerHTML = "";
+      return;
+    }
+    const scanned = extra.scanned;
+    const daysLabel = extra.daysLabel;
+    const todoLabel = extra.todoLabel || "à contacter";
+    const parts = [
+      `<button type="button" class="stat stat-action${listFilter === "todo" ? " active" : ""}" data-filter="todo" title="Afficher les entreprises à contacter">
+        <b>${todo}</b> ${todoLabel}
+      </button>`,
+      `<button type="button" class="stat stat-action${listFilter === "done" ? " active" : ""}" data-filter="done" title="Afficher les entreprises déjà contactées">
+        <b>${done}</b> déjà contactées
+      </button>`
+    ];
+    if (searchDone && withMail) {
+      parts.push(`<span class="stat"><b>${withMail}</b> e-mails prêts</span>`);
+    }
+    if (typeof scanned === "number") {
+      parts.push(`<span class="stat"><b>${scanned}</b> scannées (run)</span>`);
+    }
+    if (daysLabel) {
+      parts.push(`<span class="stat">Fenêtre : <b>${daysLabel}</b></span>`);
+    }
+    parts.push(`<button type="button" class="stat stat-action${listFilter === "all" ? " active" : ""}" data-filter="all" title="Afficher toutes les entreprises en mémoire">
+      <b>${companies.length}</b> en mémoire
+    </button>`);
+    statsBox.innerHTML = parts.join("");
+  }
+
   function loadSender() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -449,6 +494,10 @@
       return "Choisissez un secteur, laissez Auto, puis lancez le sondage. Les contacts validés restent en mémoire : les non contactés réapparaissent, les déjà contactés sont signalés automatiquement.";
     }
     if (listFilter === "todo") {
+      const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
+      if (todo > 0) {
+        return `Il y a <strong>${todo}</strong> entreprise(s) à contacter en mémoire. Cliquez sur le compteur orange « ${todo} à contacter » ci-dessus pour les afficher.`;
+      }
       return "Plus aucune entreprise à contacter en mémoire. Relancez un sondage pour en trouver de nouvelles, ou ouvrez « Déjà contactées » / Historique.";
     }
     if (listFilter === "done") {
@@ -463,29 +512,13 @@
     if (!visible.length) {
       companyList.innerHTML = `<li class="empty">${emptyMessage()}</li>`;
       csvBtn.disabled = !companies.length;
+      renderStats();
       updateSelectionUI();
-      if (companies.length) {
-        const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
-        const done = companies.length - todo;
-        statsBox.innerHTML = `
-          <div class="stat"><b>${todo}</b> à contacter</div>
-          <div class="stat"><b>${done}</b> déjà contactées</div>
-          <div class="stat"><b>${companies.length}</b> en mémoire</div>
-        `;
-      }
       return;
     }
     companyList.innerHTML = visible.map(renderCompany).join("");
     csvBtn.disabled = false;
-    const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
-    const done = companies.length - todo;
-    const withMail = companies.filter((c) => c.email && !isContacted(companyKey(c))).length;
-    statsBox.innerHTML = `
-      <div class="stat"><b>${todo}</b> à contacter</div>
-      <div class="stat"><b>${done}</b> déjà contactées</div>
-      <div class="stat"><b>${withMail}</b> e-mails prêts</div>
-      <div class="stat"><b>${companies.length}</b> en mémoire</div>
-    `;
+    renderStats();
     updateSelectionUI();
   }
 
@@ -616,12 +649,10 @@
       const done = companies.filter((c) => isContacted(companyKey(c))).length;
       const newThisRun = incoming.filter((c) => !isContacted(companyKey(c))).length;
       const alreadyThisRun = incoming.filter((c) => isContacted(companyKey(c))).length;
-      statsBox.innerHTML = `
-        <div class="stat"><b>${todo}</b> à contacter</div>
-        <div class="stat"><b>${done}</b> déjà contactées</div>
-        <div class="stat"><b>${summary.scanned || 0}</b> scannées (run)</div>
-        <div class="stat">Fenêtre : <b>${daysLabel}</b></div>
-      `;
+      renderStats({
+        scanned: summary.scanned || 0,
+        daysLabel: daysLabel
+      });
       setProgress(100, `${todo} à contacter · ${done} déjà contactées`);
       hideProgressSoon();
       if (alreadyThisRun) {
@@ -690,9 +721,9 @@
     renderList();
     const keptTodo = companies.filter((c) => !isContacted(companyKey(c))).length;
     const keptDone = companies.filter((c) => isContacted(companyKey(c))).length;
-    statsBox.innerHTML = keptTodo || keptDone
-      ? `<div class="stat"><b>${keptTodo}</b> encore à contacter</div><div class="stat"><b>${keptDone}</b> déjà contactées</div>`
-      : "";
+    if (keptTodo || keptDone) {
+      renderStats({ todoLabel: "encore à contacter" });
+    }
     logBox.textContent = "";
     logBox.classList.remove("visible");
     if (keptTodo || keptDone) {
@@ -839,9 +870,21 @@
   filterTabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-filter]");
     if (!tab) return;
-    listFilter = tab.getAttribute("data-filter");
-    saveFilter();
-    renderList();
+    setListFilter(tab.getAttribute("data-filter"), { scrollToList: true });
+  });
+
+  statsBox.addEventListener("click", (event) => {
+    const stat = event.target.closest("[data-filter]");
+    if (!stat) return;
+    setListFilter(stat.getAttribute("data-filter"), { scrollToList: true });
+  });
+
+  statsBox.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const stat = event.target.closest("[data-filter]");
+    if (!stat) return;
+    event.preventDefault();
+    setListFilter(stat.getAttribute("data-filter"), { scrollToList: true });
   });
 
   companyList.addEventListener("change", (event) => {
@@ -1017,10 +1060,14 @@
   refreshServerStatus();
   startServerWatch();
   rebuildCompaniesList();
-  updateFilterTabs();
   if (companies.length) {
+    const todoCount = companies.filter((c) => !isContacted(companyKey(c))).length;
+    if (todoCount > 0) {
+      listFilter = "todo";
+      saveFilter();
+    }
     searchDone = true;
-    renderList();
   }
+  renderList();
   seedDemoCompanies();
 })();
