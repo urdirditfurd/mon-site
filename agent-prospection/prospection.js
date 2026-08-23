@@ -28,20 +28,22 @@
   const filterTabs = document.getElementById("filterTabs");
   const countTodo = document.getElementById("countTodo");
   const countDone = document.getElementById("countDone");
-  const countAll = document.getElementById("countAll");
-  const historyBtn = document.getElementById("historyBtn");
-  const historyPanel = document.getElementById("historyPanel");
-  const historyList = document.getElementById("historyList");
   const historyClearBtn = document.getElementById("historyClearBtn");
-  const historyCloseBtn = document.getElementById("historyCloseBtn");
+  const historyPanel = document.getElementById("historyPanel");
   const viewDashboard = document.getElementById("viewDashboard");
   const viewProspection = document.getElementById("viewProspection");
   const navDashboard = document.getElementById("navDashboard");
   const navProspection = document.getElementById("navProspection");
   const dashGoProspection = document.getElementById("dashGoProspection");
+  const dashGoTodo = document.getElementById("dashGoTodo");
   const dashMetrics = document.getElementById("dashMetrics");
   const dashRuns = document.getElementById("dashRuns");
   const dashContacts = document.getElementById("dashContacts");
+  const runBtnMobile = document.getElementById("runBtnMobile");
+  const stickyRunBar = document.getElementById("stickyRunBar");
+  const mobileNavDashboard = document.getElementById("mobileNavDashboard");
+  const mobileNavProspection = document.getElementById("mobileNavProspection");
+  const historyList = document.getElementById("historyList");
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
@@ -191,7 +193,16 @@
     if (viewProspection) viewProspection.hidden = onDash;
     if (navDashboard) navDashboard.classList.toggle("active", onDash);
     if (navProspection) navProspection.classList.toggle("active", !onDash);
+    if (mobileNavDashboard) mobileNavDashboard.classList.toggle("active", onDash);
+    if (mobileNavProspection) mobileNavProspection.classList.toggle("active", !onDash);
+    if (stickyRunBar) stickyRunBar.hidden = onDash;
     if (onDash) renderDashboard();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function syncRunButtons(label) {
+    if (runBtn) runBtn.textContent = label;
+    if (runBtnMobile) runBtnMobile.textContent = label;
   }
 
   function renderDashboard() {
@@ -206,37 +217,42 @@
 
     dashMetrics.innerHTML = `
       <div class="dash-metric">
-        <span class="label">Entreprises contactées</span>
-        <div class="value">${done}</div>
-        <div class="sub">${lastContactAt ? `Dernier contact : ${formatDateTime(lastContactAt)}` : "Aucun contact pour l’instant"}</div>
-      </div>
-      <div class="dash-metric">
-        <span class="label">À contacter</span>
+        <span class="label">En attente</span>
         <div class="value">${todo}</div>
-        <div class="sub">${totalScanned} entreprise(s) en mémoire</div>
+        <div class="sub">entreprises à contacter</div>
       </div>
       <div class="dash-metric">
-        <span class="label">Sondages réalisés</span>
+        <span class="label">Contactées</span>
+        <div class="value">${done}</div>
+        <div class="sub">${lastContactAt ? `Dernier : ${formatDateTime(lastContactAt)}` : "Aucun contact encore"}</div>
+      </div>
+      <div class="dash-metric">
+        <span class="label">Recherches</span>
         <div class="value">${scanRuns.length}</div>
-        <div class="sub">${lastRun ? `Dernier : ${formatDateTime(lastRun.endedAt)}` : "Aucun sondage encore"}</div>
+        <div class="sub">${lastRun ? `Dernière : ${formatDateTime(lastRun.endedAt)}` : "Aucune recherche"}</div>
       </div>
       <div class="dash-metric">
         <span class="label">Temps agent</span>
         <div class="value" style="font-size:1.35rem">${formatDuration(totalScanTime)}</div>
-        <div class="sub">${firstContactAt ? `Depuis le ${formatDateTime(firstContactAt)}` : "Cumul des sondages"}</div>
+        <div class="sub">${totalScanned} entreprise(s) en mémoire</div>
       </div>
     `;
 
+    if (dashGoTodo) {
+      dashGoTodo.hidden = todo <= 0;
+      dashGoTodo.textContent = `Voir mes ${todo} contact(s) en attente →`;
+    }
+
     if (!scanRuns.length) {
-      dashRuns.innerHTML = `<li class="dash-empty">Aucun sondage enregistré. Lancez une prospection pour voir ici la date, la durée, le secteur et les résultats.</li>`;
+      dashRuns.innerHTML = `<li class="dash-empty">Aucune recherche enregistrée. Lancez une prospection pour voir ici la date, la durée et les résultats.</li>`;
     } else {
       dashRuns.innerHTML = scanRuns.slice(0, 8).map((run) => `
         <li class="dash-item">
           <strong>${escapeHtml(run.sectorLabel || "Secteur")}</strong>
           <div class="meta">
-            ${formatDateTime(run.startedAt)} → ${formatDateTime(run.endedAt)} · ${formatDuration(run.durationMs)}<br>
-            Fenêtre : ${escapeHtml(run.daysLabel || daysLabelFromValue(run.days))} · Zone : ${escapeHtml(run.departmentLabel || "France")}<br>
-            ${run.scanned || 0} scannée(s) · ${run.contactsFound || 0} contact(s) trouvé(s) · ${run.newTodo || 0} nouvelle(s) à traiter
+            ${formatDateTime(run.startedAt)} · ${formatDuration(run.durationMs)}<br>
+            ${escapeHtml(run.daysLabel || daysLabelFromValue(run.days))} · ${escapeHtml(run.departmentLabel || "France")}<br>
+            ${run.scanned || 0} scannée(s) · ${run.contactsFound || 0} contact(s) · ${run.newTodo || 0} à traiter
           </div>
         </li>
       `).join("");
@@ -340,6 +356,7 @@
   }
 
   function renderHistory() {
+    if (!historyList) return;
     const rows = contactedEntries();
     if (!rows.length) {
       historyList.innerHTML = `<li class="history-empty">Aucune entreprise contactée pour l’instant.</li>`;
@@ -400,27 +417,24 @@
     }
     const scanned = extra.scanned;
     const daysLabel = extra.daysLabel;
-    const todoLabel = extra.todoLabel || "à contacter";
+    const todoLabel = extra.todoLabel || "en attente";
     const parts = [
       `<button type="button" class="stat stat-action${listFilter === "todo" ? " active" : ""}" data-filter="todo" title="Afficher les entreprises à contacter">
         <b>${todo}</b> ${todoLabel}
       </button>`,
-      `<button type="button" class="stat stat-action${listFilter === "done" ? " active" : ""}" data-filter="done" title="Afficher les entreprises déjà contactées">
-        <b>${done}</b> déjà contactées
+      `<button type="button" class="stat stat-action${listFilter === "done" ? " active" : ""}" data-filter="done" title="Afficher les entreprises contactées">
+        <b>${done}</b> contactées
       </button>`
     ];
     if (searchDone && withMail) {
       parts.push(`<span class="stat"><b>${withMail}</b> e-mails prêts</span>`);
     }
     if (typeof scanned === "number") {
-      parts.push(`<span class="stat"><b>${scanned}</b> scannées (run)</span>`);
+      parts.push(`<span class="stat"><b>${scanned}</b> scannées</span>`);
     }
     if (daysLabel) {
-      parts.push(`<span class="stat">Fenêtre : <b>${daysLabel}</b></span>`);
+      parts.push(`<span class="stat">${escapeHtml(daysLabel)}</span>`);
     }
-    parts.push(`<button type="button" class="stat stat-action${listFilter === "all" ? " active" : ""}" data-filter="all" title="Afficher toutes les entreprises en mémoire">
-      <b>${companies.length}</b> en mémoire
-    </button>`);
     statsBox.innerHTML = parts.join("");
   }
 
@@ -456,7 +470,7 @@
 
   function hideProgressSoon() {
     setTimeout(() => {
-      if (!runBtn.textContent.includes("Relancer")) {
+      if (!runBtn?.textContent?.includes("Relancer")) {
         progressWrap.classList.remove("active");
       }
     }, 1800);
@@ -552,7 +566,7 @@
       const bits = [];
       if (company.email) bits.push(`<a href="mailto:${escapeHtml(company.email)}">${escapeHtml(company.email)}</a>`);
       if (company.phone) bits.push(`<a href="tel:${escapeHtml(company.phone.replace(/\s/g, ""))}">${escapeHtml(company.phone)}</a>`);
-      return `<div class="contact-row"><strong>Contact validé</strong> · ${bits.join(" · ")}<div class="meta">Source : ${escapeHtml(company.contactSource || "web public")} — à recouper avec l’Annuaire / Pappers (SIREN)</div></div>`;
+      return `<div class="contact-row"><strong>Contact</strong> · ${bits.join(" · ")}</div>`;
     }
     return "";
   }
@@ -566,9 +580,8 @@
   function updateFilterTabs() {
     const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
     const done = companies.filter((c) => isContacted(companyKey(c))).length;
-    countTodo.textContent = `(${todo})`;
-    countDone.textContent = `(${done})`;
-    countAll.textContent = `(${companies.length})`;
+    if (countTodo) countTodo.textContent = `(${todo})`;
+    if (countDone) countDone.textContent = `(${done})`;
     filterTabs.querySelectorAll(".filter-tab").forEach((tab) => {
       const active = tab.getAttribute("data-filter") === listFilter;
       tab.classList.toggle("active", active);
@@ -576,23 +589,23 @@
     });
   }
 
-  function primaryActions(company, key, mailContent) {
+  function primaryActions(company, key) {
     const canMail = Boolean(company.hasContact && company.email);
     const canSms = Boolean(company.hasContact && company.phone);
-    const links = [];
-    // S'adapte à ce que l'agent a trouvé : téléphone → Message, sinon e-mail → Mail.
-    if (canSms && canMail) {
-      links.push(`<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>`);
-      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>`);
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
+    let primary = "";
+    const secondary = [];
+
+    if (canMail) {
+      primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-send-one="${escapeHtml(key)}">Envoyer ma proposition</button>`;
     } else if (canSms) {
-      links.push(`<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>`);
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
-    } else if (canMail) {
-      links.push(`<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>`);
-      links.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Voir / modifier</button>`);
+      primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-open-sms="${escapeHtml(key)}">Envoyer un message</button>`;
     }
-    return { canMail, canSms, links };
+
+    if (canSms && canMail) {
+      secondary.push(`<button class="btn btn-ghost" type="button" data-open-sms="${escapeHtml(key)}">Message SMS</button>`);
+    }
+    secondary.push(`<button class="btn btn-ghost" type="button" data-edit-mail="${escapeHtml(key)}">Relire mon message</button>`);
+    return { canMail, canSms, primary, secondary };
   }
 
   function renderCompany(company) {
@@ -615,18 +628,22 @@
 
     const mailContent = getMailForCompany(company);
     const editId = `mail-edit-${escapeHtml(key).replace(/[^a-zA-Z0-9]/g, "_")}`;
-    const { canMail, canSms, links } = primaryActions(company, key, mailContent);
+    const { canMail, canSms, primary, secondary } = primaryActions(company, key);
 
     if (done) {
-      links.push(`<button class="btn btn-ghost" type="button" data-unmark="${escapeHtml(key)}">Remettre à contacter</button>`);
+      secondary.push(`<button class="btn btn-ghost" type="button" data-unmark="${escapeHtml(key)}">Remettre en attente</button>`);
     } else {
-      links.push(`<button class="btn btn-ghost" type="button" data-mark="${escapeHtml(key)}">Marquer contacté</button>`);
+      secondary.push(`<button class="btn btn-ghost" type="button" data-mark="${escapeHtml(key)}">C’est fait ✓</button>`);
     }
     if (company.website) {
-      links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener" title="Site rattaché à cette entreprise">Site</a>`);
+      secondary.push(`<a class="btn btn-ghost" href="${escapeHtml(company.website)}" target="_blank" rel="noopener">Site</a>`);
     }
-    if (company.sireneUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
-    if (company.pappersUrl) links.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
+    if (company.sireneUrl) secondary.push(`<a class="btn btn-ghost" href="${escapeHtml(company.sireneUrl)}" target="_blank" rel="noopener">Annuaire</a>`);
+    if (company.pappersUrl) secondary.push(`<a class="btn btn-ghost" href="${escapeHtml(company.pappersUrl)}" target="_blank" rel="noopener">Pappers</a>`);
+
+    const moreBlock = secondary.length
+      ? `<details class="card-more"><summary>Plus d’options</summary><div class="more-menu">${secondary.join("")}</div></details>`
+      : "";
 
     return `<li class="company-card${done ? " contacted" : ""}" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
@@ -634,20 +651,21 @@
         <h3>${escapeHtml(company.name)}${chip}</h3>
       </div>
       <div class="meta">
-        <div>Activité : ${activity}</div>
-        <div>Création : ${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` · SIREN ${escapeHtml(company.siren)}` : ""}</div>
-        <div>Adresse : ${escapeHtml(company.address || `${company.postalCode || ""} ${company.city || ""}`.trim() || "n.c.")}</div>
+        <div>${activity}</div>
+        <div>${escapeHtml(company.createdAt || company.publishedAt || "n.c.")}${company.siren ? ` · SIREN ${escapeHtml(company.siren)}` : ""}</div>
+        <div>${escapeHtml(company.address || `${company.postalCode || ""} ${company.city || ""}`.trim() || "n.c.")}</div>
         ${directors}
       </div>
       ${contactBlock(company)}
-      <div class="actions">${links.join("")}</div>
+      ${primary || ""}
+      ${moreBlock}
       <div class="mail-edit-area" id="${editId}">
-        <label class="field" style="margin-bottom:8px"><span>Message personnalisé (brouillon ${canSms ? "Messages" : "mail"})</span></label>
+        <label class="field" style="margin-bottom:8px"><span>Message personnalisé</span></label>
         <textarea data-mail-key="${escapeHtml(key)}">${escapeHtml(mailContent)}</textarea>
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer</button>
-          ${canSms ? `<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Message</button>` : ""}
-          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Mail</button>` : ""}
+          ${canSms ? `<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Envoyer un message</button>` : ""}
+          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer ma proposition</button>` : ""}
         </div>
       </div>
     </li>`;
@@ -839,12 +857,12 @@
       } else {
         log("Toutes les entreprises en mémoire sont déjà contactées.", { quiet: true });
       }
-      runBtn.textContent = "Lancer le sondage";
+      syncRunButtons("Trouver des entreprises");
       return;
     }
     if (event.type === "error") {
       setProgress(0, event.message || "Erreur");
-      runBtn.textContent = "Lancer le sondage";
+      syncRunButtons("Trouver des entreprises");
     }
   }
 
@@ -904,7 +922,7 @@
     if (keptTodo || keptDone) {
       log(`Mémoire : ${keptTodo} à contacter · ${keptDone} déjà contactées — recherche de nouveaux contacts…`, { quiet: true });
     }
-    runBtn.textContent = "Relancer";
+    syncRunButtons("Relancer la recherche");
     setProgress(3, "Démarrage du sondage…");
 
     const daysValue = daysSelect.value === "730" ? "730" : "365";
@@ -946,7 +964,7 @@
     } finally {
       if (myToken === runToken) {
         streamAbort = null;
-        runBtn.textContent = "Lancer le sondage";
+        syncRunButtons("Trouver des entreprises");
       }
     }
   }
@@ -1195,37 +1213,48 @@
     log("Mode démo — mémoire + Message/Mail adaptatif.", { quiet: true });
   }
 
-  historyBtn.addEventListener("click", () => toggleHistory());
-  historyCloseBtn.addEventListener("click", () => toggleHistory(false));
-  historyClearBtn.addEventListener("click", () => {
-    if (!contactedEntries().length && !Object.keys(companyMemory).length && !scanRuns.length) return;
-    if (!window.confirm("Vider l’historique des contactées, la mémoire des entreprises scannées et les sondages du tableau de bord ?")) return;
-    contactedMap = {};
-    companyMemory = {};
-    scanRuns = [];
-    saveContacted();
-    saveScanMemory();
-    saveScanRuns();
-    rebuildCompaniesList();
-    renderHistory();
-    renderList();
-    renderDashboard();
-    log("Historique, mémoire des scans et tableau de bord vidés.", { quiet: true });
-  });
-  historyList.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-history-remove]");
-    if (!btn) return;
-    const key = btn.getAttribute("data-history-remove");
-    unmarkContacted(key);
-    renderHistory();
-    renderList();
-  });
+  if (historyClearBtn) {
+    historyClearBtn.addEventListener("click", () => {
+      if (!contactedEntries().length && !Object.keys(companyMemory).length && !scanRuns.length) return;
+      if (!window.confirm("Effacer toutes les données locales (contacts, mémoire, recherches) ?")) return;
+      contactedMap = {};
+      companyMemory = {};
+      scanRuns = [];
+      saveContacted();
+      saveScanMemory();
+      saveScanRuns();
+      rebuildCompaniesList();
+      renderHistory();
+      renderList();
+      renderDashboard();
+      log("Données locales effacées.", { quiet: true });
+    });
+  }
+  if (historyList) {
+    historyList.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-history-remove]");
+      if (!btn) return;
+      const key = btn.getAttribute("data-history-remove");
+      unmarkContacted(key);
+      renderHistory();
+      renderList();
+    });
+  }
 
   document.querySelectorAll("[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => setAppView(btn.getAttribute("data-view")));
   });
   if (dashGoProspection) {
     dashGoProspection.addEventListener("click", () => setAppView("prospection"));
+  }
+  if (dashGoTodo) {
+    dashGoTodo.addEventListener("click", () => {
+      setListFilter("todo", { scrollToList: true });
+      setAppView("prospection");
+    });
+  }
+  if (runBtnMobile) {
+    runBtnMobile.addEventListener("click", run);
   }
 
   const serverRetryBtn = document.getElementById("serverRetryBtn");

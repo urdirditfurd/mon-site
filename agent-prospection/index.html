@@ -36,11 +36,14 @@
       margin: 0;
       min-height: 100vh;
       font-family: "DM Sans", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
       color: var(--text);
       background:
         radial-gradient(900px 420px at 6% -12%, rgba(245, 166, 35, .22), transparent 58%),
         radial-gradient(720px 400px at 100% 0%, rgba(250, 248, 245, .95), transparent 55%),
         linear-gradient(180deg, var(--bg0), var(--bg1) 42%, #fff);
+      padding-bottom: 88px;
     }
     .topbar {
       max-width: 1240px;
@@ -90,6 +93,140 @@
       border-color: var(--primary);
       color: var(--ink);
     }
+    .nav-btn:focus-visible,
+    .btn:focus-visible,
+    .filter-tab:focus-visible,
+    .stat-action:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .hero-title {
+      margin: 0;
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      line-height: 1.2;
+      color: var(--ink);
+      max-width: 16ch;
+    }
+    .hero-lead {
+      margin: 10px 0 0;
+      color: var(--muted);
+      max-width: 36ch;
+      line-height: 1.55;
+      font-size: 1rem;
+    }
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 18px;
+      max-width: 360px;
+    }
+    .hero-link {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: var(--accent);
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+    .hero-link:hover { text-decoration: underline; }
+    .step-label {
+      display: block;
+      margin: 0 0 12px;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .options-disclosure {
+      margin: 12px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffdf9;
+    }
+    .options-disclosure summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      font-weight: 600;
+      color: var(--ink);
+      list-style: none;
+    }
+    .options-disclosure summary::-webkit-details-marker { display: none; }
+    .options-disclosure .options-body { padding: 0 14px 14px; }
+    .panel-run-desktop { display: block; }
+    .sticky-run-bar {
+      display: none;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 64px;
+      z-index: 80;
+      padding: 10px 16px;
+      background: rgba(255, 253, 249, .96);
+      border-top: 1px solid var(--line);
+      backdrop-filter: blur(8px);
+    }
+    .mobile-nav {
+      display: none;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 90;
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      background: #fff;
+      border-top: 1px solid var(--line);
+      box-shadow: 0 -8px 24px rgba(61, 46, 22, .06);
+    }
+    .mobile-nav-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    .mobile-nav-btn {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      font: inherit;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .mobile-nav-btn.active {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      color: var(--ink);
+    }
+    .card-primary-cta { min-height: 44px; }
+    .card-more {
+      margin-top: 8px;
+      border-top: 1px dashed var(--line);
+      padding-top: 8px;
+    }
+    .card-more summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .88rem;
+      font-weight: 600;
+      list-style: none;
+    }
+    .card-more summary::-webkit-details-marker { display: none; }
+    .more-menu { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .results-tools summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--muted);
+      font-size: .88rem;
+      list-style: none;
+    }
+    .results-tools summary::-webkit-details-marker { display: none; }
     .dashboard-view {
       max-width: 1240px;
       margin: 0 auto;
@@ -549,6 +686,11 @@
       .panel { position: static; }
       .dash-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .dash-grid { grid-template-columns: 1fr; }
+      .topbar .app-nav { display: none; }
+      .mobile-nav { display: block; }
+      .panel-run-desktop { display: none; }
+      .sticky-run-bar { display: block; }
+      body { padding-bottom: 132px; }
     }
   </style>
 </head>
@@ -557,8 +699,8 @@
     <div class="topbar-row">
       <h1>Prospection</h1>
       <nav class="app-nav" aria-label="Navigation principale">
-        <button type="button" class="nav-btn active" data-view="dashboard" id="navDashboard">Tableau de bord</button>
-        <button type="button" class="nav-btn" data-view="prospection" id="navProspection">Lancer la prospection</button>
+        <button type="button" class="nav-btn active" data-view="dashboard" id="navDashboard">Accueil</button>
+        <button type="button" class="nav-btn" data-view="prospection" id="navProspection">Recherche</button>
       </nav>
     </div>
   </header>
@@ -574,22 +716,25 @@
     ou rafraîchissez la page. Le service est hébergé en ligne — aucune installation locale requise.
   </div>
 
-  <section class="dashboard-view" id="viewDashboard" aria-label="Tableau de bord">
+  <section class="dashboard-view" id="viewDashboard" aria-label="Accueil">
     <div class="dash-hero">
       <div>
-        <h2 style="margin:0">Activité de l’agent</h2>
-        <p>Vue d’ensemble des sondages réalisés, des entreprises trouvées et des contacts déjà traités.</p>
+        <h2 class="hero-title">Trouvez des clients à contacter en quelques minutes</h2>
+        <p class="hero-lead">L’agent repère les nouvelles entreprises de votre secteur et prépare vos messages de prospection.</p>
+        <div class="hero-actions">
+          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection">Lancer une recherche</button>
+          <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
+        </div>
       </div>
-      <button type="button" class="btn btn-primary" id="dashGoProspection">Lancer la prospection</button>
     </div>
     <div class="dash-metrics" id="dashMetrics"></div>
     <div class="dash-grid">
       <div class="card">
-        <h3>Derniers sondages</h3>
+        <h3>Dernières recherches</h3>
         <ul class="dash-list" id="dashRuns"></ul>
       </div>
       <div class="card">
-        <h3>Dernières entreprises contactées</h3>
+        <h3>Récemment contactées</h3>
         <ul class="dash-list" id="dashContacts"></ul>
       </div>
     </div>
@@ -597,7 +742,8 @@
 
   <main class="layout" id="viewProspection" hidden>
     <section class="panel">
-      <h2>Paramètres</h2>
+      <span class="step-label">Étape 1 — Où chercher ?</span>
+      <h2>Paramètres de recherche</h2>
       <label class="field">
         <span>Secteur</span>
         <select id="sectorSelect">
@@ -649,19 +795,25 @@
           </select>
         </label>
       </div>
-      <label class="field">
-        <span>Votre nom (signature)</span>
-        <input id="senderName" type="text" placeholder="Eva Moreau" autocomplete="name">
-      </label>
-      <label class="field">
-        <span>Votre e-mail</span>
-        <input id="senderEmail" type="email" placeholder="vous@cabinet.fr" autocomplete="email">
-      </label>
-      <label class="field">
-        <span>Votre téléphone</span>
-        <input id="senderPhone" type="tel" placeholder="06 12 34 56 78" autocomplete="tel">
-      </label>
-      <button id="runBtn" class="btn btn-primary btn-block" type="button">Lancer le sondage</button>
+      <details class="options-disclosure">
+        <summary>Options — signature et coordonnées</summary>
+        <div class="options-body">
+          <label class="field">
+            <span>Votre nom (signature)</span>
+            <input id="senderName" type="text" placeholder="Eva Moreau" autocomplete="name">
+          </label>
+          <label class="field">
+            <span>Votre e-mail</span>
+            <input id="senderEmail" type="email" placeholder="vous@cabinet.fr" autocomplete="email">
+          </label>
+          <label class="field">
+            <span>Votre téléphone</span>
+            <input id="senderPhone" type="tel" placeholder="06 12 34 56 78" autocomplete="tel">
+          </label>
+        </div>
+      </details>
+      <span class="step-label" style="margin-top:14px">Étape 2 — Lancer</span>
+      <button id="runBtn" class="btn btn-primary btn-block panel-run-desktop" type="button">Trouver des entreprises</button>
 
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
         <div class="progress-head">
@@ -676,50 +828,44 @@
 
     <section class="workspace">
       <div class="card">
+        <span class="step-label">Étape 3 — Contacter</span>
         <div class="results-head">
-          <h2>Contacts validés</h2>
-          <div class="actions" style="margin:0">
-            <button id="historyBtn" class="btn btn-ghost" type="button">Historique</button>
-            <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
-          </div>
+          <h2>Entreprises à contacter</h2>
+          <details class="results-tools">
+            <summary>Plus</summary>
+            <div class="actions" style="margin-top:10px">
+              <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Télécharger ma liste</button>
+              <button id="historyClearBtn" class="btn btn-ghost" type="button">Tout effacer</button>
+            </div>
+          </details>
         </div>
-        <div class="history-panel" id="historyPanel" hidden>
-          <h3>Historique — entreprises déjà contactées</h3>
-          <p class="hint" style="margin-top:0">Mémoire locale : contactées + entreprises scannées non contactées (réaffichées à chaque sondage). Vider efface les deux.</p>
-          <ul class="history-list" id="historyList"></ul>
-          <div class="actions" style="margin-top:10px">
-            <button id="historyClearBtn" class="btn btn-ghost" type="button">Vider historique + mémoire</button>
-            <button id="historyCloseBtn" class="btn btn-ghost" type="button">Fermer</button>
-          </div>
-        </div>
-        <div class="filter-tabs" id="filterTabs" role="tablist" aria-label="Filtrer les contacts">
+        <div class="history-panel" id="historyPanel" hidden aria-hidden="true"></div>
+        <div class="filter-tabs" id="filterTabs" role="tablist" aria-label="Filtrer les entreprises">
           <button type="button" class="filter-tab active" data-filter="todo" role="tab" aria-selected="true">
             À contacter <span class="tab-count" id="countTodo">(0)</span>
           </button>
           <button type="button" class="filter-tab" data-filter="done" role="tab" aria-selected="false">
-            Déjà contactées <span class="tab-count" id="countDone">(0)</span>
-          </button>
-          <button type="button" class="filter-tab" data-filter="all" role="tab" aria-selected="false">
-            Toutes <span class="tab-count" id="countAll">(0)</span>
+            Contactées <span class="tab-count" id="countDone">(0)</span>
           </button>
         </div>
         <div class="mass-mail-bar" id="massMailBar">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;min-height:44px">
             <input type="checkbox" id="selectAllCb" class="select-cb"> Tout sélectionner
           </label>
           <span><span class="count" id="selectedCount">0</span> sélectionné(s)</span>
-          <button id="massEditBtn" class="btn btn-ghost" type="button">Voir les messages</button>
-          <button id="massSendBtn" class="btn btn-primary" type="button">Ouvrir les mails en masse</button>
+          <button id="massEditBtn" class="btn btn-ghost" type="button">Relire les messages</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer mes propositions</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Choisissez un secteur et une période, puis lancez le sondage. Les nouvelles à contacter apparaissent ici ; les déjà contactées restent en mémoire.</li>
+          <li class="empty">Choisissez un secteur et une période, puis lancez une recherche. Les entreprises à contacter apparaissent ici.</li>
         </ul>
       </div>
 
-      <div class="card mail-template-box">
-        <h3>Modèle de mail</h3>
-        <p class="meta hint" style="margin-top:0">Personnalisé automatiquement : <code>{entreprise}</code>, <code>{dirigeant}</code>, <code>{activite}</code>, <code>{adresse}</code>. La signature utilise vos coordonnées ci-contre.</p>
+      <details class="card mail-template-box options-disclosure">
+        <summary>Personnaliser mes messages</summary>
+        <div class="options-body">
+        <p class="meta hint" style="margin-top:0">Variables : <code>{entreprise}</code>, <code>{dirigeant}</code>, <code>{activite}</code>, <code>{adresse}</code>.</p>
         <textarea id="mailTemplate">Bonjour {dirigeant},
 
 Félicitations pour la création de {entreprise} !
@@ -748,9 +894,21 @@ Cordialement,
           <h3 style="margin-top:0">Aperçu</h3>
           <div id="mailPreviewContent"></div>
         </div>
-      </div>
+        </div>
+      </details>
     </section>
   </main>
+
+  <div class="sticky-run-bar" id="stickyRunBar" hidden>
+    <button id="runBtnMobile" class="btn btn-primary btn-block" type="button">Trouver des entreprises</button>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Navigation mobile">
+    <div class="mobile-nav-inner">
+      <button type="button" class="mobile-nav-btn active" data-view="dashboard" id="mobileNavDashboard">Accueil</button>
+      <button type="button" class="mobile-nav-btn" data-view="prospection" id="mobileNavProspection">Recherche</button>
+    </div>
+  </nav>
 
   <button class="scroll-top" id="scrollTopBtn" type="button" aria-label="Haut de page">↑</button>
   <script src="/prospection/prospection.js"></script>
