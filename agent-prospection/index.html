@@ -43,7 +43,7 @@
         radial-gradient(900px 420px at 6% -12%, rgba(245, 166, 35, .22), transparent 58%),
         radial-gradient(720px 400px at 100% 0%, rgba(250, 248, 245, .95), transparent 55%),
         linear-gradient(180deg, var(--bg0), var(--bg1) 42%, #fff);
-      padding-bottom: 88px;
+      padding-bottom: 120px;
     }
     .topbar {
       max-width: 1240px;
@@ -204,6 +204,42 @@
       border-color: var(--primary);
       color: var(--ink);
     }
+    .sources-footer {
+      max-width: 1240px;
+      margin: 24px auto 0;
+      padding: 20px 24px 40px;
+      border-top: 1px solid var(--line);
+    }
+    .sources-inner h2 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      color: var(--ink);
+    }
+    .sources-note {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.45;
+      max-width: 62ch;
+    }
+    .sources-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .sources-list li {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: .86rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .sources-list strong { color: var(--ink); display: block; margin-bottom: 2px; }
     .card-primary-cta { min-height: 44px; }
     .card-more {
       margin-top: 8px;
@@ -909,6 +945,26 @@ Cordialement,
       <button type="button" class="mobile-nav-btn" data-view="prospection" id="mobileNavProspection">Recherche</button>
     </div>
   </nav>
+
+  <footer class="sources-footer" id="sourcesFooter">
+    <div class="sources-inner">
+      <h2>Sources utilisées pour trouver les contacts</h2>
+      <p class="sources-note">Uniquement des données publiques. Aucune invention d’e-mail ou de téléphone. Les numéros teaser (Pappers / Societe.com) sont exclus.</p>
+      <ul class="sources-list" id="sourcesList">
+        <li><strong>BODACC (DILA)</strong> — Nouvelles entreprises créées</li>
+        <li><strong>API Recherche d’entreprises (SIRENE)</strong> — Adresse, SIREN, activité</li>
+        <li><strong>Site officiel de l’entreprise</strong> — E-mail / téléphone public</li>
+        <li><strong>DuckDuckGo / Brave</strong> — Snippets publics</li>
+        <li><strong>Pages Jaunes</strong> — Fiches professionnelles publiques</li>
+        <li><strong>118712 / Cylex</strong> — Annuaires locaux publics</li>
+        <li><strong>Google Maps</strong> — Coordonnées affichées publiquement</li>
+        <li><strong>OpenStreetMap / Overpass</strong> — Téléphones ouverts</li>
+        <li><strong>Unifrance / Film France / CNC</strong> — Filière cinéma (pages publiques)</li>
+        <li><strong>Pappers / Societe.com</strong> — E-mail public uniquement (pas de téléphone teaser)</li>
+        <li><strong>Annuaire des entreprises</strong> — Données administratives publiques</li>
+      </ul>
+    </div>
+  </footer>
 
   <button class="scroll-top" id="scrollTopBtn" type="button" aria-label="Haut de page">↑</button>
   <script src="/prospection/prospection.js"></script>

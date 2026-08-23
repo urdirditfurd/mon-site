@@ -16,6 +16,25 @@ const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const JINA_PREFIX = "https://r.jina.ai/";
 const BODACC_PAGE_SIZE = 100;
 
+/** Sources publiques utilisées pour trouver / vérifier les contacts (affichage UI). */
+const CONTACT_SOURCES = [
+  { name: "BODACC (DILA)", role: "Nouvelles entreprises créées" },
+  { name: "API Recherche d’entreprises (SIRENE)", role: "Adresse, SIREN, activité" },
+  { name: "Site officiel de l’entreprise", role: "E-mail / téléphone public" },
+  { name: "DuckDuckGo / Brave (snippets publics)", role: "Indices de contact publics" },
+  { name: "Pages Jaunes", role: "Fiches professionnelles publiques" },
+  { name: "118712 / Cylex", role: "Annuaires locaux publics" },
+  { name: "Google Maps (données publiques)", role: "Coordonnées affichées publiquement" },
+  { name: "OpenStreetMap / Overpass", role: "Téléphones ouverts" },
+  { name: "Unifrance / Film France / CNC", role: "Filière cinéma (pages publiques)" },
+  { name: "Pappers / Societe.com", role: "E-mail public uniquement (pas de téléphone teaser)" },
+  { name: "Annuaire des entreprises", role: "Données administratives publiques" }
+];
+
+function listContactSources() {
+  return CONTACT_SOURCES.map((row) => ({ ...row }));
+}
+
 const STOP_WORDS = new Set([
   "sarl", "sas", "sasu", "eurl", "sci", "selarl", "selas", "snc", "sa", "ei",
   "societe", "ste", "les", "des", "une", "aux", "pour", "avec", "dans", "sur",
@@ -764,7 +783,7 @@ async function fetchText(url, options = {}) {
 async function fetchViaJina(targetUrl) {
   const wrapped = `${JINA_PREFIX}${targetUrl}`;
   return fetchText(wrapped, {
-    timeoutMs: 8000,
+    timeoutMs: 5500,
     retries: 0,
     headers: { "X-No-Cache": "true", Accept: "text/markdown" }
   });
@@ -823,7 +842,7 @@ async function fetchBodaccCreations(sector, days, department, needed) {
     }
     offset += rows.length;
     if (rows.length < BODACC_PAGE_SIZE) break;
-    await sleep(200);
+    await sleep(80);
   }
   return { total, companies: collected };
 }
@@ -836,7 +855,7 @@ async function enrichSirene(company) {
   if (!company.siren) return company;
   const url = `${SIRENE_URL}?${new URLSearchParams({ q: company.siren }).toString()}`;
   try {
-    const payload = await fetchJson(url, { timeoutMs: 15000, retries: 3 });
+    const payload = await fetchJson(url, { timeoutMs: 12000, retries: 2 });
     const hit = (payload.results || [])[0];
     if (!hit) return company;
     const nom = hit.nom_complet || hit.nom_raison_sociale || "";
@@ -1120,7 +1139,7 @@ async function scrapeWebsite(url, company) {
     if (picked && (picked.email || picked.phone)) {
       return { ...picked, website: url, html: baseText || combined };
     }
-    await sleep(150);
+    await sleep(40);
   }
   return { website: pageMatchesCompany(combined, company) && !activityConflictsWithPage(combined, company) && isRealCompanyWebsite(url) ? url : "", html: combined };
 }
@@ -1308,7 +1327,7 @@ async function enrichFromLocalDirectories(company) {
       });
       return true;
     }
-    await sleep(60);
+    await sleep(30);
   }
   return false;
 }
@@ -1430,10 +1449,10 @@ async function enrichFromSearch(company) {
       } catch {
         // suivant
       }
-      await sleep(400);
+      await sleep(80);
     }
     if (company.email || company.phone) return true;
-    await sleep(400);
+    await sleep(60);
   }
   return Boolean(company.email || company.phone);
 }
@@ -1767,30 +1786,25 @@ async function mapPool(items, concurrency, worker) {
 async function enrichCompanyContacts(company, onEvent) {
   onEvent({ type: "status", message: `Recherche de contact v\u00e9rifi\u00e9 — ${company.name}` });
   if (!isGenericCompanyName(company)) {
-    // Priorité aux vrais canaux (site, OSM, recherche web) — Pappers/societe en dernier et e-mail only.
-    const steps = [
-      enrichFromDomainGuess,
-      enrichFromDuckDuckGoHtml,
-      enrichFromCinemaDirectories,
-      enrichFromWebSnippets,
-      enrichFromOverpass,
-      enrichFromNominatim,
-      enrichFromPagesJaunes,
-      enrichFromLocalDirectories,
-      enrichFromDirectorSearch,
-      enrichFromSearch,
-      enrichFromAnnuaireEntreprises,
-      enrichFromPappers,
-      enrichFromSociete
+    // Vagues parallèles : on garde les mêmes sources et filtres, on gagne du temps
+    // en interrogeant plusieurs canaux en même temps, puis on s’arrête dès qu’un contact est validé.
+    const waves = [
+      [enrichFromDomainGuess, enrichFromDuckDuckGoHtml, enrichFromOverpass, enrichFromNominatim],
+      [enrichFromCinemaDirectories, enrichFromWebSnippets, enrichFromPagesJaunes, enrichFromLocalDirectories],
+      [enrichFromDirectorSearch, enrichFromSearch, enrichFromAnnuaireEntreprises, enrichFromPappers, enrichFromSociete]
     ];
-    for (const step of steps) {
+    for (const wave of waves) {
       if (isVerifiedContact(company)) break;
-      try {
-        await step(company);
-      } catch {
-        // source suivante
-      }
-      // Si un teaser a fuité, on le purge avant la source suivante.
+      await Promise.all(
+        wave.map(async (step) => {
+          if (isVerifiedContact(company)) return;
+          try {
+            await step(company);
+          } catch {
+            // source suivante
+          }
+        })
+      );
       sanitizeCompanyContact(company);
     }
   }
@@ -1824,20 +1838,29 @@ async function selectSectorCompanies(sector, days, department, limit, sender, on
   const emitCompanies = options.emitCompanies !== false;
   const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
   const localized = companies.filter((company) => matchesDepartment(company, department));
-  const selected = [];
+  const candidates = [];
   for (const company of localized) {
+    if (candidates.length >= Math.max(limit * 2, limit + 8)) break;
+    const key = companyDedupeKey(company);
+    if (seenKeys.has(key)) continue;
+    candidates.push(company);
+  }
+
+  onEvent({ type: "status", message: `Enrichissement SIRENE — ${candidates.length} entreprise(s)…` });
+  await mapPool(candidates, 6, async (company) => {
+    await enrichSirene(company);
+  });
+
+  const selected = [];
+  for (const company of candidates) {
     if (selected.length >= limit) break;
     const key = companyDedupeKey(company);
     if (seenKeys.has(key)) continue;
-    onEvent({ type: "status", message: `Enrichissement SIRENE — ${company.name}` });
-    await enrichSirene(company);
-    await sleep(60);
     if (!matchesDepartment(company, department)) continue;
     if (!isWithinCreationWindow(company, maxAgeDays)) continue;
     if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
       const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
       if (!okNaf) {
-        // Sondage auto : NAF strict pour éviter les hors-secteur.
         if (options.strictNaf) continue;
         const okKw = !sector.allSectors && activityMatchesSector(company.activity || company.nafLabel || "", sector);
         if (!okKw) continue;
@@ -1872,17 +1895,7 @@ function buildProspectionSummary({
     scanned,
     found: results.length,
     withContact: results.filter((row) => row.hasContact).length,
-    sources: [
-      "BODACC DILA",
-      "API Recherche d'entreprises",
-      "DuckDuckGo / Google / Brave (snippets publics)",
-      "PagesJaunes",
-      "118712 / Cylex / Google Maps",
-      "Filière cinéma (Unifrance / Film France / CNC — pages publiques)",
-      "OpenStreetMap / Overpass",
-      "Site officiel",
-      "Pappers / Societe.com (e-mail public uniquement — téléphones teaser exclus)"
-    ],
+    sources: CONTACT_SOURCES.map((row) => `${row.name} — ${row.role}`),
     note: auto
       ? "Sondage auto (< 1 an) : contacts publics vérifiés uniquement. Tél. Pappers/Societe.com exclus."
       : "Contacts publiés uniquement (pas de conjecture MX). Tél. dérivés du SIREN exclus. LinkedIn non scrapé (CGU)."
@@ -1943,7 +1956,7 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
       message: `Vérification des contacts (${selected.length} nouvelles, fenêtre ${days} j)…`
     });
     let stepDone = 0;
-    await mapPool(selected, 4, async (company) => {
+    await mapPool(selected, 6, async (company) => {
       if (withContact.length >= targetContacts) return;
       scanned += 1;
       await enrichCompanyContacts(company, (event) => {
@@ -2070,7 +2083,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
       type: "status",
       message: `Recherche parall\u00e8le de contacts v\u00e9rifi\u00e9s (${selected.length} entreprises)…`
     });
-    await mapPool(selected, 4, async (company) => {
+    await mapPool(selected, 6, async (company) => {
       await enrichCompanyContacts(company, onEvent);
     });
   }
@@ -2096,6 +2109,10 @@ function createProspectionRouter() {
 
   router.get("/sectors", (_req, res) => {
     res.json({ sectors: listSectors() });
+  });
+
+  router.get("/sources", (_req, res) => {
+    res.json({ sources: listContactSources() });
   });
 
   router.post("/search", async (req, res) => {
@@ -2150,9 +2167,11 @@ function createProspectionRouter() {
 
 module.exports = {
   SECTORS,
+  CONTACT_SOURCES,
   createProspectionRouter,
   runProspection,
   listSectors,
+  listContactSources,
   resolveSector,
   parseBodaccRecord,
   normalizeFrPhone,

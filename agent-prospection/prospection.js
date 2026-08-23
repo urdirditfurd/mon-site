@@ -746,6 +746,22 @@
     sectorSelect.value = [...sectorSelect.options].some((o) => o.value === current) ? current : "cinema";
   }
 
+  async function loadSources() {
+    const list = document.getElementById("sourcesList");
+    if (!list) return;
+    try {
+      const response = await fetch(`${API_PREFIX}/api/prospection/sources`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!Array.isArray(data.sources) || !data.sources.length) return;
+      list.innerHTML = data.sources.map((row) => (
+        `<li><strong>${escapeHtml(row.name)}</strong> — ${escapeHtml(row.role || "")}</li>`
+      )).join("");
+    } catch {
+      // fallback HTML déjà présent
+    }
+  }
+
   async function loadSectors() {
     try {
       const response = await fetch(`${API_PREFIX}/api/prospection/sectors`);
@@ -1271,6 +1287,7 @@
   loadScanRuns();
   loadFilter();
   loadSectors();
+  loadSources();
   warnIfFileModeWithoutServer();
   refreshServerStatus();
   startServerWatch();
