@@ -455,11 +455,11 @@
       const demoNames = new Set(["eva moreau", "votre nom"]);
       const demoEmails = new Set(["vous@cabinet.fr", "eva.moreau@exemple.fr", "eva.moreau@cabinet.fr"]);
       const demoPhones = new Set(["06 12 34 56 78", "0612345678"]);
+      const normalizedPhone = phone.replace(/\s/g, "");
+      const isDemoPhone = demoPhones.has(phone.toLowerCase()) || demoPhones.has(normalizedPhone);
       senderName.value = demoNames.has(name.toLowerCase()) ? "" : name;
       senderEmail.value = demoEmails.has(email.toLowerCase()) ? "" : email;
-      senderPhone.value = demoPhones.has(phone.replace(/\s/g, "").toLowerCase()) || demoPhones.has(phone.toLowerCase())
-        ? ""
-        : phone;
+      senderPhone.value = isDemoPhone ? "" : phone;
     } catch {
       senderName.value = "";
       senderEmail.value = "";
