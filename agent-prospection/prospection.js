@@ -34,12 +34,22 @@
   const historyList = document.getElementById("historyList");
   const historyClearBtn = document.getElementById("historyClearBtn");
   const historyCloseBtn = document.getElementById("historyCloseBtn");
+  const viewDashboard = document.getElementById("viewDashboard");
+  const viewProspection = document.getElementById("viewProspection");
+  const navDashboard = document.getElementById("navDashboard");
+  const navProspection = document.getElementById("navProspection");
+  const dashGoProspection = document.getElementById("dashGoProspection");
+  const dashMetrics = document.getElementById("dashMetrics");
+  const dashRuns = document.getElementById("dashRuns");
+  const dashContacts = document.getElementById("dashContacts");
 
   const STORAGE_KEY = "prospection-sender";
   const TEMPLATE_KEY = "prospection-mail-template";
   const CONTACTED_KEY = "prospection-contacted";
   const SCAN_MEMORY_KEY = "prospection-scan-memory";
   const FILTER_KEY = "prospection-filter";
+  const SCAN_RUNS_KEY = "prospection-scan-runs";
+  const VIEW_KEY = "prospection-view";
   const FALLBACK_SECTORS = [
     { id: "tous", label: "Tous les secteurs" },
     { id: "restauration", label: "Restauration, cafés, bars" },
@@ -68,6 +78,9 @@
   let streamAbort = null;
   let runToken = 0;
   let searchDone = false;
+  let scanRuns = [];
+  let currentView = "dashboard";
+  let scanStartedAt = null;
 
   function loadContacted() {
     try {
@@ -86,6 +99,164 @@
       companyMemory = JSON.parse(localStorage.getItem(SCAN_MEMORY_KEY) || "{}") || {};
     } catch {
       companyMemory = {};
+    }
+  }
+
+  function loadScanRuns() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(SCAN_RUNS_KEY) || "[]");
+      scanRuns = Array.isArray(rows) ? rows : [];
+    } catch {
+      scanRuns = [];
+    }
+  }
+
+  function saveScanRuns() {
+    if (scanRuns.length > 40) scanRuns = scanRuns.slice(0, 40);
+    localStorage.setItem(SCAN_RUNS_KEY, JSON.stringify(scanRuns));
+  }
+
+  function daysLabelFromValue(days) {
+    const n = Number(days);
+    if (n >= 700) return "Moins de 2 ans";
+    if (n >= 300) return "Moins d’1 an";
+    return `${n || "?"} j`;
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return "n.c.";
+    try {
+      return new Date(iso).toLocaleString("fr-FR", {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+    } catch {
+      return String(iso);
+    }
+  }
+
+  function formatDuration(ms) {
+    const total = Math.max(0, Math.round(Number(ms) || 0) / 1000);
+    if (total < 60) return `${Math.round(total)} s`;
+    const min = Math.floor(total / 60);
+    const sec = Math.round(total % 60);
+    return sec ? `${min} min ${sec} s` : `${min} min`;
+  }
+
+  function departmentLabel(code) {
+    if (!code) return "France entière";
+    const opt = [...departmentInput.options].find((o) => o.value === code);
+    return opt ? opt.textContent : code;
+  }
+
+  function sectorLabel(id) {
+    const opt = [...sectorSelect.options].find((o) => o.value === id);
+    return opt ? opt.textContent : (id || "n.c.");
+  }
+
+  function recordScanRun(summary, incoming) {
+    const endedAt = new Date().toISOString();
+    const startedAt = scanStartedAt || endedAt;
+    const durationMs = Math.max(0, new Date(endedAt) - new Date(startedAt));
+    const days = summary.daysUsed || summary.days || daysSelect.value;
+    const newTodo = incoming.filter((c) => !isContacted(companyKey(c))).length;
+    const already = incoming.filter((c) => isContacted(companyKey(c))).length;
+    scanRuns.unshift({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      startedAt,
+      endedAt,
+      durationMs,
+      sector: selectedSector(),
+      sectorLabel: sectorLabel(selectedSector()),
+      days: Number(days) || null,
+      daysLabel: daysLabelFromValue(days),
+      department: departmentInput.value.trim(),
+      departmentLabel: departmentLabel(departmentInput.value.trim()),
+      scanned: Number(summary.scanned || 0),
+      contactsFound: incoming.length,
+      newTodo,
+      alreadySeen: already,
+      todoAfter: companies.filter((c) => !isContacted(companyKey(c))).length,
+      doneAfter: companies.filter((c) => isContacted(companyKey(c))).length
+    });
+    saveScanRuns();
+    scanStartedAt = null;
+  }
+
+  function setAppView(view) {
+    currentView = view === "prospection" ? "prospection" : "dashboard";
+    localStorage.setItem(VIEW_KEY, currentView);
+    const onDash = currentView === "dashboard";
+    if (viewDashboard) viewDashboard.hidden = !onDash;
+    if (viewProspection) viewProspection.hidden = onDash;
+    if (navDashboard) navDashboard.classList.toggle("active", onDash);
+    if (navProspection) navProspection.classList.toggle("active", !onDash);
+    if (onDash) renderDashboard();
+  }
+
+  function renderDashboard() {
+    if (!dashMetrics || !dashRuns || !dashContacts) return;
+    const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
+    const done = companies.filter((c) => isContacted(companyKey(c))).length;
+    const totalScanned = Object.keys(companyMemory).length;
+    const lastRun = scanRuns[0];
+    const totalScanTime = scanRuns.reduce((sum, row) => sum + (Number(row.durationMs) || 0), 0);
+    const firstContactAt = contactedEntries().slice(-1)[0]?.at;
+    const lastContactAt = contactedEntries()[0]?.at;
+
+    dashMetrics.innerHTML = `
+      <div class="dash-metric">
+        <span class="label">Entreprises contactées</span>
+        <div class="value">${done}</div>
+        <div class="sub">${lastContactAt ? `Dernier contact : ${formatDateTime(lastContactAt)}` : "Aucun contact pour l’instant"}</div>
+      </div>
+      <div class="dash-metric">
+        <span class="label">À contacter</span>
+        <div class="value">${todo}</div>
+        <div class="sub">${totalScanned} entreprise(s) en mémoire</div>
+      </div>
+      <div class="dash-metric">
+        <span class="label">Sondages réalisés</span>
+        <div class="value">${scanRuns.length}</div>
+        <div class="sub">${lastRun ? `Dernier : ${formatDateTime(lastRun.endedAt)}` : "Aucun sondage encore"}</div>
+      </div>
+      <div class="dash-metric">
+        <span class="label">Temps agent</span>
+        <div class="value" style="font-size:1.35rem">${formatDuration(totalScanTime)}</div>
+        <div class="sub">${firstContactAt ? `Depuis le ${formatDateTime(firstContactAt)}` : "Cumul des sondages"}</div>
+      </div>
+    `;
+
+    if (!scanRuns.length) {
+      dashRuns.innerHTML = `<li class="dash-empty">Aucun sondage enregistré. Lancez une prospection pour voir ici la date, la durée, le secteur et les résultats.</li>`;
+    } else {
+      dashRuns.innerHTML = scanRuns.slice(0, 8).map((run) => `
+        <li class="dash-item">
+          <strong>${escapeHtml(run.sectorLabel || "Secteur")}</strong>
+          <div class="meta">
+            ${formatDateTime(run.startedAt)} → ${formatDateTime(run.endedAt)} · ${formatDuration(run.durationMs)}<br>
+            Fenêtre : ${escapeHtml(run.daysLabel || daysLabelFromValue(run.days))} · Zone : ${escapeHtml(run.departmentLabel || "France")}<br>
+            ${run.scanned || 0} scannée(s) · ${run.contactsFound || 0} contact(s) trouvé(s) · ${run.newTodo || 0} nouvelle(s) à traiter
+          </div>
+        </li>
+      `).join("");
+    }
+
+    const recentContacts = contactedEntries().slice(0, 8);
+    if (!recentContacts.length) {
+      dashContacts.innerHTML = `<li class="dash-empty">Aucune entreprise marquée contactée. Dès que vous ouvrez Message ou Mail, elle apparaît ici.</li>`;
+    } else {
+      dashContacts.innerHTML = recentContacts.map((row) => {
+        const channel = row.channel === "mail" ? "Mail" : (row.channel === "sms" ? "Message" : (row.channel || "manuel"));
+        return `<li class="dash-item">
+          <strong>${escapeHtml(row.name || row.key)}</strong>
+          <div class="meta">
+            ${formatDateTime(row.at)} · ${escapeHtml(channel)}
+            ${row.email ? `<br>${escapeHtml(row.email)}` : ""}
+            ${row.phone ? `<br>${escapeHtml(row.phone)}` : ""}
+          </div>
+        </li>`;
+      }).join("");
     }
   }
 
@@ -153,11 +324,13 @@
     };
     saveContacted();
     rememberCompany(company, { fromScan: false });
+    renderDashboard();
   }
 
   function unmarkContacted(key) {
     delete contactedMap[key];
     saveContacted();
+    renderDashboard();
   }
 
   function contactedEntries() {
@@ -491,7 +664,7 @@
 
   function emptyMessage() {
     if (!companies.length) {
-      return "Choisissez un secteur, laissez Auto, puis lancez le sondage. Les contacts validés restent en mémoire : les non contactés réapparaissent, les déjà contactés sont signalés automatiquement.";
+      return "Choisissez un secteur et une période (moins d’1 an ou moins de 2 ans), puis lancez le sondage. Les contacts validés restent en mémoire.";
     }
     if (listFilter === "todo") {
       const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
@@ -644,15 +817,17 @@
       saveFilter();
       renderList();
       const summary = event.summary || {};
-      const daysLabel = summary.auto ? `auto → ${summary.daysUsed || "?"} j` : `${summary.days || "?"} j`;
+      const daysLabel = daysLabelFromValue(summary.daysUsed || summary.days);
       const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
       const done = companies.filter((c) => isContacted(companyKey(c))).length;
       const newThisRun = incoming.filter((c) => !isContacted(companyKey(c))).length;
       const alreadyThisRun = incoming.filter((c) => isContacted(companyKey(c))).length;
+      recordScanRun(summary, incoming);
       renderStats({
         scanned: summary.scanned || 0,
         daysLabel: daysLabel
       });
+      renderDashboard();
       setProgress(100, `${todo} à contacter · ${done} déjà contactées`);
       hideProgressSoon();
       if (alreadyThisRun) {
@@ -660,7 +835,7 @@
       } else if (todo) {
         log(`Sondage terminé — ${todo} entreprise(s) à contacter en mémoire.`, { quiet: true });
       } else if (!companies.length) {
-        log("Aucun contact validé. Essayez Tous les secteurs ou France entière.", { quiet: true });
+        log("Aucun contact validé. Essayez Tous les secteurs, Moins de 2 ans, ou France entière.", { quiet: true });
       } else {
         log("Toutes les entreprises en mémoire sont déjà contactées.", { quiet: true });
       }
@@ -732,18 +907,18 @@
     runBtn.textContent = "Relancer";
     setProgress(3, "Démarrage du sondage…");
 
-    const daysValue = daysSelect.value || "auto";
-    const isAuto = daysValue === "auto";
+    const daysValue = daysSelect.value === "730" ? "730" : "365";
+    daysSelect.value = daysValue;
+    scanStartedAt = new Date().toISOString();
     const params = new URLSearchParams({
       sector,
       days: daysValue,
-      limit: isAuto ? "18" : "40",
+      limit: daysValue === "730" ? "50" : "40",
       department: departmentInput.value.trim(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
-    if (isAuto) params.set("targetContacts", "15");
 
     const controller = new AbortController();
     streamAbort = controller;
@@ -1023,16 +1198,19 @@
   historyBtn.addEventListener("click", () => toggleHistory());
   historyCloseBtn.addEventListener("click", () => toggleHistory(false));
   historyClearBtn.addEventListener("click", () => {
-    if (!contactedEntries().length && !Object.keys(companyMemory).length) return;
-    if (!window.confirm("Vider l’historique des contactées ET la mémoire des entreprises scannées ?")) return;
+    if (!contactedEntries().length && !Object.keys(companyMemory).length && !scanRuns.length) return;
+    if (!window.confirm("Vider l’historique des contactées, la mémoire des entreprises scannées et les sondages du tableau de bord ?")) return;
     contactedMap = {};
     companyMemory = {};
+    scanRuns = [];
     saveContacted();
     saveScanMemory();
+    saveScanRuns();
     rebuildCompaniesList();
     renderHistory();
     renderList();
-    log("Historique et mémoire des scans vidés.", { quiet: true });
+    renderDashboard();
+    log("Historique, mémoire des scans et tableau de bord vidés.", { quiet: true });
   });
   historyList.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-history-remove]");
@@ -1042,6 +1220,13 @@
     renderHistory();
     renderList();
   });
+
+  document.querySelectorAll("[data-view]").forEach((btn) => {
+    btn.addEventListener("click", () => setAppView(btn.getAttribute("data-view")));
+  });
+  if (dashGoProspection) {
+    dashGoProspection.addEventListener("click", () => setAppView("prospection"));
+  }
 
   const serverRetryBtn = document.getElementById("serverRetryBtn");
   if (serverRetryBtn) {
@@ -1054,6 +1239,7 @@
   loadTemplate();
   loadContacted();
   loadScanMemory();
+  loadScanRuns();
   loadFilter();
   loadSectors();
   warnIfFileModeWithoutServer();
@@ -1070,4 +1256,5 @@
   }
   renderList();
   seedDemoCompanies();
+  setAppView("dashboard");
 })();

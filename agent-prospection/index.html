@@ -47,6 +47,13 @@
       margin: 0 auto;
       padding: 28px 24px 10px;
     }
+    .topbar-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+    }
     h1 {
       margin: 0;
       font-family: "Fraunces", Georgia, serif;
@@ -54,6 +61,113 @@
       letter-spacing: -.02em;
       color: var(--ink);
       animation: rise .5s ease both;
+    }
+    .app-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      font-size: .9rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .nav-btn:hover,
+    .nav-btn:focus-visible {
+      border-color: var(--accent);
+      color: var(--ink);
+      outline: none;
+    }
+    .nav-btn.active {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      color: var(--ink);
+    }
+    .dashboard-view {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 14px 24px 40px;
+      display: grid;
+      gap: 16px;
+      animation: rise .5s ease .08s both;
+    }
+    .dashboard-view[hidden],
+    .layout[hidden] {
+      display: none !important;
+    }
+    .dash-hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .dash-hero p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      max-width: 560px;
+      line-height: 1.5;
+    }
+    .dash-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .dash-metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    .dash-metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: .82rem;
+      margin-bottom: 8px;
+    }
+    .dash-metric .value {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 1.8rem;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .dash-metric .sub {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: .8rem;
+    }
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 16px;
+    }
+    .dash-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .dash-item {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .dash-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .dash-item strong { color: var(--ink); display: block; margin-bottom: 4px; }
+    .dash-item .meta { color: var(--muted); font-size: .84rem; line-height: 1.45; }
+    .dash-empty {
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.5;
+      margin: 0;
     }
     @keyframes rise {
       from { opacity: 0; transform: translateY(8px); }
@@ -433,12 +547,20 @@
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .panel { position: static; }
+      .dash-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .dash-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <header class="topbar">
-    <h1>Prospection</h1>
+    <div class="topbar-row">
+      <h1>Prospection</h1>
+      <nav class="app-nav" aria-label="Navigation principale">
+        <button type="button" class="nav-btn active" data-view="dashboard" id="navDashboard">Tableau de bord</button>
+        <button type="button" class="nav-btn" data-view="prospection" id="navProspection">Lancer la prospection</button>
+      </nav>
+    </div>
   </header>
 
   <div class="file-mode-banner" id="fileModeBanner" hidden>
@@ -452,7 +574,28 @@
     ou rafraîchissez la page. Le service est hébergé en ligne — aucune installation locale requise.
   </div>
 
-  <main class="layout">
+  <section class="dashboard-view" id="viewDashboard" aria-label="Tableau de bord">
+    <div class="dash-hero">
+      <div>
+        <h2 style="margin:0">Activité de l’agent</h2>
+        <p>Vue d’ensemble des sondages réalisés, des entreprises trouvées et des contacts déjà traités.</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="dashGoProspection">Lancer la prospection</button>
+    </div>
+    <div class="dash-metrics" id="dashMetrics"></div>
+    <div class="dash-grid">
+      <div class="card">
+        <h3>Derniers sondages</h3>
+        <ul class="dash-list" id="dashRuns"></ul>
+      </div>
+      <div class="card">
+        <h3>Dernières entreprises contactées</h3>
+        <ul class="dash-list" id="dashContacts"></ul>
+      </div>
+    </div>
+  </section>
+
+  <main class="layout" id="viewProspection" hidden>
     <section class="panel">
       <h2>Paramètres</h2>
       <label class="field">
@@ -478,12 +621,8 @@
         <label class="field">
           <span>Créées depuis</span>
           <select id="daysSelect">
-            <option value="auto" selected>Auto (&lt; 1 an)</option>
-            <option value="30">30 jours</option>
-            <option value="60">60 jours</option>
-            <option value="90">90 jours</option>
-            <option value="180">180 jours</option>
-            <option value="365">365 jours</option>
+            <option value="365" selected>Moins d’1 an</option>
+            <option value="730">Moins de 2 ans</option>
           </select>
         </label>
         <label class="field">
@@ -510,7 +649,6 @@
           </select>
         </label>
       </div>
-      <p class="hint"><strong>Auto</strong> élargit 30→365 j et ne garde que les contacts publics validés.</p>
       <label class="field">
         <span>Votre nom (signature)</span>
         <input id="senderName" type="text" placeholder="Eva Moreau" autocomplete="name">
@@ -575,7 +713,7 @@
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Choisissez un secteur, laissez Auto, puis lancez le sondage. Les nouvelles à contacter apparaissent ici ; les déjà contactées restent en mémoire.</li>
+          <li class="empty">Choisissez un secteur et une période, puis lancez le sondage. Les nouvelles à contacter apparaissent ici ; les déjà contactées restent en mémoire.</li>
         </ul>
       </div>
 

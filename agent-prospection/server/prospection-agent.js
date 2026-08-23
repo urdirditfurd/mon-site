@@ -2031,7 +2031,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
     return runProspectionAuto(params, onEvent, sector, department, sender);
   }
 
-  const days = Math.min(365, Math.max(7, Number(params.days) || 30));
+  const days = Math.min(730, Math.max(7, Number(params.days) || 365));
   const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const enrichContacts = params.enrichContacts !== false;
   const contactsOnly = params.contactsOnly === true || params.contactsOnly === "1";
@@ -2061,7 +2061,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
   if (!selected.length) {
     onEvent({
       type: "status",
-      message: "Aucun r\u00e9sultat avec ces filtres. Passez en \u00ab Auto \u00bb, \u00ab Tous les secteurs \u00bb, ou videz le d\u00e9partement."
+      message: "Aucun r\u00e9sultat avec ces filtres. Essayez \u00ab Tous les secteurs \u00bb, \u00ab Moins de 2 ans \u00bb, ou France enti\u00e8re."
     });
   }
 
