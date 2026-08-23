@@ -438,14 +438,32 @@
     statsBox.innerHTML = parts.join("");
   }
 
+  function selectableCompanies() {
+    return filteredCompanies().filter((c) => {
+      if (isContacted(companyKey(c))) return false;
+      return Boolean(c.hasContact && (c.email || c.phone));
+    });
+  }
+
   function loadSender() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      senderName.value = saved.name || "";
-      senderEmail.value = saved.email || "";
-      senderPhone.value = saved.phone || "";
+      const name = String(saved.name || "").trim();
+      const email = String(saved.email || "").trim();
+      const phone = String(saved.phone || "").trim();
+      // Anciens exemples préremplis → on laisse les placeholders à la place.
+      const demoNames = new Set(["eva moreau", "votre nom"]);
+      const demoEmails = new Set(["vous@cabinet.fr", "eva.moreau@exemple.fr", "eva.moreau@cabinet.fr"]);
+      const demoPhones = new Set(["06 12 34 56 78", "0612345678"]);
+      senderName.value = demoNames.has(name.toLowerCase()) ? "" : name;
+      senderEmail.value = demoEmails.has(email.toLowerCase()) ? "" : email;
+      senderPhone.value = demoPhones.has(phone.replace(/\s/g, "").toLowerCase()) || demoPhones.has(phone.toLowerCase())
+        ? ""
+        : phone;
     } catch {
-      // ignore
+      senderName.value = "";
+      senderEmail.value = "";
+      senderPhone.value = "";
     }
   }
 
@@ -647,7 +665,7 @@
 
     return `<li class="company-card${done ? " contacted" : ""}" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
-        ${canMail && !done ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked}>` : ""}
+        ${!done ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked} aria-label="Sélectionner ${escapeHtml(company.name)}">` : ""}
         <h3>${escapeHtml(company.name)}${chip}</h3>
       </div>
       <div class="meta">
@@ -672,12 +690,19 @@
   }
 
   function updateSelectionUI() {
-    const visible = filteredCompanies();
-    const mailable = visible.filter((c) => c.hasContact && c.email && !isContacted(companyKey(c)));
+    const selectable = selectableCompanies();
+    const mailable = selectable.filter((c) => c.email);
     selectedCount.textContent = String(selectedKeys.size);
-    massMailBar.style.display = mailable.length && searchDone && listFilter !== "done" ? "flex" : "none";
+    massMailBar.style.display = selectable.length && searchDone && listFilter !== "done" ? "flex" : "none";
     massSendBtn.disabled = selectedKeys.size === 0;
-    selectAllCb.checked = mailable.length > 0 && mailable.every((c) => selectedKeys.has(companyKey(c)));
+    if (selectAllCb) {
+      selectAllCb.checked = selectable.length > 0 && selectable.every((c) => selectedKeys.has(companyKey(c)));
+      selectAllCb.indeterminate = selectedKeys.size > 0 && !selectAllCb.checked
+        && selectable.some((c) => selectedKeys.has(companyKey(c)));
+    }
+    if (massSendBtn && !mailable.length && selectedKeys.size) {
+      massSendBtn.title = "Sélectionnez des entreprises avec e-mail pour l’envoi groupé";
+    }
   }
 
   function emptyMessage() {
@@ -1155,18 +1180,29 @@
     }
   });
 
-  selectAllCb.addEventListener("change", () => {
-    const mailable = filteredCompanies().filter((c) => c.hasContact && c.email && !isContacted(companyKey(c)));
-    if (selectAllCb.checked) mailable.forEach((c) => selectedKeys.add(companyKey(c)));
-    else selectedKeys.clear();
+  selectAllCb.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const wantAll = selectAllCb.checked;
+    const selectable = selectableCompanies();
+    if (wantAll) {
+      selectable.forEach((c) => selectedKeys.add(companyKey(c)));
+    } else {
+      selectable.forEach((c) => selectedKeys.delete(companyKey(c)));
+    }
     renderList();
+    selectAllCb.checked = wantAll && selectable.length > 0;
+    selectAllCb.indeterminate = false;
+    selectedCount.textContent = String(selectedKeys.size);
+    massSendBtn.disabled = selectedKeys.size === 0;
   });
 
   massEditBtn.addEventListener("click", () => {
     companyList.querySelectorAll(".mail-edit-area").forEach((area) => {
       const key = area.id.replace("mail-edit-", "");
       const company = companies.find((c) => companyKey(c).replace(/[^a-zA-Z0-9]/g, "_") === key);
-      if (company && company.email && !isContacted(companyKey(company))) area.classList.add("visible");
+      if (company && !isContacted(companyKey(company)) && selectedKeys.has(companyKey(company))) {
+        area.classList.add("visible");
+      }
     });
   });
 
