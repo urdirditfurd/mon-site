@@ -154,8 +154,28 @@
       font-weight: 600;
       color: var(--ink);
       list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
     }
     .options-disclosure summary::-webkit-details-marker { display: none; }
+    .options-disclosure summary::after {
+      content: "";
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--accent);
+      border-bottom: 2px solid var(--accent);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -4px;
+    }
+    .options-disclosure[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 4px;
+    }
     .options-disclosure .options-body { padding: 0 14px 14px; }
     .panel-run-desktop { display: block; }
     .sticky-run-bar {
@@ -244,8 +264,28 @@
       font-size: .88rem;
       font-weight: 600;
       list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 36px;
     }
     .card-more summary::-webkit-details-marker { display: none; }
+    .card-more summary::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -3px;
+    }
+    .card-more[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 3px;
+    }
     .more-menu { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .results-tools summary {
       cursor: pointer;
@@ -253,8 +293,27 @@
       color: var(--muted);
       font-size: .88rem;
       list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
     }
     .results-tools summary::-webkit-details-marker { display: none; }
+    .results-tools summary::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -3px;
+    }
+    .results-tools[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 3px;
+    }
     .dashboard-view {
       max-width: 1240px;
       margin: 0 auto;
