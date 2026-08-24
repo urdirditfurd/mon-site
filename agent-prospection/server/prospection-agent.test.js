@@ -149,49 +149,65 @@ test("filtre l'activité cabinets et exclut le médical / juridique", () => {
   assert.equal(activityMatchesSector("avocat droit des sociétés", sector), false);
 });
 
-test("secteur cabinets d'expertise comptable — NAF 69.20Z exact", () => {
+test("secteurs de la branche juridique / finance", () => {
   const sector = resolveSector("cabinets-comptables");
   assert.equal(sector.id, "cabinets-comptables");
   assert.ok(sector.nafPrefixes.includes("69.20Z"));
   assert.equal(activityMatchesSector("Expertise comptable", sector), true);
   assert.equal(activityMatchesSector("Cabinet médical", sector), false);
-  const byLabel = resolveSector("expertise comptable");
-  assert.equal(byLabel.id, "cabinets-comptables");
-  // Verrouillage métier : un ancien secteur est remappé vers les cabinets.
+  assert.equal(resolveSector("expertise comptable").id, "cabinets-comptables");
+  assert.equal(resolveSector("cabinets-avocats").id, "cabinets-avocats");
+  assert.equal(resolveSector("avocat").id, "cabinets-avocats");
+  assert.equal(resolveSector("juridique").id, "juridique");
+  assert.equal(resolveSector("finance").id, "finance");
+  assert.equal(resolveSector("banque").id, "finance");
+  assert.equal(resolveSector("conseil-gestion").id, "conseil-gestion");
   assert.equal(resolveSector("cinema").id, "cabinets-comptables");
-  assert.equal(resolveSector("tous").id, "cabinets-comptables");
 });
 
-test("NAF exact — 69.20Z accepté, 69.10Z (juridique) rejeté", () => {
+test("NAF exact — 69.20Z accepté, 69.10Z (juridique) rejeté pour les cabinets", () => {
   const { nafMatchesSector } = require("./prospection-agent");
   const sector = resolveSector("cabinets-comptables");
   assert.equal(nafMatchesSector("69.20Z", sector), true);
   assert.equal(nafMatchesSector("6920Z", sector), true);
   assert.equal(nafMatchesSector("69.10Z", sector), false);
   assert.equal(nafMatchesSector("59.11C", sector), false);
+  const avocats = resolveSector("cabinets-avocats");
+  assert.equal(nafMatchesSector("69.10Z", avocats), true);
+  assert.equal(nafMatchesSector("69.20Z", avocats), false);
+  const finance = resolveSector("finance");
+  assert.equal(nafMatchesSector("64.19Z", finance), true);
+  assert.equal(nafMatchesSector("69.20Z", finance), false);
 });
 
-test("zones IDF, département et villes du 92", () => {
+test("zones = villes d'Île-de-France uniquement", () => {
   const { resolveZone, matchesZone, listZones } = require("./prospection-agent");
   const zones = listZones();
-  assert.ok(zones.some((z) => z.id === "idf"));
-  assert.ok(zones.some((z) => z.id === "city-asnieres"));
-  const idf = resolveZone("idf");
-  assert.equal(idf.type, "region");
-  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "Asnières-sur-Seine" }, idf), true);
-  assert.equal(matchesZone({ department: "69", postalCode: "69001", city: "Lyon" }, idf), false);
-  const asnieres = resolveZone("city-asnieres");
-  assert.equal(asnieres.type, "city");
+  assert.ok(zones.length > 1000);
+  assert.equal(zones.some((z) => z.id === "idf"), false);
+  assert.equal(zones.some((z) => z.id === "92"), false);
+  assert.ok(zones.some((z) => z.id === "city-92004"));
+  assert.ok(zones.some((z) => z.label === "Paris"));
+  const paris = resolveZone("Paris");
+  assert.equal(paris.type, "city");
+  assert.equal(paris.label, "Paris");
+  assert.equal(matchesZone({ department: "75", postalCode: "75008", city: "Paris" }, paris), true);
+  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "Asnières-sur-Seine" }, paris), false);
+  const asnieres = resolveZone("Asnières-sur-Seine");
+  assert.equal(asnieres.id, "city-92004");
   assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "ASNIERES-SUR-SEINE" }, asnieres), true);
   assert.equal(matchesZone({ department: "92", postalCode: "92400", city: "Courbevoie" }, asnieres), false);
-  const dep92 = resolveZone("92");
-  assert.equal(matchesZone({ department: "92", postalCode: "92230", city: "Gennevilliers" }, dep92), true);
+  const gennevilliers = resolveZone("gennevilliers");
+  assert.equal(matchesZone({ department: "92", postalCode: "92230", city: "Gennevilliers" }, gennevilliers), true);
 });
 
-test("listSectors n'expose que les cabinets", () => {
+test("listSectors expose la branche juridique / finance, défaut comptable", () => {
   const listed = listSectors();
-  assert.equal(listed.length, 1);
+  assert.ok(listed.length >= 5);
   assert.equal(listed[0].id, "cabinets-comptables");
+  assert.ok(listed.some((s) => s.id === "cabinets-avocats"));
+  assert.ok(listed.some((s) => s.id === "juridique"));
+  assert.ok(listed.some((s) => s.id === "finance"));
 });
 
 test("parse une annonce BODACC personne morale", () => {

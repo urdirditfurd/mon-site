@@ -466,6 +466,33 @@
       line-height: 1.5;
     }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .city-picker { position: relative; }
+    .city-suggest {
+      position: absolute;
+      z-index: 20;
+      left: 0;
+      right: 0;
+      top: calc(100% - 2px);
+      margin: 0;
+      padding: 6px;
+      list-style: none;
+      max-height: 260px;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+    .city-suggest li {
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: .9rem;
+    }
+    .city-suggest li:hover,
+    .city-suggest li.active { background: var(--primary-soft); color: var(--ink); }
+    .city-suggest .empty-hint { color: var(--muted); cursor: default; }
+    #sectorSelect:disabled { opacity: 1; color: var(--ink); }
     .btn {
       border: 1px solid transparent;
       border-radius: 10px;
@@ -812,8 +839,8 @@
   <section class="dashboard-view" id="viewDashboard" aria-label="Accueil">
     <div class="dash-hero">
       <div>
-        <h2 class="hero-title">Trouvez des cabinets d’expertise comptable à contacter</h2>
-        <p class="hero-lead">L’agent cible uniquement les cabinets (NAF 69.20Z), partout en Île-de-France ou par ville — quelle que soit leur date de création — et prépare vos messages.</p>
+        <h2 class="hero-title">Trouvez des cabinets à contacter en Île-de-France</h2>
+        <p class="hero-lead">Expertise comptable, avocats, juridique, finance : choisissez une ville, lancez la recherche — toutes dates de création — et préparez vos messages.</p>
         <div class="hero-actions">
           <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Lancer une recherche</button>
           <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
@@ -835,7 +862,7 @@
       <div class="sources-inner">
         <h2>Sources utilisées pour trouver les contacts</h2>
         <ul class="sources-list" id="sourcesList">
-          <li><strong>API Recherche d’entreprises (SIRENE)</strong> — Cabinets NAF 69.20Z, toutes dates</li>
+          <li><strong>API Recherche d’entreprises (SIRENE)</strong> — SIREN, NAF, adresse — toutes dates, villes d’Île-de-France</li>
           <li><strong>Site officiel de l’entreprise</strong> — E-mail / téléphone public</li>
           <li><strong>DuckDuckGo / Brave</strong> — Snippets publics</li>
           <li><strong>Pages Jaunes</strong> — Fiches professionnelles publiques</li>
@@ -855,57 +882,20 @@
       <h2>Paramètres de recherche</h2>
       <label class="field">
         <span>Cible</span>
-        <select id="sectorSelect" disabled aria-readonly="true">
+        <select id="sectorSelect">
           <option value="cabinets-comptables" selected>Cabinets d’expertise comptable</option>
+          <option value="cabinets-avocats">Cabinets d’avocats</option>
+          <option value="juridique">Juridique (notaires, huissiers, juristes)</option>
+          <option value="finance">Finance / banque / assurance</option>
+          <option value="conseil-gestion">Conseil en gestion</option>
+          <option value="branche-juridique-finance">Toute la branche (comptable, juridique, finance)</option>
         </select>
       </label>
-      <label class="field">
-        <span>Zone</span>
-        <select id="zoneInput">
-          <optgroup label="Région">
-            <option value="idf" selected>Île-de-France (toute la région)</option>
-          </optgroup>
-          <optgroup label="Départements IDF">
-            <option value="75">75 — Paris</option>
-            <option value="77">77 — Seine-et-Marne</option>
-            <option value="78">78 — Yvelines</option>
-            <option value="91">91 — Essonne</option>
-            <option value="92">92 — Hauts-de-Seine</option>
-            <option value="93">93 — Seine-Saint-Denis</option>
-            <option value="94">94 — Val-de-Marne</option>
-            <option value="95">95 — Val-d’Oise</option>
-          </optgroup>
-          <optgroup label="Villes — 92 Hauts-de-Seine">
-            <option value="city-asnieres">Asnières-sur-Seine</option>
-            <option value="city-gennevilliers">Gennevilliers</option>
-            <option value="city-colombes">Colombes</option>
-            <option value="city-nanterre">Nanterre</option>
-            <option value="city-boulogne">Boulogne-Billancourt</option>
-            <option value="city-courbevoie">Courbevoie</option>
-            <option value="city-levallois">Levallois-Perret</option>
-            <option value="city-neuilly">Neuilly-sur-Seine</option>
-            <option value="city-clichy">Clichy</option>
-            <option value="city-issy">Issy-les-Moulineaux</option>
-            <option value="city-rueil">Rueil-Malmaison</option>
-            <option value="city-suresnes">Suresnes</option>
-            <option value="city-puteaux">Puteaux</option>
-            <option value="city-antony">Antony</option>
-            <option value="city-montrouge">Montrouge</option>
-            <option value="city-bois-colombes">Bois-Colombes</option>
-            <option value="city-la-garenne">La Garenne-Colombes</option>
-            <option value="city-villeneuve">Villeneuve-la-Garenne</option>
-            <option value="city-meudon">Meudon</option>
-            <option value="city-chatillon">Châtillon</option>
-            <option value="city-malakoff">Malakoff</option>
-            <option value="city-vanves">Vanves</option>
-            <option value="city-sevres">Sèvres</option>
-            <option value="city-bagneux">Bagneux</option>
-            <option value="city-saint-cloud">Saint-Cloud</option>
-          </optgroup>
-          <optgroup label="Élargi">
-            <option value="france">France entière</option>
-          </optgroup>
-        </select>
+      <label class="field city-picker">
+        <span>Ville</span>
+        <input id="zoneSearch" type="search" placeholder="Rechercher une ville d’Île-de-France…" autocomplete="off" spellcheck="false" value="Paris" aria-autocomplete="list" aria-controls="zoneSuggest">
+        <input type="hidden" id="zoneInput" value="city-75056">
+        <ul id="zoneSuggest" class="city-suggest" hidden role="listbox"></ul>
       </label>
       <details class="options-disclosure">
         <summary>Options — signature et coordonnées</summary>
@@ -970,7 +960,7 @@
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Choisissez une zone (Île-de-France, département ou ville), puis lancez une recherche. Les cabinets à contacter apparaissent ici.</li>
+          <li class="empty">Choisissez une ville d’Île-de-France, puis lancez une recherche. Les entreprises à contacter apparaissent ici.</li>
         </ul>
       </div>
 

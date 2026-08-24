@@ -1,7 +1,8 @@
 /**
- * Agent de prospection — cabinets d'expertise comptable (NAF 69.20Z).
+ * Agent de prospection — branche juridique / finance / expertise comptable.
  * Sources 100 % gratuites, sans clé API.
- * - API Recherche d'entreprises (SIRENE) : cabinets actifs, toutes dates de création
+ * - API Recherche d'entreprises (SIRENE) : entreprises actives, toutes dates
+ * - Zones : communes d'Île-de-France uniquement
  * - Site officiel / annuaires publics / OSM : contacts vérifiés (double contrôle)
  */
 
@@ -16,10 +17,12 @@ const JINA_PREFIX = "https://r.jina.ai/";
 const BODACC_PAGE_SIZE = 100;
 const CABINETS_NAF = "69.20Z";
 const DEFAULT_SECTOR_ID = "cabinets-comptables";
+const DEFAULT_CITY_ID = "city-75056"; // Paris
+const IDF_CITIES = require("./idf-cities.json");
 
 /** Sources publiques utilisées pour trouver / vérifier les contacts (affichage UI). */
 const CONTACT_SOURCES = [
-  { name: "API Recherche d’entreprises (SIRENE)", role: "Cabinets NAF 69.20Z, adresse, SIREN (toutes dates)" },
+  { name: "API Recherche d’entreprises (SIRENE)", role: "SIREN, NAF, adresse — toutes dates, villes d’Île-de-France" },
   { name: "Site officiel de l’entreprise", role: "E-mail / téléphone public" },
   { name: "DuckDuckGo / Brave (snippets publics)", role: "Indices de contact publics" },
   { name: "Pages Jaunes", role: "Fiches professionnelles publiques" },
@@ -118,16 +121,22 @@ const NAF_LABELS = {
   "68.31Z": "Agences immobilières",
   "62.01Z": "Programmation informatique",
   "62.02A": "Conseil en systèmes et logiciels informatiques",
-  "69.20Z": "Activités comptables (expertise comptable)"
+  "69.20Z": "Activités comptables (expertise comptable)",
+  "69.10Z": "Activités juridiques",
+  "64.19Z": "Autres intermédiations monétaires",
+  "65.12Z": "Autres assurances",
+  "66.22Z": "Agents et courtiers d’assurances",
+  "70.22Z": "Conseil pour les affaires et autres conseils de gestion"
 };
 
-/** Cible métier unique : cabinets d'expertise comptable (NAF 69.20Z). */
+/** Branche juridique / finance / expertise comptable. Défaut : cabinets d'expertise comptable. */
 const SECTORS = [
   {
     id: DEFAULT_SECTOR_ID,
     label: "Cabinets d’expertise comptable",
     nafPrefixes: [CABINETS_NAF, "6920Z"],
     nafExact: true,
+    sireneNaf: [CABINETS_NAF],
     keywords: [
       "expertise comptable",
       "expert-comptable",
@@ -138,55 +147,66 @@ const SECTORS = [
       "commissariat aux comptes",
       "comptable"
     ],
-    exclude: [
-      "avocat",
-      "notaire",
-      "cabinet médical",
-      "cabinet dentaire",
-      "juridique",
-      "huissier"
-    ]
+    exclude: ["cabinet médical", "cabinet dentaire"]
+  },
+  {
+    id: "cabinets-avocats",
+    label: "Cabinets d’avocats",
+    nafPrefixes: ["69.10Z", "6910Z"],
+    nafExact: true,
+    sireneNaf: ["69.10Z"],
+    keywords: ["avocat", "avocats", "barreau", "selarl", "selas"],
+    exclude: ["notaire", "huissier", "commissaire-priseur", "cabinet médical"]
+  },
+  {
+    id: "juridique",
+    label: "Juridique (notaires, huissiers, juristes)",
+    nafPrefixes: ["69.10Z", "6910Z"],
+    nafExact: true,
+    sireneNaf: ["69.10Z"],
+    keywords: [
+      "juridique", "avocat", "notaire", "huissier", "juriste",
+      "commissaire-priseur", "commissaire de justice", "barreau"
+    ],
+    exclude: ["cabinet médical", "cabinet dentaire"]
+  },
+  {
+    id: "finance",
+    label: "Finance / banque / assurance",
+    nafPrefixes: ["64", "65", "66"],
+    nafExact: false,
+    sireneSection: "K",
+    keywords: [
+      "banque", "finance", "assurance", "crédit", "courtier",
+      "patrimoine", "investissement", "holding", "gestion de fonds"
+    ],
+    exclude: []
+  },
+  {
+    id: "conseil-gestion",
+    label: "Conseil en gestion",
+    nafPrefixes: ["70.22Z", "7022Z", "70.10Z", "7010Z"],
+    nafExact: true,
+    sireneNaf: ["70.22Z", "70.10Z"],
+    keywords: ["conseil de gestion", "conseil pour les affaires", "holding", "siège social"],
+    exclude: ["cabinet médical"]
+  },
+  {
+    id: "branche-juridique-finance",
+    label: "Toute la branche (comptable, juridique, finance)",
+    nafPrefixes: ["64", "65", "66", "69", "70.10", "70.22", "7010", "7022"],
+    nafExact: false,
+    sireneNaf: ["69.20Z", "69.10Z", "70.22Z", "70.10Z"],
+    sireneSection: "K",
+    keywords: [
+      "comptable", "avocat", "juridique", "notaire", "banque",
+      "finance", "assurance", "conseil", "fiduciaire"
+    ],
+    exclude: ["cabinet médical", "cabinet dentaire"]
   }
 ];
 
-/** Zones de prospection : région, départements IDF, villes (ex. 92). */
-const PROSPECT_ZONES = [
-  { id: "idf", label: "Île-de-France (toute la région)", type: "region", region: "11", group: "Région" },
-  { id: "75", label: "75 — Paris", type: "department", department: "75", group: "Départements IDF" },
-  { id: "77", label: "77 — Seine-et-Marne", type: "department", department: "77", group: "Départements IDF" },
-  { id: "78", label: "78 — Yvelines", type: "department", department: "78", group: "Départements IDF" },
-  { id: "91", label: "91 — Essonne", type: "department", department: "91", group: "Départements IDF" },
-  { id: "92", label: "92 — Hauts-de-Seine", type: "department", department: "92", group: "Départements IDF" },
-  { id: "93", label: "93 — Seine-Saint-Denis", type: "department", department: "93", group: "Départements IDF" },
-  { id: "94", label: "94 — Val-de-Marne", type: "department", department: "94", group: "Départements IDF" },
-  { id: "95", label: "95 — Val-d’Oise", type: "department", department: "95", group: "Départements IDF" },
-  { id: "city-asnieres", label: "Asnières-sur-Seine", type: "city", department: "92", postalCodes: ["92600"], cityNames: ["asnieres-sur-seine", "asnieres sur seine", "asnieres"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-gennevilliers", label: "Gennevilliers", type: "city", department: "92", postalCodes: ["92230"], cityNames: ["gennevilliers"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-colombes", label: "Colombes", type: "city", department: "92", postalCodes: ["92700"], cityNames: ["colombes"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-nanterre", label: "Nanterre", type: "city", department: "92", postalCodes: ["92000"], cityNames: ["nanterre"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-boulogne", label: "Boulogne-Billancourt", type: "city", department: "92", postalCodes: ["92100"], cityNames: ["boulogne-billancourt", "boulogne billancourt", "boulogne"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-courbevoie", label: "Courbevoie", type: "city", department: "92", postalCodes: ["92400"], cityNames: ["courbevoie"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-levallois", label: "Levallois-Perret", type: "city", department: "92", postalCodes: ["92300"], cityNames: ["levallois-perret", "levallois perret", "levallois"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-neuilly", label: "Neuilly-sur-Seine", type: "city", department: "92", postalCodes: ["92200"], cityNames: ["neuilly-sur-seine", "neuilly sur seine", "neuilly"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-clichy", label: "Clichy", type: "city", department: "92", postalCodes: ["92110"], cityNames: ["clichy"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-issy", label: "Issy-les-Moulineaux", type: "city", department: "92", postalCodes: ["92130"], cityNames: ["issy-les-moulineaux", "issy les moulineaux", "issy"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-rueil", label: "Rueil-Malmaison", type: "city", department: "92", postalCodes: ["92500"], cityNames: ["rueil-malmaison", "rueil malmaison", "rueil"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-suresnes", label: "Suresnes", type: "city", department: "92", postalCodes: ["92150"], cityNames: ["suresnes"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-puteaux", label: "Puteaux", type: "city", department: "92", postalCodes: ["92800"], cityNames: ["puteaux"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-antony", label: "Antony", type: "city", department: "92", postalCodes: ["92160"], cityNames: ["antony"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-montrouge", label: "Montrouge", type: "city", department: "92", postalCodes: ["92120"], cityNames: ["montrouge"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-bois-colombes", label: "Bois-Colombes", type: "city", department: "92", postalCodes: ["92270"], cityNames: ["bois-colombes", "bois colombes"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-la-garenne", label: "La Garenne-Colombes", type: "city", department: "92", postalCodes: ["92250"], cityNames: ["la garenne-colombes", "la garenne colombes", "garenne-colombes"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-villeneuve", label: "Villeneuve-la-Garenne", type: "city", department: "92", postalCodes: ["92390"], cityNames: ["villeneuve-la-garenne", "villeneuve la garenne"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-meudon", label: "Meudon", type: "city", department: "92", postalCodes: ["92190", "92360"], cityNames: ["meudon"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-chatillon", label: "Châtillon", type: "city", department: "92", postalCodes: ["92320"], cityNames: ["chatillon", "châtillon"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-malakoff", label: "Malakoff", type: "city", department: "92", postalCodes: ["92240"], cityNames: ["malakoff"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-vanves", label: "Vanves", type: "city", department: "92", postalCodes: ["92170"], cityNames: ["vanves"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-sevres", label: "Sèvres", type: "city", department: "92", postalCodes: ["92310"], cityNames: ["sevres", "sèvres"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-bagneux", label: "Bagneux", type: "city", department: "92", postalCodes: ["92220"], cityNames: ["bagneux"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "city-saint-cloud", label: "Saint-Cloud", type: "city", department: "92", postalCodes: ["92210"], cityNames: ["saint-cloud", "saint cloud"], group: "Villes — 92 Hauts-de-Seine" },
-  { id: "france", label: "France entière", type: "france", group: "Élargi" }
-];
+const PROSPECT_ZONES = IDF_CITIES.map((city) => ({ ...city, type: "city" }));
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,57 +221,55 @@ function listSectors() {
 }
 
 function listZones() {
-  return PROSPECT_ZONES.map(({ id, label, type, group }) => ({ id, label, type, group }));
+  return PROSPECT_ZONES.map(({ id, label }) => ({ id, label }));
+}
+
+function defaultCityZone() {
+  return PROSPECT_ZONES.find((z) => z.id === DEFAULT_CITY_ID) || PROSPECT_ZONES[0];
 }
 
 function resolveSector(raw) {
   const value = String(raw || "").trim();
   const cabinets = SECTORS.find((s) => s.id === DEFAULT_SECTOR_ID) || SECTORS[0];
   if (!value) return cabinets;
-  const lowered = value.toLowerCase();
-  if (
-    lowered === DEFAULT_SECTOR_ID
-    || lowered.includes("comptable")
-    || lowered.includes("expertise")
-    || lowered.includes("fiduciaire")
-    || lowered === CABINETS_NAF.toLowerCase()
-  ) {
-    return cabinets;
-  }
   const byId = SECTORS.find((s) => s.id === value);
   if (byId) return byId;
-  // Cible métier verrouillée : tout autre secteur demandé renvoie les cabinets.
+  const lowered = value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const byLabel = SECTORS.find((s) => {
+    const label = s.label.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+    return label.includes(lowered) || lowered.includes(s.id.replace(/-/g, " "));
+  });
+  if (byLabel) return byLabel;
+  if (lowered.includes("avocat")) return SECTORS.find((s) => s.id === "cabinets-avocats") || cabinets;
+  if (lowered.includes("jurid")) return SECTORS.find((s) => s.id === "juridique") || cabinets;
+  if (lowered.includes("financ") || lowered.includes("banque") || lowered.includes("assur")) {
+    return SECTORS.find((s) => s.id === "finance") || cabinets;
+  }
+  if (lowered.includes("conseil") || lowered.includes("gestion")) {
+    return SECTORS.find((s) => s.id === "conseil-gestion") || cabinets;
+  }
+  if (lowered.includes("comptable") || lowered.includes("expertise") || lowered.includes("fiduciaire")) {
+    return cabinets;
+  }
   return cabinets;
 }
 
 function resolveZone(raw) {
   const value = String(raw || "").trim();
-  if (!value || value === "france" || value.toLowerCase() === "france") {
-    return PROSPECT_ZONES.find((z) => z.id === "france");
-  }
+  if (!value) return defaultCityZone();
   const byId = PROSPECT_ZONES.find((z) => z.id === value);
   if (byId) return byId;
-  const dep = value.replace(/\D/g, "").slice(0, 3);
-  if (dep) {
-    const byDep = PROSPECT_ZONES.find((z) => z.type === "department" && z.department === dep.padStart(2, "0").slice(-2));
-    if (byDep) return byDep;
-    if (dep === "75" || dep === "92" || dep === "93" || dep === "94" || dep === "77" || dep === "78" || dep === "91" || dep === "95") {
-      return {
-        id: dep,
-        label: `Département ${dep}`,
-        type: "department",
-        department: dep.padStart(2, "0"),
-        group: "Départements"
-      };
-    }
-  }
-  const lowered = value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-  if (lowered.includes("ile-de-france") || lowered.includes("ile de france") || lowered === "idf") {
-    return PROSPECT_ZONES.find((z) => z.id === "idf");
-  }
-  const byCity = PROSPECT_ZONES.find((z) => z.type === "city" && (z.cityNames || []).some((n) => lowered.includes(n)));
-  if (byCity) return byCity;
-  return PROSPECT_ZONES.find((z) => z.id === "idf");
+  const lowered = normalizeCityKey(value);
+  if (!lowered) return defaultCityZone();
+  const exact = PROSPECT_ZONES.find((z) => normalizeCityKey(z.label) === lowered);
+  if (exact) return exact;
+  const byName = PROSPECT_ZONES.find((z) => (z.cityNames || []).some((n) => normalizeCityKey(n) === lowered));
+  if (byName) return byName;
+  const starts = PROSPECT_ZONES.find((z) => normalizeCityKey(z.label).startsWith(lowered) || lowered.startsWith(normalizeCityKey(z.label)));
+  if (starts) return starts;
+  const includes = PROSPECT_ZONES.find((z) => normalizeCityKey(z.label).includes(lowered));
+  if (includes) return includes;
+  return defaultCityZone();
 }
 
 function cleanDisplayName(name) {
@@ -337,35 +355,24 @@ function normalizeCityKey(value) {
 }
 
 function matchesZone(company, zone) {
-  if (!zone || zone.type === "france") return true;
-  if (zone.type === "region") {
-    const dep = String(company.department || "").padStart(2, "0");
-    const cp = String(company.postalCode || "").trim();
-    const idfDeps = new Set(["75", "77", "78", "91", "92", "93", "94", "95"]);
-    if (/^\d{5}$/.test(cp)) {
-      const fromCp = cp.slice(0, 2) === "97" || cp.slice(0, 2) === "98" ? cp.slice(0, 3) : cp.slice(0, 2);
-      return idfDeps.has(fromCp);
-    }
-    return idfDeps.has(dep);
-  }
-  if (zone.type === "department") {
-    return matchesDepartment(company, zone.department);
-  }
-  if (zone.type === "city") {
-    const cp = String(company.postalCode || "").trim();
-    if (Array.isArray(zone.postalCodes) && zone.postalCodes.length && /^\d{5}$/.test(cp)) {
-      if (zone.postalCodes.includes(cp)) return true;
-    }
-    const cityKey = normalizeCityKey(company.city);
-    if (cityKey && Array.isArray(zone.cityNames)) {
-      if (zone.cityNames.some((name) => cityKey === normalizeCityKey(name) || cityKey.includes(normalizeCityKey(name)))) {
-        if (zone.department) return matchesDepartment(company, zone.department);
-        return true;
-      }
-    }
-    return false;
-  }
-  return true;
+  if (!zone) return true;
+  if (zone.type !== "city") return false;
+  const cp = String(company.postalCode || "").trim();
+  const cityKey = normalizeCityKey(company.city);
+  const names = (zone.cityNames || []).map((n) => normalizeCityKey(n)).filter(Boolean);
+  const labelKey = normalizeCityKey(zone.label);
+  const nameOk = Boolean(
+    cityKey
+    && (
+      cityKey === labelKey
+      || names.some((n) => cityKey === n || cityKey.includes(n) || n.includes(cityKey))
+    )
+  );
+  const cpOk = /^\d{5}$/.test(cp) && Array.isArray(zone.postalCodes) && zone.postalCodes.includes(cp);
+  if (cpOk && nameOk) return true;
+  if (cpOk && !cityKey) return true;
+  if (nameOk && zone.department) return matchesDepartment(company, zone.department);
+  return false;
 }
 
 function nafLabel(code) {
@@ -932,9 +939,9 @@ function companyFromSireneHit(hit) {
     brandName: cleanDisplayName(siege.nom_commercial || hit.sigle || ""),
     name: cleanDisplayName(nom),
     legalName: cleanDisplayName(hit.nom_raison_sociale || nom),
-    activity: nafLabel(naf) || "Activités comptables",
+    activity: nafLabel(naf) || "Activité déclarée",
     naf,
-    nafLabel: nafLabel(naf) || "Activités comptables",
+    nafLabel: nafLabel(naf) || "",
     siren: String(hit.siren || "").replace(/\D/g, "").slice(0, 9),
     createdAt: hit.date_creation && !String(hit.date_creation).startsWith("1900") ? hit.date_creation : "",
     publishedAt: "",
@@ -955,77 +962,100 @@ function companyFromSireneHit(hit) {
   };
 }
 
-function buildSireneSearchParams(sector, zone, page, perPage) {
+function buildSireneSearchParams(sector, zone, page, perPage, variant = {}) {
   const params = {
-    activite_principale: CABINETS_NAF,
     etat_administratif: "A",
     per_page: String(perPage),
     page: String(page)
   };
-  if (!zone || zone.type === "france") return params;
-  if (zone.type === "region" && zone.region) {
-    params.region = zone.region;
-    return params;
+  if (variant.section_activite_principale) {
+    params.section_activite_principale = variant.section_activite_principale;
+  } else if (variant.activite_principale) {
+    params.activite_principale = variant.activite_principale;
+  } else if (Array.isArray(sector.sireneNaf) && sector.sireneNaf.length) {
+    params.activite_principale = sector.sireneNaf.join(",");
+  } else if (sector.sireneSection) {
+    params.section_activite_principale = sector.sireneSection;
+  } else {
+    params.activite_principale = CABINETS_NAF;
   }
-  if (zone.type === "department" && zone.department) {
-    params.departement = String(zone.department).padStart(2, "0");
-    return params;
-  }
-  if (zone.type === "city") {
-    if (Array.isArray(zone.postalCodes) && zone.postalCodes.length === 1) {
-      params.code_postal = zone.postalCodes[0];
-      return params;
-    }
-    if (zone.department) {
+  if (zone && zone.type === "city") {
+    const codes = Array.isArray(zone.postalCodes) ? zone.postalCodes : [];
+    if (variant.code_postal) {
+      params.code_postal = variant.code_postal;
+    } else if (codes.length === 1) {
+      params.code_postal = codes[0];
+    } else if (codes.length > 1 && codes.length <= 4) {
+      params.code_postal = codes[0];
+    } else if (zone.department) {
       params.departement = String(zone.department).padStart(2, "0");
     }
   }
   return params;
 }
 
+function sireneActivityVariants(sector) {
+  const variants = [];
+  if (sector.sireneSection) {
+    variants.push({ section_activite_principale: sector.sireneSection });
+  }
+  if (Array.isArray(sector.sireneNaf) && sector.sireneNaf.length) {
+    variants.push({ activite_principale: sector.sireneNaf.join(",") });
+  }
+  if (!variants.length) {
+    variants.push({ activite_principale: CABINETS_NAF });
+  }
+  return variants;
+}
+
 async function fetchSireneCabinets(sector, zone, needed) {
   const collected = [];
   const seen = new Set();
   const perPage = 25;
-  let page = 1;
-  let total = Infinity;
-  const maxPages = 24;
-  const postalQueue = zone && zone.type === "city" && Array.isArray(zone.postalCodes) && zone.postalCodes.length > 1
+  const maxPages = 16;
+  const activityVariants = sireneActivityVariants(sector);
+  const postalQueue = zone && zone.type === "city" && Array.isArray(zone.postalCodes) && zone.postalCodes.length > 1 && zone.postalCodes.length <= 4
     ? [...zone.postalCodes]
     : [null];
+  let total = 0;
 
-  for (const postalOverride of postalQueue) {
-    page = 1;
-    while (collected.length < Math.max(needed * 2, needed + 10) && page <= maxPages && (page - 1) * perPage < total) {
-      const base = buildSireneSearchParams(sector, zone, page, perPage);
-      if (postalOverride) base.code_postal = postalOverride;
-      const url = `${SIRENE_URL}?${new URLSearchParams(base).toString()}`;
-      let payload;
-      try {
-        payload = await fetchJson(url, { timeoutMs: 20000, retries: 2 });
-      } catch {
-        break;
+  for (const activity of activityVariants) {
+    for (const postalOverride of postalQueue) {
+      let page = 1;
+      let localTotal = Infinity;
+      while (collected.length < Math.max(needed * 2, needed + 10) && page <= maxPages && (page - 1) * perPage < localTotal) {
+        const variant = { ...activity };
+        if (postalOverride) variant.code_postal = postalOverride;
+        const url = `${SIRENE_URL}?${new URLSearchParams(buildSireneSearchParams(sector, zone, page, perPage, variant)).toString()}`;
+        let payload;
+        try {
+          payload = await fetchJson(url, { timeoutMs: 20000, retries: 2 });
+        } catch {
+          break;
+        }
+        localTotal = Number(payload.total_results || payload.total || 0) || localTotal;
+        total = Math.max(total, Number.isFinite(localTotal) ? localTotal : 0);
+        const rows = payload.results || [];
+        if (!rows.length) break;
+        for (const hit of rows) {
+          const company = companyFromSireneHit(hit);
+          if (!company || !company.siren) continue;
+          if (!nafMatchesSector(company.naf, sector)) continue;
+          if (!matchesZone(company, zone)) continue;
+          if (seen.has(company.siren)) continue;
+          seen.add(company.siren);
+          collected.push(company);
+          if (collected.length >= Math.max(needed * 2, needed + 10)) break;
+        }
+        if (rows.length < perPage) break;
+        page += 1;
+        await sleep(60);
       }
-      total = Number(payload.total_results || payload.total || 0) || total;
-      const rows = payload.results || [];
-      if (!rows.length) break;
-      for (const hit of rows) {
-        const company = companyFromSireneHit(hit);
-        if (!company || !company.siren) continue;
-        if (!nafMatchesSector(company.naf, sector)) continue;
-        if (!matchesZone(company, zone)) continue;
-        if (seen.has(company.siren)) continue;
-        seen.add(company.siren);
-        collected.push(company);
-        if (collected.length >= Math.max(needed * 2, needed + 10)) break;
-      }
-      if (rows.length < perPage) break;
-      page += 1;
-      await sleep(60);
+      if (collected.length >= needed) break;
     }
     if (collected.length >= needed) break;
   }
-  return { total: Number.isFinite(total) ? total : collected.length, companies: collected };
+  return { total: total || collected.length, companies: collected };
 }
 
 function applyContact(company, { email, phone, website, source, confidence }) {
@@ -1990,8 +2020,9 @@ async function selectSectorCompanies(sector, zone, limit, sender, onEvent, seenK
     if (seenKeys.has(key)) continue;
     if (!matchesZone(company, zone)) continue;
     if (!skipAgeFilter && options.maxAgeDays && !isWithinCreationWindow(company, options.maxAgeDays)) continue;
-    // Double vérification NAF : exact 69.20Z uniquement.
     if (!nafMatchesSector(company.naf, sector)) continue;
+    const blob = `${company.name} ${company.activity} ${company.nafLabel}`.toLowerCase();
+    if ((sector.exclude || []).some((needle) => needle && blob.includes(String(needle).toLowerCase()))) continue;
     seenKeys.add(key);
     selected.push(company);
     if (emitCompanies) {
@@ -2019,7 +2050,7 @@ function buildProspectionSummary({
     days: "all",
     daysUsed: null,
     auto,
-    department: zoneMeta && zoneMeta.type === "department" ? zoneMeta.department : (department || null),
+    department: zoneMeta && zoneMeta.department ? zoneMeta.department : (department || null),
     zone: zoneMeta ? { id: zoneMeta.id, label: zoneMeta.label, type: zoneMeta.type } : null,
     totalBodacc: totalBodacc || 0,
     totalSirene: totalSirene || totalBodacc || 0,
@@ -2027,7 +2058,7 @@ function buildProspectionSummary({
     found: results.length,
     withContact: results.filter((row) => row.hasContact).length,
     sources: CONTACT_SOURCES.map((row) => `${row.name} — ${row.role}`),
-    note: "Cabinets NAF 69.20Z uniquement, toutes dates. Contacts publics vérifiés (double contrôle). Tél. Pappers/Societe.com exclus."
+    note: `${sector.label} — villes d’Île-de-France, toutes dates. Contacts publics vérifiés (double contrôle). Tél. Pappers/Societe.com exclus.`
   };
 }
 
@@ -2139,7 +2170,7 @@ async function runProspectionAuto(params, onEvent, sector, zone, sender) {
   if (!results.length) {
     onEvent({
       type: "status",
-      message: "Aucun contact public validé. Essayez une autre zone (ex. Île-de-France) ou une ville du 92."
+      message: "Aucun contact public validé. Essayez une autre ville d’Île-de-France."
     });
   }
 
@@ -2163,7 +2194,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
   if (!sector) {
     throw new Error("Secteur cabinets d'expertise comptable indisponible.");
   }
-  const zone = resolveZone(params.zone || params.department || "idf");
+  const zone = resolveZone(params.zone || params.department || DEFAULT_CITY_ID);
   const sender = {
     name: String(params.senderName || "").trim(),
     email: String(params.senderEmail || "").trim(),
@@ -2209,7 +2240,7 @@ async function runProspection(params = {}, onEvent = () => {}) {
   if (!selected.length) {
     onEvent({
       type: "status",
-      message: "Aucun cabinet avec ces filtres. Essayez Île-de-France, un département IDF, ou une ville du 92."
+      message: "Aucun résultat avec ces filtres. Essayez une autre ville d’Île-de-France."
     });
   }
 
@@ -2289,7 +2320,7 @@ function createProspectionRouter() {
         days: req.query.days || "all",
         limit: req.query.limit,
         department: req.query.department,
-        zone: req.query.zone || req.query.department,
+        zone: req.query.zone || req.query.department || DEFAULT_CITY_ID,
         senderName: req.query.senderName,
         senderEmail: req.query.senderEmail,
         senderPhone: req.query.senderPhone,
@@ -2315,6 +2346,7 @@ module.exports = {
   CONTACT_SOURCES,
   CABINETS_NAF,
   DEFAULT_SECTOR_ID,
+  DEFAULT_CITY_ID,
   createProspectionRouter,
   runProspection,
   listSectors,

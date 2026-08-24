@@ -1,7 +1,9 @@
 (() => {
   const sectorSelect = document.getElementById("sectorSelect");
   const zoneInput = document.getElementById("zoneInput");
-  const departmentInput = zoneInput; // alias rétrocompat mémoire / historique
+  const zoneSearch = document.getElementById("zoneSearch");
+  const zoneSuggest = document.getElementById("zoneSuggest");
+  const departmentInput = zoneInput;
   const daysSelect = null;
   const senderName = document.getElementById("senderName");
   const senderEmail = document.getElementById("senderEmail");
@@ -54,17 +56,25 @@
   const SCAN_RUNS_KEY = "prospection-scan-runs";
   const VIEW_KEY = "prospection-view";
   const FALLBACK_SECTORS = [
-    { id: "cabinets-comptables", label: "Cabinets d’expertise comptable" }
+    { id: "cabinets-comptables", label: "Cabinets d’expertise comptable" },
+    { id: "cabinets-avocats", label: "Cabinets d’avocats" },
+    { id: "juridique", label: "Juridique (notaires, huissiers, juristes)" },
+    { id: "finance", label: "Finance / banque / assurance" },
+    { id: "conseil-gestion", label: "Conseil en gestion" },
+    { id: "branche-juridique-finance", label: "Toute la branche (comptable, juridique, finance)" }
   ];
   const FALLBACK_ZONES = [
-    { id: "idf", label: "Île-de-France (toute la région)", group: "Région" },
-    { id: "75", label: "75 — Paris", group: "Départements IDF" },
-    { id: "92", label: "92 — Hauts-de-Seine", group: "Départements IDF" },
-    { id: "city-asnieres", label: "Asnières-sur-Seine", group: "Villes — 92 Hauts-de-Seine" },
-    { id: "city-gennevilliers", label: "Gennevilliers", group: "Villes — 92 Hauts-de-Seine" },
-    { id: "city-colombes", label: "Colombes", group: "Villes — 92 Hauts-de-Seine" },
-    { id: "france", label: "France entière", group: "Élargi" }
+    { id: "city-75056", label: "Paris" },
+    { id: "city-92004", label: "Asnières-sur-Seine" },
+    { id: "city-92036", label: "Gennevilliers" },
+    { id: "city-92025", label: "Colombes" },
+    { id: "city-92050", label: "Nanterre" },
+    { id: "city-92012", label: "Boulogne-Billancourt" },
+    { id: "city-78646", label: "Versailles" },
+    { id: "city-93048", label: "Montreuil" },
+    { id: "city-94028", label: "Créteil" }
   ];
+  const DEFAULT_CITY_ID = "city-75056";
   const IS_FILE_MODE = window.location.protocol === "file:";
   const API_PREFIX = IS_FILE_MODE ? "http://localhost:3000" : "";
 
@@ -80,6 +90,8 @@
   let scanRuns = [];
   let currentView = "dashboard";
   let scanStartedAt = null;
+  let cityZones = FALLBACK_ZONES.slice();
+  let citySuggestIndex = -1;
 
   function loadContacted() {
     try {
@@ -144,10 +156,128 @@
     return sec ? `${min} min ${sec} s` : `${min} min`;
   }
 
+  function normalizeCityQuery(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
   function zoneLabel(code) {
-    if (!zoneInput) return code || "Île-de-France";
-    const opt = [...zoneInput.options].find((o) => o.value === code);
-    return opt ? opt.textContent : (code || "Île-de-France");
+    const id = code || zoneInput?.value || DEFAULT_CITY_ID;
+    const hit = cityZones.find((z) => z.id === id);
+    if (hit) return hit.label;
+    if (zoneSearch?.value?.trim()) return zoneSearch.value.trim();
+    return "Paris";
+  }
+
+  function selectedCityId() {
+    return zoneInput?.value?.trim() || DEFAULT_CITY_ID;
+  }
+
+  function setSelectedCity(zone) {
+    if (!zone) return;
+    if (zoneInput) zoneInput.value = zone.id;
+    if (zoneSearch) zoneSearch.value = zone.label;
+    hideCitySuggest();
+  }
+
+  function hideCitySuggest() {
+    if (!zoneSuggest) return;
+    zoneSuggest.hidden = true;
+    zoneSuggest.innerHTML = "";
+    citySuggestIndex = -1;
+  }
+
+  function filterCities(query) {
+    const q = normalizeCityQuery(query);
+    if (!q) {
+      return cityZones.filter((z) => ["city-75056", "city-92004", "city-92036", "city-92025"].includes(z.id)).concat(
+        cityZones.slice(0, 8)
+      ).filter((z, i, arr) => arr.findIndex((x) => x.id === z.id) === i).slice(0, 12);
+    }
+    const scored = [];
+    for (const zone of cityZones) {
+      const key = normalizeCityQuery(zone.label);
+      if (!key) continue;
+      let score = 0;
+      if (key === q) score = 100;
+      else if (key.startsWith(q)) score = 80;
+      else if (key.includes(q)) score = 50;
+      else if (q.split(" ").every((part) => part && key.includes(part))) score = 40;
+      if (score) scored.push({ zone, score, key });
+    }
+    scored.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key, "fr"));
+    return scored.slice(0, 12).map((row) => row.zone);
+  }
+
+  function renderCitySuggest(query) {
+    if (!zoneSuggest) return;
+    const rows = filterCities(query);
+    if (!rows.length) {
+      zoneSuggest.innerHTML = `<li class="empty-hint">Aucune ville trouvée</li>`;
+      zoneSuggest.hidden = false;
+      citySuggestIndex = -1;
+      return;
+    }
+    zoneSuggest.innerHTML = rows.map((z, i) => (
+      `<li role="option" data-id="${escapeHtml(z.id)}" class="${i === 0 ? "active" : ""}">${escapeHtml(z.label)}</li>`
+    )).join("");
+    zoneSuggest.hidden = false;
+    citySuggestIndex = 0;
+  }
+
+  function bindCityPicker() {
+    if (!zoneSearch || !zoneSuggest) return;
+    zoneSearch.addEventListener("focus", () => renderCitySuggest(zoneSearch.value));
+    zoneSearch.addEventListener("input", () => renderCitySuggest(zoneSearch.value));
+    zoneSearch.addEventListener("keydown", (event) => {
+      if (zoneSuggest.hidden && (event.key === "ArrowDown" || event.key === "Enter")) {
+        renderCitySuggest(zoneSearch.value);
+      }
+      const items = [...zoneSuggest.querySelectorAll("li[data-id]")];
+      if (!items.length) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        citySuggestIndex = Math.min(items.length - 1, citySuggestIndex + 1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        citySuggestIndex = Math.max(0, citySuggestIndex - 1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const id = items[Math.max(0, citySuggestIndex)]?.getAttribute("data-id");
+        const zone = cityZones.find((z) => z.id === id);
+        if (zone) setSelectedCity(zone);
+        return;
+      } else if (event.key === "Escape") {
+        hideCitySuggest();
+        return;
+      } else {
+        return;
+      }
+      items.forEach((el, i) => el.classList.toggle("active", i === citySuggestIndex));
+      items[citySuggestIndex]?.scrollIntoView({ block: "nearest" });
+    });
+    zoneSuggest.addEventListener("mousedown", (event) => {
+      const li = event.target.closest("li[data-id]");
+      if (!li) return;
+      event.preventDefault();
+      const zone = cityZones.find((z) => z.id === li.getAttribute("data-id"));
+      if (zone) setSelectedCity(zone);
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target === zoneSearch || zoneSuggest.contains(event.target)) return;
+      hideCitySuggest();
+      const typed = normalizeCityQuery(zoneSearch.value);
+      if (!typed) {
+        setSelectedCity(cityZones.find((z) => z.id === DEFAULT_CITY_ID) || cityZones[0]);
+        return;
+      }
+      const exact = cityZones.find((z) => normalizeCityQuery(z.label) === typed);
+      if (exact) setSelectedCity(exact);
+    });
   }
 
   function departmentLabel(code) {
@@ -163,7 +293,7 @@
     const endedAt = new Date().toISOString();
     const startedAt = scanStartedAt || endedAt;
     const durationMs = Math.max(0, new Date(endedAt) - new Date(startedAt));
-    const zoneId = (summary.zone && summary.zone.id) || zoneInput?.value?.trim() || "idf";
+    const zoneId = (summary.zone && summary.zone.id) || selectedCityId();
     const newTodo = incoming.filter((c) => !isContacted(companyKey(c))).length;
     const already = incoming.filter((c) => isContacted(companyKey(c))).length;
     scanRuns.unshift({
@@ -784,31 +914,22 @@
   }
 
   function renderSectorOptions(sectors) {
-    const list = (sectors || []).filter((s) => s.id === "cabinets-comptables");
-    const finalList = list.length ? list : FALLBACK_SECTORS;
-    sectorSelect.innerHTML = finalList.map((sector) => (
-      `<option value="${escapeHtml(sector.id)}" selected>${escapeHtml(sector.label)}</option>`
+    const list = (sectors || []).length ? sectors : FALLBACK_SECTORS;
+    const current = sectorSelect.value || "cabinets-comptables";
+    sectorSelect.disabled = false;
+    sectorSelect.innerHTML = list.map((sector) => (
+      `<option value="${escapeHtml(sector.id)}">${escapeHtml(sector.label)}</option>`
     )).join("");
-    sectorSelect.value = "cabinets-comptables";
-    sectorSelect.disabled = true;
+    const hasCurrent = [...sectorSelect.options].some((o) => o.value === current);
+    sectorSelect.value = hasCurrent ? current : "cabinets-comptables";
   }
 
   function renderZoneOptions(zones) {
-    if (!zoneInput || !Array.isArray(zones) || !zones.length) return;
-    const current = zoneInput.value || "idf";
-    const groups = new Map();
-    for (const zone of zones) {
-      const group = zone.group || "Zones";
-      if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push(zone);
-    }
-    zoneInput.innerHTML = [...groups.entries()].map(([group, rows]) => (
-      `<optgroup label="${escapeHtml(group)}">${rows.map((z) => (
-        `<option value="${escapeHtml(z.id)}">${escapeHtml(z.label)}</option>`
-      )).join("")}</optgroup>`
-    )).join("");
-    const hasCurrent = [...zoneInput.options].some((o) => o.value === current);
-    zoneInput.value = hasCurrent ? current : "idf";
+    if (!Array.isArray(zones) || !zones.length) return;
+    cityZones = zones;
+    const currentId = zoneInput?.value || DEFAULT_CITY_ID;
+    const current = cityZones.find((z) => z.id === currentId) || cityZones.find((z) => z.id === DEFAULT_CITY_ID) || cityZones[0];
+    setSelectedCity(current);
   }
 
   async function loadSources() {
@@ -902,7 +1023,7 @@
   }
 
   function selectedSector() {
-    return "cabinets-comptables";
+    return sectorSelect?.value || "cabinets-comptables";
   }
 
   function handleEvent(event) {
@@ -945,7 +1066,7 @@
       } else if (todo) {
         log(`Sondage terminé — ${todo} entreprise(s) à contacter en mémoire.`, { quiet: true });
       } else if (!companies.length) {
-        log("Aucun contact validé. Essayez Île-de-France, un département IDF, ou une ville du 92.", { quiet: true });
+        log("Aucun contact validé. Essayez une autre ville d’Île-de-France.", { quiet: true });
       } else {
         log("Tous les cabinets en mémoire sont déjà contactés.", { quiet: true });
       }
@@ -1020,11 +1141,11 @@
     const daysValue = "all";
     scanStartedAt = new Date().toISOString();
     const params = new URLSearchParams({
-      sector: "cabinets-comptables",
+      sector: selectedSector(),
       days: daysValue,
       limit: "40",
-      zone: zoneInput?.value?.trim() || "idf",
-      department: zoneInput?.value?.trim() || "idf",
+      zone: selectedCityId(),
+      department: selectedCityId(),
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
@@ -1381,6 +1502,7 @@
   loadFilter();
   loadSectors();
   loadZones();
+  bindCityPicker();
   loadSources();
   warnIfFileModeWithoutServer();
   refreshServerStatus();
