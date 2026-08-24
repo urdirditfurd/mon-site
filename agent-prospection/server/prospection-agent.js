@@ -8,6 +8,7 @@
 
 const dns = require("dns").promises;
 const express = require("express");
+const mailDrafts = require("../mail-drafts");
 
 const USER_AGENT = "ClipForge-Prospection/1.0 (+https://github.com/urdirditfurd/mon-site)";
 const BODACC_URL = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records";
@@ -1626,29 +1627,25 @@ async function enrichFromSearch(company) {
 }
 
 function buildProposal(company, sender = {}) {
-  const who = sender.name || "notre société";
-  const director = (company.directors || [])[0] ? ` ${company.directors[0]}` : "";
-  const activity = company.activity || company.nafLabel || "expertise comptable";
-  const subject = `Échange avec ${company.name}`;
-  const body = `Bonjour${director ? ` ${director}` : ""},
-
-Je me permets de vous contacter au sujet de ${company.name}.
-
-${who} souhaite échanger avec les cabinets d'expertise comptable de votre secteur afin de présenter une collaboration adaptée à votre activité (${activity}).
-
-${company.address ? `Adresse : ${company.address}` : ""}
-
-Si vous le souhaitez, je vous propose un premier échange de 20 minutes.
-
-Cordialement,
-${sender.name || ""}
-${sender.email || ""}
-${sender.phone || ""}`.replace(/\n{3,}/g, "\n\n").trim();
-
+  const draft = mailDrafts.buildOutreachMail(company, {
+    name: sender.name || sender.company || "",
+    role: sender.role || "",
+    company: sender.company || sender.name || "",
+    email: sender.email || "",
+    phone: sender.phone || "",
+    siren: sender.siren || "",
+    address: sender.address || ""
+  });
   const mailto = company.email
-    ? `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    ? `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`
     : "";
-  return { subject, body, mailto };
+  return {
+    subject: draft.subject,
+    body: draft.body,
+    mailto,
+    focusId: draft.focusId,
+    hook: draft.hook
+  };
 }
 
 function isVerifiedContact(company) {
@@ -1721,6 +1718,7 @@ function publicCompany(company, sender) {
     directors: company.directors,
     email: verifiedEmail ? (company.email || "") : "",
     phone: verifiedEmail ? (company.phone || "") : "",
+    focusId: verifiedEmail ? mailDrafts.inferClientFocus(company).id : "",
     website: verifiedEmail && company.website ? company.website : (company.website && isRealCompanyWebsite(company.website) ? company.website : ""),
     contactSource: verifiedEmail ? (company.contactSource || "") : "",
     contactConfidence: verifiedEmail ? (company.contactConfidence || "") : "",
@@ -2200,6 +2198,10 @@ async function runProspection(params = {}, onEvent = () => {}) {
   const zone = resolveZone(params.zone || params.department || DEFAULT_CITY_ID);
   const sender = {
     name: String(params.senderName || "").trim(),
+    role: String(params.senderRole || "").trim(),
+    company: String(params.senderCompany || "").trim(),
+    siren: String(params.senderSiren || "").trim(),
+    address: String(params.senderAddress || "").trim(),
     email: String(params.senderEmail || "").trim(),
     phone: String(params.senderPhone || "").trim()
   };
@@ -2322,6 +2324,10 @@ function createProspectionRouter() {
         department: req.query.department,
         zone: req.query.zone || req.query.department || DEFAULT_CITY_ID,
         senderName: req.query.senderName,
+        senderRole: req.query.senderRole,
+        senderCompany: req.query.senderCompany,
+        senderSiren: req.query.senderSiren,
+        senderAddress: req.query.senderAddress,
         senderEmail: req.query.senderEmail,
         senderPhone: req.query.senderPhone,
         enrichContacts: req.query.enrichContacts !== "0",

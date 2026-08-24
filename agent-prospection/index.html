@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prospection — nouvelles entreprises</title>
+  <title>Prospection — brouillons prêts à envoyer</title>
   <link rel="icon" href="/prospection/favicon.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="/prospection/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -28,8 +28,27 @@
       --success-border: rgba(22, 163, 74, .25);
       --warn-bg: rgba(234, 179, 8, .08);
       --warn-border: rgba(234, 179, 8, .3);
+      --danger: #b42318;
+      --danger-bg: rgba(180, 35, 24, .08);
+      --danger-border: rgba(180, 35, 24, .28);
       --shadow: 0 10px 30px rgba(61, 46, 22, .06);
       --radius: 14px;
+    }
+    .skip-link {
+      position: absolute;
+      left: 12px;
+      top: -48px;
+      z-index: 200;
+      background: var(--ink);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .skip-link:focus {
+      top: 12px;
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     * { box-sizing: border-box; }
     body {
@@ -80,6 +99,7 @@
       font-weight: 600;
       font-size: .9rem;
       cursor: pointer;
+      min-height: 44px;
       transition: border-color .15s, color .15s, background .15s;
     }
     .nav-btn:hover,
@@ -204,7 +224,7 @@
     }
     .mobile-nav-inner {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
       max-width: 520px;
       margin: 0 auto;
@@ -323,7 +343,8 @@
       animation: rise .5s ease .08s both;
     }
     .dashboard-view[hidden],
-    .layout[hidden] {
+    .layout[hidden],
+    #viewSuivi[hidden] {
       display: none !important;
     }
     .dashboard-view:not([hidden]) {
@@ -501,6 +522,7 @@
       font-family: inherit;
       cursor: pointer;
       font-size: .88rem;
+      min-height: 44px;
       transition: transform .15s ease, background .15s ease, border-color .15s ease;
     }
     .btn:hover { transform: translateY(-1px); }
@@ -666,6 +688,55 @@
       box-shadow: 0 8px 20px rgba(224, 138, 30, .08);
     }
     .company-card.contacted {
+      opacity: .88;
+      background: #fffdf9;
+    }
+    .company-card.overdue {
+      border-color: var(--danger-border);
+      background: var(--danger-bg);
+    }
+    .chip.overdue {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+    }
+    .suivi-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+    .suivi-toolbar .field { margin: 0; min-width: 160px; }
+    .suivi-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .suivi-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: #fff;
+    }
+    .suivi-item.overdue {
+      border-color: var(--danger-border);
+      background: var(--danger-bg);
+    }
+    .suivi-item h3 { margin: 0 0 6px; font-size: 1rem; }
+    .suivi-item .meta { color: var(--muted); font-size: .86rem; line-height: 1.45; }
+    .suivi-item .actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .suivi-group-title {
+      list-style: none;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 6px 0 0;
+    }
+    .overdue-flag {
+      color: var(--danger);
+      font-weight: 700;
+      font-size: .86rem;
+      margin: 6px 0 0;
+    }
       border-color: var(--success-border);
       background: linear-gradient(180deg, #f7fdf9, #fff);
     }
@@ -815,12 +886,14 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#viewDashboard">Aller au contenu</a>
   <header class="topbar">
     <div class="topbar-row">
       <h1>Prospection</h1>
       <nav class="app-nav" aria-label="Navigation principale">
         <button type="button" class="nav-btn active" data-view="dashboard" id="navDashboard">Accueil</button>
         <button type="button" class="nav-btn" data-view="prospection" id="navProspection">Recherche</button>
+        <button type="button" class="nav-btn" data-view="suivi" id="navSuivi">Suivi</button>
       </nav>
     </div>
   </header>
@@ -839,11 +912,12 @@
   <section class="dashboard-view" id="viewDashboard" aria-label="Accueil">
     <div class="dash-hero">
       <div>
-        <h2 class="hero-title">Trouvez des cabinets à contacter en Île-de-France</h2>
-        <p class="hero-lead">Expertise comptable, avocats, juridique, finance : choisissez une ville, lancez la recherche — toutes dates de création — et préparez vos messages.</p>
+        <h2 class="hero-title">Un brouillon prêt à envoyer, adapté à chaque cabinet</h2>
+        <p class="hero-lead">Trouvez un cabinet près de vous, ouvrez le mail personnalisé, relancez au bon moment. Trois clics, pas plus.</p>
         <div class="hero-actions">
-          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Lancer une recherche</button>
+          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Trouver des cabinets près de moi</button>
           <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
+          <button type="button" class="hero-link" id="dashGoSuivi" data-view="suivi" hidden>Voir les relances en retard</button>
         </div>
       </div>
     </div>
@@ -898,11 +972,27 @@
         <ul id="zoneSuggest" class="city-suggest" hidden role="listbox"></ul>
       </label>
       <details class="options-disclosure">
-        <summary>Options — signature et coordonnées</summary>
+        <summary>Votre identité (signature légale)</summary>
         <div class="options-body">
           <label class="field">
-            <span>Nom de la société (signature)</span>
-            <input id="senderName" type="text" placeholder="Ex. : Cabinet Dupont & Associés" autocomplete="organization" value="">
+            <span>Votre nom</span>
+            <input id="senderName" type="text" placeholder="Ex. : Qusai Ben Zaied" autocomplete="name" value="">
+          </label>
+          <label class="field">
+            <span>Fonction</span>
+            <input id="senderRole" type="text" placeholder="Ex. : Président" autocomplete="organization-title" value="">
+          </label>
+          <label class="field">
+            <span>Nom de la société</span>
+            <input id="senderCompany" type="text" placeholder="Ex. : Comanjo SAS" autocomplete="organization" value="">
+          </label>
+          <label class="field">
+            <span>SIREN</span>
+            <input id="senderSiren" type="text" inputmode="numeric" placeholder="Ex. : 999 898 745" autocomplete="off" value="">
+          </label>
+          <label class="field">
+            <span>Adresse de la société</span>
+            <input id="senderAddress" type="text" placeholder="Ex. : 27 rue de la Comète, 92600 Asnières-sur-Seine" autocomplete="street-address" value="">
           </label>
           <label class="field">
             <span>Votre e-mail</span>
@@ -910,12 +1000,12 @@
           </label>
           <label class="field">
             <span>Votre téléphone</span>
-            <input id="senderPhone" type="tel" placeholder="Ex. : 01 23 45 67 89" autocomplete="tel" value="">
+            <input id="senderPhone" type="tel" placeholder="Ex. : 07 68 50 77 88" autocomplete="tel" value="">
           </label>
         </div>
       </details>
       <span class="step-label" style="margin-top:14px">Étape 2 — Lancer</span>
-      <button id="runBtn" class="btn btn-primary btn-block panel-run-desktop" type="button">Trouver des entreprises</button>
+      <button id="runBtn" class="btn btn-primary btn-block panel-run-desktop" type="button">Trouver des cabinets à contacter</button>
 
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
         <div class="progress-head">
@@ -956,7 +1046,7 @@
           </label>
           <span><span class="count" id="selectedCount">0</span> sélectionné(s)</span>
           <button id="massEditBtn" class="btn btn-ghost" type="button">Relire les messages</button>
-          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer mes propositions</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Ouvrir les brouillons</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
@@ -965,24 +1055,18 @@
       </div>
 
       <details class="card mail-template-box options-disclosure">
-        <summary>Personnaliser mes messages</summary>
+        <summary>Personnaliser le corps du message</summary>
         <div class="options-body">
-        <p class="meta hint" style="margin-top:0">Variables : <code>{entreprise}</code>, <code>{dirigeant}</code>, <code>{activite}</code>, <code>{adresse}</code>.</p>
-        <textarea id="mailTemplate">Bonjour {dirigeant},
+        <p class="meta hint" style="margin-top:0">L’accroche (première phrase) s’adapte toute seule à l’activité du cabinet. Le pied légal (SIREN, source, « stop ») est ajouté automatiquement. Vous pouvez modifier le corps ci-dessous.</p>
+        <textarea id="mailTemplate">Je développe L'ARC avec un expert-comptable en exercice : à partir d'un FEC exporté de votre logiciel comptable, notre agent l'importe et mémorise tout l'historique comptable du cabinet. Ensuite, à chaque nouvelle facture que vous lui envoyez, il propose automatiquement une écriture comptable complète (compte, journal, tiers, taux et compte de TVA).
 
-Je me permets de vous contacter au sujet de {entreprise}.
+Le collaborateur peut échanger avec l'agent pour lui indiquer les ajustements souhaités : l'agent retient ces corrections et les applique dès la facture suivante, pour proposer une écriture toujours plus juste.
 
-Nous souhaitons échanger avec les cabinets d’expertise comptable de votre secteur afin de présenter une collaboration adaptée à votre activité.
+Nous avons créé un FEC fictif, celui d'une entreprise imaginaire avec plusieurs factures, pour vous faire une démonstration. Nous aimerions vous montrer la simplicité de fonctionnement de l'agent et l'aide qu'il peut apporter à votre cabinet : cela vous permettrait de vous concentrer sur des tâches à plus haute valeur ajoutée.
 
-Activité : {activite}
-Adresse : {adresse}
+C'est gratuit et sans engagement.
 
-Si vous le souhaitez, je vous propose un premier échange de 20 minutes.
-
-Cordialement,
-[Nom de la société]
-[Votre email]
-[Votre téléphone]</textarea>
+Ça vaut 10 minutes au téléphone ?</textarea>
         <div class="actions">
           <button id="previewMailBtn" class="btn btn-ghost" type="button">Aperçu</button>
           <button id="saveTemplateBtn" class="btn btn-ghost" type="button">Sauvegarder</button>
@@ -996,18 +1080,45 @@ Cordialement,
     </section>
   </main>
 
+  <section class="dashboard-view" id="viewSuivi" hidden aria-label="Suivi des mails">
+    <div class="dash-hero">
+      <div>
+        <h2 class="hero-title">Suivi et relances</h2>
+        <p class="hero-lead">Les mails envoyés passent ici. Après le délai choisi, la ligne devient rouge et un brouillon de relance est prêt.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="suivi-toolbar">
+        <label class="field">
+          <span>Relancer après</span>
+          <select id="followUpDelay">
+            <option value="3">3 jours</option>
+            <option value="5" selected>5 jours</option>
+            <option value="7">7 jours</option>
+            <option value="10">10 jours</option>
+            <option value="14">14 jours</option>
+          </select>
+        </label>
+        <p class="meta hint" style="margin:0;max-width:42ch">Le délai s’applique aux prochains envois. Les lignes déjà en retard restent visibles en rouge, avec le texte « À relancer ».</p>
+      </div>
+      <ul class="suivi-list" id="suiviList"></ul>
+    </div>
+  </section>
+
   <div class="sticky-run-bar" id="stickyRunBar" hidden>
-    <button id="runBtnMobile" class="btn btn-primary btn-block" type="button">Trouver des entreprises</button>
+    <button id="runBtnMobile" class="btn btn-primary btn-block" type="button">Trouver des cabinets à contacter</button>
   </div>
 
   <nav class="mobile-nav" aria-label="Navigation mobile">
     <div class="mobile-nav-inner">
       <button type="button" class="mobile-nav-btn active" data-view="dashboard" id="mobileNavDashboard">Accueil</button>
       <button type="button" class="mobile-nav-btn" data-view="prospection" id="mobileNavProspection">Recherche</button>
+      <button type="button" class="mobile-nav-btn" data-view="suivi" id="mobileNavSuivi">Suivi</button>
     </div>
   </nav>
 
   <button class="scroll-top" id="scrollTopBtn" type="button" aria-label="Haut de page">↑</button>
+  <script src="/prospection/mail-drafts.js"></script>
   <script src="/prospection/prospection.js"></script>
 </body>
 </html>

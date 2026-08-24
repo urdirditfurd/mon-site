@@ -6,6 +6,10 @@
   const departmentInput = zoneInput;
   const daysSelect = null;
   const senderName = document.getElementById("senderName");
+  const senderRole = document.getElementById("senderRole");
+  const senderCompany = document.getElementById("senderCompany");
+  const senderSiren = document.getElementById("senderSiren");
+  const senderAddress = document.getElementById("senderAddress");
   const senderEmail = document.getElementById("senderEmail");
   const senderPhone = document.getElementById("senderPhone");
   const runBtn = document.getElementById("runBtn");
@@ -37,8 +41,14 @@
   const viewProspection = document.getElementById("viewProspection");
   const navDashboard = document.getElementById("navDashboard");
   const navProspection = document.getElementById("navProspection");
+  const navSuivi = document.getElementById("navSuivi");
   const dashGoProspection = document.getElementById("dashGoProspection");
   const dashGoTodo = document.getElementById("dashGoTodo");
+  const dashGoSuivi = document.getElementById("dashGoSuivi");
+  const viewSuivi = document.getElementById("viewSuivi");
+  const suiviList = document.getElementById("suiviList");
+  const followUpDelay = document.getElementById("followUpDelay");
+  const mobileNavSuivi = document.getElementById("mobileNavSuivi");
   const dashMetrics = document.getElementById("dashMetrics");
   const dashRuns = document.getElementById("dashRuns");
   const dashContacts = document.getElementById("dashContacts");
@@ -55,6 +65,7 @@
   const FILTER_KEY = "prospection-filter";
   const SCAN_RUNS_KEY = "prospection-scan-runs";
   const VIEW_KEY = "prospection-view";
+  const FOLLOWUP_KEY = "prospection-followup-days";
   const FALLBACK_SECTORS = [
     { id: "cabinets-comptables", label: "Cabinets d’expertise comptable" },
     { id: "cabinets-avocats", label: "Cabinets d’avocats" },
@@ -319,29 +330,59 @@
   }
 
   function setAppView(view) {
-    currentView = view === "prospection" || view === "recherche" ? "prospection" : "dashboard";
+    const next = view === "prospection" || view === "recherche"
+      ? "prospection"
+      : (view === "suivi" ? "suivi" : "dashboard");
+    currentView = next;
     localStorage.setItem(VIEW_KEY, currentView);
-    const onDash = currentView === "dashboard";
+    const onDash = next === "dashboard";
+    const onSearch = next === "prospection";
+    const onSuivi = next === "suivi";
     if (viewDashboard) {
       viewDashboard.hidden = !onDash;
       viewDashboard.setAttribute("aria-hidden", onDash ? "false" : "true");
     }
     if (viewProspection) {
-      viewProspection.hidden = onDash;
-      viewProspection.setAttribute("aria-hidden", onDash ? "true" : "false");
+      viewProspection.hidden = !onSearch;
+      viewProspection.setAttribute("aria-hidden", onSearch ? "false" : "true");
     }
-    if (navDashboard) navDashboard.classList.toggle("active", onDash);
-    if (navProspection) navProspection.classList.toggle("active", !onDash);
-    if (mobileNavDashboard) mobileNavDashboard.classList.toggle("active", onDash);
-    if (mobileNavProspection) mobileNavProspection.classList.toggle("active", !onDash);
-    if (stickyRunBar) stickyRunBar.hidden = onDash;
-    const hash = onDash ? "#accueil" : "#recherche";
+    if (viewSuivi) {
+      viewSuivi.hidden = !onSuivi;
+      viewSuivi.setAttribute("aria-hidden", onSuivi ? "false" : "true");
+    }
+    const tabs = [
+      [navDashboard, onDash],
+      [navProspection, onSearch],
+      [navSuivi, onSuivi],
+      [mobileNavDashboard, onDash],
+      [mobileNavProspection, onSearch],
+      [mobileNavSuivi, onSuivi]
+    ];
+    for (const [el, active] of tabs) {
+      if (!el) continue;
+      el.classList.toggle("active", active);
+      el.setAttribute("aria-current", active ? "page" : "false");
+    }
+    if (stickyRunBar) stickyRunBar.hidden = !onSearch;
+    const skip = document.querySelector(".skip-link");
+    if (skip) {
+      skip.setAttribute("href", onSuivi ? "#viewSuivi" : (onSearch ? "#viewProspection" : "#viewDashboard"));
+    }
+    const hash = onDash ? "#accueil" : (onSuivi ? "#suivi" : "#recherche");
     if (window.location.hash !== hash) {
       history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
     }
     if (onDash) {
       renderDashboard();
       window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (onSuivi) {
+      renderSuivi();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      requestAnimationFrame(() => {
+        if (followUpDelay) followUpDelay.focus({ preventScroll: true });
+      });
       return;
     }
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
@@ -360,11 +401,10 @@
     if (!dashMetrics || !dashRuns || !dashContacts) return;
     const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
     const done = companies.filter((c) => isContacted(companyKey(c))).length;
-    const totalScanned = Object.keys(companyMemory).length;
+    const overdue = overdueEntries().length;
     const lastRun = scanRuns[0];
-    const totalScanTime = scanRuns.reduce((sum, row) => sum + (Number(row.durationMs) || 0), 0);
-    const firstContactAt = contactedEntries().slice(-1)[0]?.at;
     const lastContactAt = contactedEntries()[0]?.at;
+    updateSuiviBadge(overdue);
 
     dashMetrics.innerHTML = `
       <div class="dash-metric">
@@ -373,25 +413,29 @@
         <div class="sub">entreprises à contacter</div>
       </div>
       <div class="dash-metric">
-        <span class="label">Contactées</span>
+        <span class="label">Mails ouverts</span>
         <div class="value">${done}</div>
-        <div class="sub">${lastContactAt ? `Dernier : ${formatDateTime(lastContactAt)}` : "Aucun contact encore"}</div>
+        <div class="sub">${lastContactAt ? `Dernier : ${formatDateTime(lastContactAt)}` : "Aucun brouillon encore"}</div>
+      </div>
+      <div class="dash-metric">
+        <span class="label">À relancer</span>
+        <div class="value">${overdue}</div>
+        <div class="sub">${overdue ? "Délai dépassé — ouvrir Suivi" : "Aucune relance en retard"}</div>
       </div>
       <div class="dash-metric">
         <span class="label">Recherches</span>
         <div class="value">${scanRuns.length}</div>
         <div class="sub">${lastRun ? `Dernière : ${formatDateTime(lastRun.endedAt)}` : "Aucune recherche"}</div>
       </div>
-      <div class="dash-metric">
-        <span class="label">Temps agent</span>
-        <div class="value" style="font-size:1.35rem">${formatDuration(totalScanTime)}</div>
-        <div class="sub">${totalScanned} entreprise(s) en mémoire</div>
-      </div>
     `;
 
     if (dashGoTodo) {
       dashGoTodo.hidden = todo <= 0;
       dashGoTodo.textContent = `Voir mes ${todo} contact(s) en attente →`;
+    }
+    if (dashGoSuivi) {
+      dashGoSuivi.hidden = overdue <= 0;
+      dashGoSuivi.textContent = `Voir les ${overdue} relance(s) en retard →`;
     }
 
     if (!scanRuns.length) {
@@ -477,28 +521,88 @@
       });
   }
 
+  function followUpDays() {
+    const n = Number((followUpDelay && followUpDelay.value) || localStorage.getItem(FOLLOWUP_KEY) || "5");
+    return [3, 5, 7, 10, 14].includes(n) ? n : 5;
+  }
+
+  function loadFollowUpDelay() {
+    if (!followUpDelay) return;
+    followUpDelay.value = String(followUpDays());
+  }
+
+  function followUpDueMs(entry) {
+    if (!entry) return NaN;
+    const due = Date.parse(entry.followUpAt || "");
+    if (Number.isFinite(due)) return due;
+    const at = Date.parse(entry.sentAt || entry.at || "");
+    if (!Number.isFinite(at)) return NaN;
+    return at + followUpDays() * 86400000;
+  }
+
+  function isOverdue(entry) {
+    if (!entry || entry.replied || entry.booked || entry.followUpSent) return false;
+    const due = followUpDueMs(entry);
+    return Number.isFinite(due) && due <= Date.now();
+  }
+
+  function overdueEntries() {
+    return contactedEntries().filter((row) => isOverdue(row));
+  }
+
+  function updateSuiviBadge(count) {
+    const n = typeof count === "number" ? count : overdueEntries().length;
+    const label = n > 0 ? `Suivi (${n})` : "Suivi";
+    if (navSuivi) navSuivi.textContent = label;
+    if (mobileNavSuivi) mobileNavSuivi.textContent = label;
+  }
+
   function markContacted(company, channel) {
     const key = companyKey(company);
+    const prev = contactedMap[key] && typeof contactedMap[key] === "object" ? contactedMap[key] : {};
+    const now = new Date().toISOString();
+    const isMail = (channel || "mail") === "mail";
     contactedMap[key] = {
-      name: company.name || key,
-      siren: company.siren || "",
-      activity: company.activity || company.nafLabel || "",
-      email: company.email || "",
-      phone: company.phone || "",
-      address: company.address || "",
-      channel: channel || (company.phone ? "sms" : "mail"),
-      source: company.contactSource || "",
-      at: new Date().toISOString()
+      ...prev,
+      name: company.name || prev.name || key,
+      siren: company.siren || prev.siren || "",
+      activity: company.activity || company.nafLabel || prev.activity || "",
+      email: company.email || prev.email || "",
+      phone: company.phone || prev.phone || "",
+      address: company.address || prev.address || "",
+      website: company.website || prev.website || "",
+      sireneUrl: company.sireneUrl || prev.sireneUrl || "",
+      directors: company.directors || prev.directors || [],
+      city: company.city || prev.city || "",
+      channel: channel || prev.channel || (company.phone ? "sms" : "mail"),
+      source: company.contactSource || prev.source || "",
+      at: prev.at || now,
+      sentAt: isMail ? now : (prev.sentAt || now),
+      followUpAt: new Date(Date.now() + followUpDays() * 86400000).toISOString(),
+      followUpSent: false,
+      replied: Boolean(prev.replied),
+      booked: Boolean(prev.booked)
     };
     saveContacted();
     rememberCompany(company, { fromScan: false });
     renderDashboard();
+    if (currentView === "suivi") renderSuivi();
+  }
+
+  function patchContacted(key, extra) {
+    if (!contactedMap[key]) return;
+    contactedMap[key] = { ...contactedMap[key], ...extra };
+    saveContacted();
+    renderDashboard();
+    renderSuivi();
+    renderList();
   }
 
   function unmarkContacted(key) {
     delete contactedMap[key];
     saveContacted();
     renderDashboard();
+    if (currentView === "suivi") renderSuivi();
   }
 
   function contactedEntries() {
@@ -530,6 +634,92 @@
         <button class="btn btn-ghost" type="button" data-history-remove="${escapeHtml(row.key)}">Retirer</button>
       </li>`;
     }).join("");
+  }
+
+  function resolveFollowUpCompany(key) {
+    if (companies.find((c) => companyKey(c) === key)) {
+      return companies.find((c) => companyKey(c) === key);
+    }
+    if (companyMemory[key]) return companyMemory[key];
+    const row = contactedMap[key];
+    if (!row) return null;
+    return {
+      ...row,
+      name: row.name,
+      siren: row.siren || key,
+      email: row.email,
+      website: row.website,
+      sireneUrl: row.sireneUrl,
+      directors: row.directors || [],
+      activity: row.activity,
+      hasContact: true
+    };
+  }
+
+  function sendFollowUp(key) {
+    const company = resolveFollowUpCompany(key);
+    if (!company || !company.email) {
+      log("Pas d’e-mail public pour cette relance.", { quiet: true });
+      return;
+    }
+    const mail = buildMail(company, "followup");
+    openMailto(company, mail.body, mail.subject);
+    patchContacted(key, {
+      followUpSent: true,
+      followUpSentAt: new Date().toISOString()
+    });
+    log(`Brouillon de relance ouvert pour ${company.name} — relisez puis envoyez.`, { quiet: true });
+  }
+
+  function renderSuivi() {
+    if (!suiviList) return;
+    const rows = contactedEntries().filter((row) => row.email);
+    updateSuiviBadge(overdueEntries().length);
+    if (!rows.length) {
+      suiviList.innerHTML = `<li class="empty">Aucun mail ouvert pour l’instant. Depuis Recherche, ouvrez un brouillon : il apparaîtra ici pour le suivi.</li>`;
+      return;
+    }
+    const overdue = rows.filter((row) => isOverdue(row));
+    const waiting = rows.filter((row) => !isOverdue(row) && !row.replied && !row.booked && !row.followUpSent);
+    const done = rows.filter((row) => row.replied || row.booked || row.followUpSent);
+    const item = (row) => {
+      const overdueFlag = isOverdue(row);
+      const sent = row.sentAt || row.at;
+      const sentLabel = sent ? new Date(sent).toLocaleDateString("fr-FR") : "—";
+      const dueMs = followUpDueMs(row);
+      const dueLabel = Number.isFinite(dueMs) ? new Date(dueMs).toLocaleDateString("fr-FR") : "—";
+      const status = row.booked
+        ? `<p class="overdue-flag" style="color:var(--success)">RDV posé</p>`
+        : (row.replied
+          ? `<p class="overdue-flag" style="color:var(--success)">A répondu</p>`
+          : (row.followUpSent
+            ? `<p class="meta hint">Relance ouverte</p>`
+            : (overdueFlag
+              ? `<p class="overdue-flag">À relancer — délai dépassé sans réponse</p>`
+              : "")));
+      return `<li class="suivi-item${overdueFlag ? " overdue" : ""}">
+        <h3>${escapeHtml(row.name || row.key)}${overdueFlag ? ` <span class="chip overdue">À relancer</span>` : ""}</h3>
+        <div class="meta">
+          ${escapeHtml(row.city || "")}${row.city ? " · " : ""}envoyé le ${escapeHtml(sentLabel)} · relance le ${escapeHtml(dueLabel)}
+          ${row.email ? `<br>${escapeHtml(row.email)}` : ""}
+        </div>
+        ${status}
+        <div class="actions">
+          ${!row.replied && !row.booked ? `<button class="btn btn-primary" type="button" data-followup="${escapeHtml(row.key)}">Ouvrir la relance</button>` : ""}
+          <button class="btn btn-ghost" type="button" data-replied="${escapeHtml(row.key)}">A répondu</button>
+          <button class="btn btn-ghost" type="button" data-booked="${escapeHtml(row.key)}">RDV posé</button>
+        </div>
+      </li>`;
+    };
+    const group = (title, list) => {
+      if (!list.length) return "";
+      return `<li class="suivi-group-title">${escapeHtml(title)} (${list.length})</li>${list.map(item).join("")}`;
+    };
+    suiviList.innerHTML = [
+      group("À relancer", overdue),
+      group("En attente", waiting),
+      group("Traités", done)
+    ].filter(Boolean).join("") || `<li class="empty">Rien à afficher.</li>`;
   }
 
   function toggleHistory(force) {
@@ -612,6 +802,10 @@
       senderName.value = demoNames.has(name.toLowerCase()) ? "" : name;
       senderEmail.value = demoEmails.has(email.toLowerCase()) ? "" : email;
       senderPhone.value = isDemoPhone ? "" : phone;
+      if (senderRole) senderRole.value = String(saved.role || "");
+      if (senderCompany) senderCompany.value = String(saved.company || "");
+      if (senderSiren) senderSiren.value = String(saved.siren || "");
+      if (senderAddress) senderAddress.value = String(saved.address || "");
     } catch {
       senderName.value = "";
       senderEmail.value = "";
@@ -622,9 +816,25 @@
   function saveSender() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       name: senderName.value.trim(),
+      role: senderRole ? senderRole.value.trim() : "",
+      company: senderCompany ? senderCompany.value.trim() : "",
+      siren: senderSiren ? senderSiren.value.trim() : "",
+      address: senderAddress ? senderAddress.value.trim() : "",
       email: senderEmail.value.trim(),
       phone: senderPhone.value.trim()
     }));
+  }
+
+  function getSender() {
+    return {
+      name: senderName ? senderName.value.trim() : "",
+      role: senderRole ? senderRole.value.trim() : "",
+      company: senderCompany ? senderCompany.value.trim() : "",
+      siren: senderSiren ? senderSiren.value.trim() : "",
+      address: senderAddress ? senderAddress.value.trim() : "",
+      email: senderEmail ? senderEmail.value.trim() : "",
+      phone: senderPhone ? senderPhone.value.trim() : ""
+    };
   }
 
   function setProgress(percent, label) {
@@ -678,19 +888,33 @@
       .replace(/\{activite\}/g, company.activity || "")
       .replace(/\{adresse\}/g, company.address || "")
       .replace(/\[Votre nom\]/g, senderName.value.trim() || "")
-      .replace(/\[Nom de la société\]/g, senderName.value.trim() || "")
+      .replace(/\[Nom de la société\]/g, (senderCompany && senderCompany.value.trim()) || senderName.value.trim() || "")
       .replace(/\[Votre email\]/g, senderEmail.value.trim() || "")
       .replace(/\[Votre téléphone\]/g, senderPhone.value.trim() || "");
+  }
+
+  function buildMail(company, kind) {
+    const Mail = window.ProspectionMail;
+    const sender = getSender();
+    if (Mail) {
+      if (kind === "followup") return Mail.buildFollowUpMail(company, sender);
+      const custom = mailTemplate && mailTemplate.value.trim();
+      return Mail.buildOutreachMail(company, sender, { bodyOverride: custom || undefined });
+    }
+    return {
+      subject: `Échange avec ${company.name}`,
+      body: fillTemplate((mailTemplate && mailTemplate.value) || "", company)
+    };
   }
 
   function getMailForCompany(company) {
     const key = companyKey(company);
     if (editedMails[key]) return editedMails[key];
-    return fillTemplate(mailTemplate.value, company);
+    return buildMail(company, "outreach").body;
   }
 
-  function mailSubject(company) {
-    return `Échange avec ${company.name}`;
+  function mailSubject(company, kind) {
+    return buildMail(company, kind || "outreach").subject;
   }
 
   function openExternal(href) {
@@ -703,9 +927,9 @@
     a.remove();
   }
 
-  function openMailto(company, body) {
+  function openMailto(company, body, subject) {
     if (!company.email) return false;
-    const mailto = `mailto:${company.email}?subject=${encodeURIComponent(mailSubject(company))}&body=${encodeURIComponent(body)}`;
+    const mailto = `mailto:${company.email}?subject=${encodeURIComponent(subject || mailSubject(company))}&body=${encodeURIComponent(body)}`;
     openExternal(mailto);
     return true;
   }
@@ -763,12 +987,16 @@
   function primaryActions(company, key) {
     const canMail = Boolean(company.hasContact && company.email);
     const canSms = Boolean(company.hasContact && company.phone);
+    const done = isContacted(key);
+    const overdue = done && isOverdue(contactedMap[key]);
     let primary = "";
     const secondary = [];
 
-    if (canMail) {
-      primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-send-one="${escapeHtml(key)}">Envoyer ma proposition</button>`;
-    } else if (canSms) {
+    if (done && overdue && canMail) {
+      primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-followup="${escapeHtml(key)}">Ouvrir la relance</button>`;
+    } else if (canMail && !done) {
+      primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-send-one="${escapeHtml(key)}">Ouvrir le brouillon</button>`;
+    } else if (canSms && !done) {
       primary = `<button class="btn btn-primary btn-block card-primary-cta" type="button" data-open-sms="${escapeHtml(key)}">Envoyer un message</button>`;
     }
 
@@ -782,9 +1010,12 @@
   function renderCompany(company) {
     const key = companyKey(company);
     const done = isContacted(key);
+    const overdue = done && isOverdue(contactedMap[key]);
     const checked = selectedKeys.has(key) ? "checked" : "";
     const chip = done
-      ? `<span class="chip done">déjà contacté</span>`
+      ? (overdue
+        ? `<span class="chip overdue">À relancer</span>`
+        : `<span class="chip done">déjà contacté</span>`)
       : (Number(company.scanCount || 0) > 1
         ? `<span class="chip ok">à contacter · déjà scannée</span>`
         : `<span class="chip ok">à contacter</span>`);
@@ -816,7 +1047,7 @@
       ? `<details class="card-more"><summary>Plus d’options</summary><div class="more-menu">${secondary.join("")}</div></details>`
       : "";
 
-    return `<li class="company-card${done ? " contacted" : ""}" data-key="${escapeHtml(key)}">
+    return `<li class="company-card${done ? " contacted" : ""}${overdue ? " overdue" : ""}" data-key="${escapeHtml(key)}">
       <div class="company-card-header">
         ${!done ? `<input type="checkbox" class="select-cb" data-select="${escapeHtml(key)}" ${checked} aria-label="Sélectionner ${escapeHtml(company.name)}">` : ""}
         <h3>${escapeHtml(company.name)}${chip}</h3>
@@ -836,7 +1067,7 @@
         <div class="actions">
           <button class="btn btn-ghost" type="button" data-save-mail="${escapeHtml(key)}">Enregistrer</button>
           ${canSms ? `<button class="btn btn-primary" type="button" data-open-sms="${escapeHtml(key)}">Envoyer un message</button>` : ""}
-          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Envoyer ma proposition</button>` : ""}
+          ${canMail ? `<button class="btn btn-primary" type="button" data-send-one="${escapeHtml(key)}">Ouvrir le brouillon</button>` : ""}
         </div>
       </div>
     </li>`;
@@ -1148,6 +1379,10 @@
       zone: selectedCityId(),
       department: selectedCityId(),
       senderName: senderName.value.trim(),
+      senderRole: senderRole ? senderRole.value.trim() : "",
+      senderCompany: senderCompany ? senderCompany.value.trim() : "",
+      senderSiren: senderSiren ? senderSiren.value.trim() : "",
+      senderAddress: senderAddress ? senderAddress.value.trim() : "",
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
     });
@@ -1205,8 +1440,12 @@
   function loadTemplate() {
     const saved = localStorage.getItem(TEMPLATE_KEY);
     if (!saved) return;
-    // Ancien modèle « nouvelles créations » → on laisse le modèle cabinets par défaut.
-    if (/Félicitations pour la création/i.test(saved) || /premières semaines d’une entreprise/i.test(saved)) {
+    // Ancien modèle « nouvelles créations » ou hors L'ARC → modèle cabinets par défaut.
+    if (
+      /Félicitations pour la création/i.test(saved)
+      || /premières semaines d’une entreprise/i.test(saved)
+      || !/L['’]ARC/i.test(saved)
+    ) {
       localStorage.removeItem(TEMPLATE_KEY);
       return;
     }
@@ -1235,7 +1474,7 @@
       return;
     }
     const body = getMailForCompany(company);
-    openMailto(company, body);
+    openMailto(company, body, mailSubject(company));
     markContacted(company, "mail");
     selectedKeys.delete(key);
     renderList();
@@ -1270,7 +1509,7 @@
     if (!ok) return;
     let sent = 0;
     for (const company of toSend) {
-      openMailto(company, getMailForCompany(company));
+      openMailto(company, getMailForCompany(company), mailSubject(company));
       markContacted(company, "mail");
       selectedKeys.delete(companyKey(company));
       sent += 1;
@@ -1318,6 +1557,11 @@
     const sendBtn = event.target.closest("[data-send-one]");
     if (sendBtn) {
       sendOne(sendBtn.getAttribute("data-send-one"));
+      return;
+    }
+    const followBtn = event.target.closest("[data-followup]");
+    if (followBtn) {
+      sendFollowUp(followBtn.getAttribute("data-followup"));
       return;
     }
     const markBtn = event.target.closest("[data-mark]");
@@ -1390,7 +1634,34 @@
   csvBtn.addEventListener("click", exportCsv);
   previewMailBtn.addEventListener("click", previewMail);
   saveTemplateBtn.addEventListener("click", saveTemplate);
-  [senderName, senderEmail, senderPhone].forEach((input) => input.addEventListener("change", saveSender));
+  [senderName, senderRole, senderCompany, senderSiren, senderAddress, senderEmail, senderPhone]
+    .filter(Boolean)
+    .forEach((input) => input.addEventListener("change", saveSender));
+  if (followUpDelay) {
+    followUpDelay.addEventListener("change", () => {
+      localStorage.setItem(FOLLOWUP_KEY, followUpDelay.value);
+      renderSuivi();
+      renderDashboard();
+    });
+  }
+  if (suiviList) {
+    suiviList.addEventListener("click", (event) => {
+      const followBtn = event.target.closest("[data-followup]");
+      if (followBtn) {
+        sendFollowUp(followBtn.getAttribute("data-followup"));
+        return;
+      }
+      const repliedBtn = event.target.closest("[data-replied]");
+      if (repliedBtn) {
+        patchContacted(repliedBtn.getAttribute("data-replied"), { replied: true });
+        return;
+      }
+      const bookedBtn = event.target.closest("[data-booked]");
+      if (bookedBtn) {
+        patchContacted(bookedBtn.getAttribute("data-booked"), { booked: true });
+      }
+    });
+  }
 
   const scrollTopBtn = document.getElementById("scrollTopBtn");
   window.addEventListener("scroll", () => {
@@ -1407,7 +1678,7 @@
       {
         name: "Cabinet Exemplaire Expertise",
         siren: "552108722",
-        activity: "Activités comptables",
+        activity: "Expertise comptable — clientèle BTP et bâtiments",
         naf: "69.20Z",
         nafLabel: "Activités comptables",
         createdAt: "1984-05-27",
@@ -1417,6 +1688,7 @@
         directors: ["Nathalie Jarjaille"],
         phone: "",
         email: "contact@cabinet-exemplaire.example",
+        website: "https://www.cabinet-exemplaire.example",
         hasContact: true,
         contactSource: "démo e-mail"
       },
@@ -1458,6 +1730,7 @@
       renderHistory();
       renderList();
       renderDashboard();
+      renderSuivi();
       log("Données locales effacées.", { quiet: true });
     });
   }
@@ -1496,6 +1769,7 @@
   }
 
   loadSender();
+  loadFollowUpDelay();
   loadTemplate();
   loadContacted();
   loadScanMemory();
@@ -1519,6 +1793,20 @@
   }
   renderList();
   seedDemoCompanies();
-  const startOnSearch = window.location.hash === "#recherche";
-  setAppView(startOnSearch ? "prospection" : "dashboard");
+  window.addEventListener("hashchange", () => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "recherche") setAppView("prospection");
+    else if (hash === "suivi") setAppView("suivi");
+    else setAppView("dashboard");
+  });
+  const hash = window.location.hash.replace("#", "");
+  const savedView = localStorage.getItem(VIEW_KEY);
+  const startView = hash === "recherche"
+    ? "prospection"
+    : (hash === "suivi"
+      ? "suivi"
+      : (hash === "accueil"
+        ? "dashboard"
+        : (savedView === "prospection" || savedView === "suivi" ? savedView : "dashboard")));
+  setAppView(startView);
 })();

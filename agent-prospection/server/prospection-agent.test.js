@@ -278,15 +278,28 @@ test("similarité de nom et proposition cabinets", () => {
   assert.ok(nameSimilarity("CREOLE AVENUE CHELLES", "Restaurant Creole Avenue Chelles") > 0.6);
   const proposal = buildProposal({
     name: "FIDUCIAIRE SEINE",
-    activity: "Activités comptables",
+    activity: "Expertise comptable — clientèle BTP et bâtiments",
     createdAt: "2015-08-04",
-    directors: ["Marie Dupont"],
+    directors: ["Eric Martin"],
     address: "12 Rue de Malte 92600 Asnières-sur-Seine",
-    email: "contact@fiduciaire-seine.fr"
-  }, { name: "Cabinet Dupont & Associés", email: "contact@dupont.fr" });
-  assert.match(proposal.subject, /Échange avec FIDUCIAIRE SEINE/);
-  assert.match(proposal.body, /cabinets d'expertise comptable/);
-  assert.match(proposal.body, /Cabinet Dupont/);
+    email: "contact@fiduciaire-seine.fr",
+    website: "https://www.fiduciaire-seine.fr"
+  }, {
+    name: "Qusai Ben Zaied",
+    role: "Président",
+    company: "Comanjo SAS",
+    email: "contact@comanjo.net",
+    phone: "07 68 50 77 88",
+    siren: "999898745",
+    address: "27 rue de la Comète, 92600 Asnières-sur-Seine"
+  });
+  assert.match(proposal.subject, /test gratuit sur la saisie des factures/);
+  assert.match(proposal.body, /entreprises du bâtiment/);
+  assert.match(proposal.body, /L'ARC/);
+  assert.match(proposal.body, /Répondez « stop » pour ne plus être contacté/);
+  assert.match(proposal.body, /SIREN 999 898 745/);
+  assert.match(proposal.body, /https:\/\/www\.fiduciaire-seine\.fr/);
+  assert.match(proposal.body, /Bonjour Eric/);
   assert.match(proposal.mailto, /^mailto:contact%40fiduciaire-seine\.fr/);
 });
 
