@@ -11,7 +11,11 @@ const {
   buildProposal,
   decodeDuckDuckGoUrl,
   pageMatchesCompany,
-  phoneFitsCompany
+  phoneFitsCompany,
+  isSirenTeaserPhone,
+  listSectors,
+  sanitizeCompanyContact,
+  sourceForbidsPhone
 } = require("./prospection-agent");
 
 test("normalise les téléphones français et ignore les numéros surtaxés", () => {
@@ -19,6 +23,8 @@ test("normalise les téléphones français et ignore les numéros surtaxés", ()
   assert.equal(normalizeFrPhone("06.12.34.56.78"), "06 12 34 56 78");
   assert.equal(normalizeFrPhone("0895853832"), "");
   assert.equal(normalizeFrPhone("0875548900"), ""); // teaser 08 / Pappers
+  assert.equal(normalizeFrPhone("09 99 99 99 77"), "");
+  assert.equal(normalizeFrPhone("01 23 45 67 89"), "");
 });
 
 test("rejette un téléphone teaser dérivé du SIREN", () => {
@@ -28,15 +34,210 @@ test("rejette un téléphone teaser dérivé du SIREN", () => {
   assert.equal(phoneFitsCompany("0875548900", company), false);
 });
 
+test("rejette tous les teasers Pappers signalés (cinéma Paris)", () => {
+  const cases = [
+    ["NATISTORY MEDIA", "107935108", "07 93 51 08 00"],
+    ["HERITAGE CORP", "107413627", "07 41 36 27 00"],
+    ["OSBC PROD", "107684813", "07 68 48 13 00"],
+    ["Louboutin Simon", "107569964", "07 56 99 64 00"],
+    ["CULTURE RAPIDE", "107463853", "07 46 38 53 00"],
+    ["SATOSHI PRAKASH CRUZ", "107541567", "07 54 15 67 00"],
+    ["JUICE PROD", "107630113", "07 63 01 13 00"]
+  ];
+  for (const [name, siren, phone] of cases) {
+    const company = { name, siren, department: "75", city: "Paris" };
+    assert.equal(isSirenTeaserPhone(phone, company), true, `${name} teaser`);
+    assert.equal(phoneFitsCompany(phone, company), false, `${name} fits`);
+  }
+  // Vrai mobile hors motif SIREN
+  assert.equal(phoneFitsCompany("06 89 89 83 10", { siren: "107552028", department: "75" }), true);
+});
+
+test("Pappers / societe.com interdisent le téléphone même si fourni", () => {
+  assert.equal(sourceForbidsPhone("Pappers (page publique)"), true);
+  assert.equal(sourceForbidsPhone("societe.com"), true);
+  assert.equal(sourceForbidsPhone("site trajectoire360.fr"), false);
+  const company = {
+    siren: "107935108",
+    department: "75",
+    phone: "07 93 51 08 00",
+    email: "",
+    contactSource: "Pappers (page publique)",
+    contactVerified: true,
+    contactConfidence: "medium"
+  };
+  sanitizeCompanyContact(company);
+  assert.equal(company.phone, "");
+  assert.equal(company.contactVerified, false);
+});
+
+test("les résultats affichés exigent un e-mail public (pas le téléphone seul)", () => {
+  const { isEmailContact, publicCompany } = require("./prospection-agent");
+  const phoneOnly = {
+    name: "CABINET TEL",
+    siren: "123456789",
+    department: "92",
+    city: "Colombes",
+    postalCode: "92700",
+    directors: [],
+    phone: "01 46 49 00 00",
+    email: "",
+    contactSource: "OpenStreetMap",
+    contactVerified: true,
+    contactConfidence: "high"
+  };
+  assert.equal(isEmailContact(phoneOnly), false);
+  const publishedPhone = publicCompany(phoneOnly);
+  assert.equal(publishedPhone.hasContact, false);
+  assert.equal(publishedPhone.email, "");
+  const withMail = {
+    ...phoneOnly,
+    email: "contact@cabinet-tel.fr"
+  };
+  assert.equal(isEmailContact(withMail), true);
+  const publishedMail = publicCompany(withMail);
+  assert.equal(publishedMail.hasContact, true);
+  assert.equal(publishedMail.email, "contact@cabinet-tel.fr");
+  assert.equal(publishedMail.preferredChannel, "mail");
+});
+
+test("CULTURE RAPIDE — homonyme Paris sans adresse rejetée", () => {
+  const culture = {
+    name: "CULTURE RAPIDE",
+    siren: "107463853",
+    city: "Paris",
+    postalCode: "75020",
+    address: "103 Rue Julien Lacroix 75020 Paris",
+    department: "75",
+    naf: "5920Z",
+    activity: "Production audiovisuelle"
+  };
+  assert.equal(
+    pageMatchesCompany("Culture Rapide Paris téléphone café bar cocktail", culture),
+    false
+  );
+  assert.equal(
+    pageMatchesCompany("Culture Rapide 75020 Paris Rue Julien Lacroix", culture),
+    true
+  );
+  assert.equal(
+    pageMatchesCompany(`Culture Rapide SIREN ${culture.siren}`, culture),
+    true
+  );
+});
+
+test("CULTURE RAPIDE — fiche café même adresse rejetée sans SIREN", () => {
+  const { activityConflictsWithPage, directoryEvidenceOk } = require("./prospection-agent");
+  const culture = {
+    name: "CULTURE RAPIDE",
+    siren: "107463853",
+    city: "Paris",
+    postalCode: "75020",
+    address: "103 Rue Julien Lacroix 75020 Paris",
+    department: "75",
+    naf: "5920Z",
+    activity: "création production édition œuvres audiovisuelles"
+  };
+  const pjCafe = `
+### Culture Rapide
+103 rue Julien Lacroix 75020 Paris
+terrasse · concert · bar à bière
+Dans l'activité **Cafés, bars**, ces résultats peuvent vous intéresser
+tél 06 63 00 00 10
+`;
+  assert.equal(activityConflictsWithPage(pjCafe, culture), true);
+  assert.equal(directoryEvidenceOk(pjCafe, culture), false);
+  assert.equal(directoryEvidenceOk(`${pjCafe}\nSIREN ${culture.siren}`, culture), true);
+  assert.equal(
+    directoryEvidenceOk(`Culture Rapide SIREN ${culture.siren} 103 rue Julien Lacroix 75020 production audiovisuelle`, culture),
+    true
+  );
+});
+
+test("JUICE PROD — teaser Pappers filtré", () => {
+  const juice = {
+    name: "JUICE PROD",
+    siren: "107630113",
+    department: "75",
+    city: "Paris",
+    postalCode: "75002"
+  };
+  assert.equal(isSirenTeaserPhone("07 63 01 13 00", juice), true);
+  assert.equal(phoneFitsCompany("07 63 01 13 00", juice), false);
+});
+
 test("extrait e-mails utiles et filtre les faux positifs", () => {
   const text = "Contact: hello@creole-avenue.fr photo.png@cdn.com user@sentry.io";
   assert.deepEqual(extractEmails(text), ["hello@creole-avenue.fr"]);
 });
 
-test("filtre l'activité restauration et exclut les livreurs", () => {
-  const sector = resolveSector("restauration");
-  assert.equal(activityMatchesSector("Restaurant pizzeria", sector), true);
-  assert.equal(activityMatchesSector("livraison de commandes restaurants en vélo", sector), false);
+test("filtre l'activité cabinets et exclut le médical / juridique", () => {
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(activityMatchesSector("Expertise comptable", sector), true);
+  assert.equal(activityMatchesSector("Cabinet comptable fiduciaire", sector), true);
+  assert.equal(activityMatchesSector("cabinet médical généraliste", sector), false);
+  assert.equal(activityMatchesSector("avocat droit des sociétés", sector), false);
+});
+
+test("secteurs de la branche juridique / finance", () => {
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(sector.id, "cabinets-comptables");
+  assert.ok(sector.nafPrefixes.includes("69.20Z"));
+  assert.equal(activityMatchesSector("Expertise comptable", sector), true);
+  assert.equal(activityMatchesSector("Cabinet médical", sector), false);
+  assert.equal(resolveSector("expertise comptable").id, "cabinets-comptables");
+  assert.equal(resolveSector("cabinets-avocats").id, "cabinets-avocats");
+  assert.equal(resolveSector("avocat").id, "cabinets-avocats");
+  assert.equal(resolveSector("juridique").id, "juridique");
+  assert.equal(resolveSector("finance").id, "finance");
+  assert.equal(resolveSector("banque").id, "finance");
+  assert.equal(resolveSector("conseil-gestion").id, "conseil-gestion");
+  assert.equal(resolveSector("cinema").id, "cabinets-comptables");
+});
+
+test("NAF exact — 69.20Z accepté, 69.10Z (juridique) rejeté pour les cabinets", () => {
+  const { nafMatchesSector } = require("./prospection-agent");
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(nafMatchesSector("69.20Z", sector), true);
+  assert.equal(nafMatchesSector("6920Z", sector), true);
+  assert.equal(nafMatchesSector("69.10Z", sector), false);
+  assert.equal(nafMatchesSector("59.11C", sector), false);
+  const avocats = resolveSector("cabinets-avocats");
+  assert.equal(nafMatchesSector("69.10Z", avocats), true);
+  assert.equal(nafMatchesSector("69.20Z", avocats), false);
+  const finance = resolveSector("finance");
+  assert.equal(nafMatchesSector("64.19Z", finance), true);
+  assert.equal(nafMatchesSector("69.20Z", finance), false);
+});
+
+test("zones = villes d'Île-de-France uniquement", () => {
+  const { resolveZone, matchesZone, listZones } = require("./prospection-agent");
+  const zones = listZones();
+  assert.ok(zones.length > 1000);
+  assert.equal(zones.some((z) => z.id === "idf"), false);
+  assert.equal(zones.some((z) => z.id === "92"), false);
+  assert.ok(zones.some((z) => z.id === "city-92004"));
+  assert.ok(zones.some((z) => z.label === "Paris"));
+  const paris = resolveZone("Paris");
+  assert.equal(paris.type, "city");
+  assert.equal(paris.label, "Paris");
+  assert.equal(matchesZone({ department: "75", postalCode: "75008", city: "Paris" }, paris), true);
+  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "Asnières-sur-Seine" }, paris), false);
+  const asnieres = resolveZone("Asnières-sur-Seine");
+  assert.equal(asnieres.id, "city-92004");
+  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "ASNIERES-SUR-SEINE" }, asnieres), true);
+  assert.equal(matchesZone({ department: "92", postalCode: "92400", city: "Courbevoie" }, asnieres), false);
+  const gennevilliers = resolveZone("gennevilliers");
+  assert.equal(matchesZone({ department: "92", postalCode: "92230", city: "Gennevilliers" }, gennevilliers), true);
+});
+
+test("listSectors expose la branche juridique / finance, défaut comptable", () => {
+  const listed = listSectors();
+  assert.ok(listed.length >= 5);
+  assert.equal(listed[0].id, "cabinets-comptables");
+  assert.ok(listed.some((s) => s.id === "cabinets-avocats"));
+  assert.ok(listed.some((s) => s.id === "juridique"));
+  assert.ok(listed.some((s) => s.id === "finance"));
 });
 
 test("parse une annonce BODACC personne morale", () => {
@@ -73,19 +274,33 @@ test("parse une annonce BODACC personne morale", () => {
   assert.match(company.address, /Malte/);
 });
 
-test("similarité de nom et proposition comptable", () => {
+test("similarité de nom et proposition cabinets", () => {
   assert.ok(nameSimilarity("CREOLE AVENUE CHELLES", "Restaurant Creole Avenue Chelles") > 0.6);
   const proposal = buildProposal({
-    name: "SARL ELIA",
-    activity: "Restaurant pizzeria",
-    createdAt: "2026-08-04",
-    directors: ["Marie Dupont"],
-    address: "12 Rue de Malte 75011 Paris",
-    email: "contact@elia.fr"
-  }, { name: "Eva Moreau", email: "eva@cabinet.fr" });
-  assert.match(proposal.subject, /accompagnement comptable/);
-  assert.match(proposal.body, /gestion comptable/);
-  assert.match(proposal.mailto, /^mailto:contact%40elia\.fr/);
+    name: "FIDUCIAIRE SEINE",
+    activity: "Expertise comptable — clientèle BTP et bâtiments",
+    createdAt: "2015-08-04",
+    directors: ["Eric Martin"],
+    address: "12 Rue de Malte 92600 Asnières-sur-Seine",
+    email: "contact@fiduciaire-seine.fr",
+    website: "https://www.fiduciaire-seine.fr"
+  }, {
+    name: "Qusai Ben Zaied",
+    role: "Président",
+    company: "Comanjo SAS",
+    email: "contact@comanjo.net",
+    phone: "07 68 50 77 88",
+    siren: "999898745",
+    address: "27 rue de la Comète, 92600 Asnières-sur-Seine"
+  });
+  assert.match(proposal.subject, /test gratuit sur la saisie des factures/);
+  assert.match(proposal.body, /entreprises du bâtiment/);
+  assert.match(proposal.body, /L'ARC/);
+  assert.match(proposal.body, /Répondez « stop » pour ne plus être contacté/);
+  assert.match(proposal.body, /SIREN 999 898 745/);
+  assert.match(proposal.body, /https:\/\/www\.fiduciaire-seine\.fr/);
+  assert.match(proposal.body, /Bonjour Eric/);
+  assert.match(proposal.mailto, /^mailto:contact%40fiduciaire-seine\.fr/);
 });
 
 test("décode les liens DuckDuckGo", () => {

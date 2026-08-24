@@ -3,58 +3,426 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent de prospection — nouvelles entreprises</title>
+  <title>Prospection — brouillons prêts à envoyer</title>
   <link rel="icon" href="/prospection/favicon.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="/prospection/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #faf8f5;
+      --bg0: #faf8f5;
+      --bg1: #fffdf9;
       --panel: #ffffff;
       --panel-2: #fff7ed;
       --text: #2d2a26;
       --muted: #7a7268;
+      --line: #e8e0d4;
       --primary: #e08a1e;
       --primary-2: #f5a623;
+      --primary-soft: rgba(224, 138, 30, .14);
+      --ink: #3d2e16;
       --accent: #d97706;
-      --line: #e8e0d4;
       --success: #16a34a;
-      --success-bg: rgba(22,163,74,.08);
-      --success-border: rgba(22,163,74,.25);
-      --warn-bg: rgba(234,179,8,.08);
-      --warn-border: rgba(234,179,8,.3);
+      --success-bg: rgba(22, 163, 74, .08);
+      --success-border: rgba(22, 163, 74, .25);
+      --warn-bg: rgba(234, 179, 8, .08);
+      --warn-border: rgba(234, 179, 8, .3);
+      --danger: #b42318;
+      --danger-bg: rgba(180, 35, 24, .08);
+      --danger-border: rgba(180, 35, 24, .28);
+      --shadow: 0 10px 30px rgba(61, 46, 22, .06);
+      --radius: 14px;
+    }
+    .skip-link {
+      position: absolute;
+      left: 12px;
+      top: -48px;
+      z-index: 200;
+      background: var(--ink);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .skip-link:focus {
+      top: 12px;
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Inter", sans-serif;
-      background: var(--bg);
+      font-family: "DM Sans", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
       color: var(--text);
+      background:
+        radial-gradient(900px 420px at 6% -12%, rgba(245, 166, 35, .22), transparent 58%),
+        radial-gradient(720px 400px at 100% 0%, rgba(250, 248, 245, .95), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1) 42%, #fff);
+      padding-bottom: 120px;
     }
     .topbar {
       max-width: 1240px;
       margin: 0 auto;
-      padding: 24px 24px 12px;
+      padding: 28px 24px 10px;
     }
-    .eyebrow {
-      margin: 0 0 8px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 700;
+    .topbar-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
     }
-    h1 { margin: 0; font-size: clamp(1.7rem, 2.8vw, 2.4rem); color: var(--text); }
-    h2 { margin: 0 0 14px; font-size: 1.03rem; }
-    .subtitle {
-      margin: 8px 0 0;
+    h1 {
+      margin: 0;
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(2rem, 3.4vw, 2.7rem);
+      letter-spacing: -.02em;
+      color: var(--ink);
+      animation: rise .5s ease both;
+    }
+    .app-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      border: 1px solid var(--line);
+      background: #fff;
       color: var(--muted);
-      max-width: 760px;
-      font-size: .93rem;
-      line-height: 1.45;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      font-size: .9rem;
+      cursor: pointer;
+      min-height: 44px;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .nav-btn:hover,
+    .nav-btn:focus-visible {
+      border-color: var(--accent);
+      color: var(--ink);
+      outline: none;
+    }
+    .nav-btn.active {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      color: var(--ink);
+    }
+    .nav-btn:focus-visible,
+    .btn:focus-visible,
+    .filter-tab:focus-visible,
+    .stat-action:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .hero-title {
+      margin: 0;
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      line-height: 1.2;
+      color: var(--ink);
+      max-width: 16ch;
+    }
+    .hero-lead {
+      margin: 10px 0 0;
+      color: var(--muted);
+      max-width: 36ch;
+      line-height: 1.55;
+      font-size: 1rem;
+    }
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 18px;
+      max-width: 360px;
+    }
+    .hero-link {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: var(--accent);
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+    .hero-link:hover { text-decoration: underline; }
+    .step-label {
+      display: block;
+      margin: 0 0 12px;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .options-disclosure {
+      margin: 12px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffdf9;
+    }
+    .options-disclosure summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      font-weight: 600;
+      color: var(--ink);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+    }
+    .options-disclosure summary::-webkit-details-marker { display: none; }
+    .options-disclosure summary::after {
+      content: "";
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--accent);
+      border-bottom: 2px solid var(--accent);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -4px;
+    }
+    .options-disclosure[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 4px;
+    }
+    .options-disclosure .options-body { padding: 0 14px 14px; }
+    .panel-run-desktop { display: block; }
+    .sticky-run-bar {
+      display: none;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 64px;
+      z-index: 80;
+      padding: 10px 16px;
+      background: rgba(255, 253, 249, .96);
+      border-top: 1px solid var(--line);
+      backdrop-filter: blur(8px);
+    }
+    .mobile-nav {
+      display: none;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 90;
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      background: #fff;
+      border-top: 1px solid var(--line);
+      box-shadow: 0 -8px 24px rgba(61, 46, 22, .06);
+    }
+    .mobile-nav-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    .mobile-nav-btn {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      font: inherit;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .mobile-nav-btn.active {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      color: var(--ink);
+    }
+    .sources-footer {
+      margin-top: 8px;
+      padding: 16px 0 8px;
+      border-top: 1px solid var(--line);
+    }
+    .sources-inner h2 {
+      margin: 0 0 12px;
+      font-size: 1rem;
+      color: var(--ink);
+    }
+    .sources-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .sources-list li {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: .86rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .sources-list strong { color: var(--ink); display: block; margin-bottom: 2px; }
+    .card-primary-cta { min-height: 44px; }
+    .card-more {
+      margin-top: 8px;
+      border-top: 1px dashed var(--line);
+      padding-top: 8px;
+    }
+    .card-more summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .88rem;
+      font-weight: 600;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 36px;
+    }
+    .card-more summary::-webkit-details-marker { display: none; }
+    .card-more summary::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -3px;
+    }
+    .card-more[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 3px;
+    }
+    .more-menu { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .results-tools summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--muted);
+      font-size: .88rem;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+    }
+    .results-tools summary::-webkit-details-marker { display: none; }
+    .results-tools summary::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transition: transform .2s ease;
+      margin-top: -3px;
+    }
+    .results-tools[open] > summary::after {
+      transform: rotate(225deg);
+      margin-top: 3px;
+    }
+    .dashboard-view {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 14px 24px 40px;
+      display: grid;
+      gap: 16px;
+      animation: rise .5s ease .08s both;
+    }
+    .dashboard-view[hidden],
+    .layout[hidden],
+    #viewSuivi[hidden] {
+      display: none !important;
+    }
+    .dashboard-view:not([hidden]) {
+      display: grid;
+    }
+    .layout:not([hidden]) {
+      display: grid;
+    }
+    .dash-hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .dash-hero p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      max-width: 560px;
+      line-height: 1.5;
+    }
+    .dash-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .dash-metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    .dash-metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: .82rem;
+      margin-bottom: 8px;
+    }
+    .dash-metric .value {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 1.8rem;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .dash-metric .sub {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: .8rem;
+    }
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 16px;
+    }
+    .dash-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .dash-item {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .dash-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .dash-item strong { color: var(--ink); display: block; margin-bottom: 4px; }
+    .dash-item .meta { color: var(--muted); font-size: .84rem; line-height: 1.45; }
+    .dash-empty {
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.5;
+      margin: 0;
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
     }
     .file-mode-banner {
       max-width: 1240px;
@@ -64,35 +432,37 @@
       background: var(--warn-bg);
       border-radius: 10px;
       font-size: .9rem;
-      line-height: 1.5;
-    }
-    .file-mode-banner code {
-      background: rgba(0,0,0,.06);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: .85em;
     }
     .layout {
       max-width: 1240px;
       margin: 0 auto;
-      padding: 14px 24px 24px;
+      padding: 14px 24px 40px;
       display: grid;
       gap: 18px;
+      grid-template-columns: 360px 1fr;
     }
-    .prospect-layout { grid-template-columns: 380px 1fr; }
-    .panel, .timeline-card {
+    .panel, .card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
     }
-    .panel { padding: 16px; }
-    .workspace { display: grid; gap: 18px; }
+    .panel {
+      padding: 18px;
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      animation: rise .5s ease .08s both;
+    }
+    .workspace { display: grid; gap: 16px; animation: rise .55s ease .12s both; }
+    .card { padding: 16px; }
+    h2 { margin: 0 0 14px; font-size: 1.02rem; color: var(--ink); }
+    h3 { margin: 0 0 8px; font-size: .95rem; }
     .field { display: block; margin-bottom: 12px; }
-    .field > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: .9rem; }
+    .field > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: .86rem; font-weight: 500; }
     input, select, textarea {
       width: 100%;
-      background: var(--bg);
+      background: #fffdf9;
       border: 1px solid var(--line);
       color: var(--text);
       border-radius: 10px;
@@ -103,10 +473,47 @@
     input:focus, select:focus, textarea:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(224,138,30,.12);
+      box-shadow: 0 0 0 3px var(--primary-soft);
     }
-    textarea { resize: vertical; line-height: 1.45; }
+    textarea { resize: vertical; line-height: 1.5; min-height: 220px; }
+    #mailTemplate {
+      min-height: 340px;
+      font-size: .92rem;
+      line-height: 1.55;
+    }
+    .mail-edit-area textarea {
+      min-height: 280px !important;
+      font-size: .9rem !important;
+      line-height: 1.5;
+    }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .city-picker { position: relative; }
+    .city-suggest {
+      position: absolute;
+      z-index: 20;
+      left: 0;
+      right: 0;
+      top: calc(100% - 2px);
+      margin: 0;
+      padding: 6px;
+      list-style: none;
+      max-height: 260px;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+    .city-suggest li {
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: .9rem;
+    }
+    .city-suggest li:hover,
+    .city-suggest li.active { background: var(--primary-soft); color: var(--ink); }
+    .city-suggest .empty-hint { color: var(--muted); cursor: default; }
+    #sectorSelect:disabled { opacity: 1; color: var(--ink); }
     .btn {
       border: 1px solid transparent;
       border-radius: 10px;
@@ -114,28 +521,109 @@
       font-weight: 600;
       font-family: inherit;
       cursor: pointer;
-      font-size: .9rem;
-      transition: transform .14s ease, opacity .14s ease;
+      font-size: .88rem;
+      min-height: 44px;
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
     }
     .btn:hover { transform: translateY(-1px); }
-    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--primary), var(--primary-2));
-      color: #fff;
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-2); }
+    .btn-ghost { background: #fff; border-color: var(--line); color: var(--text); }
+    .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-block { width: 100%; }
+    .hint { color: var(--muted); font-size: .82rem; line-height: 1.45; margin: 8px 0 0; }
+    .progress-wrap {
+      display: none;
+      margin: 14px 0 8px;
+      padding: 12px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #fff7ed, #fffdf9);
+      border: 1px solid rgba(224, 138, 30, .22);
     }
-    .btn-ghost {
-      background: var(--bg);
-      color: var(--text);
-      border-color: var(--line);
+    .progress-wrap.active { display: block; }
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: .84rem;
+      color: var(--muted);
     }
-    .btn-danger {
-      background: #fef2f2;
-      color: #b91c1c;
-      border-color: #fecaca;
+    .progress-head strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .progress-track {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(224, 138, 30, .14);
+      overflow: hidden;
     }
-    .btn-block { width: 100%; margin-top: 4px; }
-    .hint { color: var(--muted); font-size: .8rem; margin: 8px 0 0; }
-    .small { font-size: .78rem; }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), var(--primary-2));
+      transition: width .35s ease;
+      position: relative;
+    }
+    .progress-bar::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+      animation: sheen 1.4s linear infinite;
+    }
+    @keyframes sheen {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(100%); }
+    }
+    .status-line {
+      margin-top: 8px;
+      font-size: .82rem;
+      color: var(--muted);
+      min-height: 1.2em;
+    }
+    .log-box {
+      margin-top: 10px;
+      max-height: 120px;
+      overflow: auto;
+      background: #fffdf9;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: .75rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      display: none;
+    }
+    .filter-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .filter-tab {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: .82rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .filter-tab:hover { border-color: var(--primary); color: var(--accent); }
+    .filter-tab.active {
+      background: var(--primary-soft);
+      border-color: rgba(224, 138, 30, .45);
+      color: var(--ink);
+    }
+    .filter-tab .tab-count {
+      font-variant-numeric: tabular-nums;
+      opacity: .85;
+    }
+    .log-box.visible { display: block; }
     .results-head {
       display: flex;
       justify-content: space-between;
@@ -144,395 +632,495 @@
       margin-bottom: 12px;
     }
     .results-head h2 { margin: 0; }
-    .log-box {
-      background: var(--bg);
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .stat {
+      background: #fff7ed;
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
-      min-height: 64px;
-      max-height: 120px;
-      overflow: auto;
-      font-size: .8rem;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: .82rem;
       color: var(--muted);
-      white-space: pre-wrap;
+    }
+    .stat b { color: var(--ink); }
+    .stat-action {
+      cursor: pointer;
+      font: inherit;
+      transition: border-color .15s, background .15s;
+    }
+    .stat-action:hover,
+    .stat-action:focus-visible {
+      border-color: var(--accent);
+      background: #fff;
+      outline: none;
+    }
+    .stat-action.active {
+      border-color: var(--accent);
+      background: #fff;
+      box-shadow: 0 0 0 2px rgba(234, 88, 12, .15);
+    }
+    .mass-mail-bar {
+      display: none;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      font-size: .88rem;
+    }
+    .mass-mail-bar .count {
+      font-weight: 700;
+      color: var(--success);
+      min-width: 1.2em;
     }
     .company-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
     .company-card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-    }
-    .company-card h3 { margin: 0 0 6px; font-size: 1.05rem; }
-    .meta { color: var(--muted); font-size: .82rem; line-height: 1.45; }
-    .contact-row {
-      margin-top: 10px;
-      padding: 10px;
-      border-radius: 10px;
-      background: var(--success-bg);
-      border: 1px solid var(--success-border);
-    }
-    .contact-row a { color: var(--accent); }
-    .contact-row.missing {
-      background: var(--warn-bg);
-      border-color: var(--warn-border);
-    }
-    .contact-row strong { display: block; margin-bottom: 4px; }
-    .chip {
-      display: inline-block;
-      font-size: .72rem;
-      font-weight: 700;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: var(--warn-bg);
-      color: var(--accent);
-      margin-left: 8px;
-    }
-    .chip.ok { background: var(--success-bg); color: var(--success); }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
-    .stat {
-      background: var(--panel-2);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px 12px;
-      font-size: .8rem;
-      color: var(--muted);
-    }
-    .stat b { color: var(--text); }
-    .mail-template-box {
-      margin-top: 16px;
-      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 14px;
+      background: #fff;
+      transition: border-color .15s ease, box-shadow .15s ease;
     }
-    .mail-template-box h3 { margin: 0 0 10px; font-size: .95rem; }
-    .mail-template-box textarea {
-      min-height: 180px;
-      background: var(--bg);
+    .company-card:hover {
+      border-color: rgba(224, 138, 30, .4);
+      box-shadow: 0 8px 20px rgba(224, 138, 30, .08);
     }
-    .mail-template-box .actions { margin-top: 8px; }
-    .mail-preview { display: none; }
-    .mail-preview.visible { display: block; }
-    .mass-mail-bar {
+    .company-card.contacted {
+      opacity: .88;
+      background: #fffdf9;
+    }
+    .company-card.overdue {
+      border-color: var(--danger-border);
+      background: var(--danger-bg);
+    }
+    .chip.overdue {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+    }
+    .suivi-toolbar {
       display: flex;
-      gap: 10px;
-      align-items: center;
       flex-wrap: wrap;
-      padding: 12px;
-      background: var(--panel-2);
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+    .suivi-toolbar .field { margin: 0; min-width: 160px; }
+    .suivi-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .suivi-item {
       border: 1px solid var(--line);
       border-radius: 12px;
-      margin-bottom: 12px;
+      padding: 14px;
+      background: #fff;
     }
-    .mass-mail-bar .count { font-weight: 700; color: var(--accent); }
-    .select-cb {
-      width: auto;
-      margin: 0 6px 0 0;
-      accent-color: var(--primary);
-      cursor: pointer;
+    .suivi-item.overdue {
+      border-color: var(--danger-border);
+      background: var(--danger-bg);
+    }
+    .suivi-item h3 { margin: 0 0 6px; font-size: 1rem; }
+    .suivi-item .meta { color: var(--muted); font-size: .86rem; line-height: 1.45; }
+    .suivi-item .actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .suivi-group-title {
+      list-style: none;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 6px 0 0;
+    }
+    .overdue-flag {
+      color: var(--danger);
+      font-weight: 700;
+      font-size: .86rem;
+      margin: 6px 0 0;
+    }
+      border-color: var(--success-border);
+      background: linear-gradient(180deg, #f7fdf9, #fff);
     }
     .company-card-header {
       display: flex;
-      align-items: center;
-      gap: 6px;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
     }
-    .company-card-header h3 { flex: 1; }
+    .company-card h3 {
+      margin: 0;
+      font-size: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .chip {
+      font-size: .72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #eef2f6;
+      color: var(--muted);
+    }
+    .chip.ok {
+      background: rgba(245, 166, 35, .14);
+      color: var(--accent);
+      border: 1px solid rgba(224, 138, 30, .28);
+    }
+    .chip.done {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success-border);
+    }
+    .meta { color: var(--muted); font-size: .84rem; line-height: 1.45; }
+    .contact-row {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      font-size: .88rem;
+    }
+    .contact-row a { color: var(--primary); font-weight: 600; }
+    .contact-row .meta { margin-top: 4px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .mail-edit-area {
-      margin-top: 10px;
       display: none;
+      margin-top: 12px;
+      padding: 14px;
+      border-top: 1px dashed var(--line);
+      border-radius: 0 0 12px 12px;
+      background: var(--panel-2);
     }
     .mail-edit-area.visible { display: block; }
-    .mail-edit-area textarea {
-      min-height: 140px;
-      font-size: .82rem;
-    }
-    .mail-edit-area .actions { margin-top: 6px; }
-    .empty { color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: var(--bg); padding: 10px; }
-    .site-footer {
-      padding: 20px;
-      text-align: center;
+    .mail-edit-area .actions { margin-top: 12px; }
+    .empty {
       color: var(--muted);
-      font-size: 0.85rem;
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      background: #fffdf9;
+      padding: 18px;
+      text-align: center;
     }
-    .site-footer a { color: var(--muted); text-decoration: none; }
-    .site-footer a:hover { color: var(--text); }
-    .site-footer span { margin: 0 8px; }
-    code { background: var(--panel-2); padding: 2px 5px; border-radius: 4px; font-size: .82rem; }
+    .mail-template-box code {
+      background: #fff7ed;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: .85em;
+    }
+    .mail-preview {
+      display: none;
+      margin-top: 12px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: #fffdf9;
+      border: 1px solid var(--line);
+      white-space: pre-wrap;
+      font-size: .9rem;
+      line-height: 1.5;
+      max-height: none;
+      overflow: visible;
+    }
+    .mail-preview.visible { display: block; }
+    #mailPreviewContent {
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: none;
+    }
     .scroll-top {
       position: fixed;
-      bottom: 28px;
-      right: 28px;
-      width: 48px;
-      height: 48px;
+      right: 20px;
+      bottom: 20px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--primary), var(--primary-2));
-      color: #fff;
       border: none;
+      background: var(--primary);
+      color: #fff;
+      font-size: 1.2rem;
       cursor: pointer;
-      font-size: 1.4rem;
-      line-height: 1;
-      box-shadow: 0 4px 14px rgba(224,138,30,.35);
       opacity: 0;
       pointer-events: none;
       transition: opacity .25s ease, transform .25s ease;
       z-index: 90;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
     .scroll-top.visible { opacity: 1; pointer-events: auto; }
-    .scroll-top:hover { transform: translateY(-3px) scale(1.05); }
-    .panel { position: sticky; top: 16px; align-self: start; }
+    .scroll-top:hover { transform: translateY(-3px); }
+    .select-cb { width: auto; accent-color: var(--primary); }
+    .history-panel {
+      display: none;
+      margin-bottom: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fffdf9, #fff7ed);
+    }
+    .history-panel.visible { display: block; }
+    .history-panel h3 { margin: 0 0 10px; font-size: .95rem; color: var(--ink); }
+    .history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+    .history-item {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: baseline;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      font-size: .86rem;
+    }
+    .history-item strong { color: var(--ink); }
+    .history-item .meta { color: var(--muted); font-size: .8rem; }
+    .history-empty { color: var(--muted); font-size: .88rem; padding: 8px 0; }
     @media (max-width: 900px) {
-      .prospect-layout { grid-template-columns: 1fr; }
+      .layout { grid-template-columns: 1fr; }
       .panel { position: static; }
+      .dash-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .dash-grid { grid-template-columns: 1fr; }
+      .topbar .app-nav { display: none; }
+      .mobile-nav { display: block; }
+      .panel-run-desktop { display: none; }
+      .sticky-run-bar { display: block; }
+      .sticky-run-bar[hidden] { display: none !important; }
+      body { padding-bottom: 80px; }
+      body:has(#stickyRunBar:not([hidden])) { padding-bottom: 132px; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#viewDashboard">Aller au contenu</a>
   <header class="topbar">
-    <div>
-      <p class="eyebrow">Agent IA · sources publiques gratuites</p>
-      <h1>Agent de prospection</h1>
-      <p class="subtitle">
-        Recense les <strong>nouvelles entreprises</strong> d’un secteur, retrouve un <strong>e-mail ou un téléphone</strong> public, puis prépare une proposition d’aide en gestion comptable.
-      </p>
+    <div class="topbar-row">
+      <h1>Prospection</h1>
+      <nav class="app-nav" aria-label="Navigation principale">
+        <button type="button" class="nav-btn active" data-view="dashboard" id="navDashboard">Accueil</button>
+        <button type="button" class="nav-btn" data-view="prospection" id="navProspection">Recherche</button>
+        <button type="button" class="nav-btn" data-view="suivi" id="navSuivi">Suivi</button>
+      </nav>
     </div>
   </header>
 
   <div class="file-mode-banner" id="fileModeBanner" hidden>
-    <strong>Mode fichier local.</strong> Pour lancer la prospection, ouvrez un terminal dans ce dossier puis exécutez
-    <code>npm install</code> et <code>npm start</code>, et allez sur
+    <strong>Mode fichier local.</strong> Lancez <code>npm install && npm run start:prospection</code> puis ouvrez
     <a href="http://localhost:3000/prospection">http://localhost:3000/prospection</a>.
   </div>
 
-  <main class="layout prospect-layout">
+  <div class="file-mode-banner server-offline-banner" id="serverOfflineBanner" hidden>
+    <strong>Connexion interrompue.</strong> Vérifiez votre réseau (Wi‑Fi / 4G), puis
+    <button class="btn btn-ghost" type="button" id="serverRetryBtn">Réessayer</button>
+    ou rafraîchissez la page. Le service est hébergé en ligne — aucune installation locale requise.
+  </div>
+
+  <section class="dashboard-view" id="viewDashboard" aria-label="Accueil">
+    <div class="dash-hero">
+      <div>
+        <h2 class="hero-title">Un brouillon prêt à envoyer, adapté à chaque cabinet</h2>
+        <p class="hero-lead">Trouvez un cabinet près de vous, ouvrez le mail personnalisé, relancez au bon moment. Trois clics, pas plus.</p>
+        <div class="hero-actions">
+          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Trouver des cabinets près de moi</button>
+          <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
+          <button type="button" class="hero-link" id="dashGoSuivi" data-view="suivi" hidden>Voir les relances en retard</button>
+        </div>
+      </div>
+    </div>
+    <div class="dash-metrics" id="dashMetrics"></div>
+    <div class="dash-grid">
+      <div class="card">
+        <h3>Dernières recherches</h3>
+        <ul class="dash-list" id="dashRuns"></ul>
+      </div>
+      <div class="card">
+        <h3>Récemment contactées</h3>
+        <ul class="dash-list" id="dashContacts"></ul>
+      </div>
+    </div>
+    <footer class="sources-footer" id="sourcesFooter">
+      <div class="sources-inner">
+        <h2>Sources utilisées pour trouver les contacts</h2>
+        <ul class="sources-list" id="sourcesList">
+          <li><strong>API Recherche d’entreprises (SIRENE)</strong> — SIREN, NAF, adresse — toutes dates, villes d’Île-de-France</li>
+          <li><strong>Site officiel de l’entreprise</strong> — E-mail / téléphone public</li>
+          <li><strong>DuckDuckGo / Brave</strong> — Snippets publics</li>
+          <li><strong>Pages Jaunes</strong> — Fiches professionnelles publiques</li>
+          <li><strong>118712 / Cylex</strong> — Annuaires locaux publics</li>
+          <li><strong>Google Maps</strong> — Coordonnées affichées publiquement</li>
+          <li><strong>OpenStreetMap / Overpass</strong> — Téléphones ouverts</li>
+          <li><strong>Pappers / Societe.com</strong> — E-mail public uniquement (pas de téléphone teaser)</li>
+          <li><strong>Annuaire des entreprises</strong> — Données administratives publiques</li>
+        </ul>
+      </div>
+    </footer>
+  </section>
+
+  <main class="layout" id="viewProspection" hidden>
     <section class="panel">
-      <h2>Lancer l’agent</h2>
+      <span class="step-label">Étape 1 — Où chercher ?</span>
+      <h2>Paramètres de recherche</h2>
       <label class="field">
-        <span>Secteur des nouvelles entreprises</span>
+        <span>Cible</span>
         <select id="sectorSelect">
-          <option value="restauration">Restauration, cafés, bars</option>
-          <option value="btp">BTP / artisanat du bâtiment</option>
-          <option value="commerce">Commerce de détail</option>
-          <option value="immobilier">Immobilier</option>
-          <option value="informatique">Informatique / digital</option>
-          <option value="conseil" selected>Conseil, gestion, juridique</option>
-          <option value="sante">Santé / médical</option>
-          <option value="beaute">Beauté / coiffure</option>
-          <option value="transport">Transport / logistique</option>
-          <option value="enseignement">Formation / enseignement</option>
-          <option value="arts">Arts, spectacles, sport</option>
-          <option value="services">Services aux entreprises</option>
+          <option value="cabinets-comptables" selected>Cabinets d’expertise comptable</option>
+          <option value="cabinets-avocats">Cabinets d’avocats</option>
+          <option value="juridique">Juridique (notaires, huissiers, juristes)</option>
+          <option value="finance">Finance / banque / assurance</option>
+          <option value="conseil-gestion">Conseil en gestion</option>
+          <option value="branche-juridique-finance">Toute la branche (comptable, juridique, finance)</option>
         </select>
       </label>
-      <label class="field">
-        <span>Ou saisir un secteur libre</span>
-        <input id="sectorCustom" type="text" placeholder="ex. plomberie, auto-école, boulangerie" autocomplete="off">
+      <label class="field city-picker">
+        <span>Ville</span>
+        <input id="zoneSearch" type="search" placeholder="Rechercher une ville d’Île-de-France…" autocomplete="off" spellcheck="false" value="Paris" aria-autocomplete="list" aria-controls="zoneSuggest">
+        <input type="hidden" id="zoneInput" value="city-75056">
+        <ul id="zoneSuggest" class="city-suggest" hidden role="listbox"></ul>
       </label>
-      <div class="grid-2">
-        <label class="field">
-          <span>Créées depuis</span>
-          <select id="daysSelect">
-            <option value="7">7 jours</option>
-            <option value="15">15 jours</option>
-            <option value="30" selected>30 jours</option>
-            <option value="60">60 jours</option>
-            <option value="90">90 jours</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Département</span>
-          <select id="departmentInput">
-            <option value="">Tous les départements</option>
-            <option value="01">01 – Ain</option>
-            <option value="02">02 – Aisne</option>
-            <option value="03">03 – Allier</option>
-            <option value="04">04 – Alpes-de-Haute-Provence</option>
-            <option value="05">05 – Hautes-Alpes</option>
-            <option value="06">06 – Alpes-Maritimes</option>
-            <option value="07">07 – Ardèche</option>
-            <option value="08">08 – Ardennes</option>
-            <option value="09">09 – Ariège</option>
-            <option value="10">10 – Aube</option>
-            <option value="11">11 – Aude</option>
-            <option value="12">12 – Aveyron</option>
-            <option value="13">13 – Bouches-du-Rhône</option>
-            <option value="14">14 – Calvados</option>
-            <option value="15">15 – Cantal</option>
-            <option value="16">16 – Charente</option>
-            <option value="17">17 – Charente-Maritime</option>
-            <option value="18">18 – Cher</option>
-            <option value="19">19 – Corrèze</option>
-            <option value="2A">2A – Corse-du-Sud</option>
-            <option value="2B">2B – Haute-Corse</option>
-            <option value="21">21 – Côte-d’Or</option>
-            <option value="22">22 – Côtes-d’Armor</option>
-            <option value="23">23 – Creuse</option>
-            <option value="24">24 – Dordogne</option>
-            <option value="25">25 – Doubs</option>
-            <option value="26">26 – Drôme</option>
-            <option value="27">27 – Eure</option>
-            <option value="28">28 – Eure-et-Loir</option>
-            <option value="29">29 – Finistère</option>
-            <option value="30">30 – Gard</option>
-            <option value="31">31 – Haute-Garonne</option>
-            <option value="32">32 – Gers</option>
-            <option value="33">33 – Gironde</option>
-            <option value="34">34 – Hérault</option>
-            <option value="35">35 – Ille-et-Vilaine</option>
-            <option value="36">36 – Indre</option>
-            <option value="37">37 – Indre-et-Loire</option>
-            <option value="38">38 – Isère</option>
-            <option value="39">39 – Jura</option>
-            <option value="40">40 – Landes</option>
-            <option value="41">41 – Loir-et-Cher</option>
-            <option value="42">42 – Loire</option>
-            <option value="43">43 – Haute-Loire</option>
-            <option value="44">44 – Loire-Atlantique</option>
-            <option value="45">45 – Loiret</option>
-            <option value="46">46 – Lot</option>
-            <option value="47">47 – Lot-et-Garonne</option>
-            <option value="48">48 – Lozère</option>
-            <option value="49">49 – Maine-et-Loire</option>
-            <option value="50">50 – Manche</option>
-            <option value="51">51 – Marne</option>
-            <option value="52">52 – Haute-Marne</option>
-            <option value="53">53 – Mayenne</option>
-            <option value="54">54 – Meurthe-et-Moselle</option>
-            <option value="55">55 – Meuse</option>
-            <option value="56">56 – Morbihan</option>
-            <option value="57">57 – Moselle</option>
-            <option value="58">58 – Nièvre</option>
-            <option value="59">59 – Nord</option>
-            <option value="60">60 – Oise</option>
-            <option value="61">61 – Orne</option>
-            <option value="62">62 – Pas-de-Calais</option>
-            <option value="63">63 – Puy-de-Dôme</option>
-            <option value="64">64 – Pyrénées-Atlantiques</option>
-            <option value="65">65 – Hautes-Pyrénées</option>
-            <option value="66">66 – Pyrénées-Orientales</option>
-            <option value="67">67 – Bas-Rhin</option>
-            <option value="68">68 – Haut-Rhin</option>
-            <option value="69">69 – Rhône</option>
-            <option value="70">70 – Haute-Saône</option>
-            <option value="71">71 – Saône-et-Loire</option>
-            <option value="72">72 – Sarthe</option>
-            <option value="73">73 – Savoie</option>
-            <option value="74">74 – Haute-Savoie</option>
-            <option value="75">75 – Paris</option>
-            <option value="76">76 – Seine-Maritime</option>
-            <option value="77">77 – Seine-et-Marne</option>
-            <option value="78">78 – Yvelines</option>
-            <option value="79">79 – Deux-Sèvres</option>
-            <option value="80">80 – Somme</option>
-            <option value="81">81 – Tarn</option>
-            <option value="82">82 – Tarn-et-Garonne</option>
-            <option value="83">83 – Var</option>
-            <option value="84">84 – Vaucluse</option>
-            <option value="85">85 – Vendée</option>
-            <option value="86">86 – Vienne</option>
-            <option value="87">87 – Haute-Vienne</option>
-            <option value="88">88 – Vosges</option>
-            <option value="89">89 – Yonne</option>
-            <option value="90">90 – Territoire de Belfort</option>
-            <option value="91">91 – Essonne</option>
-            <option value="92">92 – Hauts-de-Seine</option>
-            <option value="93">93 – Seine-Saint-Denis</option>
-            <option value="94">94 – Val-de-Marne</option>
-            <option value="95">95 – Val-d’Oise</option>
-            <option value="971">971 – Guadeloupe</option>
-            <option value="972">972 – Martinique</option>
-            <option value="973">973 – Guyane</option>
-            <option value="974">974 – La Réunion</option>
-            <option value="976">976 – Mayotte</option>
-          </select>
-        </label>
+      <details class="options-disclosure">
+        <summary>Votre identité (signature légale)</summary>
+        <div class="options-body">
+          <label class="field">
+            <span>Votre nom</span>
+            <input id="senderName" type="text" placeholder="Ex. : Qusai Ben Zaied" autocomplete="name" value="">
+          </label>
+          <label class="field">
+            <span>Fonction</span>
+            <input id="senderRole" type="text" placeholder="Ex. : Président" autocomplete="organization-title" value="">
+          </label>
+          <label class="field">
+            <span>Nom de la société</span>
+            <input id="senderCompany" type="text" placeholder="Ex. : Comanjo SAS" autocomplete="organization" value="">
+          </label>
+          <label class="field">
+            <span>SIREN</span>
+            <input id="senderSiren" type="text" inputmode="numeric" placeholder="Ex. : 999 898 745" autocomplete="off" value="">
+          </label>
+          <label class="field">
+            <span>Adresse de la société</span>
+            <input id="senderAddress" type="text" placeholder="Ex. : 27 rue de la Comète, 92600 Asnières-sur-Seine" autocomplete="street-address" value="">
+          </label>
+          <label class="field">
+            <span>Votre e-mail</span>
+            <input id="senderEmail" type="email" placeholder="Ex. : contact@votresociete.fr" autocomplete="email" value="">
+          </label>
+          <label class="field">
+            <span>Votre téléphone</span>
+            <input id="senderPhone" type="tel" placeholder="Ex. : 07 68 50 77 88" autocomplete="tel" value="">
+          </label>
+        </div>
+      </details>
+      <span class="step-label" style="margin-top:14px">Étape 2 — Lancer</span>
+      <button id="runBtn" class="btn btn-primary btn-block panel-run-desktop" type="button">Trouver des cabinets à contacter</button>
+
+      <div class="progress-wrap" id="progressWrap" aria-live="polite">
+        <div class="progress-head">
+          <span id="progressLabel">Préparation…</span>
+          <strong id="progressPct">0%</strong>
+        </div>
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+        <div class="status-line" id="statusLine"></div>
       </div>
-      <label class="field">
-        <span>Votre nom (signature du mail)</span>
-        <input id="senderName" type="text" placeholder="Eva Moreau">
-      </label>
-      <label class="field">
-        <span>Votre e-mail</span>
-        <input id="senderEmail" type="email" placeholder="vous@cabinet.fr">
-      </label>
-      <label class="field">
-        <span>Votre téléphone</span>
-        <input id="senderPhone" type="tel" placeholder="06 12 34 56 78">
-      </label>
-      <button id="runBtn" class="btn btn-primary btn-block" type="button">Lancer la prospection</button>
-      <p class="hint small">Sources : BODACC, Annuaire officiel, Pappers, PagesJaunes, site de l’entreprise, OSM. <strong>Aucun e-mail inventé</strong> — seuls les contacts publiés et vérifiés permettent l’envoi.</p>
-      <div class="log-box" id="logBox">En attente d’un secteur…</div>
+      <div class="log-box" id="logBox"></div>
     </section>
 
     <section class="workspace">
-      <div class="timeline-card" style="padding:16px">
+      <div class="card">
+        <span class="step-label">Étape 3 — Contacter</span>
         <div class="results-head">
-          <h2>Nouvelles entreprises trouvées</h2>
-          <div class="actions" style="margin:0">
-            <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Export CSV</button>
-          </div>
+          <h2>Entreprises à contacter</h2>
+          <details class="results-tools">
+            <summary>Plus</summary>
+            <div class="actions" style="margin-top:10px">
+              <button id="csvBtn" class="btn btn-ghost" type="button" disabled>Télécharger ma liste</button>
+              <button id="historyClearBtn" class="btn btn-ghost" type="button">Tout effacer</button>
+            </div>
+          </details>
         </div>
-        <div class="mass-mail-bar" id="massMailBar" style="display:none">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <div class="history-panel" id="historyPanel" hidden aria-hidden="true"></div>
+        <div class="filter-tabs" id="filterTabs" role="tablist" aria-label="Filtrer les entreprises">
+          <button type="button" class="filter-tab active" data-filter="todo" role="tab" aria-selected="true">
+            À contacter <span class="tab-count" id="countTodo">(0)</span>
+          </button>
+          <button type="button" class="filter-tab" data-filter="done" role="tab" aria-selected="false">
+            Contactées <span class="tab-count" id="countDone">(0)</span>
+          </button>
+        </div>
+        <div class="mass-mail-bar" id="massMailBar">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;min-height:44px">
             <input type="checkbox" id="selectAllCb" class="select-cb"> Tout sélectionner
           </label>
-          <span class="count" id="selectedCount">0</span> sélectionné(es)
-          <button id="massEditBtn" class="btn btn-ghost" type="button">Relire / modifier les mails</button>
-          <button id="massSendBtn" class="btn btn-primary" type="button">Envoyer les mails sélectionnés</button>
+          <span><span class="count" id="selectedCount">0</span> sélectionné(s)</span>
+          <button id="massEditBtn" class="btn btn-ghost" type="button">Relire les messages</button>
+          <button id="massSendBtn" class="btn btn-primary" type="button">Ouvrir les brouillons</button>
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Aucun résultat pour le moment. Choisissez un secteur puis lancez l’agent.</li>
+          <li class="empty">Choisissez une ville d’Île-de-France, puis lancez une recherche. Seules les entreprises avec un e-mail public apparaissent ici.</li>
         </ul>
       </div>
-      <div class="timeline-card mail-template-box" style="padding:16px; margin-top:16px">
-        <h3>Mail de prospection type</h3>
-        <p class="meta">Ce modèle sera personnalisé automatiquement avec le nom de chaque entreprise. Utilisez <code>{entreprise}</code>, <code>{dirigeant}</code>, <code>{activite}</code> et <code>{adresse}</code> comme variables.</p>
-        <textarea id="mailTemplate">Bonjour {dirigeant},
 
-Félicitations pour la création de {entreprise} !
+      <details class="card mail-template-box options-disclosure">
+        <summary>Personnaliser le corps du message</summary>
+        <div class="options-body">
+        <p class="meta hint" style="margin-top:0">L’accroche (première phrase) s’adapte toute seule à l’activité du cabinet. Le pied légal (SIREN, source, « stop ») est ajouté automatiquement. Vous pouvez modifier le corps ci-dessous.</p>
+        <textarea id="mailTemplate">Je développe L'ARC avec un expert-comptable en exercice : à partir d'un FEC exporté de votre logiciel comptable, notre agent l'importe et mémorise tout l'historique comptable du cabinet. Ensuite, à chaque nouvelle facture que vous lui envoyez, il propose automatiquement une écriture comptable complète (compte, journal, tiers, taux et compte de TVA).
 
-Je me permets de vous contacter car les premières semaines d’une entreprise sont décisives pour poser une gestion comptable simple et fiable (facturation, charges, TVA, trésorerie).
+Le collaborateur peut échanger avec l'agent pour lui indiquer les ajustements souhaités : l'agent retient ces corrections et les applique dès la facture suivante, pour proposer une écriture toujours plus juste.
 
-Notre cabinet peut vous accompagner sur :
-- la mise en place de la comptabilité et du prévisionnel
-- le suivi mensuel (recettes / dépenses / TVA)
-- la préparation des échéances URSSAF, impôts et bulletins si besoin
+Nous avons créé un FEC fictif, celui d'une entreprise imaginaire avec plusieurs factures, pour vous faire une démonstration. Nous aimerions vous montrer la simplicité de fonctionnement de l'agent et l'aide qu'il peut apporter à votre cabinet : cela vous permettrait de vous concentrer sur des tâches à plus haute valeur ajoutée.
 
-Activité déclarée : {activite}
-Adresse : {adresse}
+C'est gratuit et sans engagement.
 
-Si vous le souhaitez, je vous propose un premier échange offert de 20 minutes pour faire le point.
-
-Cordialement,
-[Votre nom]
-[Votre email]
-[Votre téléphone]</textarea>
+Ça vaut 10 minutes au téléphone ?</textarea>
         <div class="actions">
-          <button id="previewMailBtn" class="btn btn-ghost" type="button">Aperçu avec la 1ère entreprise</button>
-          <button id="saveTemplateBtn" class="btn btn-ghost" type="button">Sauvegarder le modèle</button>
+          <button id="previewMailBtn" class="btn btn-ghost" type="button">Aperçu</button>
+          <button id="saveTemplateBtn" class="btn btn-ghost" type="button">Sauvegarder</button>
         </div>
         <div class="mail-preview" id="mailPreview">
-          <h3 style="margin-top:12px">Aperçu</h3>
-          <div id="mailPreviewContent" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:.82rem;white-space:pre-wrap;line-height:1.5"></div>
+          <h3 style="margin-top:0">Aperçu</h3>
+          <div id="mailPreviewContent"></div>
         </div>
-      </div>
+        </div>
+      </details>
     </section>
   </main>
 
-  <button class="scroll-top" id="scrollTopBtn" type="button" aria-label="Remonter en haut">&#8593;</button>
+  <section class="dashboard-view" id="viewSuivi" hidden aria-label="Suivi des mails">
+    <div class="dash-hero">
+      <div>
+        <h2 class="hero-title">Suivi et relances</h2>
+        <p class="hero-lead">Les mails envoyés passent ici. Après le délai choisi, la ligne devient rouge et un brouillon de relance est prêt.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="suivi-toolbar">
+        <label class="field">
+          <span>Relancer après</span>
+          <select id="followUpDelay">
+            <option value="3">3 jours</option>
+            <option value="5" selected>5 jours</option>
+            <option value="7">7 jours</option>
+            <option value="10">10 jours</option>
+            <option value="14">14 jours</option>
+          </select>
+        </label>
+        <p class="meta hint" style="margin:0;max-width:42ch">Le délai s’applique aux prochains envois. Les lignes déjà en retard restent visibles en rouge, avec le texte « À relancer ».</p>
+      </div>
+      <ul class="suivi-list" id="suiviList"></ul>
+    </div>
+  </section>
 
-  <footer class="site-footer">
-    <a href="/prospection">Agent de prospection</a>
-    <span>·</span>
-    <a href="/legal/terms.html">Conditions</a>
-  </footer>
+  <div class="sticky-run-bar" id="stickyRunBar" hidden>
+    <button id="runBtnMobile" class="btn btn-primary btn-block" type="button">Trouver des cabinets à contacter</button>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Navigation mobile">
+    <div class="mobile-nav-inner">
+      <button type="button" class="mobile-nav-btn active" data-view="dashboard" id="mobileNavDashboard">Accueil</button>
+      <button type="button" class="mobile-nav-btn" data-view="prospection" id="mobileNavProspection">Recherche</button>
+      <button type="button" class="mobile-nav-btn" data-view="suivi" id="mobileNavSuivi">Suivi</button>
+    </div>
+  </nav>
+
+  <button class="scroll-top" id="scrollTopBtn" type="button" aria-label="Haut de page">↑</button>
+  <script src="/prospection/mail-drafts.js"></script>
   <script src="/prospection/prospection.js"></script>
 </body>
 </html>

@@ -3944,9 +3944,11 @@ ensureDirs()
     if (scheduleConfig.enabled) {
       scheduleNextAutomationTick(scheduleConfig);
     }
-    app.listen(PORT, () => {
+    const HOST = process.env.HOST || "0.0.0.0";
+    app.listen(PORT, HOST, () => {
       const deploy = readDeployInfo();
-      console.log(`ClipForge API en écoute sur http://localhost:${PORT}`);
+      console.log(`ClipForge API en écoute sur http://${HOST}:${PORT}`);
+      console.log(`Prospection : http://<IP-du-VPS>:${PORT}/prospection`);
       console.log(`ROOT_DIR=${deploy.rootDir} indexBytes=${deploy.indexBytes} uiSimplified=${deploy.uiSimplified}`);
       if (!deploy.uiSimplified) {
         console.warn("ATTENTION: index.html servi sans downloadAllBtn — mauvais dossier ou ancienne version.");

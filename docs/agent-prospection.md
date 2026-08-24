@@ -2,119 +2,33 @@
 
 ## En une phrase
 
-Un agent IA qui **trouve les nouvelles entreprises** d'un secteur choisi, **retrouve leurs contacts** (e-mail ou téléphone) via des sources publiques gratuites, et **prépare des mails de prospection** personnalisés pour proposer vos services de gestion comptable.
+Un agent qui **trouve des cabinets** de la branche juridique / finance en **Île-de-France**, **retrouve leurs e-mails publics**, et **prépare un brouillon d’e-mail personnalisé** prêt à envoyer.
 
----
+## Parcours (3 onglets)
 
-## Ce qu'il fait
+- **Accueil** — valeur en moins de 3 secondes, CTA « Trouver des cabinets près de moi »
+- **Recherche** — ville IDF + cible, liste, **Ouvrir le brouillon**
+- **Suivi** — relances paramétrables (3 à 14 jours, défaut 5), ligne rouge + texte « À relancer », brouillon de relance
 
-### 1. Recensement des nouvelles entreprises
+## Brouillons mail (comme le flux Claude)
 
-- Interroge le **BODACC** (annonces légales de création d'entreprises)
-- Filtre par **secteur** (restauration, BTP, conseil, beauté, etc.) ou secteur libre
-- Filtre par **période** (7 à 90 jours) et **département** (101 départements français)
-- Enrichit chaque fiche via l'**Annuaire des entreprises** (SIREN, NAF, adresse, dirigeant)
+- **Accroche dynamique** selon l’activité des clients du cabinet (BTP, resto, santé, etc.)
+- **Corps standard L’ARC** (FEC, écritures, démo 10 min)
+- **Pied légal obligatoire** : identité (nom, fonction, société, SIREN, adresse, tel, e-mail), **source des données + lien**, *« Répondez « stop » pour ne plus être contacté »*
 
-### 2. Recherche de contacts
+## Cibles
 
-- Cherche automatiquement un **e-mail** ou un **téléphone** public pour chaque entreprise
-- Sources utilisées (100 % gratuites, sans clé API) :
-  - Devinette d'e-mail par enregistrement MX DNS
-  - OpenStreetMap Nominatim
-  - PagesJaunes
-  - Brave Search
-  - Societe.com
-  - Recherche par nom du dirigeant
+- Cabinets d’expertise comptable (défaut, NAF 69.20Z)
+- Cabinets d’avocats
+- Juridique (notaires, huissiers, juristes)
+- Finance / banque / assurance
+- Conseil en gestion
+- Toute la branche
 
-### 3. Prospection par e-mail
+## Zone
 
-- **Modèle de mail type** personnalisable avec variables : `{entreprise}`, `{dirigeant}`, `{activite}`, `{adresse}`
-- **Aperçu** du mail pour la 1ère entreprise trouvée
-- **Édition individuelle** du mail par entreprise
-- **Envoi en masse** : sélection multiple + ouverture des fenêtres mailto
-- **Export CSV** de toutes les entreprises et contacts
+Uniquement les **villes d’Île-de-France** (1 266 communes), avec **barre de recherche**. Pas de région ni de département.
 
----
+Toutes dates de création.
 
-## Interface
-
-- Thème clair blanc / orange
-- Formulaire sticky à gauche, résultats à droite
-- Bouton **retour en haut** en scroll
-- Barre d'actions : tout sélectionner, relire/modifier, envoyer
-- Journal en temps réel pendant la recherche
-
----
-
-## Exemple de résultat
-
-| Critère | Exemple |
-|---------|---------|
-| Secteur | Conseil, gestion, juridique |
-| Zone | Paris (75) |
-| Période | 30 jours |
-| Entreprises trouvées | 20+ |
-| Avec contact | 24 (e-mails et/ou téléphones) |
-
----
-
-## Points forts
-
-- **Gratuit** : aucune clé API, aucun abonnement
-- **Illimité** : pas de plafond sur le nombre de résultats
-- **Autonome** : l'utilisateur choisit le secteur, lance l'agent, relit les mails et envoie
-- **Conforme** : sources publiques officielles (BODACC, Annuaire entreprises)
-
----
-
-## Public cible
-
-Experts-comptables, cabinets comptables et conseillers qui souhaitent **prospecter les nouvelles entreprises** de leur région pour proposer un accompagnement en gestion comptable dès la création.
-
----
-
-## Fichiers du projet
-
-Tout est regroupé dans **`agent-prospection/`** :
-
-| Fichier | Rôle |
-|---------|------|
-| `agent-prospection/index.html` | Interface (HTML + CSS) |
-| `agent-prospection/prospection.js` | Logique front (recherche, mails, export) |
-| `agent-prospection/favicon.png` | Icône onglet (tons orange du site) |
-| `agent-prospection/server/prospection-agent.js` | Agent IA (BODACC, contacts, SSE) |
-| `agent-prospection/server/standalone-server.js` | Serveur minimal (repo autonome) |
-
-Le serveur principal ClipForge (`server/index.js`) monte les routes `/prospection` et `/api/prospection`.
-
----
-
-## Lancer l'agent en local
-
-```bash
-npm install
-npm start
-```
-
-Puis ouvrir : **http://localhost:3000/prospection**
-
----
-
-## Déploiement (Render)
-
-Le projet inclut un `render.yaml`. Déployez sur Render : l'agent sera accessible à :
-
-`https://votre-app.onrender.com/prospection`
-
-> GitHub Pages ne suffit pas : l'agent nécessite le backend Node.js pour interroger BODACC et enrichir les contacts.
-
----
-
-## API
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /prospection` | Page interface |
-| `GET /api/prospection/sectors` | Liste des secteurs |
-| `GET /api/prospection/stream?sector=...&days=...&department=...` | Recherche en streaming (SSE) |
-| `POST /api/prospection/search` | Recherche synchrone (JSON) |
+URL VPS : https://51-254-135-158.sslip.io/prospection
