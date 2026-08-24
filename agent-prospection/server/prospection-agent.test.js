@@ -71,6 +71,36 @@ test("Pappers / societe.com interdisent le téléphone même si fourni", () => {
   assert.equal(company.contactVerified, false);
 });
 
+test("les résultats affichés exigent un e-mail public (pas le téléphone seul)", () => {
+  const { isEmailContact, publicCompany } = require("./prospection-agent");
+  const phoneOnly = {
+    name: "CABINET TEL",
+    siren: "123456789",
+    department: "92",
+    city: "Colombes",
+    postalCode: "92700",
+    directors: [],
+    phone: "01 46 49 00 00",
+    email: "",
+    contactSource: "OpenStreetMap",
+    contactVerified: true,
+    contactConfidence: "high"
+  };
+  assert.equal(isEmailContact(phoneOnly), false);
+  const publishedPhone = publicCompany(phoneOnly);
+  assert.equal(publishedPhone.hasContact, false);
+  assert.equal(publishedPhone.email, "");
+  const withMail = {
+    ...phoneOnly,
+    email: "contact@cabinet-tel.fr"
+  };
+  assert.equal(isEmailContact(withMail), true);
+  const publishedMail = publicCompany(withMail);
+  assert.equal(publishedMail.hasContact, true);
+  assert.equal(publishedMail.email, "contact@cabinet-tel.fr");
+  assert.equal(publishedMail.preferredChannel, "mail");
+});
+
 test("CULTURE RAPIDE — homonyme Paris sans adresse rejetée", () => {
   const culture = {
     name: "CULTURE RAPIDE",

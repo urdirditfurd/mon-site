@@ -1627,7 +1627,7 @@ async function enrichFromSearch(company) {
 
 function buildProposal(company, sender = {}) {
   const who = sender.name || "notre société";
-  const director = company.directors[0] ? ` ${company.directors[0]}` : "";
+  const director = (company.directors || [])[0] ? ` ${company.directors[0]}` : "";
   const activity = company.activity || company.nafLabel || "expertise comptable";
   const subject = `Échange avec ${company.name}`;
   const body = `Bonjour${director ? ` ${director}` : ""},
@@ -1656,6 +1656,16 @@ function isVerifiedContact(company) {
   return Boolean(
     company.contactVerified
     && (company.email || company.phone)
+    && company.contactConfidence !== "low"
+  );
+}
+
+/** Résultats affichés : uniquement les entreprises avec un e-mail public vérifié. */
+function isEmailContact(company) {
+  sanitizeCompanyContact(company);
+  return Boolean(
+    company.contactVerified
+    && company.email
     && company.contactConfidence !== "low"
   );
 }
@@ -1693,8 +1703,8 @@ function sanitizeCompanyContact(company) {
 
 function publicCompany(company, sender) {
   sanitizeCompanyContact(company);
-  const verified = isVerifiedContact(company);
-  const proposal = verified && company.email ? buildProposal(company, sender) : null;
+  const verifiedEmail = isEmailContact(company);
+  const proposal = verifiedEmail ? buildProposal(company, sender) : null;
   return {
     name: company.name,
     legalName: company.legalName,
@@ -1709,16 +1719,14 @@ function publicCompany(company, sender) {
     postalCode: company.postalCode,
     department: company.department,
     directors: company.directors,
-    email: verified ? (company.email || "") : "",
-    phone: verified ? (company.phone || "") : "",
-    website: verified && company.website ? company.website : (company.website && isRealCompanyWebsite(company.website) ? company.website : ""),
-    contactSource: verified ? (company.contactSource || "") : "",
-    contactConfidence: verified ? (company.contactConfidence || "") : "",
-    contactVerified: verified,
-    hasContact: verified,
-    preferredChannel: verified
-      ? (company.phone ? "sms" : (company.email ? "mail" : ""))
-      : "",
+    email: verifiedEmail ? (company.email || "") : "",
+    phone: verifiedEmail ? (company.phone || "") : "",
+    website: verifiedEmail && company.website ? company.website : (company.website && isRealCompanyWebsite(company.website) ? company.website : ""),
+    contactSource: verifiedEmail ? (company.contactSource || "") : "",
+    contactConfidence: verifiedEmail ? (company.contactConfidence || "") : "",
+    contactVerified: verifiedEmail,
+    hasContact: verifiedEmail,
+    preferredChannel: verifiedEmail ? "mail" : "",
     bodaccUrl: company.bodaccUrl,
     sireneUrl: company.sireneUrl || (company.siren ? `https://annuaire-entreprises.data.gouv.fr/entreprise/${company.siren}` : ""),
     pappersUrl: company.siren ? `https://www.pappers.fr/entreprise/${company.siren}` : "",
@@ -1976,8 +1984,8 @@ async function enrichCompanyContacts(company, onEvent) {
   onEvent({
     type: "status",
     message: published.hasContact
-      ? `Contact v\u00e9rifi\u00e9 (${published.contactSource}) pour ${company.name}`
-      : `Pas de contact public v\u00e9rifi\u00e9 pour ${company.name}`
+      ? `E-mail v\u00e9rifi\u00e9 (${published.contactSource}) pour ${company.name}`
+      : `Pas d'e-mail public v\u00e9rifi\u00e9 pour ${company.name}`
   });
   return published;
 }
@@ -2056,9 +2064,9 @@ function buildProspectionSummary({
     totalSirene: totalSirene || totalBodacc || 0,
     scanned,
     found: results.length,
-    withContact: results.filter((row) => row.hasContact).length,
+    withContact: results.filter((row) => row.hasContact && row.email).length,
     sources: CONTACT_SOURCES.map((row) => `${row.name} — ${row.role}`),
-    note: `${sector.label} — villes d’Île-de-France, toutes dates. Contacts publics vérifiés (double contrôle). Tél. Pappers/Societe.com exclus.`
+    note: `${sector.label} — villes d’Île-de-France, toutes dates. Uniquement les e-mails publics vérifiés (double contrôle). Tél. seuls exclus.`
   };
 }
 
@@ -2067,7 +2075,6 @@ async function runProspectionAuto(params, onEvent, sector, zone, sender) {
   const perStep = Math.min(30, Math.max(10, Number(params.limit) || 25));
   const seenKeys = new Set();
   const withContact = [];
-  const usedPhones = new Set();
   const usedEmails = new Set();
   let totalSirene = 0;
   let scanned = 0;
@@ -2080,7 +2087,7 @@ async function runProspectionAuto(params, onEvent, sector, zone, sender) {
   emitProgress(4, `Cabinets d’expertise comptable${zoneLabel}`);
   onEvent({
     type: "status",
-    message: `Recherche SIRENE — cabinets NAF 69.20Z${zoneLabel}, toutes dates (objectif ${targetContacts} contacts).`
+    message: `Recherche SIRENE — ${sector.label}${zoneLabel}, toutes dates (objectif ${targetContacts} e-mails).`
   });
 
   const rounds = 3;
@@ -2090,7 +2097,7 @@ async function runProspectionAuto(params, onEvent, sector, zone, sender) {
     emitProgress(stepBase + 2, `Vague ${stepIndex + 1} — recherche de cabinets…`);
     onEvent({
       type: "status",
-      message: `Vague ${stepIndex + 1} — ${withContact.length}/${targetContacts} contacts validés…`
+      message: `Vague ${stepIndex + 1} — ${withContact.length}/${targetContacts} e-mails validés…`
     });
     const { total, selected } = await selectSectorCompanies(
       sector,
@@ -2126,55 +2133,51 @@ async function runProspectionAuto(params, onEvent, sector, zone, sender) {
       const contactBoost = Math.min(8, (withContact.length / targetContacts) * 8);
       emitProgress(
         Math.min(96, localPct + contactBoost),
-        `${withContact.length}/${targetContacts} contacts · ${company.name.slice(0, 42)}`
+        `${withContact.length}/${targetContacts} e-mails · ${company.name.slice(0, 42)}`
       );
-      if (!isVerifiedContact(company)) {
-        onEvent({ type: "status", message: `Pas de contact public pour ${company.name}` });
+      if (!isEmailContact(company)) {
+        onEvent({ type: "status", message: `Pas d’e-mail public pour ${company.name}` });
         return;
       }
       if (!nafMatchesSector(company.naf, sector)) {
         onEvent({ type: "status", message: `NAF hors cible ignoré — ${company.name}` });
         return;
       }
-      const phoneKey = String(company.phone || "").replace(/\D/g, "");
       const emailKey = String(company.email || "").toLowerCase();
-      if (phoneKey && usedPhones.has(phoneKey)) company.phone = "";
-      if (emailKey && usedEmails.has(emailKey)) company.email = "";
-      if (!company.phone && !company.email) {
+      if (emailKey && usedEmails.has(emailKey)) {
         company.contactVerified = false;
-        onEvent({ type: "status", message: `Contact doublon ignoré pour ${company.name}` });
+        onEvent({ type: "status", message: `E-mail doublon ignoré pour ${company.name}` });
         return;
       }
-      if (phoneKey && company.phone) usedPhones.add(phoneKey);
-      if (emailKey && company.email) usedEmails.add(emailKey);
+      if (emailKey) usedEmails.add(emailKey);
       const published = publicCompany(company, sender);
-      if (!published.hasContact) return;
+      if (!published.hasContact || !published.email) return;
       withContact.push(company);
       onEvent({ type: "company", company: published });
       onEvent({ type: "contact", siren: published.siren, company: published });
       onEvent({
         type: "status",
-        message: `Contact validé — ${published.name} (${published.contactSource || "public"})`
+        message: `Contact validé — ${published.name} (${published.email})`
       });
     });
     onEvent({
       type: "status",
-      message: `Après vague ${stepIndex + 1} : ${withContact.length} contact(s) validé(s) / ${scanned} scanné(s).`
+      message: `Après vague ${stepIndex + 1} : ${withContact.length} e-mail(s) validé(s) / ${scanned} scanné(s).`
     });
   }
 
   const results = withContact
     .map((company) => publicCompany(company, sender))
-    .filter((row) => row.hasContact);
+    .filter((row) => row.hasContact && row.email);
 
   if (!results.length) {
     onEvent({
       type: "status",
-      message: "Aucun contact public validé. Essayez une autre ville d’Île-de-France."
+      message: "Aucun e-mail public validé. Essayez une autre ville d’Île-de-France."
     });
   }
 
-  emitProgress(100, results.length ? `${results.length} contact(s) validé(s)` : "Aucun contact validé");
+  emitProgress(100, results.length ? `${results.length} e-mail(s) validé(s)` : "Aucun e-mail validé");
   const summary = buildProspectionSummary({
     sector,
     days: "all",
@@ -2214,12 +2217,11 @@ async function runProspection(params = {}, onEvent = () => {}) {
 
   const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const enrichContacts = params.enrichContacts !== false;
-  const contactsOnly = params.contactsOnly === true || params.contactsOnly === "1";
 
   const zoneLabel = zone && zone.id !== "france" ? ` · ${zone.label}` : "";
   onEvent({
     type: "status",
-    message: `Recherche SIRENE — cabinets d’expertise comptable (NAF 69.20Z), toutes dates${zoneLabel}.`
+    message: `Recherche SIRENE — ${sector.label}, toutes dates${zoneLabel}.`
   });
 
   const seenKeys = new Set();
@@ -2257,10 +2259,8 @@ async function runProspection(params = {}, onEvent = () => {}) {
 
   let results = selected
     .filter((company) => nafMatchesSector(company.naf, sector))
-    .map((company) => publicCompany(company, sender));
-  if (contactsOnly) {
-    results = results.filter((row) => row.hasContact);
-  }
+    .map((company) => publicCompany(company, sender))
+    .filter((row) => row.hasContact && row.email);
   const summary = buildProspectionSummary({
     sector,
     days: "all",
@@ -2372,6 +2372,8 @@ module.exports = {
   directoryEvidenceOk,
   sanitizeCompanyContact,
   sourceForbidsPhone,
+  isEmailContact,
+  publicCompany,
   companyFromSireneHit,
   searchName,
   isGenericCompanyName,

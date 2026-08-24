@@ -448,6 +448,7 @@
 
   function rememberCompany(company, { fromScan } = {}) {
     if (!company || !company.hasContact) return;
+    if (!company.email) return;
     const key = companyKey(company);
     const prev = companyMemory[key] || {};
     companyMemory[key] = {
@@ -466,7 +467,7 @@
 
   function rebuildCompaniesList() {
     companies = Object.values(companyMemory)
-      .filter((c) => c && c.hasContact && (c.email || c.phone))
+      .filter((c) => c && c.hasContact && c.email)
       .map((c) => ({ ...c }))
       .sort((a, b) => {
         const aDone = isContacted(companyKey(a)) ? 1 : 0;
@@ -592,7 +593,7 @@
   function selectableCompanies() {
     return filteredCompanies().filter((c) => {
       if (isContacted(companyKey(c))) return false;
-      return Boolean(c.hasContact && (c.email || c.phone));
+      return Boolean(c.hasContact && c.email);
     });
   }
 
@@ -859,7 +860,7 @@
 
   function emptyMessage() {
     if (!companies.length) {
-      return "Choisissez un secteur et une période (moins d’1 an ou moins de 2 ans), puis lancez le sondage. Les contacts validés restent en mémoire.";
+      return "Choisissez une ville, lancez une recherche. Seules les entreprises avec un e-mail public apparaissent.";
     }
     if (listFilter === "todo") {
       const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
@@ -892,7 +893,7 @@
 
   function upsertCompany(company) {
     if (!company || !company.hasContact) return;
-    if (!company.email && !company.phone) return;
+    if (!company.email) return;
     const key = companyKey(company);
     const already = isContacted(key);
     rememberCompany(company, { fromScan: true });
@@ -1040,7 +1041,7 @@
       return;
     }
     if (event.type === "done") {
-      const incoming = (event.companies || []).filter((c) => c.hasContact && (c.email || c.phone));
+      const incoming = (event.companies || []).filter((c) => c.hasContact && c.email);
       incoming.forEach((c) => rememberCompany(c, { fromScan: true }));
       rebuildCompaniesList();
       searchDone = true;
@@ -1066,7 +1067,7 @@
       } else if (todo) {
         log(`Sondage terminé — ${todo} entreprise(s) à contacter en mémoire.`, { quiet: true });
       } else if (!companies.length) {
-        log("Aucun contact validé. Essayez une autre ville d’Île-de-France.", { quiet: true });
+        log("Aucun e-mail public validé. Essayez une autre ville d’Île-de-France.", { quiet: true });
       } else {
         log("Tous les cabinets en mémoire sont déjà contactés.", { quiet: true });
       }
@@ -1414,10 +1415,10 @@
         city: "Courbevoie",
         postalCode: "92400",
         directors: ["Nathalie Jarjaille"],
-        phone: "01 46 93 30 00",
-        email: "",
+        phone: "",
+        email: "contact@cabinet-exemplaire.example",
         hasContact: true,
-        contactSource: "démo téléphone"
+        contactSource: "démo e-mail"
       },
       {
         name: "Fiduciaire Seine Expertise",
