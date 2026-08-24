@@ -141,32 +141,57 @@ test("extrait e-mails utiles et filtre les faux positifs", () => {
   assert.deepEqual(extractEmails(text), ["hello@creole-avenue.fr"]);
 });
 
-test("filtre l'activité restauration et exclut les livreurs", () => {
-  const sector = resolveSector("restauration");
-  assert.equal(activityMatchesSector("Restaurant pizzeria", sector), true);
-  assert.equal(activityMatchesSector("livraison de commandes restaurants en vélo", sector), false);
+test("filtre l'activité cabinets et exclut le médical / juridique", () => {
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(activityMatchesSector("Expertise comptable", sector), true);
+  assert.equal(activityMatchesSector("Cabinet comptable fiduciaire", sector), true);
+  assert.equal(activityMatchesSector("cabinet médical généraliste", sector), false);
+  assert.equal(activityMatchesSector("avocat droit des sociétés", sector), false);
 });
 
-test("secteur cinéma couvre production audiovisuelle et NAF 59", () => {
-  const sector = resolveSector("cinema");
-  assert.equal(sector.id, "cinema");
-  assert.ok(sector.nafPrefixes.includes("59"));
-  assert.ok(sector.nafPrefixes.includes("60"));
-  assert.equal(activityMatchesSector("Production cinématographique et audiovisuelle", sector), true);
-  assert.equal(activityMatchesSector("Salle de sport et fitness", sector), false);
-  const byLabel = resolveSector("cinéma");
-  assert.equal(byLabel.id, "cinema");
+test("secteur cabinets d'expertise comptable — NAF 69.20Z exact", () => {
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(sector.id, "cabinets-comptables");
+  assert.ok(sector.nafPrefixes.includes("69.20Z"));
+  assert.equal(activityMatchesSector("Expertise comptable", sector), true);
+  assert.equal(activityMatchesSector("Cabinet médical", sector), false);
+  const byLabel = resolveSector("expertise comptable");
+  assert.equal(byLabel.id, "cabinets-comptables");
+  // Verrouillage métier : un ancien secteur est remappé vers les cabinets.
+  assert.equal(resolveSector("cinema").id, "cabinets-comptables");
+  assert.equal(resolveSector("tous").id, "cabinets-comptables");
 });
 
-test("secteur tous agrège les NAF de la liste", () => {
-  const sector = resolveSector("tous");
-  assert.equal(sector.id, "tous");
-  assert.equal(sector.allSectors, true);
-  assert.ok(sector.nafPrefixes.includes("56"));
-  assert.ok(sector.nafPrefixes.includes("59"));
-  assert.equal(activityMatchesSector("n'importe quoi", sector), true);
+test("NAF exact — 69.20Z accepté, 69.10Z (juridique) rejeté", () => {
+  const { nafMatchesSector } = require("./prospection-agent");
+  const sector = resolveSector("cabinets-comptables");
+  assert.equal(nafMatchesSector("69.20Z", sector), true);
+  assert.equal(nafMatchesSector("6920Z", sector), true);
+  assert.equal(nafMatchesSector("69.10Z", sector), false);
+  assert.equal(nafMatchesSector("59.11C", sector), false);
+});
+
+test("zones IDF, département et villes du 92", () => {
+  const { resolveZone, matchesZone, listZones } = require("./prospection-agent");
+  const zones = listZones();
+  assert.ok(zones.some((z) => z.id === "idf"));
+  assert.ok(zones.some((z) => z.id === "city-asnieres"));
+  const idf = resolveZone("idf");
+  assert.equal(idf.type, "region");
+  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "Asnières-sur-Seine" }, idf), true);
+  assert.equal(matchesZone({ department: "69", postalCode: "69001", city: "Lyon" }, idf), false);
+  const asnieres = resolveZone("city-asnieres");
+  assert.equal(asnieres.type, "city");
+  assert.equal(matchesZone({ department: "92", postalCode: "92600", city: "ASNIERES-SUR-SEINE" }, asnieres), true);
+  assert.equal(matchesZone({ department: "92", postalCode: "92400", city: "Courbevoie" }, asnieres), false);
+  const dep92 = resolveZone("92");
+  assert.equal(matchesZone({ department: "92", postalCode: "92230", city: "Gennevilliers" }, dep92), true);
+});
+
+test("listSectors n'expose que les cabinets", () => {
   const listed = listSectors();
-  assert.equal(listed[0].id, "tous");
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, "cabinets-comptables");
 });
 
 test("parse une annonce BODACC personne morale", () => {
@@ -203,19 +228,20 @@ test("parse une annonce BODACC personne morale", () => {
   assert.match(company.address, /Malte/);
 });
 
-test("similarité de nom et proposition comptable", () => {
+test("similarité de nom et proposition cabinets", () => {
   assert.ok(nameSimilarity("CREOLE AVENUE CHELLES", "Restaurant Creole Avenue Chelles") > 0.6);
   const proposal = buildProposal({
-    name: "SARL ELIA",
-    activity: "Restaurant pizzeria",
-    createdAt: "2026-08-04",
+    name: "FIDUCIAIRE SEINE",
+    activity: "Activités comptables",
+    createdAt: "2015-08-04",
     directors: ["Marie Dupont"],
-    address: "12 Rue de Malte 75011 Paris",
-    email: "contact@elia.fr"
-  }, { name: "Eva Moreau", email: "eva@cabinet.fr" });
-  assert.match(proposal.subject, /accompagnement comptable/);
-  assert.match(proposal.body, /gestion comptable/);
-  assert.match(proposal.mailto, /^mailto:contact%40elia\.fr/);
+    address: "12 Rue de Malte 92600 Asnières-sur-Seine",
+    email: "contact@fiduciaire-seine.fr"
+  }, { name: "Cabinet Dupont & Associés", email: "contact@dupont.fr" });
+  assert.match(proposal.subject, /Échange avec FIDUCIAIRE SEINE/);
+  assert.match(proposal.body, /cabinets d'expertise comptable/);
+  assert.match(proposal.body, /Cabinet Dupont/);
+  assert.match(proposal.mailto, /^mailto:contact%40fiduciaire-seine\.fr/);
 });
 
 test("décode les liens DuckDuckGo", () => {

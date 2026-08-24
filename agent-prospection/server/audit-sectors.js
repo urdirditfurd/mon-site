@@ -26,9 +26,9 @@ const {
 })();
 
 const OUT = process.env.AUDIT_OUT || "/opt/cursor/artifacts/prospection_sector_audit.json";
-const DAYS = Number(process.env.AUDIT_DAYS || 365);
+const DAYS = process.env.AUDIT_DAYS || "all";
 const LIMIT = Number(process.env.AUDIT_LIMIT || 10);
-const DEPARTMENT = process.env.AUDIT_DEPARTMENT || ""; // France entière = plus de chances
+const ZONE = process.env.AUDIT_ZONE || process.env.AUDIT_DEPARTMENT || "idf";
 const CONCURRENCY = Number(process.env.AUDIT_CONCURRENCY || 2);
 
 function validateContact(company) {
@@ -55,9 +55,10 @@ async function auditSector(sectorId) {
         sector: sectorId,
         days: DAYS,
         limit: LIMIT,
-        department: DEPARTMENT,
+        zone: ZONE,
+        department: ZONE,
         contactsOnly: true,
-        senderName: "Audit",
+        senderName: "Audit Cabinets",
         senderEmail: "audit@example.com"
       },
       (event) => {
@@ -121,9 +122,8 @@ async function mapPool(items, concurrency, worker) {
 }
 
 async function main() {
-  const sectors = listSectors().map((s) => s.id).filter((id) => id !== "tous");
-  // Include "tous" at the end as a light check with smaller limit via env override per call
-  console.log(`Audit ${sectors.length} secteurs — days=${DAYS} limit=${LIMIT} dep="${DEPARTMENT || "FR"}"`);
+  const sectors = listSectors().map((s) => s.id);
+  console.log(`Audit ${sectors.length} secteur(s) — days=${DAYS} limit=${LIMIT} zone="${ZONE}"`);
   const rows = await mapPool(sectors, CONCURRENCY, async (id) => {
     process.stderr.write(`→ ${id}…\n`);
     const row = await auditSector(id);
@@ -137,7 +137,7 @@ async function main() {
   const withBad = rows.filter((r) => (r.badCount || 0) > 0 || r.error);
   const report = {
     generatedAt: new Date().toISOString(),
-    params: { DAYS, LIMIT, DEPARTMENT, CONCURRENCY },
+    params: { DAYS, LIMIT, ZONE, CONCURRENCY },
     summary: {
       sectors: rows.length,
       sectorsWithContact: withHits.length,
@@ -154,7 +154,7 @@ async function main() {
     "# Audit prospection multi-secteurs",
     "",
     `- Généré : ${report.generatedAt}`,
-    `- Paramètres : ${DAYS} j, limit ${LIMIT}, dép. ${DEPARTMENT || "France"}`,
+    `- Paramètres : days=${DAYS}, limit ${LIMIT}, zone ${ZONE}`,
     `- Secteurs avec ≥1 contact : **${report.summary.sectorsWithContact}/${report.summary.sectors}**`,
     `- Contacts invalides détectés : **${report.summary.totalBad}**`,
     "",

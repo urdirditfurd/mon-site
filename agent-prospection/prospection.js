@@ -1,7 +1,8 @@
 (() => {
   const sectorSelect = document.getElementById("sectorSelect");
-  const daysSelect = document.getElementById("daysSelect");
-  const departmentInput = document.getElementById("departmentInput");
+  const zoneInput = document.getElementById("zoneInput");
+  const departmentInput = zoneInput; // alias rétrocompat mémoire / historique
+  const daysSelect = null;
   const senderName = document.getElementById("senderName");
   const senderEmail = document.getElementById("senderEmail");
   const senderPhone = document.getElementById("senderPhone");
@@ -53,20 +54,16 @@
   const SCAN_RUNS_KEY = "prospection-scan-runs";
   const VIEW_KEY = "prospection-view";
   const FALLBACK_SECTORS = [
-    { id: "tous", label: "Tous les secteurs" },
-    { id: "restauration", label: "Restauration, cafés, bars" },
-    { id: "btp", label: "BTP / artisanat du bâtiment" },
-    { id: "commerce", label: "Commerce de détail" },
-    { id: "immobilier", label: "Immobilier" },
-    { id: "informatique", label: "Informatique / digital" },
-    { id: "conseil", label: "Conseil, gestion, juridique" },
-    { id: "sante", label: "Santé / médical" },
-    { id: "beaute", label: "Beauté / coiffure" },
-    { id: "transport", label: "Transport / logistique" },
-    { id: "enseignement", label: "Formation / enseignement" },
-    { id: "cinema", label: "Cinéma / audiovisuel / production" },
-    { id: "arts", label: "Arts, spectacles, sport" },
-    { id: "services", label: "Services aux entreprises" }
+    { id: "cabinets-comptables", label: "Cabinets d’expertise comptable" }
+  ];
+  const FALLBACK_ZONES = [
+    { id: "idf", label: "Île-de-France (toute la région)", group: "Région" },
+    { id: "75", label: "75 — Paris", group: "Départements IDF" },
+    { id: "92", label: "92 — Hauts-de-Seine", group: "Départements IDF" },
+    { id: "city-asnieres", label: "Asnières-sur-Seine", group: "Villes — 92 Hauts-de-Seine" },
+    { id: "city-gennevilliers", label: "Gennevilliers", group: "Villes — 92 Hauts-de-Seine" },
+    { id: "city-colombes", label: "Colombes", group: "Villes — 92 Hauts-de-Seine" },
+    { id: "france", label: "France entière", group: "Élargi" }
   ];
   const IS_FILE_MODE = window.location.protocol === "file:";
   const API_PREFIX = IS_FILE_MODE ? "http://localhost:3000" : "";
@@ -119,7 +116,9 @@
   }
 
   function daysLabelFromValue(days) {
+    if (!days || days === "all" || days === "auto") return "Toutes dates";
     const n = Number(days);
+    if (!Number.isFinite(n)) return "Toutes dates";
     if (n >= 700) return "Moins de 2 ans";
     if (n >= 300) return "Moins d’1 an";
     return `${n || "?"} j`;
@@ -145,22 +144,26 @@
     return sec ? `${min} min ${sec} s` : `${min} min`;
   }
 
+  function zoneLabel(code) {
+    if (!zoneInput) return code || "Île-de-France";
+    const opt = [...zoneInput.options].find((o) => o.value === code);
+    return opt ? opt.textContent : (code || "Île-de-France");
+  }
+
   function departmentLabel(code) {
-    if (!code) return "France entière";
-    const opt = [...departmentInput.options].find((o) => o.value === code);
-    return opt ? opt.textContent : code;
+    return zoneLabel(code);
   }
 
   function sectorLabel(id) {
     const opt = [...sectorSelect.options].find((o) => o.value === id);
-    return opt ? opt.textContent : (id || "n.c.");
+    return opt ? opt.textContent : (id || "Cabinets d’expertise comptable");
   }
 
   function recordScanRun(summary, incoming) {
     const endedAt = new Date().toISOString();
     const startedAt = scanStartedAt || endedAt;
     const durationMs = Math.max(0, new Date(endedAt) - new Date(startedAt));
-    const days = summary.daysUsed || summary.days || daysSelect.value;
+    const zoneId = (summary.zone && summary.zone.id) || zoneInput?.value?.trim() || "idf";
     const newTodo = incoming.filter((c) => !isContacted(companyKey(c))).length;
     const already = incoming.filter((c) => isContacted(companyKey(c))).length;
     scanRuns.unshift({
@@ -170,10 +173,10 @@
       durationMs,
       sector: selectedSector(),
       sectorLabel: sectorLabel(selectedSector()),
-      days: Number(days) || null,
-      daysLabel: daysLabelFromValue(days),
-      department: departmentInput.value.trim(),
-      departmentLabel: departmentLabel(departmentInput.value.trim()),
+      days: null,
+      daysLabel: "Toutes dates",
+      department: zoneId,
+      departmentLabel: (summary.zone && summary.zone.label) || zoneLabel(zoneId),
       scanned: Number(summary.scanned || 0),
       contactsFound: incoming.length,
       newTodo,
@@ -269,7 +272,7 @@
           <strong>${escapeHtml(run.sectorLabel || "Secteur")}</strong>
           <div class="meta">
             ${formatDateTime(run.startedAt)} · ${formatDuration(run.durationMs)}<br>
-            ${escapeHtml(run.daysLabel || daysLabelFromValue(run.days))} · ${escapeHtml(run.departmentLabel || "France")}<br>
+            ${escapeHtml(run.daysLabel || "Toutes dates")} · ${escapeHtml(run.departmentLabel || "Île-de-France")}<br>
             ${run.scanned || 0} scannée(s) · ${run.contactsFound || 0} contact(s) · ${run.newTodo || 0} à traiter
           </div>
         </li>
@@ -470,9 +473,9 @@
       const email = String(saved.email || "").trim();
       const phone = String(saved.phone || "").trim();
       // Anciens exemples préremplis → on laisse les placeholders à la place.
-      const demoNames = new Set(["eva moreau", "votre nom"]);
-      const demoEmails = new Set(["vous@cabinet.fr", "eva.moreau@exemple.fr", "eva.moreau@cabinet.fr"]);
-      const demoPhones = new Set(["06 12 34 56 78", "0612345678"]);
+      const demoNames = new Set(["eva moreau", "votre nom", "nom de la société"]);
+      const demoEmails = new Set(["vous@cabinet.fr", "eva.moreau@exemple.fr", "eva.moreau@cabinet.fr", "contact@votresociete.fr"]);
+      const demoPhones = new Set(["06 12 34 56 78", "0612345678", "01 23 45 67 89", "0123456789"]);
       const normalizedPhone = phone.replace(/\s/g, "");
       const isDemoPhone = demoPhones.has(phone.toLowerCase()) || demoPhones.has(normalizedPhone);
       senderName.value = demoNames.has(name.toLowerCase()) ? "" : name;
@@ -544,6 +547,7 @@
       .replace(/\{activite\}/g, company.activity || "")
       .replace(/\{adresse\}/g, company.address || "")
       .replace(/\[Votre nom\]/g, senderName.value.trim() || "")
+      .replace(/\[Nom de la société\]/g, senderName.value.trim() || "")
       .replace(/\[Votre email\]/g, senderEmail.value.trim() || "")
       .replace(/\[Votre téléphone\]/g, senderPhone.value.trim() || "");
   }
@@ -555,7 +559,7 @@
   }
 
   function mailSubject(company) {
-    return `Proposition d’accompagnement comptable — ${company.name}`;
+    return `Échange avec ${company.name}`;
   }
 
   function openExternal(href) {
@@ -780,13 +784,31 @@
   }
 
   function renderSectorOptions(sectors) {
-    const current = sectorSelect.value || "cinema";
-    const list = [...sectors];
-    if (!list.some((s) => s.id === "tous")) list.unshift({ id: "tous", label: "Tous les secteurs" });
-    sectorSelect.innerHTML = list.map((sector) => (
-      `<option value="${escapeHtml(sector.id)}">${escapeHtml(sector.label)}</option>`
+    const list = (sectors || []).filter((s) => s.id === "cabinets-comptables");
+    const finalList = list.length ? list : FALLBACK_SECTORS;
+    sectorSelect.innerHTML = finalList.map((sector) => (
+      `<option value="${escapeHtml(sector.id)}" selected>${escapeHtml(sector.label)}</option>`
     )).join("");
-    sectorSelect.value = [...sectorSelect.options].some((o) => o.value === current) ? current : "cinema";
+    sectorSelect.value = "cabinets-comptables";
+    sectorSelect.disabled = true;
+  }
+
+  function renderZoneOptions(zones) {
+    if (!zoneInput || !Array.isArray(zones) || !zones.length) return;
+    const current = zoneInput.value || "idf";
+    const groups = new Map();
+    for (const zone of zones) {
+      const group = zone.group || "Zones";
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(zone);
+    }
+    zoneInput.innerHTML = [...groups.entries()].map(([group, rows]) => (
+      `<optgroup label="${escapeHtml(group)}">${rows.map((z) => (
+        `<option value="${escapeHtml(z.id)}">${escapeHtml(z.label)}</option>`
+      )).join("")}</optgroup>`
+    )).join("");
+    const hasCurrent = [...zoneInput.options].some((o) => o.value === current);
+    zoneInput.value = hasCurrent ? current : "idf";
   }
 
   async function loadSources() {
@@ -813,6 +835,17 @@
       renderSectorOptions(data.sectors?.length ? data.sectors : FALLBACK_SECTORS);
     } catch {
       renderSectorOptions(FALLBACK_SECTORS);
+    }
+  }
+
+  async function loadZones() {
+    try {
+      const response = await fetch(`${API_PREFIX}/api/prospection/zones`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      renderZoneOptions(data.zones?.length ? data.zones : FALLBACK_ZONES);
+    } catch {
+      // options HTML déjà présentes
     }
   }
 
@@ -869,7 +902,7 @@
   }
 
   function selectedSector() {
-    return sectorSelect.value;
+    return "cabinets-comptables";
   }
 
   function handleEvent(event) {
@@ -894,7 +927,7 @@
       saveFilter();
       renderList();
       const summary = event.summary || {};
-      const daysLabel = daysLabelFromValue(summary.daysUsed || summary.days);
+      const daysLabel = "Toutes dates";
       const todo = companies.filter((c) => !isContacted(companyKey(c))).length;
       const done = companies.filter((c) => isContacted(companyKey(c))).length;
       const newThisRun = incoming.filter((c) => !isContacted(companyKey(c))).length;
@@ -912,9 +945,9 @@
       } else if (todo) {
         log(`Sondage terminé — ${todo} entreprise(s) à contacter en mémoire.`, { quiet: true });
       } else if (!companies.length) {
-        log("Aucun contact validé. Essayez Tous les secteurs, Moins de 2 ans, ou France entière.", { quiet: true });
+        log("Aucun contact validé. Essayez Île-de-France, un département IDF, ou une ville du 92.", { quiet: true });
       } else {
-        log("Toutes les entreprises en mémoire sont déjà contactées.", { quiet: true });
+        log("Tous les cabinets en mémoire sont déjà contactés.", { quiet: true });
       }
       syncRunButtons("Trouver des entreprises");
       return;
@@ -984,14 +1017,14 @@
     syncRunButtons("Relancer la recherche");
     setProgress(3, "Démarrage du sondage…");
 
-    const daysValue = daysSelect.value === "730" ? "730" : "365";
-    daysSelect.value = daysValue;
+    const daysValue = "all";
     scanStartedAt = new Date().toISOString();
     const params = new URLSearchParams({
-      sector,
+      sector: "cabinets-comptables",
       days: daysValue,
-      limit: daysValue === "730" ? "50" : "40",
-      department: departmentInput.value.trim(),
+      limit: "40",
+      zone: zoneInput?.value?.trim() || "idf",
+      department: zoneInput?.value?.trim() || "idf",
       senderName: senderName.value.trim(),
       senderEmail: senderEmail.value.trim(),
       senderPhone: senderPhone.value.trim()
@@ -1049,7 +1082,13 @@
 
   function loadTemplate() {
     const saved = localStorage.getItem(TEMPLATE_KEY);
-    if (saved) mailTemplate.value = saved;
+    if (!saved) return;
+    // Ancien modèle « nouvelles créations » → on laisse le modèle cabinets par défaut.
+    if (/Félicitations pour la création/i.test(saved) || /premières semaines d’une entreprise/i.test(saved)) {
+      localStorage.removeItem(TEMPLATE_KEY);
+      return;
+    }
+    mailTemplate.value = saved.replace(/\[Votre nom\]/g, "[Nom de la société]");
   }
 
   function saveTemplate() {
@@ -1244,34 +1283,34 @@
     if (params.get("demo") !== "1") return;
     const demoRows = [
       {
-        name: "Lune Prod SARL",
-        siren: "900111222",
-        activity: "Production de films",
-        naf: "5911C",
-        nafLabel: "Production de films",
-        createdAt: "2026-06-01",
-        address: "12 rue du Soleil, 75011 Paris",
-        city: "Paris",
-        postalCode: "75011",
-        directors: ["Alice Martin"],
-        phone: "06 12 34 56 78",
+        name: "Cabinet Exemplaire Expertise",
+        siren: "552108722",
+        activity: "Activités comptables",
+        naf: "69.20Z",
+        nafLabel: "Activités comptables",
+        createdAt: "1984-05-27",
+        address: "41 rue du Capitaine Guynemer, 92400 Courbevoie",
+        city: "Courbevoie",
+        postalCode: "92400",
+        directors: ["Nathalie Jarjaille"],
+        phone: "01 46 93 30 00",
         email: "",
         hasContact: true,
         contactSource: "démo téléphone"
       },
       {
-        name: "Soleil Édition",
-        siren: "900333444",
-        activity: "Édition audiovisuelle",
-        naf: "5913A",
-        nafLabel: "Édition",
-        createdAt: "2026-07-15",
-        address: "8 avenue Orange, 75010 Paris",
-        city: "Paris",
-        postalCode: "75010",
+        name: "Fiduciaire Seine Expertise",
+        siren: "903309490",
+        activity: "Activités comptables",
+        naf: "69.20Z",
+        nafLabel: "Activités comptables",
+        createdAt: "2021-03-12",
+        address: "12 avenue de la République, 92600 Asnières-sur-Seine",
+        city: "Asnières-sur-Seine",
+        postalCode: "92600",
         directors: ["Bruno Dupont"],
         phone: "",
-        email: "contact@soleil-edition.example",
+        email: "contact@fiduciaire-seine.example",
         hasContact: true,
         contactSource: "démo e-mail"
       }
@@ -1341,6 +1380,7 @@
   loadScanRuns();
   loadFilter();
   loadSectors();
+  loadZones();
   loadSources();
   warnIfFileModeWithoutServer();
   refreshServerStatus();

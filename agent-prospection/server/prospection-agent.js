@@ -1,9 +1,8 @@
 /**
- * Agent de prospection — sources 100 % gratuites, sans clé API.
- * - BODACC (data.gouv / DILA) : créations d'entreprises du jour
- * - API Recherche d'entreprises (annuaire-entreprises) : NAF, dirigeants, adresse
- * - OpenStreetMap Nominatim : téléphone / e-mail / site si le lieu est cartographié
- * - Brave Search + PagesJaunes via le lecteur Jina (gratuit) : contacts publics
+ * Agent de prospection — cabinets d'expertise comptable (NAF 69.20Z).
+ * Sources 100 % gratuites, sans clé API.
+ * - API Recherche d'entreprises (SIRENE) : cabinets actifs, toutes dates de création
+ * - Site officiel / annuaires publics / OSM : contacts vérifiés (double contrôle)
  */
 
 const dns = require("dns").promises;
@@ -15,18 +14,18 @@ const SIRENE_URL = "https://recherche-entreprises.api.gouv.fr/search";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const JINA_PREFIX = "https://r.jina.ai/";
 const BODACC_PAGE_SIZE = 100;
+const CABINETS_NAF = "69.20Z";
+const DEFAULT_SECTOR_ID = "cabinets-comptables";
 
 /** Sources publiques utilisées pour trouver / vérifier les contacts (affichage UI). */
 const CONTACT_SOURCES = [
-  { name: "BODACC (DILA)", role: "Nouvelles entreprises créées" },
-  { name: "API Recherche d’entreprises (SIRENE)", role: "Adresse, SIREN, activité" },
+  { name: "API Recherche d’entreprises (SIRENE)", role: "Cabinets NAF 69.20Z, adresse, SIREN (toutes dates)" },
   { name: "Site officiel de l’entreprise", role: "E-mail / téléphone public" },
   { name: "DuckDuckGo / Brave (snippets publics)", role: "Indices de contact publics" },
   { name: "Pages Jaunes", role: "Fiches professionnelles publiques" },
   { name: "118712 / Cylex", role: "Annuaires locaux publics" },
   { name: "Google Maps (données publiques)", role: "Coordonnées affichées publiquement" },
   { name: "OpenStreetMap / Overpass", role: "Téléphones ouverts" },
-  { name: "Unifrance / Film France / CNC", role: "Filière cinéma (pages publiques)" },
   { name: "Pappers / Societe.com", role: "E-mail public uniquement (pas de téléphone teaser)" },
   { name: "Annuaire des entreprises", role: "Données administratives publiques" }
 ];
@@ -118,160 +117,141 @@ const NAF_LABELS = {
   "96.02B": "Soins de beauté",
   "68.31Z": "Agences immobilières",
   "62.01Z": "Programmation informatique",
-  "62.02A": "Conseil en systèmes et logiciels informatiques"
+  "62.02A": "Conseil en systèmes et logiciels informatiques",
+  "69.20Z": "Activités comptables (expertise comptable)"
 };
 
+/** Cible métier unique : cabinets d'expertise comptable (NAF 69.20Z). */
 const SECTORS = [
   {
-    id: "restauration",
-    label: "Restauration, cafés, bars",
-    nafPrefixes: ["56"],
-    keywords: ["restaurant", "pizzeria", "brasserie", "snack", "traiteur", "café", "bar ", "salon de thé", "food truck", "glacier", "crêperie", "restauration rapide"],
-    exclude: ["livraison de commandes restaurant", "coursier", "restauration de bien", "restauration d'immeuble", "restauration et/ou", "commerce de gros"]
-  },
-  {
-    id: "btp",
-    label: "BTP / artisanat du bâtiment",
-    nafPrefixes: ["41", "42", "43"],
-    keywords: ["maçonnerie", "plomberie", "électricité", "couverture", "peinture", "rénovation", "construction", "carrelage", "menuiserie", "plâtrerie", "chauffage"],
-    exclude: []
-  },
-  {
-    id: "commerce",
-    label: "Commerce de détail",
-    nafPrefixes: ["47"],
-    keywords: ["commerce de détail", "boutique", "magasin", "épicerie", "prêt à porter", "vente au détail"],
-    exclude: []
-  },
-  {
-    id: "immobilier",
-    label: "Immobilier",
-    nafPrefixes: ["68"],
-    keywords: ["agence immobilière", "transaction immobilière", "gestion locative", "marchand de biens"],
-    exclude: []
-  },
-  {
-    id: "informatique",
-    label: "Informatique / digital",
-    nafPrefixes: ["62", "63"],
-    keywords: ["informatique", "développement web", "logiciel", "numérique", "digital", "application mobile", "sites internet"],
-    exclude: []
-  },
-  {
-    id: "conseil",
-    label: "Conseil, gestion, juridique",
-    nafPrefixes: ["69", "70", "74"],
-    keywords: ["conseil", "consulting", "expertise", "audit", "ressources humaines", "cabinet"],
-    exclude: []
-  },
-  {
-    id: "sante",
-    label: "Santé / médical",
-    nafPrefixes: ["86"],
-    keywords: ["médical", "dentaire", "infirmier", "kinésith", "ostéopath", "psycholog", "cabinet médical", "orthophon"],
-    exclude: []
-  },
-  {
-    id: "beaute",
-    label: "Beauté / coiffure",
-    nafPrefixes: ["96"],
-    keywords: ["coiffure", "esthétique", "salon de coiffure", "onglerie", "institut de beauté", " barbier"],
-    exclude: []
-  },
-  {
-    id: "transport",
-    label: "Transport / logistique",
-    nafPrefixes: ["49", "52"],
-    keywords: ["transport", "taxi", "vtc", "déménagement", "logistique", "livraison"],
-    exclude: []
-  },
-  {
-    id: "enseignement",
-    label: "Formation / enseignement",
-    nafPrefixes: ["85"],
-    keywords: ["formation", "enseignement", "coaching", "auto-école", "soutien scolaire"],
-    exclude: []
-  },
-  {
-    id: "cinema",
-    label: "Cinéma / audiovisuel / production",
-    nafPrefixes: ["59", "60"],
+    id: DEFAULT_SECTOR_ID,
+    label: "Cabinets d’expertise comptable",
+    nafPrefixes: [CABINETS_NAF, "6920Z"],
+    nafExact: true,
     keywords: [
-      "cinéma", "cinema", "audiovisuel", "audiovisuelle",
-      "tournage", "production audiovisuelle", "production cinématographique",
-      "production de films", "réalisation de films", "société de production",
-      "post-production", "postproduction", "effets spéciaux",
-      "distribution de films", "salle de cinéma", "projection cinématographique",
-      "documentaire", "studio de production", "captation audiovisuelle",
-      "programme de télévision", "production télévisuelle"
+      "expertise comptable",
+      "expert-comptable",
+      "expert comptable",
+      "cabinet comptable",
+      "activités comptables",
+      "fiduciaire",
+      "commissariat aux comptes",
+      "comptable"
     ],
-    exclude: ["salle de sport", "fitness", "yoga", "édition de livres", "application mobile"]
-  },
-  {
-    id: "arts",
-    label: "Arts, spectacles, sport",
-    nafPrefixes: ["90", "93"],
-    keywords: ["spectacle", "théâtre", "theatre", "danse", "musique", "concert", "salle de sport", "fitness", "yoga", "artiste"],
-    exclude: ["cinéma", "audiovisuel", "production cinématographique"]
-  },
-  {
-    id: "services",
-    label: "Services aux entreprises",
-    nafPrefixes: ["81", "82"],
-    keywords: ["nettoyage", "sécurité", "secrétariat", "services aux entreprises", "paysagiste"],
-    exclude: []
+    exclude: [
+      "avocat",
+      "notaire",
+      "cabinet médical",
+      "cabinet dentaire",
+      "juridique",
+      "huissier"
+    ]
   }
 ];
 
-function buildAllSectorsMeta() {
-  const nafPrefixes = [...new Set(SECTORS.flatMap((s) => s.nafPrefixes || []))];
-  const keywords = [...new Set(SECTORS.flatMap((s) => s.keywords || []))];
-  const exclude = [...new Set(SECTORS.flatMap((s) => s.exclude || []))];
-  return {
-    id: "tous",
-    label: "Tous les secteurs",
-    nafPrefixes,
-    keywords,
-    exclude,
-    allSectors: true
-  };
-}
+/** Zones de prospection : région, départements IDF, villes (ex. 92). */
+const PROSPECT_ZONES = [
+  { id: "idf", label: "Île-de-France (toute la région)", type: "region", region: "11", group: "Région" },
+  { id: "75", label: "75 — Paris", type: "department", department: "75", group: "Départements IDF" },
+  { id: "77", label: "77 — Seine-et-Marne", type: "department", department: "77", group: "Départements IDF" },
+  { id: "78", label: "78 — Yvelines", type: "department", department: "78", group: "Départements IDF" },
+  { id: "91", label: "91 — Essonne", type: "department", department: "91", group: "Départements IDF" },
+  { id: "92", label: "92 — Hauts-de-Seine", type: "department", department: "92", group: "Départements IDF" },
+  { id: "93", label: "93 — Seine-Saint-Denis", type: "department", department: "93", group: "Départements IDF" },
+  { id: "94", label: "94 — Val-de-Marne", type: "department", department: "94", group: "Départements IDF" },
+  { id: "95", label: "95 — Val-d’Oise", type: "department", department: "95", group: "Départements IDF" },
+  { id: "city-asnieres", label: "Asnières-sur-Seine", type: "city", department: "92", postalCodes: ["92600"], cityNames: ["asnieres-sur-seine", "asnieres sur seine", "asnieres"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-gennevilliers", label: "Gennevilliers", type: "city", department: "92", postalCodes: ["92230"], cityNames: ["gennevilliers"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-colombes", label: "Colombes", type: "city", department: "92", postalCodes: ["92700"], cityNames: ["colombes"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-nanterre", label: "Nanterre", type: "city", department: "92", postalCodes: ["92000"], cityNames: ["nanterre"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-boulogne", label: "Boulogne-Billancourt", type: "city", department: "92", postalCodes: ["92100"], cityNames: ["boulogne-billancourt", "boulogne billancourt", "boulogne"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-courbevoie", label: "Courbevoie", type: "city", department: "92", postalCodes: ["92400"], cityNames: ["courbevoie"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-levallois", label: "Levallois-Perret", type: "city", department: "92", postalCodes: ["92300"], cityNames: ["levallois-perret", "levallois perret", "levallois"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-neuilly", label: "Neuilly-sur-Seine", type: "city", department: "92", postalCodes: ["92200"], cityNames: ["neuilly-sur-seine", "neuilly sur seine", "neuilly"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-clichy", label: "Clichy", type: "city", department: "92", postalCodes: ["92110"], cityNames: ["clichy"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-issy", label: "Issy-les-Moulineaux", type: "city", department: "92", postalCodes: ["92130"], cityNames: ["issy-les-moulineaux", "issy les moulineaux", "issy"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-rueil", label: "Rueil-Malmaison", type: "city", department: "92", postalCodes: ["92500"], cityNames: ["rueil-malmaison", "rueil malmaison", "rueil"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-suresnes", label: "Suresnes", type: "city", department: "92", postalCodes: ["92150"], cityNames: ["suresnes"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-puteaux", label: "Puteaux", type: "city", department: "92", postalCodes: ["92800"], cityNames: ["puteaux"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-antony", label: "Antony", type: "city", department: "92", postalCodes: ["92160"], cityNames: ["antony"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-montrouge", label: "Montrouge", type: "city", department: "92", postalCodes: ["92120"], cityNames: ["montrouge"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-bois-colombes", label: "Bois-Colombes", type: "city", department: "92", postalCodes: ["92270"], cityNames: ["bois-colombes", "bois colombes"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-la-garenne", label: "La Garenne-Colombes", type: "city", department: "92", postalCodes: ["92250"], cityNames: ["la garenne-colombes", "la garenne colombes", "garenne-colombes"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-villeneuve", label: "Villeneuve-la-Garenne", type: "city", department: "92", postalCodes: ["92390"], cityNames: ["villeneuve-la-garenne", "villeneuve la garenne"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-meudon", label: "Meudon", type: "city", department: "92", postalCodes: ["92190", "92360"], cityNames: ["meudon"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-chatillon", label: "Châtillon", type: "city", department: "92", postalCodes: ["92320"], cityNames: ["chatillon", "châtillon"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-malakoff", label: "Malakoff", type: "city", department: "92", postalCodes: ["92240"], cityNames: ["malakoff"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-vanves", label: "Vanves", type: "city", department: "92", postalCodes: ["92170"], cityNames: ["vanves"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-sevres", label: "Sèvres", type: "city", department: "92", postalCodes: ["92310"], cityNames: ["sevres", "sèvres"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-bagneux", label: "Bagneux", type: "city", department: "92", postalCodes: ["92220"], cityNames: ["bagneux"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "city-saint-cloud", label: "Saint-Cloud", type: "city", department: "92", postalCodes: ["92210"], cityNames: ["saint-cloud", "saint cloud"], group: "Villes — 92 Hauts-de-Seine" },
+  { id: "france", label: "France entière", type: "france", group: "Élargi" }
+];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeNaf(code) {
+  return String(code || "").replace(/\./g, "").toUpperCase();
+}
+
 function listSectors() {
-  return [
-    { id: "tous", label: "Tous les secteurs" },
-    ...SECTORS.map(({ id, label }) => ({ id, label }))
-  ];
+  return SECTORS.map(({ id, label }) => ({ id, label }));
+}
+
+function listZones() {
+  return PROSPECT_ZONES.map(({ id, label, type, group }) => ({ id, label, type, group }));
 }
 
 function resolveSector(raw) {
   const value = String(raw || "").trim();
-  if (!value) return null;
+  const cabinets = SECTORS.find((s) => s.id === DEFAULT_SECTOR_ID) || SECTORS[0];
+  if (!value) return cabinets;
   const lowered = value.toLowerCase();
-  if (lowered === "tous" || lowered === "all" || lowered.includes("tous les secteurs")) {
-    return buildAllSectorsMeta();
+  if (
+    lowered === DEFAULT_SECTOR_ID
+    || lowered.includes("comptable")
+    || lowered.includes("expertise")
+    || lowered.includes("fiduciaire")
+    || lowered === CABINETS_NAF.toLowerCase()
+  ) {
+    return cabinets;
   }
   const byId = SECTORS.find((s) => s.id === value);
   if (byId) return byId;
-  const byLabel = SECTORS.find((s) => lowered.includes(s.id) || s.label.toLowerCase().includes(lowered) || s.keywords.some((k) => lowered.includes(k.trim())));
-  if (byLabel) {
-    return {
-      ...byLabel,
-      extraKeywords: [value]
-    };
+  // Cible métier verrouillée : tout autre secteur demandé renvoie les cabinets.
+  return cabinets;
+}
+
+function resolveZone(raw) {
+  const value = String(raw || "").trim();
+  if (!value || value === "france" || value.toLowerCase() === "france") {
+    return PROSPECT_ZONES.find((z) => z.id === "france");
   }
-  return {
-    id: "custom",
-    label: value,
-    nafPrefixes: [],
-    keywords: [value],
-    exclude: [],
-    extraKeywords: []
-  };
+  const byId = PROSPECT_ZONES.find((z) => z.id === value);
+  if (byId) return byId;
+  const dep = value.replace(/\D/g, "").slice(0, 3);
+  if (dep) {
+    const byDep = PROSPECT_ZONES.find((z) => z.type === "department" && z.department === dep.padStart(2, "0").slice(-2));
+    if (byDep) return byDep;
+    if (dep === "75" || dep === "92" || dep === "93" || dep === "94" || dep === "77" || dep === "78" || dep === "91" || dep === "95") {
+      return {
+        id: dep,
+        label: `Département ${dep}`,
+        type: "department",
+        department: dep.padStart(2, "0"),
+        group: "Départements"
+      };
+    }
+  }
+  const lowered = value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (lowered.includes("ile-de-france") || lowered.includes("ile de france") || lowered === "idf") {
+    return PROSPECT_ZONES.find((z) => z.id === "idf");
+  }
+  const byCity = PROSPECT_ZONES.find((z) => z.type === "city" && (z.cityNames || []).some((n) => lowered.includes(n)));
+  if (byCity) return byCity;
+  return PROSPECT_ZONES.find((z) => z.id === "idf");
 }
 
 function cleanDisplayName(name) {
@@ -339,9 +319,53 @@ function activityMatchesSector(activity, sector) {
 }
 
 function nafMatchesSector(naf, sector) {
-  const code = String(naf || "");
+  const code = normalizeNaf(naf);
   if (!code || !(sector.nafPrefixes || []).length) return true;
-  return sector.nafPrefixes.some((prefix) => code.startsWith(prefix));
+  if (sector.nafExact) {
+    return sector.nafPrefixes.some((prefix) => normalizeNaf(prefix) === code);
+  }
+  return sector.nafPrefixes.some((prefix) => code.startsWith(normalizeNaf(prefix)));
+}
+
+function normalizeCityKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchesZone(company, zone) {
+  if (!zone || zone.type === "france") return true;
+  if (zone.type === "region") {
+    const dep = String(company.department || "").padStart(2, "0");
+    const cp = String(company.postalCode || "").trim();
+    const idfDeps = new Set(["75", "77", "78", "91", "92", "93", "94", "95"]);
+    if (/^\d{5}$/.test(cp)) {
+      const fromCp = cp.slice(0, 2) === "97" || cp.slice(0, 2) === "98" ? cp.slice(0, 3) : cp.slice(0, 2);
+      return idfDeps.has(fromCp);
+    }
+    return idfDeps.has(dep);
+  }
+  if (zone.type === "department") {
+    return matchesDepartment(company, zone.department);
+  }
+  if (zone.type === "city") {
+    const cp = String(company.postalCode || "").trim();
+    if (Array.isArray(zone.postalCodes) && zone.postalCodes.length && /^\d{5}$/.test(cp)) {
+      if (zone.postalCodes.includes(cp)) return true;
+    }
+    const cityKey = normalizeCityKey(company.city);
+    if (cityKey && Array.isArray(zone.cityNames)) {
+      if (zone.cityNames.some((name) => cityKey === normalizeCityKey(name) || cityKey.includes(normalizeCityKey(name)))) {
+        if (zone.department) return matchesDepartment(company, zone.department);
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
 }
 
 function nafLabel(code) {
@@ -888,6 +912,120 @@ async function enrichSirene(company) {
     // L'annonce BODACC reste exploitable si Sirene est limitée.
   }
   return company;
+}
+
+function companyFromSireneHit(hit) {
+  const siege = hit.siege || {};
+  const nom = hit.nom_complet || hit.nom_raison_sociale || "";
+  if (!nom || isNonDiffusible(nom)) return null;
+  const naf = hit.activite_principale || siege.activite_principale || "";
+  const address = siege.geo_adresse || siege.adresse || "";
+  const dirigeants = Array.isArray(hit.dirigeants) ? hit.dirigeants : [];
+  const directors = dirigeants
+    .map((d) => [d.prenoms, d.nom, d.denomination].filter(Boolean).join(" ").trim())
+    .filter((name) => name && !isNonDiffusible(name));
+  const dep = String(siege.departement || "").trim()
+    || (String(siege.code_postal || "").match(/^(\d{2,3})/) || [])[1]
+    || "";
+  return {
+    source: "SIRENE",
+    brandName: cleanDisplayName(siege.nom_commercial || hit.sigle || ""),
+    name: cleanDisplayName(nom),
+    legalName: cleanDisplayName(hit.nom_raison_sociale || nom),
+    activity: nafLabel(naf) || "Activités comptables",
+    naf,
+    nafLabel: nafLabel(naf) || "Activités comptables",
+    siren: String(hit.siren || "").replace(/\D/g, "").slice(0, 9),
+    createdAt: hit.date_creation && !String(hit.date_creation).startsWith("1900") ? hit.date_creation : "",
+    publishedAt: "",
+    address: address && !isNonDiffusible(address) ? address : "",
+    city: siege.libelle_commune || "",
+    postalCode: siege.code_postal || "",
+    department: dep ? String(dep).replace(/\D/g, "").padStart(2, "0").slice(0, 2) : "",
+    directors,
+    latitude: siege.latitude ? Number(siege.latitude) : null,
+    longitude: siege.longitude ? Number(siege.longitude) : null,
+    sireneUrl: hit.siren ? `https://annuaire-entreprises.data.gouv.fr/entreprise/${hit.siren}` : "",
+    email: "",
+    phone: "",
+    website: "",
+    contactSource: "",
+    contactConfidence: "",
+    contactVerified: false
+  };
+}
+
+function buildSireneSearchParams(sector, zone, page, perPage) {
+  const params = {
+    activite_principale: CABINETS_NAF,
+    etat_administratif: "A",
+    per_page: String(perPage),
+    page: String(page)
+  };
+  if (!zone || zone.type === "france") return params;
+  if (zone.type === "region" && zone.region) {
+    params.region = zone.region;
+    return params;
+  }
+  if (zone.type === "department" && zone.department) {
+    params.departement = String(zone.department).padStart(2, "0");
+    return params;
+  }
+  if (zone.type === "city") {
+    if (Array.isArray(zone.postalCodes) && zone.postalCodes.length === 1) {
+      params.code_postal = zone.postalCodes[0];
+      return params;
+    }
+    if (zone.department) {
+      params.departement = String(zone.department).padStart(2, "0");
+    }
+  }
+  return params;
+}
+
+async function fetchSireneCabinets(sector, zone, needed) {
+  const collected = [];
+  const seen = new Set();
+  const perPage = 25;
+  let page = 1;
+  let total = Infinity;
+  const maxPages = 24;
+  const postalQueue = zone && zone.type === "city" && Array.isArray(zone.postalCodes) && zone.postalCodes.length > 1
+    ? [...zone.postalCodes]
+    : [null];
+
+  for (const postalOverride of postalQueue) {
+    page = 1;
+    while (collected.length < Math.max(needed * 2, needed + 10) && page <= maxPages && (page - 1) * perPage < total) {
+      const base = buildSireneSearchParams(sector, zone, page, perPage);
+      if (postalOverride) base.code_postal = postalOverride;
+      const url = `${SIRENE_URL}?${new URLSearchParams(base).toString()}`;
+      let payload;
+      try {
+        payload = await fetchJson(url, { timeoutMs: 20000, retries: 2 });
+      } catch {
+        break;
+      }
+      total = Number(payload.total_results || payload.total || 0) || total;
+      const rows = payload.results || [];
+      if (!rows.length) break;
+      for (const hit of rows) {
+        const company = companyFromSireneHit(hit);
+        if (!company || !company.siren) continue;
+        if (!nafMatchesSector(company.naf, sector)) continue;
+        if (!matchesZone(company, zone)) continue;
+        if (seen.has(company.siren)) continue;
+        seen.add(company.siren);
+        collected.push(company);
+        if (collected.length >= Math.max(needed * 2, needed + 10)) break;
+      }
+      if (rows.length < perPage) break;
+      page += 1;
+      await sleep(60);
+    }
+    if (collected.length >= needed) break;
+  }
+  return { total: Number.isFinite(total) ? total : collected.length, companies: collected };
 }
 
 function applyContact(company, { email, phone, website, source, confidence }) {
@@ -1458,25 +1596,19 @@ async function enrichFromSearch(company) {
 }
 
 function buildProposal(company, sender = {}) {
-  const who = sender.name || "un expert-comptable partenaire";
+  const who = sender.name || "notre société";
   const director = company.directors[0] ? ` ${company.directors[0]}` : "";
-  const activity = company.activity || company.nafLabel || "votre activité";
-  const subject = `Proposition d'accompagnement comptable — ${company.name}`;
+  const activity = company.activity || company.nafLabel || "expertise comptable";
+  const subject = `Échange avec ${company.name}`;
   const body = `Bonjour${director ? ` ${director}` : ""},
 
-Félicitations pour la création de ${company.name}${company.createdAt ? ` (${company.createdAt})` : ""}.
+Je me permets de vous contacter au sujet de ${company.name}.
 
-Je me permets de vous contacter car les premières semaines d'une entreprise sont décisives pour poser une gestion comptable simple et fiable (facturation, charges, TVA, trésorerie).
+${who} souhaite échanger avec les cabinets d'expertise comptable de votre secteur afin de présenter une collaboration adaptée à votre activité (${activity}).
 
-${who} peut vous accompagner sur :
-- la mise en place de la comptabilité et du prévisionnel
-- le suivi mensuel (recettes / dépenses / TVA)
-- la préparation des échéances URSSAF, impôts et bulletins si besoin
-
-Activité déclarée : ${activity}
 ${company.address ? `Adresse : ${company.address}` : ""}
 
-Si vous le souhaitez, je vous propose un premier échange offert de 20 minutes pour faire le point.
+Si vous le souhaitez, je vous propose un premier échange de 20 minutes.
 
 Cordialement,
 ${sender.name || ""}
@@ -1833,11 +1965,11 @@ function companyDedupeKey(company) {
   return company.siren || `${company.name}|${company.city}|${company.createdAt}`;
 }
 
-async function selectSectorCompanies(sector, days, department, limit, sender, onEvent, seenKeys, options = {}) {
-  const maxAgeDays = options.maxAgeDays || days;
+async function selectSectorCompanies(sector, zone, limit, sender, onEvent, seenKeys, options = {}) {
   const emitCompanies = options.emitCompanies !== false;
-  const { total, companies } = await fetchBodaccCreations(sector, days, department, limit);
-  const localized = companies.filter((company) => matchesDepartment(company, department));
+  const skipAgeFilter = options.skipAgeFilter !== false;
+  const { total, companies } = await fetchSireneCabinets(sector, zone, limit);
+  const localized = companies.filter((company) => matchesZone(company, zone));
   const candidates = [];
   for (const company of localized) {
     if (candidates.length >= Math.max(limit * 2, limit + 8)) break;
@@ -1846,7 +1978,7 @@ async function selectSectorCompanies(sector, days, department, limit, sender, on
     candidates.push(company);
   }
 
-  onEvent({ type: "status", message: `Enrichissement SIRENE — ${candidates.length} entreprise(s)…` });
+  onEvent({ type: "status", message: `Contrôle SIRENE / NAF — ${candidates.length} cabinet(s)…` });
   await mapPool(candidates, 6, async (company) => {
     await enrichSirene(company);
   });
@@ -1856,16 +1988,10 @@ async function selectSectorCompanies(sector, days, department, limit, sender, on
     if (selected.length >= limit) break;
     const key = companyDedupeKey(company);
     if (seenKeys.has(key)) continue;
-    if (!matchesDepartment(company, department)) continue;
-    if (!isWithinCreationWindow(company, maxAgeDays)) continue;
-    if (company.naf && Array.isArray(sector.nafPrefixes) && sector.nafPrefixes.length) {
-      const okNaf = sector.nafPrefixes.some((p) => String(company.naf).startsWith(p));
-      if (!okNaf) {
-        if (options.strictNaf) continue;
-        const okKw = !sector.allSectors && activityMatchesSector(company.activity || company.nafLabel || "", sector);
-        if (!okKw) continue;
-      }
-    }
+    if (!matchesZone(company, zone)) continue;
+    if (!skipAgeFilter && options.maxAgeDays && !isWithinCreationWindow(company, options.maxAgeDays)) continue;
+    // Double vérification NAF : exact 69.20Z uniquement.
+    if (!nafMatchesSector(company.naf, sector)) continue;
     seenKeys.add(key);
     selected.push(company);
     if (emitCompanies) {
@@ -1879,81 +2005,81 @@ function buildProspectionSummary({
   sector,
   days,
   department,
+  zone,
   totalBodacc,
+  totalSirene,
   results,
   auto = false,
   daysUsed = null,
   scanned = 0
 }) {
+  const zoneMeta = zone || null;
   return {
     sector: { id: sector.id, label: sector.label },
-    days: auto ? "auto" : days,
-    daysUsed: daysUsed || days,
+    days: "all",
+    daysUsed: null,
     auto,
-    department: department || null,
-    totalBodacc,
+    department: zoneMeta && zoneMeta.type === "department" ? zoneMeta.department : (department || null),
+    zone: zoneMeta ? { id: zoneMeta.id, label: zoneMeta.label, type: zoneMeta.type } : null,
+    totalBodacc: totalBodacc || 0,
+    totalSirene: totalSirene || totalBodacc || 0,
     scanned,
     found: results.length,
     withContact: results.filter((row) => row.hasContact).length,
     sources: CONTACT_SOURCES.map((row) => `${row.name} — ${row.role}`),
-    note: auto
-      ? "Sondage auto (< 1 an) : contacts publics vérifiés uniquement. Tél. Pappers/Societe.com exclus."
-      : "Contacts publiés uniquement (pas de conjecture MX). Tél. dérivés du SIREN exclus. LinkedIn non scrapé (CGU)."
+    note: "Cabinets NAF 69.20Z uniquement, toutes dates. Contacts publics vérifiés (double contrôle). Tél. Pappers/Societe.com exclus."
   };
 }
 
-async function runProspectionAuto(params, onEvent, sector, department, sender) {
-  const AUTO_STEPS = [30, 60, 90, 180, 365];
+async function runProspectionAuto(params, onEvent, sector, zone, sender) {
   const targetContacts = Math.min(40, Math.max(5, Number(params.targetContacts) || 15));
-  const perStep = Math.min(25, Math.max(8, Number(params.limit) || 18));
+  const perStep = Math.min(30, Math.max(10, Number(params.limit) || 25));
   const seenKeys = new Set();
   const withContact = [];
   const usedPhones = new Set();
   const usedEmails = new Set();
-  let totalBodacc = 0;
+  let totalSirene = 0;
   let scanned = 0;
-  let daysUsed = AUTO_STEPS[0];
 
   const emitProgress = (percent, label) => {
     onEvent({ type: "progress", percent: Math.max(0, Math.min(100, Math.round(percent))), label });
   };
 
-  emitProgress(4, `Sondage ${sector.label} — démarrage`);
+  const zoneLabel = zone && zone.id !== "france" ? ` · ${zone.label}` : "";
+  emitProgress(4, `Cabinets d’expertise comptable${zoneLabel}`);
   onEvent({
     type: "status",
-    message: `Sondage auto — ${sector.label} : entreprises < 1 an, contacts publics uniquement (objectif ${targetContacts}).`
+    message: `Recherche SIRENE — cabinets NAF 69.20Z${zoneLabel}, toutes dates (objectif ${targetContacts} contacts).`
   });
 
-  for (let stepIndex = 0; stepIndex < AUTO_STEPS.length; stepIndex += 1) {
-    const days = AUTO_STEPS[stepIndex];
-    daysUsed = days;
+  const rounds = 3;
+  for (let stepIndex = 0; stepIndex < rounds; stepIndex += 1) {
     if (withContact.length >= targetContacts) break;
-    const stepBase = (stepIndex / AUTO_STEPS.length) * 88;
-    emitProgress(stepBase + 2, `Fenêtre ${days} j — recherche d’entreprises…`);
+    const stepBase = (stepIndex / rounds) * 88;
+    emitProgress(stepBase + 2, `Vague ${stepIndex + 1} — recherche de cabinets…`);
     onEvent({
       type: "status",
-      message: `Fenêtre auto ${days} j — ${withContact.length}/${targetContacts} contacts validés…`
+      message: `Vague ${stepIndex + 1} — ${withContact.length}/${targetContacts} contacts validés…`
     });
     const { total, selected } = await selectSectorCompanies(
       sector,
-      days,
-      department,
-      perStep,
+      zone,
+      perStep + stepIndex * 8,
       sender,
       onEvent,
       seenKeys,
-      { maxAgeDays: 365, emitCompanies: false, strictNaf: true }
+      { skipAgeFilter: true, emitCompanies: false, strictNaf: true }
     );
-    totalBodacc = Math.max(totalBodacc, total);
+    totalSirene = Math.max(totalSirene, total);
     if (!selected.length) {
-      emitProgress(stepBase + 10, `Fenêtre ${days} j — aucune nouvelle, élargissement…`);
-      onEvent({ type: "status", message: `Aucune nouvelle entreprise à ${days} j — élargissement…` });
-      continue;
+      emitProgress(stepBase + 10, `Vague ${stepIndex + 1} — aucun nouveau cabinet`);
+      onEvent({ type: "status", message: "Aucun nouveau cabinet dans cette vague." });
+      break;
     }
-    emitProgress(stepBase + 12, `Vérification de ${selected.length} contacts (${days} j)…`);
+    emitProgress(stepBase + 12, `Vérification de ${selected.length} contacts…`);
     onEvent({
       type: "status",
-      message: `Vérification des contacts (${selected.length} nouvelles, fenêtre ${days} j)…`
+      message: `Double vérification des contacts (${selected.length} cabinets)…`
     });
     let stepDone = 0;
     await mapPool(selected, 6, async (company) => {
@@ -1962,15 +2088,21 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
       await enrichCompanyContacts(company, (event) => {
         if (event.type === "status") onEvent(event);
       });
+      // Second passage sanitize (filet final).
+      sanitizeCompanyContact(company);
       stepDone += 1;
-      const localPct = stepBase + 12 + (stepDone / Math.max(selected.length, 1)) * (88 / AUTO_STEPS.length - 12);
+      const localPct = stepBase + 12 + (stepDone / Math.max(selected.length, 1)) * (88 / rounds - 12);
       const contactBoost = Math.min(8, (withContact.length / targetContacts) * 8);
       emitProgress(
         Math.min(96, localPct + contactBoost),
         `${withContact.length}/${targetContacts} contacts · ${company.name.slice(0, 42)}`
       );
-      if (!isVerifiedContact(company) || !isWithinCreationWindow(company, 365)) {
+      if (!isVerifiedContact(company)) {
         onEvent({ type: "status", message: `Pas de contact public pour ${company.name}` });
+        return;
+      }
+      if (!nafMatchesSector(company.naf, sector)) {
+        onEvent({ type: "status", message: `NAF hors cible ignoré — ${company.name}` });
         return;
       }
       const phoneKey = String(company.phone || "").replace(/\D/g, "");
@@ -1996,7 +2128,7 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
     });
     onEvent({
       type: "status",
-      message: `Après ${days} j : ${withContact.length} contact(s) validé(s) / ${scanned} scanné(s).`
+      message: `Après vague ${stepIndex + 1} : ${withContact.length} contact(s) validé(s) / ${scanned} scanné(s).`
     });
   }
 
@@ -2007,19 +2139,19 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
   if (!results.length) {
     onEvent({
       type: "status",
-      message: "Aucun contact public validé sous 1 an. Essayez un autre secteur, « Tous », ou videz le département."
+      message: "Aucun contact public validé. Essayez une autre zone (ex. Île-de-France) ou une ville du 92."
     });
   }
 
   emitProgress(100, results.length ? `${results.length} contact(s) validé(s)` : "Aucun contact validé");
   const summary = buildProspectionSummary({
     sector,
-    days: daysUsed,
-    department,
-    totalBodacc,
+    days: "all",
+    department: zone && zone.department,
+    zone,
+    totalSirene,
     results,
     auto: true,
-    daysUsed,
     scanned
   });
   onEvent({ type: "done", summary, companies: results });
@@ -2027,76 +2159,83 @@ async function runProspectionAuto(params, onEvent, sector, department, sender) {
 }
 
 async function runProspection(params = {}, onEvent = () => {}) {
-  const sector = resolveSector(params.sector);
+  const sector = resolveSector(params.sector || DEFAULT_SECTOR_ID);
   if (!sector) {
-    throw new Error("Choisissez un secteur d'activité.");
+    throw new Error("Secteur cabinets d'expertise comptable indisponible.");
   }
-  const department = String(params.department || "").replace(/\D/g, "").slice(0, 3);
+  const zone = resolveZone(params.zone || params.department || "idf");
   const sender = {
     name: String(params.senderName || "").trim(),
     email: String(params.senderEmail || "").trim(),
     phone: String(params.senderPhone || "").trim()
   };
-  const daysRaw = String(params.days || "auto").trim().toLowerCase();
-  const autoMode = daysRaw === "auto" || params.mode === "sondage" || params.auto === true || params.auto === "1";
+  const daysRaw = String(params.days || "all").trim().toLowerCase();
+  const autoMode = daysRaw === "auto"
+    || daysRaw === "all"
+    || params.mode === "sondage"
+    || params.auto === true
+    || params.auto === "1"
+    || !params.days;
 
   if (autoMode) {
-    return runProspectionAuto(params, onEvent, sector, department, sender);
+    return runProspectionAuto(params, onEvent, sector, zone, sender);
   }
 
-  const days = Math.min(730, Math.max(7, Number(params.days) || 365));
   const limit = Math.min(60, Math.max(3, Number(params.limit) || 40));
   const enrichContacts = params.enrichContacts !== false;
   const contactsOnly = params.contactsOnly === true || params.contactsOnly === "1";
 
-  const zoneLabel = department ? ` · d\u00e9partement ${department}` : "";
+  const zoneLabel = zone && zone.id !== "france" ? ` · ${zone.label}` : "";
   onEvent({
     type: "status",
-    message: `Recherche BODACC — cr\u00e9ations ${sector.label}, ${days} derniers jours${zoneLabel}.`
+    message: `Recherche SIRENE — cabinets d’expertise comptable (NAF 69.20Z), toutes dates${zoneLabel}.`
   });
 
   const seenKeys = new Set();
   const { total, selected } = await selectSectorCompanies(
     sector,
-    days,
-    department,
+    zone,
     limit,
     sender,
     onEvent,
     seenKeys,
-    { maxAgeDays: days, emitCompanies: true }
+    { skipAgeFilter: true, emitCompanies: true }
   );
   onEvent({
     type: "status",
-    message: `${total} annonces BODACC, ${selected.length} entreprises retenues${zoneLabel || " (France)"}.`
+    message: `${total} cabinets SIRENE, ${selected.length} retenus après filtre NAF / zone${zoneLabel || " (France)"}.`
   });
 
   if (!selected.length) {
     onEvent({
       type: "status",
-      message: "Aucun r\u00e9sultat avec ces filtres. Essayez \u00ab Tous les secteurs \u00bb, \u00ab Moins de 2 ans \u00bb, ou France enti\u00e8re."
+      message: "Aucun cabinet avec ces filtres. Essayez Île-de-France, un département IDF, ou une ville du 92."
     });
   }
 
   if (enrichContacts && selected.length) {
     onEvent({
       type: "status",
-      message: `Recherche parall\u00e8le de contacts v\u00e9rifi\u00e9s (${selected.length} entreprises)…`
+      message: `Double vérification des contacts (${selected.length} cabinets)…`
     });
     await mapPool(selected, 6, async (company) => {
       await enrichCompanyContacts(company, onEvent);
+      sanitizeCompanyContact(company);
     });
   }
 
-  let results = selected.map((company) => publicCompany(company, sender));
+  let results = selected
+    .filter((company) => nafMatchesSector(company.naf, sector))
+    .map((company) => publicCompany(company, sender));
   if (contactsOnly) {
     results = results.filter((row) => row.hasContact);
   }
   const summary = buildProspectionSummary({
     sector,
-    days,
-    department,
-    totalBodacc: total,
+    days: "all",
+    department: zone && zone.department,
+    zone,
+    totalSirene: total,
     results,
     scanned: selected.length
   });
@@ -2109,6 +2248,10 @@ function createProspectionRouter() {
 
   router.get("/sectors", (_req, res) => {
     res.json({ sectors: listSectors() });
+  });
+
+  router.get("/zones", (_req, res) => {
+    res.json({ zones: listZones() });
   });
 
   router.get("/sources", (_req, res) => {
@@ -2142,10 +2285,11 @@ function createProspectionRouter() {
     req.on("close", () => clearInterval(heartbeat));
     try {
       await runProspection({
-        sector: req.query.sector,
-        days: req.query.days,
+        sector: req.query.sector || DEFAULT_SECTOR_ID,
+        days: req.query.days || "all",
         limit: req.query.limit,
         department: req.query.department,
+        zone: req.query.zone || req.query.department,
         senderName: req.query.senderName,
         senderEmail: req.query.senderEmail,
         senderPhone: req.query.senderPhone,
@@ -2167,17 +2311,25 @@ function createProspectionRouter() {
 
 module.exports = {
   SECTORS,
+  PROSPECT_ZONES,
   CONTACT_SOURCES,
+  CABINETS_NAF,
+  DEFAULT_SECTOR_ID,
   createProspectionRouter,
   runProspection,
   listSectors,
+  listZones,
   listContactSources,
   resolveSector,
+  resolveZone,
   parseBodaccRecord,
   normalizeFrPhone,
   extractEmails,
   extractPhones,
   activityMatchesSector,
+  nafMatchesSector,
+  matchesZone,
+  matchesDepartment,
   nameSimilarity,
   buildProposal,
   decodeDuckDuckGoUrl,
@@ -2188,6 +2340,7 @@ module.exports = {
   directoryEvidenceOk,
   sanitizeCompanyContact,
   sourceForbidsPhone,
+  companyFromSireneHit,
   searchName,
   isGenericCompanyName,
   enrichFromDomainGuess

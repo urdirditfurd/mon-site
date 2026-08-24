@@ -812,8 +812,8 @@
   <section class="dashboard-view" id="viewDashboard" aria-label="Accueil">
     <div class="dash-hero">
       <div>
-        <h2 class="hero-title">Trouvez des clients à contacter en quelques minutes</h2>
-        <p class="hero-lead">L’agent repère les nouvelles entreprises de votre secteur et prépare vos messages de prospection.</p>
+        <h2 class="hero-title">Trouvez des cabinets d’expertise comptable à contacter</h2>
+        <p class="hero-lead">L’agent cible uniquement les cabinets (NAF 69.20Z), partout en Île-de-France ou par ville — quelle que soit leur date de création — et prépare vos messages.</p>
         <div class="hero-actions">
           <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Lancer une recherche</button>
           <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
@@ -835,15 +835,13 @@
       <div class="sources-inner">
         <h2>Sources utilisées pour trouver les contacts</h2>
         <ul class="sources-list" id="sourcesList">
-          <li><strong>BODACC (DILA)</strong> — Nouvelles entreprises créées</li>
-          <li><strong>API Recherche d’entreprises (SIRENE)</strong> — Adresse, SIREN, activité</li>
+          <li><strong>API Recherche d’entreprises (SIRENE)</strong> — Cabinets NAF 69.20Z, toutes dates</li>
           <li><strong>Site officiel de l’entreprise</strong> — E-mail / téléphone public</li>
           <li><strong>DuckDuckGo / Brave</strong> — Snippets publics</li>
           <li><strong>Pages Jaunes</strong> — Fiches professionnelles publiques</li>
           <li><strong>118712 / Cylex</strong> — Annuaires locaux publics</li>
           <li><strong>Google Maps</strong> — Coordonnées affichées publiquement</li>
           <li><strong>OpenStreetMap / Overpass</strong> — Téléphones ouverts</li>
-          <li><strong>Unifrance / Film France / CNC</strong> — Filière cinéma (pages publiques)</li>
           <li><strong>Pappers / Societe.com</strong> — E-mail public uniquement (pas de téléphone teaser)</li>
           <li><strong>Annuaire des entreprises</strong> — Données administratives publiques</li>
         </ul>
@@ -856,70 +854,73 @@
       <span class="step-label">Étape 1 — Où chercher ?</span>
       <h2>Paramètres de recherche</h2>
       <label class="field">
-        <span>Secteur</span>
-        <select id="sectorSelect">
-          <option value="tous">Tous les secteurs</option>
-          <option value="restauration">Restauration, cafés, bars</option>
-          <option value="btp">BTP / artisanat du bâtiment</option>
-          <option value="commerce">Commerce de détail</option>
-          <option value="immobilier">Immobilier</option>
-          <option value="informatique">Informatique / digital</option>
-          <option value="conseil">Conseil, gestion, juridique</option>
-          <option value="sante">Santé / médical</option>
-          <option value="beaute">Beauté / coiffure</option>
-          <option value="transport">Transport / logistique</option>
-          <option value="enseignement">Formation / enseignement</option>
-          <option value="cinema" selected>Cinéma / audiovisuel / production</option>
-          <option value="arts">Arts, spectacles, sport</option>
-          <option value="services">Services aux entreprises</option>
+        <span>Cible</span>
+        <select id="sectorSelect" disabled aria-readonly="true">
+          <option value="cabinets-comptables" selected>Cabinets d’expertise comptable</option>
         </select>
       </label>
-      <div class="grid-2">
-        <label class="field">
-          <span>Créées depuis</span>
-          <select id="daysSelect">
-            <option value="365" selected>Moins d’1 an</option>
-            <option value="730">Moins de 2 ans</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Département</span>
-          <select id="departmentInput">
-            <option value="">France entière</option>
-            <option value="75" selected>75 – Paris</option>
-            <option value="92">92 – Hauts-de-Seine</option>
-            <option value="93">93 – Seine-Saint-Denis</option>
-            <option value="94">94 – Val-de-Marne</option>
-            <option value="69">69 – Rhône</option>
-            <option value="13">13 – Bouches-du-Rhône</option>
-            <option value="31">31 – Haute-Garonne</option>
-            <option value="33">33 – Gironde</option>
-            <option value="44">44 – Loire-Atlantique</option>
-            <option value="59">59 – Nord</option>
-            <option value="67">67 – Bas-Rhin</option>
-            <option value="06">06 – Alpes-Maritimes</option>
-            <option value="34">34 – Hérault</option>
-            <option value="77">77 – Seine-et-Marne</option>
-            <option value="78">78 – Yvelines</option>
-            <option value="91">91 – Essonne</option>
-            <option value="95">95 – Val-d’Oise</option>
-          </select>
-        </label>
-      </div>
+      <label class="field">
+        <span>Zone</span>
+        <select id="zoneInput">
+          <optgroup label="Région">
+            <option value="idf" selected>Île-de-France (toute la région)</option>
+          </optgroup>
+          <optgroup label="Départements IDF">
+            <option value="75">75 — Paris</option>
+            <option value="77">77 — Seine-et-Marne</option>
+            <option value="78">78 — Yvelines</option>
+            <option value="91">91 — Essonne</option>
+            <option value="92">92 — Hauts-de-Seine</option>
+            <option value="93">93 — Seine-Saint-Denis</option>
+            <option value="94">94 — Val-de-Marne</option>
+            <option value="95">95 — Val-d’Oise</option>
+          </optgroup>
+          <optgroup label="Villes — 92 Hauts-de-Seine">
+            <option value="city-asnieres">Asnières-sur-Seine</option>
+            <option value="city-gennevilliers">Gennevilliers</option>
+            <option value="city-colombes">Colombes</option>
+            <option value="city-nanterre">Nanterre</option>
+            <option value="city-boulogne">Boulogne-Billancourt</option>
+            <option value="city-courbevoie">Courbevoie</option>
+            <option value="city-levallois">Levallois-Perret</option>
+            <option value="city-neuilly">Neuilly-sur-Seine</option>
+            <option value="city-clichy">Clichy</option>
+            <option value="city-issy">Issy-les-Moulineaux</option>
+            <option value="city-rueil">Rueil-Malmaison</option>
+            <option value="city-suresnes">Suresnes</option>
+            <option value="city-puteaux">Puteaux</option>
+            <option value="city-antony">Antony</option>
+            <option value="city-montrouge">Montrouge</option>
+            <option value="city-bois-colombes">Bois-Colombes</option>
+            <option value="city-la-garenne">La Garenne-Colombes</option>
+            <option value="city-villeneuve">Villeneuve-la-Garenne</option>
+            <option value="city-meudon">Meudon</option>
+            <option value="city-chatillon">Châtillon</option>
+            <option value="city-malakoff">Malakoff</option>
+            <option value="city-vanves">Vanves</option>
+            <option value="city-sevres">Sèvres</option>
+            <option value="city-bagneux">Bagneux</option>
+            <option value="city-saint-cloud">Saint-Cloud</option>
+          </optgroup>
+          <optgroup label="Élargi">
+            <option value="france">France entière</option>
+          </optgroup>
+        </select>
+      </label>
       <details class="options-disclosure">
         <summary>Options — signature et coordonnées</summary>
         <div class="options-body">
           <label class="field">
-            <span>Votre nom (signature)</span>
-            <input id="senderName" type="text" placeholder="Ex. : Eva Moreau" autocomplete="name" value="">
+            <span>Nom de la société (signature)</span>
+            <input id="senderName" type="text" placeholder="Ex. : Cabinet Dupont & Associés" autocomplete="organization" value="">
           </label>
           <label class="field">
             <span>Votre e-mail</span>
-            <input id="senderEmail" type="email" placeholder="Ex. : eva.moreau@cabinet.fr" autocomplete="email" value="">
+            <input id="senderEmail" type="email" placeholder="Ex. : contact@votresociete.fr" autocomplete="email" value="">
           </label>
           <label class="field">
             <span>Votre téléphone</span>
-            <input id="senderPhone" type="tel" placeholder="Ex. : 06 12 34 56 78" autocomplete="tel" value="">
+            <input id="senderPhone" type="tel" placeholder="Ex. : 01 23 45 67 89" autocomplete="tel" value="">
           </label>
         </div>
       </details>
@@ -969,7 +970,7 @@
         </div>
         <div class="stats" id="statsBox"></div>
         <ul class="company-list" id="companyList">
-          <li class="empty">Choisissez un secteur et une période, puis lancez une recherche. Les entreprises à contacter apparaissent ici.</li>
+          <li class="empty">Choisissez une zone (Île-de-France, département ou ville), puis lancez une recherche. Les cabinets à contacter apparaissent ici.</li>
         </ul>
       </div>
 
@@ -979,22 +980,17 @@
         <p class="meta hint" style="margin-top:0">Variables : <code>{entreprise}</code>, <code>{dirigeant}</code>, <code>{activite}</code>, <code>{adresse}</code>.</p>
         <textarea id="mailTemplate">Bonjour {dirigeant},
 
-Félicitations pour la création de {entreprise} !
+Je me permets de vous contacter au sujet de {entreprise}.
 
-Je me permets de vous contacter car les premières semaines d’une entreprise sont décisives pour poser une gestion comptable simple et fiable (facturation, charges, TVA, trésorerie).
+Nous souhaitons échanger avec les cabinets d’expertise comptable de votre secteur afin de présenter une collaboration adaptée à votre activité.
 
-Notre cabinet peut vous accompagner sur :
-- la mise en place de la comptabilité et du prévisionnel
-- le suivi mensuel (recettes / dépenses / TVA)
-- la préparation des échéances URSSAF, impôts et bulletins si besoin
-
-Activité déclarée : {activite}
+Activité : {activite}
 Adresse : {adresse}
 
-Si vous le souhaitez, je vous propose un premier échange offert de 20 minutes pour faire le point.
+Si vous le souhaitez, je vous propose un premier échange de 20 minutes.
 
 Cordialement,
-[Votre nom]
+[Nom de la société]
 [Votre email]
 [Votre téléphone]</textarea>
         <div class="actions">

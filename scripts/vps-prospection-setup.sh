@@ -247,7 +247,7 @@ fi
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/prospection
 nginx -t
 systemctl enable nginx >/dev/null 2>&1 || true
-systemctl reload nginx
+systemctl restart nginx
 
 sleep 2
 HEALTH_INTERNAL="$(curl -sS "http://127.0.0.1:${INTERNAL_PORT}/api/health" 2>/dev/null || echo ERREUR)"
