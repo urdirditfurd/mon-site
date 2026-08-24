@@ -163,14 +163,13 @@ server {
 
 # HTTPS standard — lien client : https://${PROSPECTION_DOMAIN}/prospection
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 0.0.0.0:443 ssl;
+    listen [::]:443 ssl;
     server_name ${PROSPECTION_DOMAIN};
 
     ssl_certificate     /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/privkey.pem;
 ${ssl_extra}
-    ssl_protocols TLSv1.2 TLSv1.3;
 
     client_max_body_size 20M;
 
@@ -188,14 +187,13 @@ ${ssl_extra}
 
 # Ancien lien :3010 → 443 (évite l’erreur Safari « connexion interrompue »)
 server {
-    listen ${PUBLIC_PORT} ssl;
+    listen 0.0.0.0:${PUBLIC_PORT} ssl;
     listen [::]:${PUBLIC_PORT} ssl;
     server_name ${PROSPECTION_DOMAIN};
 
     ssl_certificate     /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/privkey.pem;
 ${ssl_extra}
-    ssl_protocols TLSv1.2 TLSv1.3;
 
     return 301 https://\$host\$request_uri;
 }
