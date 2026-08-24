@@ -137,9 +137,19 @@ EOF
 }
 
 write_https_config() {
+  local ssl_extra=""
+  if [[ -f /etc/letsencrypt/options-ssl-nginx.conf ]]; then
+    ssl_extra="    include /etc/letsencrypt/options-ssl-nginx.conf;"
+  fi
+  if [[ -f /etc/letsencrypt/ssl-dhparams.pem ]]; then
+    ssl_extra="${ssl_extra}
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
+  fi
   cat > "$NGINX_SITE" <<EOF
+# HTTP → HTTPS 443 (Safari / iPhone : pas de port exotique)
 server {
     listen 80;
+    listen [::]:80;
     server_name ${PROSPECTION_DOMAIN};
 
     location /.well-known/acme-challenge/ {
@@ -147,19 +157,20 @@ server {
     }
 
     location / {
-        return 301 https://\$host:${PUBLIC_PORT}\$request_uri;
+        return 301 https://\$host\$request_uri;
     }
 }
 
+# HTTPS standard — lien client : https://${PROSPECTION_DOMAIN}/prospection
 server {
-    listen ${PUBLIC_PORT} ssl;
-    listen [::]:${PUBLIC_PORT} ssl;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${PROSPECTION_DOMAIN};
 
     ssl_certificate     /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+${ssl_extra}
+    ssl_protocols TLSv1.2 TLSv1.3;
 
     client_max_body_size 20M;
 
@@ -173,6 +184,20 @@ server {
         proxy_read_timeout 600s;
         proxy_buffering off;
     }
+}
+
+# Ancien lien :3010 → 443 (évite l’erreur Safari « connexion interrompue »)
+server {
+    listen ${PUBLIC_PORT} ssl;
+    listen [::]:${PUBLIC_PORT} ssl;
+    server_name ${PROSPECTION_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PROSPECTION_DOMAIN}/privkey.pem;
+${ssl_extra}
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    return 301 https://\$host\$request_uri;
 }
 EOF
 }
@@ -248,8 +273,10 @@ echo " Logs:     pm2 logs prospection --lines 50"
 echo " Health:   $HEALTH_PUBLIC"
 echo ""
 if [[ "$ENABLE_HTTPS" == "1" && -f "/etc/letsencrypt/live/${PROSPECTION_DOMAIN}/fullchain.pem" ]]; then
-  echo " URL sécurisée (cadenas) :"
-  echo "   https://${PROSPECTION_DOMAIN}:${PUBLIC_PORT}/prospection"
+  echo " URL Safari / iPhone (à envoyer au client) :"
+  echo "   https://${PROSPECTION_DOMAIN}/prospection"
+  echo ""
+  echo " Ancien lien :3010 redirige vers 443."
   echo ""
 fi
 echo " URL HTTP (IP directe) :"

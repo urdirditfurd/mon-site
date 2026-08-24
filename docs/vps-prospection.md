@@ -59,7 +59,9 @@ ENABLE_HTTPS=1 PUBLIC_IP=51.254.135.158 PROSPECTION_DOMAIN=51-254-135-158.sslip.
 
 URL sécurisée :
 
-**https://51-254-135-158.sslip.io:3010/prospection**
+**https://51-254-135-158.sslip.io/prospection**
+
+(Safari / iPhone : **sans** `:3010` — le HTTPS doit être sur le port 443.)
 
 ### Option B — Votre propre domaine
 
