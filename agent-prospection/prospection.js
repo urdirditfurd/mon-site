@@ -823,6 +823,7 @@
       email: senderEmail.value.trim(),
       phone: senderPhone.value.trim()
     }));
+    renderList();
   }
 
   function getSender() {
@@ -1454,6 +1455,7 @@
 
   function saveTemplate() {
     localStorage.setItem(TEMPLATE_KEY, mailTemplate.value);
+    renderList();
     log("Modèle sauvegardé.", { quiet: true });
   }
 
