@@ -186,18 +186,36 @@
   }
 
   function setAppView(view) {
-    currentView = view === "prospection" ? "prospection" : "dashboard";
+    currentView = view === "prospection" || view === "recherche" ? "prospection" : "dashboard";
     localStorage.setItem(VIEW_KEY, currentView);
     const onDash = currentView === "dashboard";
-    if (viewDashboard) viewDashboard.hidden = !onDash;
-    if (viewProspection) viewProspection.hidden = onDash;
+    if (viewDashboard) {
+      viewDashboard.hidden = !onDash;
+      viewDashboard.setAttribute("aria-hidden", onDash ? "false" : "true");
+    }
+    if (viewProspection) {
+      viewProspection.hidden = onDash;
+      viewProspection.setAttribute("aria-hidden", onDash ? "true" : "false");
+    }
     if (navDashboard) navDashboard.classList.toggle("active", onDash);
     if (navProspection) navProspection.classList.toggle("active", !onDash);
     if (mobileNavDashboard) mobileNavDashboard.classList.toggle("active", onDash);
     if (mobileNavProspection) mobileNavProspection.classList.toggle("active", !onDash);
     if (stickyRunBar) stickyRunBar.hidden = onDash;
-    if (onDash) renderDashboard();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const hash = onDash ? "#accueil" : "#recherche";
+    if (window.location.hash !== hash) {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+    }
+    if (onDash) {
+      renderDashboard();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+    requestAnimationFrame(() => {
+      if (viewProspection) viewProspection.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (sectorSelect) sectorSelect.focus({ preventScroll: true });
+    });
   }
 
   function syncRunButtons(label) {
@@ -1293,12 +1311,12 @@
     });
   }
 
-  document.querySelectorAll("[data-view]").forEach((btn) => {
-    btn.addEventListener("click", () => setAppView(btn.getAttribute("data-view")));
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-view]");
+    if (!btn) return;
+    event.preventDefault();
+    setAppView(btn.getAttribute("data-view"));
   });
-  if (dashGoProspection) {
-    dashGoProspection.addEventListener("click", () => setAppView("prospection"));
-  }
   if (dashGoTodo) {
     dashGoTodo.addEventListener("click", () => {
       setListFilter("todo", { scrollToList: true });
@@ -1338,5 +1356,6 @@
   }
   renderList();
   seedDemoCompanies();
-  setAppView("dashboard");
+  const startOnSearch = window.location.hash === "#recherche";
+  setAppView(startOnSearch ? "prospection" : "dashboard");
 })();

@@ -326,6 +326,12 @@
     .layout[hidden] {
       display: none !important;
     }
+    .dashboard-view:not([hidden]) {
+      display: grid;
+    }
+    .layout:not([hidden]) {
+      display: grid;
+    }
     .dash-hero {
       display: flex;
       flex-wrap: wrap;
@@ -809,7 +815,7 @@
         <h2 class="hero-title">Trouvez des clients à contacter en quelques minutes</h2>
         <p class="hero-lead">L’agent repère les nouvelles entreprises de votre secteur et prépare vos messages de prospection.</p>
         <div class="hero-actions">
-          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection">Lancer une recherche</button>
+          <button type="button" class="btn btn-primary btn-block" id="dashGoProspection" data-view="prospection">Lancer une recherche</button>
           <button type="button" class="hero-link" id="dashGoTodo" hidden>Voir mes contacts en attente</button>
         </div>
       </div>
