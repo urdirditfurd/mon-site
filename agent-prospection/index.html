@@ -882,7 +882,8 @@
       .panel-run-desktop { display: none; }
       .sticky-run-bar { display: block; }
       .sticky-run-bar[hidden] { display: none !important; }
-      body { padding-bottom: 132px; }
+      body { padding-bottom: 80px; }
+      body:has(#stickyRunBar:not([hidden])) { padding-bottom: 132px; }
     }
   </style>
 </head>
