@@ -124,6 +124,7 @@ with gr.Blocks(title="Wan Snapdragon — Pinokio", theme=gr.themes.Soft()) as de
                 fn=run_generation,
                 inputs=[prompt, resolution, num_frames, steps, seed],
                 outputs=[video, status],
+                api_name="generate",
             )
 
         with gr.Tab("Colab gratuit (GPU cloud)"):
@@ -169,9 +170,138 @@ Wan2GP officiel exige CUDA NVIDIA. Ce script Pinokio est un **pont** pour Snapdr
             )
 
 if __name__ == "__main__":
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+
     port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
+    http_port = int(os.environ.get("WAN_HTTP_PORT", str(port + 7)))
+    host = os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1")
+
+    class WanHttpApi(BaseHTTPRequestHandler):
+        """API HTTP stable pour ClipForge /video-ia-qwen (sans clé, local)."""
+
+        def log_message(self, fmt: str, *args) -> None:
+            return
+
+        def _send(self, code: int, payload: dict, content_type: str = "application/json"):
+            body = json.dumps(payload).encode("utf-8") if content_type == "application/json" else payload
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path in ("/health", "/api/health"):
+                self._send(200, {"ok": True, "engine": "wan-snapdragon", "gradioPort": port})
+                return
+            if parsed.path == "/api/download":
+                qs = parse_qs(parsed.query)
+                file_path = (qs.get("path") or [""])[0]
+                if not file_path or ".." in file_path:
+                    self._send(400, {"error": "path invalide"})
+                    return
+                target = Path(file_path).resolve()
+                if not str(target).startswith(str(OUTPUT_DIR.resolve())) or not target.is_file():
+                    self._send(404, {"error": "fichier introuvable"})
+                    return
+                data = target.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path not in ("/api/t2v", "/generate"):
+                self._send(404, {"error": "not found"})
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._send(400, {"error": "JSON invalide"})
+                return
+
+            prompt = str(body.get("prompt") or "").strip()
+            if not prompt:
+                self._send(400, {"error": "prompt requis"})
+                return
+
+            aspect = str(body.get("aspectRatio") or "16:9")
+            resolution = {
+                "16:9": "480p 16:9",
+                "9:16": "480p 9:16",
+                "1:1": "480p 1:1",
+            }.get(aspect, "480p 16:9")
+
+            duration = float(body.get("durationSec") or 3)
+            # 16 fps ; Wan Snapdragon plafonne à 33 frames (~2 s)
+            frames = int(round(duration * 16))
+            frames = max(17, min(33, frames))
+            if frames % 4 != 1:
+                frames = max(17, (frames // 4) * 4 + 1)
+
+            out_name = f"wan_api_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
+            out_path = OUTPUT_DIR / out_name
+            cache_dir = os.environ.get("WAN_MODEL_CACHE") or str(
+                Path(__file__).resolve().parent.parent / "models"
+            )
+
+            try:
+                result = generate_video(
+                    prompt=prompt,
+                    output_path=str(out_path),
+                    resolution_key=resolution,
+                    num_frames=frames,
+                    fps=16,
+                    steps=int(body.get("steps") or 20),
+                    seed=int(body["seed"]) if body.get("seed") else None,
+                    cache_dir=cache_dir,
+                )
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+                return
+
+            download = f"http://{host}:{http_port}/api/download?path={out_path}"
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "path": str(out_path),
+                    "downloadUrl": download,
+                    "width": result.get("width"),
+                    "height": result.get("height"),
+                    "numFrames": result.get("numFrames"),
+                    "device": result.get("device"),
+                },
+            )
+
+    def _serve_http():
+        server = ThreadingHTTPServer((host, http_port), WanHttpApi)
+        print(f"[wan-http] API locale http://{host}:{http_port}/api/t2v (health /api/health)")
+        server.serve_forever()
+
+    threading.Thread(target=_serve_http, daemon=True).start()
+
     demo.queue(default_concurrency_limit=1).launch(
-        server_name=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
+        server_name=host,
         server_port=port,
         share=os.environ.get("GRADIO_SHARE", "").lower() in ("1", "true", "yes"),
         show_error=True,

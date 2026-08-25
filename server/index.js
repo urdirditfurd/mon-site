@@ -16,12 +16,15 @@ const VIDEO_FACTORY_DIR = path.join(ROOT_DIR, "video-factory");
 const VOANH_DIR = path.join(ROOT_DIR, "voanh");
 const LEGAL_DIR = path.join(ROOT_DIR, "legal");
 const PROSPECTION_DIR = path.join(ROOT_DIR, "agent-prospection");
+const QWEN_VIDEO_DIR = path.join(ROOT_DIR, "video-ia-qwen");
 const INDEX_HTML_PATH = path.join(CLIPFORGE_DIR, "index.html");
 const VOANH_HTML_PATH = path.join(VOANH_DIR, "index.html");
 const VIDEO_FACTORY_HTML_PATH = path.join(VIDEO_FACTORY_DIR, "index.html");
 const PROSPECTION_HTML_PATH = path.join(PROSPECTION_DIR, "index.html");
+const QWEN_VIDEO_HTML_PATH = path.join(QWEN_VIDEO_DIR, "index.html");
 const { createVoanhVideoRouter } = require("./voanh-video");
 const { createSulphurVideoRouter } = require("./sulphur-video");
+const { createQwenVideoRouter } = require("./qwen-video");
 const { createProspectionRouter } = require("../agent-prospection/server/prospection-agent");
 const { FAL_LIMITS, estimateFalJob, listFalModels, DEFAULT_FAL_MODEL } = require("./fal-limits");
 const { processAiRemixJob } = require("./clipforge-ai-remix");
@@ -3884,6 +3887,14 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   }
 });
 
+app.get(["/video-ia-qwen", "/video-ia-qwen/"], (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(QWEN_VIDEO_HTML_PATH)) {
+    return res.status(404).send("video-ia-qwen/index.html introuvable");
+  }
+  return res.sendFile(QWEN_VIDEO_HTML_PATH);
+});
+
 app.use(express.static(ROOT_DIR, { index: false }));
 
 app.get("/", (_req, res) => {
@@ -3920,6 +3931,8 @@ app.get("/prospection", (_req, res) => {
 app.get("/prospection.html", (_req, res) => res.redirect(301, "/prospection"));
 app.use("/prospection", express.static(PROSPECTION_DIR, { index: false }));
 
+app.use("/video-ia-qwen", express.static(QWEN_VIDEO_DIR, { index: false }));
+
 app.use("/legal", express.static(LEGAL_DIR, { index: false }));
 app.get("/privacy.html", (_req, res) => res.redirect(301, "/legal/privacy.html"));
 app.get("/terms.html", (_req, res) => res.redirect(301, "/legal/terms.html"));
@@ -3932,6 +3945,7 @@ ensureDirs()
     ffmpegReady = checkBinary("ffmpeg", "-version") && checkBinary("ffprobe", "-version");
     app.use("/api/voanh", createVoanhVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     app.use("/api/sulphur", createSulphurVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
+    app.use("/api/qwen", createQwenVideoRouter({ storageDir: STORAGE_DIR, getFfmpegReady: () => ffmpegReady }));
     whisperAvailable = checkBinary("whisper", "--help");
     ytDlpAvailable = resolveYtDlpAvailable();
     edgeTtsAvailable = checkPythonModule("edge_tts", ["--help"]);

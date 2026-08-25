@@ -3,6 +3,7 @@ agent-de-prospection/
 storage/uploads/*
 storage/jobs/*
 storage/jobs-db.json
+storage/qwen-videos/
 !storage/uploads/.gitkeep
 !storage/jobs/.gitkeep
 **/__pycache__/

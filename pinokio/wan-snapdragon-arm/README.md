@@ -2,12 +2,22 @@
 
 Application Pinokio pour **Surface Copilot+ / Snapdragon X Elite** et tout PC **sans GPU NVIDIA**.
 
+## Ports (intégration ClipForge)
+
+| Service | URL |
+|---------|-----|
+| Interface Gradio | http://127.0.0.1:7860 |
+| API HTTP (site `/video-ia-qwen`) | http://127.0.0.1:7867/api/t2v |
+| Health | http://127.0.0.1:7867/api/health |
+
+Après `npm start`, ouvrir **http://localhost:3000/video-ia-qwen** avec le moteur **Pinokio Wan local**.
+
 ## Ce que ça fait
 
 | Bouton Pinokio | Action |
 |----------------|--------|
 | **Install** | PyTorch **CPU ARM64** (pas CUDA) + Wan 2.1 1.3B |
-| **Run** | Interface Gradio (style Wan2GP) sur `http://127.0.0.1:7860` |
+| **Run** | Interface Gradio (style Wan2GP) sur `http://127.0.0.1:7860` + API HTTP `:7867` |
 | **Colab GPU gratuit** | Ouvre le notebook Wan 2.1 avec GPU T4 cloud |
 | **Check** | Vérifie PyTorch / diffusers |
 
