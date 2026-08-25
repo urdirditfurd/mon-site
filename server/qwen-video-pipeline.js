@@ -111,12 +111,21 @@ function planSegments({ totalSec, segmentSec, script, model }) {
   };
 }
 
-function sizeForAspect(aspectRatio, resolution, model) {
+function sizeForAspect(aspectRatio, resolution, model, engine) {
   const aspect = ASPECT_TO_SIZE[aspectRatio] || ASPECT_TO_SIZE["16:9"];
   const preferred = aspect[resolution] || aspect["720P"] || aspect["1080P"];
+  if (engine === "demo") return preferred;
   const caps = MODEL_CAPS[model];
   if (!caps?.sizes?.length) return preferred;
   if (caps.sizes.includes(preferred)) return preferred;
+  // Fallbacks aspect-aware for legacy Wan 2.2 sizes
+  if (aspectRatio === "9:16") {
+    const portrait = caps.sizes.find((s) => {
+      const [w, h] = s.split("*").map(Number);
+      return h > w;
+    });
+    if (portrait) return portrait;
+  }
   return caps.sizes[caps.sizes.length - 1];
 }
 
@@ -381,7 +390,7 @@ function createQwenJobManager({ storageDir, getFfmpegReady }) {
         throw new Error("FFmpeg introuvable — requis pour assembler les segments");
       }
 
-      const size = sizeForAspect(job.aspectRatio, job.resolution, job.model);
+      const size = sizeForAspect(job.aspectRatio, job.resolution, job.model, job.engine);
       const [w, h] = size.split("*").map(Number);
       const segmentPaths = [];
 

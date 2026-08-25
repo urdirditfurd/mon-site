@@ -3887,6 +3887,14 @@ app.get("/api/jobs/:jobId/bundle", async (req, res) => {
   }
 });
 
+app.get(["/video-ia-qwen", "/video-ia-qwen/"], (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!fs.existsSync(QWEN_VIDEO_HTML_PATH)) {
+    return res.status(404).send("video-ia-qwen/index.html introuvable");
+  }
+  return res.sendFile(QWEN_VIDEO_HTML_PATH);
+});
+
 app.use(express.static(ROOT_DIR, { index: false }));
 
 app.get("/", (_req, res) => {
@@ -3923,13 +3931,6 @@ app.get("/prospection", (_req, res) => {
 app.get("/prospection.html", (_req, res) => res.redirect(301, "/prospection"));
 app.use("/prospection", express.static(PROSPECTION_DIR, { index: false }));
 
-app.get("/video-ia-qwen", (_req, res) => {
-  res.set("Cache-Control", "no-store");
-  if (!fs.existsSync(QWEN_VIDEO_HTML_PATH)) {
-    return res.status(404).send("video-ia-qwen/index.html introuvable");
-  }
-  return res.sendFile(QWEN_VIDEO_HTML_PATH);
-});
 app.use("/video-ia-qwen", express.static(QWEN_VIDEO_DIR, { index: false }));
 
 app.use("/legal", express.static(LEGAL_DIR, { index: false }));
