@@ -4463,6 +4463,26 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
 
     if (result?.listingId) {
       rememberListingPublish(listing.id, result);
+      try {
+        const market = getSetting.get("auto_publish_market")?.value || "France";
+        const st = loadPipelineState(market);
+        st.publishedToday = (Number(st.publishedToday) || 0) + 1;
+        savePipelineState(st);
+        logAutoPublishPublished({
+          listingId: listing.id,
+          title: listing.seo_title || "Produit",
+          sell: Number(listing.suggested_price) || 0,
+          cost: listingCost(listing),
+          cheapest: null,
+          competitorCount: 0,
+          netPct: null,
+          ebayListingId: result.listingId,
+          marketCode: marketplaceToCode(market),
+          detail: "publication manuelle / reprise",
+        });
+      } catch (e) {
+        console.warn("[EBX] log publish manuel:", e.message);
+      }
       const saved = getListingById.get(listing.id);
       console.log(
         `[EBX] Listing #${listing.id} mémorisé → ebay_listing_id=${saved?.ebay_listing_id} env=${saved?.publish_env} variations=${saved?.variations_active ? "OK" : "off"}`
