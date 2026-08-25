@@ -116,10 +116,11 @@
         ffmpeg.className = `pill ${data.ffmpegReady ? "ok" : "warn"}`;
       }
       if (engine) {
-        const pin = data.pinokio?.ok ? "Pinokio ON" : "Pinokio OFF";
-        const key = data.hasQwenKey ? "clé serveur" : "pas de clé serveur";
-        engine.textContent = `${pin} · ${key}`;
-        engine.className = "pill";
+        const pinOk = Boolean(data.pinokio?.ok);
+        const mode = data.pinokio?.mode || "";
+        const pin = pinOk ? `Wan ON (${mode || "ok"})` : "Wan OFF — lance Pinokio";
+        engine.textContent = pin;
+        engine.className = `pill ${pinOk ? "ok" : "warn"}`;
       }
       return data;
     } catch {

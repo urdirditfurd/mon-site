@@ -1,39 +1,51 @@
-# Vidéo IA Qwen
+# Vidéo IA Qwen + Wan Pinokio (gratuit illimité)
 
-Workflow local : découpe un script en **N segments** Wan/Qwen, génère chaque clip, puis assemble un MP4 de **20 s à 2 min**.
-
-## Lien de test
+## Lien
 
 ```text
 http://localhost:3000/video-ia-qwen
 ```
 
-```bash
-cd mon-site
+## Réparer le clone Windows (ton erreur actuelle)
+
+Ton dépôt était **hors branche** et sans fichiers → `package.json` introuvable.
+
+Dans PowerShell :
+
+```powershell
+cd $HOME\mon-site
+git fetch origin
+git checkout -f main
+git pull origin main
+git checkout cursor/video-ia-qwen-workflow-37c6
+git pull origin cursor/video-ia-qwen-workflow-37c6
+npm install
 npm start
 ```
 
-## Moteurs
+Ou en une commande :
 
-| Mode | Usage |
-|------|--------|
-| **Démo** | FFmpeg local, sans GPU ni crédits — valide le chaînage |
-| **API Qwen** | DashScope (`QWEN_API_KEY` ou clé dans l’UI) |
-| **Pinokio** | Wan2GP sur `http://127.0.0.1:7860` |
-
-## Variables d’environnement (optionnel)
-
-```bash
-export QWEN_API_KEY=sk-...
-# ou DASHSCOPE_API_KEY
-export QWEN_DASHSCOPE_BASE=https://dashscope-intl.aliyuncs.com/api/v1
-export PINOKIO_WAN_URL=http://127.0.0.1:7860
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-video-ia-qwen.ps1
 ```
 
-## API
+Puis ouvre : http://localhost:3000/video-ia-qwen
 
-- `GET /api/qwen/health`
-- `POST /api/qwen/plan`
-- `POST /api/qwen/jobs`
-- `GET /api/qwen/jobs/:id`
-- `GET /api/qwen/jobs/:id/download`
+## Wan local (Pinokio) — déjà branché
+
+| Élément | Détail |
+|---------|--------|
+| UI | Moteur **Pinokio Wan local** (défaut) |
+| Gradio | `http://127.0.0.1:7860` |
+| API HTTP (repo) | `http://127.0.0.1:7867/api/t2v` |
+| App Pinokio du repo | `pinokio/wan-snapdragon-arm/` |
+
+### Lancer Wan
+
+1. Installer [Pinokio](https://pinokio.co)
+2. Ajouter l’app : dossier `mon-site\pinokio\wan-snapdragon-arm` (ou Discover → Wan2GP)
+3. **Install** puis **Run**
+4. Vérifier que le pastille UI affiche Pinokio ON
+5. Générer depuis `/video-ia-qwen`
+
+Sans Pinokio démarré, utilise temporairement **Démo FFmpeg** pour tester le chaînage.

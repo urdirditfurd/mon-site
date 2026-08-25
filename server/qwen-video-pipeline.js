@@ -256,59 +256,275 @@ async function generateQwenSegment({ apiKey, model, prompt, size, durationSec, o
 }
 
 async function pingPinokio(baseUrl) {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  const httpApi = deriveWanHttpApiUrl(base);
+
   try {
-    const res = await fetch(`${baseUrl}/config`, { signal: AbortSignal.timeout(2500) });
-    if (res.ok) return { ok: true, mode: "gradio-config" };
+    const res = await fetch(`${httpApi}/api/health`, { signal: AbortSignal.timeout(2500) });
+    if (res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: true, mode: "wan-http", httpApi, detail: body };
+    }
   } catch {
     /* fall through */
   }
+
   try {
-    const res = await fetch(baseUrl, { signal: AbortSignal.timeout(2500) });
-    return { ok: res.ok, mode: "root", status: res.status };
+    const res = await fetch(`${base}/config`, { signal: AbortSignal.timeout(2500) });
+    if (res.ok) return { ok: true, mode: "gradio-config", httpApi };
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const res = await fetch(base, { signal: AbortSignal.timeout(2500) });
+    return { ok: res.ok, mode: "root", status: res.status, httpApi };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: error instanceof Error ? error.message : String(error), httpApi };
   }
 }
 
-/**
- * Appel Gradio 4+ (predict) — compatible Wan2GP / interfaces similaires.
- * Si l’API Gradio diffère, le mode demo reste disponible pour valider le chaînage.
- */
-async function generatePinokioSegment({ baseUrl, prompt, durationSec, outPath }) {
-  const candidates = [
-    `${baseUrl}/gradio_api/call/generate`,
-    `${baseUrl}/api/predict`,
-    `${baseUrl}/run/predict`
-  ];
+function deriveWanHttpApiUrl(gradioBase) {
+  try {
+    const u = new URL(gradioBase);
+    const gradioPort = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+    // Wan Snapdragon du repo : Gradio 7860 + API HTTP 7867
+    if (gradioPort === 7860) {
+      u.port = "7867";
+      return u.toString().replace(/\/+$/, "");
+    }
+    if (gradioPort > 0) {
+      u.port = String(gradioPort + 7);
+      return u.toString().replace(/\/+$/, "");
+    }
+  } catch {
+    /* ignore */
+  }
+  return String(process.env.WAN_HTTP_URL || "http://127.0.0.1:7867").replace(/\/+$/, "");
+}
 
-  let lastError = "Pinokio injoignable";
+function aspectToWanResolution(aspectRatio) {
+  if (aspectRatio === "9:16") return "480p 9:16";
+  if (aspectRatio === "1:1") return "480p 1:1";
+  return "480p 16:9";
+}
+
+function durationToWanFrames(durationSec) {
+  let frames = Math.round(Number(durationSec || 3) * 16);
+  frames = Math.max(17, Math.min(33, frames));
+  if (frames % 4 !== 1) frames = Math.max(17, Math.floor(frames / 4) * 4 + 1);
+  return frames;
+}
+
+function extractVideoRef(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    return value.url || value.path || value.name || value.video || null;
+  }
+  return null;
+}
+
+async function savePinokioVideoRef(baseUrl, ref, outPath) {
+  if (!ref || typeof ref !== "string") throw new Error("Référence vidéo Pinokio vide");
+
+  if (/^https?:\/\//i.test(ref)) {
+    await downloadFile(ref, outPath);
+    return outPath;
+  }
+
+  // Gradio file endpoints
+  const candidates = [];
+  if (ref.startsWith("/")) {
+    candidates.push(`${baseUrl}${ref}`);
+    candidates.push(`${baseUrl}/gradio_api/file=${ref}`);
+    candidates.push(`${baseUrl}/file=${ref}`);
+  } else {
+    candidates.push(`${baseUrl}/gradio_api/file=${encodeURIComponent(ref)}`);
+    candidates.push(`${baseUrl}/file=${encodeURIComponent(ref)}`);
+    // Fichier local produit par wan-snapdragon
+    if (fs.existsSync(ref)) {
+      await fsp.copyFile(ref, outPath);
+      return outPath;
+    }
+  }
+
+  let lastError = "téléchargement impossible";
   for (const url of candidates) {
+    try {
+      await downloadFile(url, outPath);
+      return outPath;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  throw new Error(lastError);
+}
+
+async function generateViaWanHttpApi({ httpApi, prompt, durationSec, aspectRatio, outPath }) {
+  const res = await fetch(`${httpApi}/api/t2v`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      durationSec,
+      aspectRatio: aspectRatio || "16:9",
+      steps: 20
+    }),
+    signal: AbortSignal.timeout(Number(process.env.WAN_HTTP_TIMEOUT_MS || 45 * 60 * 1000))
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) {
+    throw new Error(body.error || `Wan HTTP ${res.status}`);
+  }
+  if (body.path && fs.existsSync(body.path)) {
+    await fsp.copyFile(body.path, outPath);
+    return outPath;
+  }
+  if (body.downloadUrl) {
+    await downloadFile(body.downloadUrl, outPath);
+    return outPath;
+  }
+  throw new Error("Wan HTTP OK mais sans fichier vidéo");
+}
+
+async function callGradioNamedApi(baseUrl, apiName, data) {
+  const endpoints = [
+    `${baseUrl}/gradio_api/call/${apiName}`,
+    `${baseUrl}/call/${apiName}`
+  ];
+  let lastError = "Gradio call échoué";
+  for (const url of endpoints) {
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+        signal: AbortSignal.timeout(60000)
+      });
+      if (!res.ok) {
+        lastError = `Gradio HTTP ${res.status} (${url})`;
+        continue;
+      }
+      const body = await res.json().catch(() => ({}));
+      const eventId = body.event_id || body.eventId;
+      if (!eventId) {
+        // Réponse synchrone rare
+        return body.data || body;
+      }
+      const pollUrl = `${url}/${eventId}`;
+      const started = Date.now();
+      const maxMs = Number(process.env.WAN_GRADIO_TIMEOUT_MS || 45 * 60 * 1000);
+      while (Date.now() - started < maxMs) {
+        const streamRes = await fetch(pollUrl, { signal: AbortSignal.timeout(120000) });
+        const text = await streamRes.text();
+        const lines = text.split(/\r?\n/);
+        let eventName = "";
+        for (const line of lines) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          if (line.startsWith("data:")) {
+            const raw = line.slice(5).trim();
+            if (!raw || raw === "null") continue;
+            let parsed;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              continue;
+            }
+            if (eventName === "complete" || Array.isArray(parsed)) {
+              return parsed;
+            }
+            if (eventName === "error") {
+              throw new Error(typeof parsed === "string" ? parsed : JSON.stringify(parsed));
+            }
+          }
+        }
+        await sleep(2000);
+      }
+      throw new Error("Timeout Gradio");
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  throw new Error(lastError);
+}
+
+/**
+ * Pinokio / Wan local — priorise l'API HTTP du repo (wan-snapdragon-arm),
+ * puis Gradio api_name=generate (Wan Snapdragon / Wan2GP).
+ */
+async function generatePinokioSegment({
+  baseUrl,
+  prompt,
+  durationSec,
+  aspectRatio,
+  outPath
+}) {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  const httpApi = deriveWanHttpApiUrl(base);
+  const frames = durationToWanFrames(durationSec);
+  const resolution = aspectToWanResolution(aspectRatio);
+  let lastError = "Pinokio/Wan injoignable";
+
+  // 1) API HTTP du repo (fiable)
+  try {
+    await generateViaWanHttpApi({
+      httpApi,
+      prompt,
+      durationSec,
+      aspectRatio,
+      outPath
+    });
+    return outPath;
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : String(error);
+  }
+
+  // 2) Gradio nommé (wan-snapdragon api_name=generate)
+  try {
+    const data = await callGradioNamedApi(base, "generate", [
+      prompt,
+      resolution,
+      frames,
+      20,
+      0
+    ]);
+    const ref = extractVideoRef(Array.isArray(data) ? data[0] : data);
+    await savePinokioVideoRef(base, ref, outPath);
+    return outPath;
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : String(error);
+  }
+
+  // 3) Fallbacks génériques Wan2GP / Gradio predict
+  const fallbacks = [
+    { url: `${base}/gradio_api/call/generate`, data: [prompt, resolution, frames, 20, 0] },
+    { url: `${base}/api/predict`, data: [prompt, durationSec], fn_index: 0 },
+    { url: `${base}/run/predict`, data: [prompt, durationSec], fn_index: 0 }
+  ];
+
+  for (const item of fallbacks) {
+    try {
+      const res = await fetch(item.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          data: [prompt, durationSec],
-          fn_index: 0
+          data: item.data,
+          fn_index: item.fn_index ?? 0
         }),
         signal: AbortSignal.timeout(120000)
       });
       if (!res.ok) {
-        lastError = `Pinokio HTTP ${res.status} (${url})`;
+        lastError = `Pinokio HTTP ${res.status} (${item.url})`;
         continue;
       }
       const body = await res.json().catch(() => null);
-      const maybeUrl =
-        body?.data?.[0]?.url ||
-        body?.data?.[0]?.video?.url ||
-        body?.data?.[0] ||
-        body?.path;
-      if (typeof maybeUrl === "string" && /^https?:\/\//i.test(maybeUrl)) {
-        await downloadFile(maybeUrl, outPath);
-        return outPath;
-      }
-      if (typeof maybeUrl === "string" && maybeUrl.startsWith("/")) {
-        await downloadFile(`${baseUrl}${maybeUrl}`, outPath);
+      const maybe =
+        extractVideoRef(body?.data?.[0]) ||
+        extractVideoRef(body?.data) ||
+        extractVideoRef(body?.path);
+      if (maybe) {
+        await savePinokioVideoRef(base, maybe, outPath);
         return outPath;
       }
       lastError = "Réponse Pinokio sans fichier vidéo exploitable";
@@ -316,8 +532,10 @@ async function generatePinokioSegment({ baseUrl, prompt, durationSec, outPath })
       lastError = error instanceof Error ? error.message : String(error);
     }
   }
+
   throw new Error(
-    `${lastError}. Vérifiez que Wan2GP tourne sur ${baseUrl}, ou utilisez le mode Démo / API Qwen.`
+    `${lastError}. Lancez Wan local : Pinokio → wan-snapdragon-arm (ou Wan2GP) puis réessayez. ` +
+      `Gradio=${base} · API HTTP=${httpApi}`
   );
 }
 
@@ -428,6 +646,7 @@ function createQwenJobManager({ storageDir, getFfmpegReady }) {
             baseUrl: job.pinokioUrl,
             prompt: seg.prompt,
             durationSec: seg.durationSec,
+            aspectRatio: job.aspectRatio,
             outPath
           });
         } else {
@@ -507,7 +726,9 @@ function createQwenJobManager({ storageDir, getFfmpegReady }) {
       const ping = await pingPinokio(resolvePinokioUrl(input.pinokioUrl));
       if (!ping.ok) {
         throw new Error(
-          `Pinokio/Wan inaccessible (${ping.error || "offline"}). Lancez Wan2GP ou choisissez Démo / API Qwen.`
+          `Pinokio/Wan inaccessible (${ping.error || "offline"}). ` +
+            `Lancez pinokio/wan-snapdragon-arm (Gradio :7860, API :7867) ou Wan2GP, ` +
+            `sinon choisissez temporairement Démo FFmpeg.`
         );
       }
     }
@@ -558,9 +779,9 @@ function createQwenJobManager({ storageDir, getFfmpegReady }) {
       models: Object.keys(MODEL_CAPS),
       limits: { minTotalSec: MIN_TOTAL_SEC, maxTotalSec: MAX_TOTAL_SEC },
       engines: [
-        { id: "demo", label: "Démo locale (FFmpeg, sans GPU)" },
-        { id: "qwen-api", label: "API Qwen / DashScope (Wan cloud)" },
-        { id: "pinokio", label: "Pinokio Wan2GP (local)" }
+        { id: "pinokio", label: "Pinokio Wan local (gratuit illimité)" },
+        { id: "demo", label: "Démo locale (FFmpeg, test immédiat)" },
+        { id: "qwen-api", label: "API Qwen / DashScope (Wan cloud)" }
       ]
     };
   }

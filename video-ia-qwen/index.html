@@ -24,10 +24,11 @@
     </header>
 
     <section class="hero">
-      <h2>Automatiser des vidéos longues à partir de clips courts</h2>
+      <h2>Wan local gratuit via Pinokio — déjà branché</h2>
       <p>
-        Wan génère des clips courts (5–30 s selon le modèle). Cet outil découpe ton script,
-        génère chaque segment (API Qwen, Pinokio local, ou mode Démo), puis les assemble.
+        Choisissez le moteur <strong>Pinokio Wan local</strong> (sans clé, sans limite cloud).
+        Lancez d’abord Wan dans Pinokio (<code>wan-snapdragon-arm</code> du repo ou Wan2GP),
+        puis générez ici : N segments → assemblage FFmpeg → MP4 20&nbsp;s à 2&nbsp;min.
       </p>
     </section>
 
@@ -82,10 +83,11 @@ Un randonneur avance, lumière dorée entre les arbres."></textarea>
           <div class="field">
             <label for="engine">Moteur</label>
             <select id="engine">
-              <option value="demo" selected>Démo locale (FFmpeg, test immédiat)</option>
-              <option value="qwen-api">API Qwen / DashScope</option>
-              <option value="pinokio">Pinokio Wan2GP (localhost:7860)</option>
+              <option value="pinokio" selected>Pinokio Wan local (gratuit illimité)</option>
+              <option value="demo">Démo FFmpeg (test sans Wan)</option>
+              <option value="qwen-api">API Qwen / DashScope (crédits)</option>
             </select>
+            <span class="field-hint">Pinokio : Gradio <code>http://127.0.0.1:7860</code> + API HTTP <code>:7867</code></span>
           </div>
           <div class="field">
             <label for="aspect">Format</label>
@@ -144,9 +146,9 @@ Un randonneur avance, lumière dorée entre les arbres."></textarea>
     </div>
 
     <footer class="note">
-      Lien de test : <code>http://localhost:3000/video-ia-qwen</code>
-      · Lancer d’abord <code>npm start</code> à la racine du repo.
-      · Mode Démo = validation du chaînage sans GPU ni crédits.
+      Lien : <code>http://localhost:3000/video-ia-qwen</code>
+      · Windows : <code>scripts\setup-video-ia-qwen.ps1</code>
+      · Wan local : Pinokio → installer/lancer <code>pinokio/wan-snapdragon-arm</code> (ou Wan2GP) avant de générer.
     </footer>
   </div>
   <script src="/video-ia-qwen/app.js"></script>
