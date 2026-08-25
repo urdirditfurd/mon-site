@@ -8,6 +8,7 @@ Chaque sous-projet est dans son propre dossier. **Toujours lancer `npm start` av
 | **Video Factory** | `video-factory/` | http://localhost:3000/studio |
 | **VOANH AI** | `voanh/` | http://localhost:3000/voanh |
 | **Agent de prospection** | `agent-prospection/` | http://localhost:3000/prospection |
+| **Vidéo IA Qwen** | `video-ia-qwen/` | http://localhost:3000/video-ia-qwen |
 | **Pages légales** | `legal/` | http://localhost:3000/legal/privacy.html |
 | **TikTok callback** | `tiktok/` | http://localhost:3000/tiktok/callback.html |
 | **Trading backend** | `trading_backend/` | (API Python) |

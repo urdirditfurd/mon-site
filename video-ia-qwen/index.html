@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vidéo IA Qwen — segments + assemblage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/video-ia-qwen/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div class="brand">
+        <h1>Vidéo IA Qwen</h1>
+        <p>Chaîne locale : N segments Wan/Qwen → FFmpeg → MP4 20 s à 2 min</p>
+      </div>
+      <div class="pills">
+        <span class="pill" id="pill-server">Serveur…</span>
+        <span class="pill" id="pill-ffmpeg">FFmpeg…</span>
+        <span class="pill" id="pill-engine">Moteur…</span>
+      </div>
+    </header>
+
+    <section class="hero">
+      <h2>Automatiser des vidéos longues à partir de clips courts</h2>
+      <p>
+        Wan génère des clips courts (5–30 s selon le modèle). Cet outil découpe ton script,
+        génère chaque segment (API Qwen, Pinokio local, ou mode Démo), puis les assemble.
+      </p>
+    </section>
+
+    <div id="toast" class="alert info hidden"></div>
+
+    <div class="grid">
+      <main class="panel">
+        <h3>Brief &amp; réglages</h3>
+
+        <div class="field">
+          <label for="script">Script / narration</label>
+          <textarea id="script" placeholder="Décris la vidéo ou colle une narration. Elle sera découpée en segments.
+
+Exemple :
+Un drone survole une forêt brumeuse au lever du soleil.
+La caméra descend vers un sentier humide.
+Un randonneur avance, lumière dorée entre les arbres."></textarea>
+        </div>
+
+        <div class="field">
+          <div class="duration-box">
+            <label for="totalSec">Durée cible</label>
+            <div class="duration-value" id="totalLabel">60 s</div>
+          </div>
+          <input type="range" id="totalSec" min="20" max="120" step="5" value="60">
+          <span class="field-hint">De 20 secondes à 2 minutes.</span>
+        </div>
+
+        <div class="row-2">
+          <div class="field">
+            <label for="segmentSec">Durée par segment</label>
+            <select id="segmentSec">
+              <option value="5" selected>5 s (Wan 2.2)</option>
+              <option value="10">10 s</option>
+              <option value="15">15 s (Wan 2.6/2.7)</option>
+              <option value="30">30 s (Wan 3.0 cloud)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="model">Modèle</label>
+            <select id="model">
+              <option value="wan2.2-t2v-plus" selected>wan2.2-t2v-plus (5 s)</option>
+              <option value="wan2.5-t2v-preview">wan2.5-t2v-preview (5/10 s)</option>
+              <option value="wan2.6-t2v">wan2.6-t2v (2–15 s)</option>
+              <option value="wan2.7-t2v">wan2.7-t2v (2–15 s)</option>
+              <option value="wan3.0-video">wan3.0-video (2–30 s)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row-2">
+          <div class="field">
+            <label for="engine">Moteur</label>
+            <select id="engine">
+              <option value="demo" selected>Démo locale (FFmpeg, test immédiat)</option>
+              <option value="qwen-api">API Qwen / DashScope</option>
+              <option value="pinokio">Pinokio Wan2GP (localhost:7860)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="aspect">Format</label>
+            <select id="aspect">
+              <option value="16:9" selected>16:9 YouTube</option>
+              <option value="9:16">9:16 TikTok / Reels</option>
+              <option value="1:1">1:1 Carré</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row-2">
+          <div class="field">
+            <label for="resolution">Résolution</label>
+            <select id="resolution">
+              <option value="720P" selected>720P</option>
+              <option value="1080P">1080P</option>
+              <option value="480P">480P</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="pinokioUrl">URL Pinokio</label>
+            <input type="text" id="pinokioUrl" value="http://127.0.0.1:7860" placeholder="http://127.0.0.1:7860">
+          </div>
+        </div>
+
+        <div class="field" id="apiKeyField">
+          <label for="apiKey">Clé API Qwen / DashScope (stockée dans le navigateur)</label>
+          <input type="password" id="apiKey" placeholder="sk-… ou DASHSCOPE_API_KEY" autocomplete="off">
+          <span class="field-hint">Ou définis <code>QWEN_API_KEY</code> / <code>DASHSCOPE_API_KEY</code> côté serveur.</span>
+        </div>
+
+        <div class="plan-box" id="planBox">
+          Plan : <strong id="planSummary">—</strong>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="btnPlan">Prévisualiser le plan</button>
+          <button type="button" class="btn-primary" id="btnGenerate">Générer la vidéo</button>
+        </div>
+      </main>
+
+      <aside class="panel">
+        <h3>Progression</h3>
+        <div class="meta" id="statusLabel">En attente</div>
+        <div class="progress"><span id="progressFill"></span></div>
+        <div class="meta" id="progressDetail"></div>
+        <div class="log" id="log" aria-live="polite"></div>
+        <div class="preview hidden" id="previewWrap">
+          <video id="preview" controls playsinline></video>
+          <div class="actions">
+            <a class="btn-primary" id="btnDownload" href="#" download>Télécharger le MP4</a>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="note">
+      Lien de test : <code>http://localhost:3000/video-ia-qwen</code>
+      · Lancer d’abord <code>npm start</code> à la racine du repo.
+      · Mode Démo = validation du chaînage sans GPU ni crédits.
+    </footer>
+  </div>
+  <script src="/video-ia-qwen/app.js"></script>
+</body>
+</html>

@@ -45,6 +45,7 @@ Chaque outil est dans son dossier. Voir [`docs/projets.md`](docs/projets.md) pou
 | `video-factory/` | http://localhost:3000/studio |
 | `voanh/` | http://localhost:3000/voanh |
 | `agent-prospection/` | **http://localhost:3000/prospection** |
+| `video-ia-qwen/` | **http://localhost:3000/video-ia-qwen** |
 | `legal/` | http://localhost:3000/legal/privacy.html |
 
 ## Agent de prospection
