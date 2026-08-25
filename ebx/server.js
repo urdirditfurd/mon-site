@@ -299,14 +299,17 @@ const listUnpublishedForAuto = db.prepare(
    LIMIT 40`
 );
 const findListingBySourceUrl = db.prepare(
-  `SELECT id FROM listings WHERE source_url = ? ORDER BY id DESC LIMIT 1`
+  `SELECT id, auto_prepared, ebay_listing_id, html_description, seo_title, suggested_price, cost_price, keywords
+   FROM listings WHERE source_url = ? ORDER BY id DESC LIMIT 1`
 );
 const findListingByAutoQuery = db.prepare(
-  `SELECT id FROM listings WHERE keywords LIKE ? ORDER BY id DESC LIMIT 1`
+  `SELECT id, auto_prepared, ebay_listing_id, html_description, seo_title, suggested_price, cost_price, keywords
+   FROM listings WHERE keywords LIKE ? ORDER BY id DESC LIMIT 1`
 );
 const markListingAutoPrepared = db.prepare(
   `UPDATE listings SET auto_prepared = 1, suggested_price = ?, cost_price = ? WHERE id = ?`
 );
+const reviveListingPrepared = db.prepare(`UPDATE listings SET auto_prepared = 1 WHERE id = ?`);
 const countAutoQueue = db.prepare(
   `SELECT COUNT(*) AS n FROM listings
    WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
@@ -604,6 +607,97 @@ function purgeDeadAutoPublishQueue() {
     }
   }
   if (n) console.log(`[auto-publish] ${n} fiche(s) retiree(s) de la file (images VPS)`);
+}
+
+/**
+ * Remet en file les fiches quarantainées qui ont des photos /media/
+ * (ex. anciennes erreurs EPS maintenant corrigées).
+ * Supprime définitivement les quarantaines sans images.
+ * Une seule reprise forcée par jour (évite boucle quarantine ↔ revive).
+ */
+function reviveQuarantinedPublishables({ force = false } = {}) {
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    const flag = getSetting.get("auto_publish_revived_day")?.value;
+    if (!force && flag === day) return { revived: 0, deleted: 0, skipped: true };
+  } catch (_) {}
+
+  const rows = db
+    .prepare(
+      `SELECT id, html_description, keywords FROM listings
+       WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
+         AND COALESCE(auto_prepared, 0) = -1`
+    )
+    .all();
+  let revived = 0;
+  let deleted = 0;
+  for (const row of rows) {
+    if (countCachedMediaImagesInHtml(row.html_description) >= 1) {
+      reviveListingPrepared.run(row.id);
+      revived += 1;
+    } else {
+      try {
+        deleteListingById.run(row.id);
+        deleted += 1;
+      } catch (err) {
+        console.warn(`[auto-publish] delete mort #${row.id}:`, err.message);
+      }
+    }
+  }
+  try {
+    upsertSetting.run("auto_publish_revived_day", day);
+  } catch (_) {}
+  if (revived || deleted) {
+    console.log(
+      `[auto-publish] reprise file: ${revived} fiche(s) remises en file, ${deleted} morte(s) supprimée(s)`
+    );
+  }
+  return { revived, deleted, skipped: false };
+}
+
+/** Libère les mots-clés bloqués si plus aucune fiche active ne les occupe. */
+function clearStaleFailedQueries(state) {
+  if (!state?.failedQueries || typeof state.failedQueries !== "object") return 0;
+  let cleared = 0;
+  for (const q of Object.keys(state.failedQueries)) {
+    const row = findListingByAutoQuery.get(`%auto-publish:${q}%`);
+    if (!row) {
+      delete state.failedQueries[q];
+      cleared += 1;
+      continue;
+    }
+    const published = String(row.ebay_listing_id || "").trim();
+    if (published) continue;
+    // Quarantaine : retenter le mot-clé (revive ou nouvelle prep)
+    if (Number(row.auto_prepared) < 0) {
+      delete state.failedQueries[q];
+      cleared += 1;
+    }
+  }
+  return cleared;
+}
+
+/**
+ * Décide quoi faire d'une fiche existante pour un mot-clé / URL :
+ * - publiée ou déjà en file → bloquer
+ * - quarantaine avec /media/ → remettre en file
+ * - quarantaine sans image → supprimer et laisser préparer
+ * - absente → laisser préparer
+ */
+function resolveExistingAutoListing(row) {
+  if (!row) return { action: "prepare" };
+  const published = String(row.ebay_listing_id || "").trim();
+  if (published) return { action: "skip", reason: "déjà publié" };
+  const ap = Number(row.auto_prepared) || 0;
+  if (ap >= 0) return { action: "skip", reason: "déjà en Mes Listings" };
+  if (countCachedMediaImagesInHtml(row.html_description) >= 1) {
+    reviveListingPrepared.run(row.id);
+    return { action: "revive", listingId: row.id, title: row.seo_title || "" };
+  }
+  try {
+    deleteListingById.run(row.id);
+  } catch (_) {}
+  return { action: "prepare" };
 }
 
 function trimAutoPublishLogNoise() {
@@ -949,6 +1043,11 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
   let state = await refreshDemandIfNeeded(marketplace, send);
   state.failedQueries = state.failedQueries && typeof state.failedQueries === "object" ? state.failedQueries : {};
   state.failedUrls = state.failedUrls && typeof state.failedUrls === "object" ? state.failedUrls : {};
+  const cleared = clearStaleFailedQueries(state);
+  if (cleared) {
+    send({ type: "log", message: `[PREPARE] ${cleared} mot(s)-clé(s) re-débloqués (fiches mortes / quarantaine)` });
+    savePipelineState(state);
+  }
   if (!(state.keywords || []).length) {
     send({ type: "log", message: "[PREPARE] Aucun mot-clé demande aujourd'hui" });
     savePipelineState(state);
@@ -973,8 +1072,19 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       continue;
     }
 
-    if (findListingByAutoQuery.get(`%auto-publish:${kw.query}%`)) {
-      send({ type: "log", message: `[PREPARE] « ${kw.query} » déjà en Mes Listings — mot-clé suivant` });
+    const existingByQuery = findListingByAutoQuery.get(`%auto-publish:${kw.query}%`);
+    const resolvedQuery = resolveExistingAutoListing(existingByQuery);
+    if (resolvedQuery.action === "skip") {
+      send({ type: "log", message: `[PREPARE] « ${kw.query} » ${resolvedQuery.reason} — mot-clé suivant` });
+      continue;
+    }
+    if (resolvedQuery.action === "revive") {
+      stats.prepared += 1;
+      state.preparedToday = (state.preparedToday || 0) + 1;
+      send({
+        type: "log",
+        message: `[PREPARE] reprise file #${resolvedQuery.listingId} — ${(resolvedQuery.title || kw.query).slice(0, 48)}`,
+      });
       continue;
     }
 
@@ -1062,9 +1172,25 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
     }
 
     const url = String(best.offer.url).split("?")[0];
-    if (state.failedUrls[url] || findListingBySourceUrl.get(url)) {
+    if (state.failedUrls[url]) {
+      send({ type: "log", message: `[PREPARE] URL déjà écartée aujourd'hui — mot-clé suivant` });
+      state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
+      continue;
+    }
+    const existingByUrl = findListingBySourceUrl.get(url);
+    const resolvedUrl = resolveExistingAutoListing(existingByUrl);
+    if (resolvedUrl.action === "skip") {
       send({ type: "log", message: `[PREPARE] URL déjà vue / en listings — mot-clé suivant` });
       state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
+      continue;
+    }
+    if (resolvedUrl.action === "revive") {
+      stats.prepared += 1;
+      state.preparedToday = (state.preparedToday || 0) + 1;
+      send({
+        type: "log",
+        message: `[PREPARE] URL reprise en file #${resolvedUrl.listingId} — ${(resolvedUrl.title || kw.query).slice(0, 48)}`,
+      });
       continue;
     }
 
@@ -1136,7 +1262,18 @@ async function runAutoPublishTick({
   }
   const out = { published: 0, prepared: 0, skipped: 0, errors: 0, items: [] };
   try {
+    const revived = reviveQuarantinedPublishables();
+    if (revived.revived) {
+      send({
+        type: "log",
+        message: `[INIT] Reprise file — ${revived.revived} fiche(s) avec photos remises en publication`,
+      });
+    }
     let state0 = loadPipelineState(marketplace);
+    const cleared0 = clearStaleFailedQueries(state0);
+    if (cleared0) {
+      send({ type: "log", message: `[INIT] ${cleared0} mot(s)-clé(s) re-débloqués` });
+    }
     state0.lastTickAt = new Date().toISOString();
     state0.lastPhase = "tick";
     savePipelineState(state0);
@@ -3614,6 +3751,30 @@ app.get("/api/auto-publish/history", (_req, res) => {
   }
 });
 
+/** Remet en file les fiches quarantainées avec photos /media/ (force). */
+app.post("/api/auto-publish/revive", (_req, res) => {
+  try {
+    // Reset le flag journalier pour forcer la reprise
+    try {
+      upsertSetting.run("auto_publish_revived_day", "");
+    } catch (_) {}
+    const result = reviveQuarantinedPublishables({ force: true });
+    let state = loadPipelineState(getSetting.get("auto_publish_market")?.value || "France");
+    const cleared = clearStaleFailedQueries(state);
+    savePipelineState(state);
+    res.json({
+      success: true,
+      data: {
+        ...result,
+        clearedQueries: cleared,
+        queued: Number(countAutoQueue.get()?.n || 0),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post("/api/auto-publish/settings", (req, res) => {
   try {
     const wasOn = getSetting.get("auto_publish_enabled")?.value === "1";
@@ -4745,6 +4906,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
   trimAutoPublishLogNoise();
   purgeDeadAutoPublishQueue();
+  reviveQuarantinedPublishables({ force: true });
   startAutoPublishScheduler();
   startInboxSyncScheduler();
 });
