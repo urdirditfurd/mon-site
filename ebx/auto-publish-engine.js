@@ -191,8 +191,14 @@ function nextLoopMarket(index = 0) {
 
 function isFatalListingError(msg) {
   const m = String(msg || "");
-  return /Impossible d'extraire|essayez une autre URL|Aucune image|Pas d'images utilisables|source_url|produit trop pauvre/i.test(
+  return /Impossible d'extraire|essayez une autre URL|Aucune image|Pas d'images|héberger les images|Gallery \/ EPS|source_url|produit trop pauvre|limite de vente|dépassement du montant|ISBN n'a pas/i.test(
     m
+  );
+}
+
+function isEpsImageError(msg) {
+  return /héberger les images|Gallery \/ EPS|Impossible d'héberger|miniature refusée|cache image fail/i.test(
+    String(msg || "")
   );
 }
 
@@ -468,6 +474,7 @@ module.exports = {
   loopDelayMs,
   nextLoopMarket,
   isFatalListingError,
+  isEpsImageError,
   looksLikeBrandToken,
   buildDemandKeywords,
   nextDemandSlice,

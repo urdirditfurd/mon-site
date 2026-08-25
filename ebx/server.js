@@ -75,6 +75,7 @@ const {
   loopDelayMs,
   nextLoopMarket,
   isFatalListingError,
+  isEpsImageError,
 } = require("./auto-publish-engine");
 const {
   getRankings,
@@ -247,14 +248,16 @@ function insertListingSafe({ seoTitle, html, price, keywords = "", sourceUrl = "
   return { id: Number(result.lastInsertRowid), duplicate: false };
 }
 
-/** Insert + cache images locales (async). */
+/** Insert + cache images locales (async). Échoue si aucune photo /media/ utilisable. */
 async function insertListingWithImageCache(opts) {
   const result = insertListingSafe(opts);
-  try {
-    const row = getListingById.get(result.id);
-    if (row) await localizeListingImages(row);
-  } catch (err) {
-    console.warn(`[EBX] cache images listing #${result.id}:`, err.message);
+  const row = getListingById.get(result.id);
+  if (row) {
+    const updated = await localizeListingImages(row);
+    if (countCachedMediaImagesInHtml(updated.html_description) < 1) {
+      quarantineListing(result.id, "Photos non cachees sur le VPS");
+      throw new Error("Photos non cachees localement — produit ecarte");
+    }
   }
   return result;
 }
@@ -276,6 +279,7 @@ const listAutoPublishLog = db.prepare(
   `SELECT id, listing_id, seo_title, sell_price, cost_price, competitor_price, competitor_count, net_pct,
           ebay_listing_id, marketplace, status, detail, published_at
    FROM auto_publish_log
+   WHERE status = 'published'
    ORDER BY published_at DESC, id DESC
    LIMIT 200`
 );
@@ -566,6 +570,53 @@ function quarantineListing(listingId, reason = "") {
   }
 }
 
+/** Journal Auto-Publish : uniquement les publications eBay réelles. */
+function logAutoPublishPublished(row) {
+  insertAutoPublishLog.run(
+    row.listingId,
+    row.title,
+    row.sell,
+    row.cost || 0,
+    row.cheapest ?? null,
+    row.competitorCount || 0,
+    row.netPct ?? null,
+    String(row.ebayListingId || ""),
+    row.marketCode,
+    "published",
+    row.detail || ""
+  );
+}
+
+/** Retire de la file les fiches sans photos /media/ (ne partiront jamais). */
+function purgeDeadAutoPublishQueue() {
+  const rows = db
+    .prepare(
+      `SELECT id, html_description FROM listings
+       WHERE TRIM(COALESCE(ebay_listing_id, '')) = ''
+         AND COALESCE(auto_prepared, 0) = 1`
+    )
+    .all();
+  let n = 0;
+  for (const row of rows) {
+    if (countCachedMediaImagesInHtml(row.html_description) < 1) {
+      quarantineListing(row.id, "File morte — photos non cachees sur le VPS");
+      n += 1;
+    }
+  }
+  if (n) console.log(`[auto-publish] ${n} fiche(s) retiree(s) de la file (images VPS)`);
+}
+
+function trimAutoPublishLogNoise() {
+  try {
+    const r = db.prepare(`DELETE FROM auto_publish_log WHERE status != 'published'`).run();
+    if (r.changes > 0) {
+      console.log(`[auto-publish] journal nettoye — ${r.changes} entree(s) ignorées/erreurs supprimees`);
+    }
+  } catch (err) {
+    console.warn("[auto-publish] trim log:", err.message);
+  }
+}
+
 function isSellingLimitError(msg) {
   const m = String(msg || "");
   return /limite de vente|selling limit|dépassement du montant/i.test(m);
@@ -616,9 +667,6 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
       const vero = scanVero(`${listing.seo_title} ${listing.html_description || ""}`);
       if (vero.level === "block") {
         stats.skipped += 1;
-        insertAutoPublishLog.run(
-          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `VeRO: ${vero.message}`
-        );
         quarantineListing(listing.id, vero.message);
         send({ type: "log", message: `[SKIP] VeRO — ${vero.message}` });
         continue;
@@ -626,9 +674,6 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
       const haz = scanHazardous(`${listing.seo_title} ${listing.html_description || ""}`);
       if (haz.level === "block") {
         stats.skipped += 1;
-        insertAutoPublishLog.run(
-          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", `Hazmat: ${haz.message}`
-        );
         quarantineListing(listing.id, haz.message);
         send({ type: "log", message: `[SKIP] Hazmat — ${haz.message}` });
         continue;
@@ -636,21 +681,16 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
 
       try {
         listing = await ensureListingImages(listing);
-        if (countRealImagesInHtml(listing.html_description || "") <= 0) {
+        if (countCachedMediaImagesInHtml(listing.html_description || "") < 1) {
           stats.skipped += 1;
-          insertAutoPublishLog.run(
-            listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "skipped", "Pas d'images utilisables"
-          );
-          send({ type: "log", message: `[SKIP] Pas d'images utilisables` });
+          quarantineListing(listing.id, "Photos non cachees sur le VPS");
+          send({ type: "log", message: `[SKIP] Pas d'images /media/ cachees — retire de la file` });
           continue;
         }
       } catch (imgErr) {
         stats.errors += 1;
-        insertAutoPublishLog.run(
-          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "error", imgErr.message
-        );
         send({ type: "log", message: `[ERROR] images: ${imgErr.message}` });
-        if (isFatalListingError(imgErr.message)) {
+        if (isFatalListingError(imgErr.message) || isEpsImageError(imgErr.message)) {
           quarantineListing(listing.id, imgErr.message);
           send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (extrait / images)` });
         }
@@ -662,9 +702,6 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         priced = await priceListingForEbay(listing, { marketplace: marketCode, minNetPct: 5 });
       } catch (priceErr) {
         stats.errors += 1;
-        insertAutoPublishLog.run(
-          listing.id, title, listing.suggested_price || 0, listingCost(listing), null, 0, null, "", marketCode, "error", priceErr.message
-        );
         send({ type: "log", message: `[ERROR] prix: ${priceErr.message}` });
         continue;
       }
@@ -682,19 +719,6 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           priced.competitorCount > 0 && priced.competitive === false
             ? `Pas assez concurrentiel (plancher ${priced.minSell}€ vs eBay ${priced.cheapest}€)`
             : `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`;
-        insertAutoPublishLog.run(
-          listing.id,
-          title,
-          priced.sell || 0,
-          priced.cost || 0,
-          priced.cheapest,
-          priced.competitorCount || 0,
-          priced.netPct,
-          "",
-          marketCode,
-          "skipped",
-          why
-        );
         quarantineListing(listing.id, why);
         send({ type: "log", message: `[SKIP] ${why} — retiré de la file auto` });
         continue;
@@ -717,19 +741,18 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
             ebayListingId: result.listingId,
           };
           stats.items.push(row);
-          insertAutoPublishLog.run(
-            listing.id,
+          logAutoPublishPublished({
+            listingId: listing.id,
             title,
-            priced.sell,
-            priced.cost || 0,
-            priced.cheapest,
-            priced.competitorCount || 0,
-            priced.netPct,
-            String(result.listingId),
+            sell: priced.sell,
+            cost: priced.cost || 0,
+            cheapest: priced.cheapest,
+            competitorCount: priced.competitorCount || 0,
+            netPct: priced.netPct,
+            ebayListingId: result.listingId,
             marketCode,
-            "published",
-            `${priced.competitorCount} concurrent(s)`
-          );
+            detail: `${priced.competitorCount} concurrent(s)`,
+          });
           send({
             type: "published",
             item: row,
@@ -741,19 +764,6 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
       } catch (pubErr) {
         stats.errors += 1;
         const errMsg = String(pubErr.message || pubErr).slice(0, 400);
-        insertAutoPublishLog.run(
-          listing.id,
-          title,
-          priced.sell,
-          priced.cost || 0,
-          priced.cheapest,
-          priced.competitorCount || 0,
-          priced.netPct,
-          "",
-          marketCode,
-          "error",
-          errMsg
-        );
         send({ type: "log", message: `[ERROR] publish: ${pubErr.message}` });
         if (isSellingLimitError(errMsg)) {
           quarantineListing(listing.id, "Plafond de vente eBay atteint");
@@ -764,6 +774,11 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           stats.sellingLimitHit = true;
           break;
         }
+        if (isEpsImageError(errMsg)) {
+          quarantineListing(listing.id, errMsg);
+          send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (EPS / photos VPS)` });
+          continue;
+        }
         if (isFatalListingError(errMsg) && !isPhotoPublishError(errMsg)) {
           quarantineListing(listing.id, errMsg);
           send({ type: "log", message: `[SKIP] Listing #${listing.id} retiré de la file (extrait)` });
@@ -771,24 +786,26 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
           try {
             send({ type: "log", message: `[REPAIR] Photos eBay < 500px — re-scrape images…` });
             listing = await ensureListingImages(listing);
+            if (countCachedMediaImagesInHtml(listing.html_description || "") < 1) {
+              throw new Error("Photos non cachees localement apres reparation");
+            }
             const result2 = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
             if (result2?.listingId) {
               rememberListingPublish(listing.id, result2);
               stats.published += 1;
               stats.errors = Math.max(0, stats.errors - 1);
-              insertAutoPublishLog.run(
-                listing.id,
+              logAutoPublishPublished({
+                listingId: listing.id,
                 title,
-                priced.sell,
-                priced.cost || 0,
-                priced.cheapest,
-                priced.competitorCount || 0,
-                priced.netPct,
-                String(result2.listingId),
+                sell: priced.sell,
+                cost: priced.cost || 0,
+                cheapest: priced.cheapest,
+                competitorCount: priced.competitorCount || 0,
+                netPct: priced.netPct,
+                ebayListingId: result2.listingId,
                 marketCode,
-                "published",
-                `photos réparées`
-              );
+                detail: "photos réparées",
+              });
               send({ type: "log", message: `[OK] publié #${result2.listingId} après réparation photos` });
               continue;
             }
@@ -1040,19 +1057,6 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       state.skippedToday += 1;
       state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
       const why = explainUnprofitable(ranked, competitorPrices);
-      insertAutoPublishLog.run(
-        0,
-        kw.query,
-        ranked[0]?.priced?.sell || 0,
-        ranked[0]?.offer?.price || 0,
-        ranked[0]?.priced?.market || competitorPrices[0] || null,
-        competitorPrices.length,
-        ranked[0]?.netPct ?? null,
-        "",
-        marketCode,
-        "skipped",
-        why
-      );
       send({ type: "log", message: `[PREPARE] ignoré « ${kw.query} » — ${why} (plus aujourd'hui)` });
       continue;
     }
@@ -1084,19 +1088,6 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
         const why = `Après scrape: plancher ${priced.minSell}€ vs eBay ${
           priced.market != null ? priced.market + "€" : "n/a"
         } (net ${priced.netPct}%)`;
-        insertAutoPublishLog.run(
-          0,
-          built.seoTitle || kw.query,
-          priced.sell || 0,
-          cost,
-          priced.market || priced.cheapest,
-          priced.competitorCount || 0,
-          priced.netPct,
-          "",
-          marketCode,
-          "skipped",
-          why
-        );
         send({ type: "log", message: `[PREPARE] fiche écartée — ${why}` });
         continue;
       }
@@ -1111,19 +1102,6 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       markListingAutoPrepared.run(priced.sell, cost, result.id);
       stats.prepared += 1;
       state.preparedToday += 1;
-      insertAutoPublishLog.run(
-        result.id,
-        built.seoTitle,
-        priced.sell,
-        cost,
-        priced.cheapest,
-        priced.competitorCount || 0,
-        priced.netPct,
-        "",
-        marketCode,
-        "prepared",
-        `file d'attente · ${best.offer.source} au prochain cycle`
-      );
       send({
         type: "log",
         message: `[PREPARE] listing #${result.id} en file — ${built.seoTitle.slice(0, 48)} @ ${priced.sell}€`,
@@ -1133,19 +1111,6 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
       state.lastError = err.message;
       state.failedUrls[url] = (state.failedUrls[url] || 0) + 1;
       state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
-      insertAutoPublishLog.run(
-        0,
-        kw.query,
-        best.priced?.sell || 0,
-        best.offer?.price || 0,
-        null,
-        0,
-        null,
-        "",
-        marketCode,
-        "error",
-        err.message
-      );
       send({ type: "log", message: `[PREPARE] listing: ${err.message} — URL et mot-clé écartés aujourd'hui` });
     }
   }
@@ -1535,7 +1500,12 @@ function requireWebUser(req, res, next) {
 app.use(requireWebUser);
 
 // Images produit cachées localement (publish EPS sans dépendre d'Ali/Amazon)
-const { ensureCacheDir, localizeHtmlImages, CACHE_DIR } = require("./image-cache");
+const {
+  ensureCacheDir,
+  localizeHtmlImages,
+  countCachedMediaImagesInHtml,
+  CACHE_DIR,
+} = require("./image-cache");
 ensureCacheDir();
 app.use("/media", express.static(CACHE_DIR, { maxAge: "7d", fallthrough: true }));
 
@@ -3001,7 +2971,7 @@ const HELP_FAQ = [
   {
     keys: ["sniper", "auto-snipe", "snipe", "import"],
     reply:
-      "Product Sniper cherche un signal eBay puis un produit Amazon / Ali / Cdiscount. Les liens trouvés s’affichent sous « Meilleure offre par site ». L’import va dans Mes Listings. Auto-Publish publie ensuite après comparaison des prix eBay (rentabilité ≥ 5 %, quantité 5000).",
+      "Product Sniper cherche un signal eBay puis un produit Amazon / Ali / Cdiscount. Les liens trouvés s’affichent sous « Meilleure offre par site ». L’import va dans Mes Listings. Auto-Publish publie ensuite après comparaison des prix eBay (rentabilité ≥ 5 %, quantité adaptée à ta limite de vente).",
   },
   {
     keys: ["prix", "skip", "manquant", "n/a"],
@@ -4773,6 +4743,8 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   }
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
+  trimAutoPublishLogNoise();
+  purgeDeadAutoPublishQueue();
   startAutoPublishScheduler();
   startInboxSyncScheduler();
 });

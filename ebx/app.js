@@ -1476,18 +1476,11 @@ function renderAutoPublishHistory(published) {
 function renderAutoPublishLog(log) {
   const body = document.getElementById("auto-publish-log");
   if (!body) return;
-  const rows = Array.isArray(log) ? log : [];
+  const rows = (Array.isArray(log) ? log : []).filter((item) => String(item.status || "") === "published");
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="5" class="p-6 text-sm text-zinc-400 text-center">Aucune activité pipeline pour l’instant.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="p-6 text-sm text-zinc-400 text-center">Aucune publication Auto-Publish pour l’instant.</td></tr>`;
     return;
   }
-  const badge = (status) => {
-    const s = String(status || "");
-    if (s === "published") return `<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg text-xs">publié</span>`;
-    if (s === "prepared") return `<span class="text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg text-xs">en file</span>`;
-    if (s === "skipped") return `<span class="text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg text-xs">ignoré</span>`;
-    return `<span class="text-red-700 bg-red-50 px-2 py-0.5 rounded-lg text-xs">erreur</span>`;
-  };
   body.innerHTML = rows
     .slice(0, 80)
     .map((item) => {
@@ -1497,12 +1490,18 @@ function renderAutoPublishLog(log) {
       const net = item.net_pct != null && item.net_pct !== "" ? `${Number(item.net_pct).toFixed(1)} %` : "—";
       const date = formatPublishDate(item.published_at);
       const detail = escapeHtml(item.detail || "");
+      const ebayId = String(item.ebay_listing_id || "");
+      const link = ebayId
+        ? `<a class="text-[#6d7ddf] underline" target="_blank" rel="noopener" href="https://www.ebay.fr/itm/${escapeHtml(
+            ebayId
+          )}">#${escapeHtml(ebayId)}</a>`
+        : "—";
       return `<tr class="border-b border-zinc-50">
         <td class="p-3 whitespace-nowrap text-zinc-500">${date}</td>
-        <td class="p-3">${badge(item.status)}</td>
         <td class="p-3 font-medium">${title}${detail ? `<div class="text-[11px] text-zinc-400 font-normal mt-0.5">${detail}</div>` : ""}</td>
         <td class="p-3 text-brand-600 font-semibold">${priceTxt}</td>
         <td class="p-3 text-zinc-500">${net}</td>
+        <td class="p-3">${link}</td>
       </tr>`;
     })
     .join("");
@@ -2844,6 +2843,13 @@ async function sendSavSelected(force) {
   }
 }
 
+function updateSidebarEbayStatus(label) {
+  const sideEbay = document.getElementById("sidebar-ebay-status");
+  if (!sideEbay) return;
+  const text = String(label || "").trim();
+  sideEbay.textContent = text ? `eBay : ${text}` : "eBay non lié";
+}
+
 async function loadAccounts() {
   const box = document.getElementById("accounts-list");
   const oauthStatus = document.getElementById("oauth-status");
@@ -2863,7 +2869,7 @@ async function loadAccounts() {
         : "Statut : non connecté — clique « Connecter mon eBay »";
     }
     const sideEbay = document.getElementById("sidebar-ebay-status");
-    if (sideEbay) sideEbay.textContent = active ? `eBay : ${active.user_id || active.label}` : "eBay non lié";
+    if (sideEbay && active) sideEbay.textContent = `eBay : ${active.user_id || active.label}`;
     box.innerHTML = rows.length
       ? rows
           .map(
@@ -2983,7 +2989,7 @@ async function ensureWebSession() {
     if (emailEl) emailEl.textContent = webUser?.email || "Mon compte";
     const sideEbay = document.getElementById("sidebar-ebay-status");
     if (sideEbay) {
-      sideEbay.textContent = webEbay?.userId ? `eBay : ${webEbay.userId}` : "eBay non lié";
+      updateSidebarEbayStatus(webEbay?.userId || webEbay?.label || "");
     }
     const oauthStatus = document.getElementById("oauth-status");
     if (oauthStatus && webEbay) {
@@ -3758,6 +3764,9 @@ async function loadSetupStatus() {
     if (emailEl) emailEl.textContent = d.seller?.email || "—";
     if (envEl) envEl.textContent = d.ebayEnv === "production" ? "Production (réel)" : "Hors production";
     if (oauthEl) oauthEl.textContent = d.seller?.ok ? "Connecté" : d.seller?.error || "À configurer";
+    if (d.seller?.ok && d.seller?.userId) {
+      updateSidebarEbayStatus(d.seller.userId);
+    }
 
     const conn = document.getElementById("settings-connectivity");
     if (conn) {
@@ -3833,6 +3842,7 @@ checkHealth();
   setAuthTab("login");
   const ok = await ensureWebSession();
   if (ok) {
+    loadSetupStatus();
     loadDashboard();
     startNotificationsPolling();
   }

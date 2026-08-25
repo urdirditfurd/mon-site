@@ -13,6 +13,7 @@ const {
   sniperQueryVariants,
   loopDelayMs,
   isFatalListingError,
+  isEpsImageError,
   DAILY_PUBLISH_TARGET,
 } = require("./auto-publish-engine");
 const { competitiveSellPrice } = require("./business-engine");
@@ -152,6 +153,8 @@ check(
 );
 check(isFatalListingError("Impossible d'extraire le produit (aliexpress) — essayez une autre URL"), "erreur extrait = fatale");
 check(!isFatalListingError("Accès refusé eBay (scope manquant)"), "erreur OAuth pas fatale");
+check(isEpsImageError("Impossible d'héberger les images sur eBay (Gallery / EPS)"), "erreur EPS = image fatale");
+check(isFatalListingError("Impossible d'héberger les images sur eBay (Gallery / EPS)"), "erreur EPS incluse dans fatal");
 check(DAILY_PUBLISH_TARGET === 200, "quota 200/jour");
 check(loopDelayMs(10) < loopDelayMs(200), "boucle plus courte que la pause quota");
 

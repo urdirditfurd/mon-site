@@ -143,6 +143,33 @@ function isUsableProductImageUrl(imageUrl) {
   return true;
 }
 
+function chromeLaunchOpts() {
+  const opts = [{ channel: "chrome" }, { channel: "chromium" }];
+  if (process.env.CHROME_PATH) opts.unshift({ executablePath: process.env.CHROME_PATH });
+  const linuxPaths = [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/opt/google/chrome/chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+  ];
+  for (const executablePath of linuxPaths) {
+    if (fs.existsSync(executablePath)) opts.push({ executablePath });
+  }
+  if (process.platform === "win32") {
+    const pf = process.env.PROGRAMFILES || "C:\\Program Files";
+    const pf86 = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+    const local = process.env.LOCALAPPDATA || "";
+    opts.push(
+      { executablePath: `${pf}\\Google\\Chrome\\Application\\chrome.exe` },
+      { executablePath: `${pf86}\\Google\\Chrome\\Application\\chrome.exe` },
+      { executablePath: `${local}\\Google\\Chrome\\Application\\chrome.exe` },
+      { executablePath: `${pf86}\\Microsoft\\Edge\\Application\\msedge.exe` }
+    );
+  }
+  return opts;
+}
+
 /** Convertit WebP → PNG via Chrome (playwright-core) pour eBay EPS. */
 async function convertWebpToPng(webpBuf) {
   let chromium;
@@ -151,24 +178,7 @@ async function convertWebpToPng(webpBuf) {
   } catch {
     throw new Error("playwright-core requis pour convertir WebP → PNG");
   }
-  const launchOpts = [
-    { channel: "chrome" },
-    { channel: "chromium" },
-    { executablePath: process.env.CHROME_PATH || "" },
-  ].filter((o) => o.executablePath !== "");
-
-  // Windows chemins courants
-  if (process.platform === "win32") {
-    const pf = process.env.PROGRAMFILES || "C:\\\\Program Files";
-    const pf86 = process.env["PROGRAMFILES(X86)"] || "C:\\\\Program Files (x86)";
-    const local = process.env.LOCALAPPDATA || "";
-    launchOpts.push(
-      { executablePath: `${pf}\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe` },
-      { executablePath: `${pf86}\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe` },
-      { executablePath: `${local}\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe` },
-      { executablePath: `${pf86}\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe` }
-    );
-  }
+  const launchOpts = chromeLaunchOpts();
 
   let browser = null;
   let lastErr = "chrome introuvable";
@@ -454,18 +464,7 @@ async function ensureMinLongestEdge(buf, contentType, minEdge = MIN_IMAGE_EDGE) 
   const tw = Math.max(minEdge, Math.ceil(dims.width * scale));
   const th = Math.max(minEdge, Math.ceil(dims.height * scale));
 
-  const launchOpts = [{ channel: "chrome" }, { channel: "chromium" }];
-  if (process.env.CHROME_PATH) launchOpts.unshift({ executablePath: process.env.CHROME_PATH });
-  if (process.platform === "win32") {
-    const pf = process.env.PROGRAMFILES || "C:\\Program Files";
-    const pf86 = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
-    const local = process.env.LOCALAPPDATA || "";
-    launchOpts.push(
-      { executablePath: `${pf}\\Google\\Chrome\\Application\\chrome.exe` },
-      { executablePath: `${pf86}\\Google\\Chrome\\Application\\chrome.exe` },
-      { executablePath: `${local}\\Google\\Chrome\\Application\\chrome.exe` }
-    );
-  }
+  const launchOpts = chromeLaunchOpts();
 
   let browser = null;
   let lastErr = "chrome introuvable";
@@ -729,6 +728,17 @@ function extractAllImageSrcs(html) {
   return urls;
 }
 
+/** Images déjà en cache local /media/ (publishables EPS). */
+function countCachedMediaImagesInHtml(html) {
+  let n = 0;
+  const re = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    if (/^\/media\//i.test(m[1])) n += 1;
+  }
+  return n;
+}
+
 module.exports = {
   CACHE_DIR,
   MIN_IMAGE_BYTES,
@@ -738,7 +748,9 @@ module.exports = {
   cacheRemoteImage,
   loadImageBuffer,
   localizeHtmlImages,
+  chromeLaunchOpts,
   extractAllImageSrcs,
+  countCachedMediaImagesInHtml,
   resolveLocalMediaPath,
   isMediaUrl,
   publicMediaPath,
