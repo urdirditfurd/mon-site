@@ -674,7 +674,7 @@
             </div>
             <button id="auto-publish-btn" type="button" onclick="runAutoPublish()" class="btn-primary shrink-0">Lancer un cycle</button>
           </div>
-          <div class="grid md:grid-cols-3 gap-3">
+          <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label class="text-xs text-zinc-500">Marketplace eBay</label>
               <select id="auto-publish-market" class="w-full mt-1 px-3 py-2 rounded-xl border text-sm" onchange="saveAutoPublishSettings()">
@@ -688,6 +688,12 @@
               <label class="flex items-center gap-3 text-sm text-ink-900 pb-2">
                 <input id="auto-publish-enabled" type="checkbox" class="toggle" onchange="saveAutoPublishSettings()" />
                 Automatisation (boucle 200/jour, tous marchés)
+              </label>
+            </div>
+            <div class="flex items-end">
+              <label class="flex items-center gap-3 text-sm text-ink-900 pb-2" title="Après chaque pub eBay, crée aussi une annonce Etsy (brouillon sauf ETSY_AUTO_ACTIVATE=1)">
+                <input id="auto-publish-etsy" type="checkbox" class="toggle" onchange="saveAutoPublishSettings()" />
+                Aussi publier sur Etsy
               </label>
             </div>
             <div class="grid grid-cols-3 gap-2 text-center text-sm">
@@ -1014,6 +1020,18 @@
         </div>
 
         <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
+          <h3 class="font-semibold text-lg">Connecter mon Etsy</h3>
+          <p class="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+            Etsy n’est <strong>pas</strong> un clone eBay : handmade / vintage / fournitures créatives.
+            Le dropshipping Amazon générique risque un ban. Par défaut EBX crée des <strong>brouillons</strong> (pas d’activation auto).
+          </p>
+          <p id="etsy-setup-hint" class="text-xs text-zinc-500">Configure ETSY_API_KEYSTRING + ETSY_SHARED_SECRET + EBX_PUBLIC_URL dans .env (app sur etsy.com/developers).</p>
+          <button type="button" onclick="connectEtsyOAuth()" class="btn-primary">Connecter mon Etsy</button>
+          <p id="etsy-oauth-status" class="text-sm text-zinc-500">Statut : non connecté</p>
+          <div id="etsy-accounts-list" class="space-y-2 text-sm"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border p-6 space-y-4 max-w-3xl">
           <h3 class="font-semibold text-lg">Comptes eBay liés</h3>
           <div id="accounts-list" class="space-y-2 text-sm"></div>
         </div>
@@ -1198,6 +1216,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=snipe-v13"></script>
+  <script src="app.js?v=snipe-v14"></script>
 </body>
 </html>

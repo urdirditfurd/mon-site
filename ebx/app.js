@@ -1531,6 +1531,8 @@ async function loadAutoPublishHistory() {
     const data = json.data || {};
     const enabled = document.getElementById("auto-publish-enabled");
     if (enabled) enabled.checked = Boolean(data.enabled);
+    const etsyChk = document.getElementById("auto-publish-etsy");
+    if (etsyChk) etsyChk.checked = Boolean(data.etsy);
     const market = document.getElementById("auto-publish-market");
     if (market && data.marketplace) market.value = data.marketplace;
     const published = data.published || [];
@@ -1586,12 +1588,13 @@ async function loadAutoPublishHistory() {
 
 async function saveAutoPublishSettings() {
   const enabled = Boolean(document.getElementById("auto-publish-enabled")?.checked);
+  const etsy = Boolean(document.getElementById("auto-publish-etsy")?.checked);
   const marketplace = document.getElementById("auto-publish-market")?.value || "France";
   try {
     await fetch(API + "/api/auto-publish/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled, marketplace }),
+      body: JSON.stringify({ enabled, etsy, marketplace }),
     });
     await loadAutoPublishHistory();
   } catch (err) {
@@ -2917,6 +2920,80 @@ async function connectEbayOAuth() {
   }
 }
 
+async function connectEtsyOAuth() {
+  try {
+    const res = await fetch(`${API}/api/oauth/etsy/start`, { credentials: "same-origin" });
+    const json = await res.json();
+    if (!json.success || !json.url) throw new Error(json.error || "OAuth Etsy indisponible");
+    window.location.href = json.url;
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function loadEtsyStatus() {
+  try {
+    const res = await fetch(API + "/api/etsy/status");
+    const json = await res.json();
+    const d = json.data || {};
+    const status = document.getElementById("etsy-oauth-status");
+    const hint = document.getElementById("etsy-setup-hint");
+    if (hint) {
+      hint.textContent = d.configured
+        ? `Redirect URI à déclarer dans l’app Etsy : ${d.redirectUri || "—"}`
+        : "Configure ETSY_API_KEYSTRING + ETSY_SHARED_SECRET + EBX_PUBLIC_URL dans .env (app sur etsy.com/developers).";
+    }
+    if (status) {
+      status.textContent = d.account
+        ? `Statut : lié à ${d.account.shopName || d.account.shopId}`
+        : d.configured
+          ? "Statut : non connecté — clique « Connecter mon Etsy »"
+          : "Statut : clés API manquantes dans .env";
+    }
+    const box = document.getElementById("etsy-accounts-list");
+    if (box) {
+      const listRes = await fetch(API + "/api/etsy/accounts");
+      const listJson = await listRes.json();
+      const rows = listJson.data || [];
+      box.innerHTML = rows.length
+        ? rows
+            .map(
+              (a) => `<div class="flex items-center justify-between gap-2 p-3 rounded-xl border ${
+                a.is_active ? "bg-emerald-50 border-emerald-100" : "bg-white"
+              }">
+              <div><p class="font-medium">${escapeHtml(a.shop_name || a.label || a.shop_id)}</p>
+              <p class="text-xs text-zinc-400">Shop #${escapeHtml(a.shop_id || "")}${a.is_active ? " · ACTIF" : ""}</p></div>
+              <div class="flex gap-2">
+                ${
+                  a.is_active
+                    ? ""
+                    : `<button onclick="activateEtsyAccount(${a.id})" class="text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-lg">Activer</button>`
+                }
+                <button onclick="removeEtsyAccount(${a.id})" class="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-lg">Suppr.</button>
+              </div>
+            </div>`
+            )
+            .join("")
+        : `<p class="text-zinc-400 text-xs">Aucune boutique Etsy liée.</p>`;
+    }
+  } catch (err) {
+    console.warn("[EBX] etsy status:", err.message);
+  }
+}
+
+async function activateEtsyAccount(id) {
+  const res = await fetch(API + "/api/etsy/accounts/" + id + "/activate", { method: "POST" });
+  const json = await res.json();
+  if (!json.success) return alert(json.error || "Erreur");
+  loadEtsyStatus();
+}
+
+async function removeEtsyAccount(id) {
+  if (!confirm("Supprimer ce compte Etsy de la liste locale ?")) return;
+  await fetch(API + "/api/etsy/accounts/" + id, { method: "DELETE" });
+  loadEtsyStatus();
+}
+
 function showAuthGate(_show) {
   const gate = document.getElementById("auth-gate");
   if (!gate) return;
@@ -3747,6 +3824,7 @@ function loadSettings() {
   checkHealth();
   loadSetupStatus();
   loadAccounts();
+  loadEtsyStatus();
   loadSupplierConfig();
   loadOrders();
 }
@@ -3850,7 +3928,7 @@ checkHealth();
 
 
 // Expose handlers for onclick + bind as backup
-["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","loadSavInboxPage","refreshSavStatus","loadSavSales","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer","runAutoPublish","loadAutoPublishHistory","saveAutoPublishSettings"].forEach((name) => {
+["navigate","runTitleBuilder","generateFromUrl","runSnipe","analyzeCompetitor","copyTitle","copyHtml","setTheme","runBulking","runSubstitution","runManualImport","saveManualListing","publishManualListing","loadRankings","loadListings","loadOrders","loadSettings","viewListing","saveListingEdits","publishListingFromModal","publishListing","deleteListing","deleteSelectedListings","toggleSelectAllListings","updateListingsBulkBar","deleteOrder","deleteSelectedOrders","toggleSelectAllOrders","updateOrdersBulkBar","dedupeListings","scrubListingImages","closeModal","closeModalIfBackdrop","closeErrorModal","closeErrorModalIfBackdrop","copyErrorModalText","showPublishError","closeImgModal","pickImage","addKeyword","removeKeyword","kwPage","onTitleEdit","advanceOrder","viewCompetitorHistory","deleteCompetitorHistory","syncListing","endListingEbay","syncEbayOrders","addEbayAccount","activateEbayAccount","removeEbayAccount","loadAccounts","connectEtsyOAuth","activateEtsyAccount","removeEtsyAccount","loadEtsyStatus","openSupplierOrder","copyShipAddress","processAutoOrderQueue","saveAutoOrderSettings","toggleSupplier","connectSupplier","loadSupplierConfig","toggleDarkMode","toggleDescColors","deleteSavSelected","selectSav","syncSavMessages","draftSavSelected","escalateSavSelected","sendSavSelected","autoDraftAllSav","loadSav","loadSavInboxPage","refreshSavStatus","loadSavSales","moveEditImage","promoteEditImage","zoomEditImage","setEditTheme","loadDashboard","refreshDashboardTrending","toggleNotificationsPanel","refreshNotifications","navigateFromNotif","startNotificationsPolling","markNotificationsRead","markAllNotificationsRead","openNotificationItem","toggleHelpChat","sendHelpChat","importSnipeOffer","runAutoPublish","loadAutoPublishHistory","saveAutoPublishSettings"].forEach((name) => {
   if (typeof globalThis[name] === "function") window[name] = globalThis[name];
 });
 

@@ -161,6 +161,27 @@ if (!listingCols.includes("cost_price")) {
 if (!listingCols.includes("auto_prepared")) {
   db.exec("ALTER TABLE listings ADD COLUMN auto_prepared INTEGER DEFAULT 0");
 }
+if (!listingCols.includes("etsy_listing_id")) {
+  db.exec("ALTER TABLE listings ADD COLUMN etsy_listing_id TEXT DEFAULT ''");
+}
+if (!listingCols.includes("etsy_published_at")) {
+  db.exec("ALTER TABLE listings ADD COLUMN etsy_published_at DATETIME");
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS etsy_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT,
+    shop_id TEXT,
+    shop_name TEXT DEFAULT '',
+    user_id TEXT DEFAULT '',
+    access_token TEXT DEFAULT '',
+    refresh_token TEXT DEFAULT '',
+    token_expires_at INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS auto_publish_log (
@@ -212,6 +233,14 @@ function rememberListingPublish(localId, pub = {}) {
     vars ? JSON.stringify(vars) : "",
     Number(localId)
   );
+}
+
+const updateListingEtsyPublish = db.prepare(
+  `UPDATE listings SET etsy_listing_id = ?, etsy_published_at = CURRENT_TIMESTAMP WHERE id = ?`
+);
+
+function rememberEtsyPublish(localId, pub = {}) {
+  updateListingEtsyPublish.run(String(pub.listingId || ""), Number(localId));
 }
 
 function clearListingPublish(localId) {
@@ -722,6 +751,72 @@ function isPhotoPublishError(msg) {
   return /500 pixels|résolution des photos|photo.*exigences|Gallery|trop petite|image trop/i.test(m);
 }
 
+function etsyAutoPublishEnabled() {
+  return getSetting.get("auto_publish_etsy")?.value === "1";
+}
+
+function persistEtsyTokenRefresh(accountId, refreshed) {
+  if (!accountId || !refreshed?.accessToken) return;
+  try {
+    updateEtsyAccountTokens.run(
+      refreshed.accessToken,
+      refreshed.refreshToken || "",
+      Date.now() + (Number(refreshed.expiresIn) || 3600) * 1000,
+      null,
+      null,
+      accountId
+    );
+  } catch (_) {
+    db.prepare(
+      `UPDATE etsy_accounts SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?`
+    ).run(
+      refreshed.accessToken,
+      refreshed.refreshToken || "",
+      Date.now() + (Number(refreshed.expiresIn) || 3600) * 1000,
+      accountId
+    );
+  }
+}
+
+/** Publie sur Etsy si automatisation Etsy ON + boutique liée. */
+async function maybePublishToEtsy(listing, { send = () => {}, activate = false } = {}) {
+  if (!etsyAutoPublishEnabled()) return null;
+  const { isEtsyConfigured, publishToEtsy } = require("./etsy-api");
+  if (!isEtsyConfigured()) {
+    send({ type: "log", message: "[ETSY] Clés API manquantes (.env ETSY_*) — skip" });
+    return null;
+  }
+  const account = getActiveEtsyAccount.get();
+  if (!account) {
+    send({ type: "log", message: "[ETSY] Boutique non liée — Paramètres → Connecter Etsy" });
+    return null;
+  }
+  if (String(listing.etsy_listing_id || "").trim()) {
+    send({ type: "log", message: `[ETSY] Déjà en ligne #${listing.etsy_listing_id}` });
+    return null;
+  }
+  try {
+    const result = await publishToEtsy(listing, account, {
+      activate,
+      quantity: 1,
+      onTokenRefresh: (ref) => {
+        db.prepare(
+          `UPDATE etsy_accounts SET access_token = ?, refresh_token = COALESCE(NULLIF(?, ''), refresh_token), token_expires_at = ? WHERE id = ?`
+        ).run(ref.accessToken, ref.refreshToken || "", Date.now() + (ref.expiresIn || 3600) * 1000, account.id);
+      },
+    });
+    rememberEtsyPublish(listing.id, result);
+    send({
+      type: "log",
+      message: `[ETSY] ${result.state === "active" ? "publié" : "brouillon"} #${result.listingId} — ${result.url}`,
+    });
+    return result;
+  } catch (err) {
+    send({ type: "log", message: `[ETSY] erreur: ${err.message}` });
+    return { error: err.message };
+  }
+}
+
 async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () => {}, nested = false } = {}) {
   if (!nested) {
     if (!claimAutoPublishBusy(send)) {
@@ -852,6 +947,11 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
             item: row,
           });
           send({ type: "log", message: `[OK] publié #${result.listingId} à ${priced.sell.toFixed(2)}€` });
+          const fresh = getListingById.get(listing.id) || listing;
+          await maybePublishToEtsy(
+            { ...fresh, suggested_price: priced.sell },
+            { send, activate: process.env.ETSY_AUTO_ACTIVATE === "1" }
+          );
         } else {
           throw new Error("Pas de listingId eBay");
         }
@@ -901,6 +1001,11 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
                 detail: "photos réparées",
               });
               send({ type: "log", message: `[OK] publié #${result2.listingId} après réparation photos` });
+              const fresh2 = getListingById.get(listing.id) || listing;
+              await maybePublishToEtsy(
+                { ...fresh2, suggested_price: priced.sell },
+                { send, activate: process.env.ETSY_AUTO_ACTIVATE === "1" }
+              );
               continue;
             }
           } catch (repairErr) {
@@ -1390,6 +1495,28 @@ const updateEbayAccountRefresh = db.prepare(
    SET refresh_token = ?, env = ?, marketplace = ?, label = ?, is_active = 1
    WHERE id = ?`
 );
+
+const listEtsyAccounts = db.prepare(
+  "SELECT id, label, shop_id, shop_name, user_id, is_active, created_at FROM etsy_accounts ORDER BY is_active DESC, id DESC"
+);
+const getActiveEtsyAccount = db.prepare(
+  "SELECT * FROM etsy_accounts WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+);
+const getEtsyAccountById = db.prepare("SELECT * FROM etsy_accounts WHERE id = ?");
+const insertEtsyAccount = db.prepare(
+  `INSERT INTO etsy_accounts (label, shop_id, shop_name, user_id, access_token, refresh_token, token_expires_at, is_active)
+   VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
+);
+const clearActiveEtsyAccounts = db.prepare("UPDATE etsy_accounts SET is_active = 0");
+const activateEtsyAccount = db.prepare("UPDATE etsy_accounts SET is_active = 1 WHERE id = ?");
+const updateEtsyAccountTokens = db.prepare(
+  `UPDATE etsy_accounts
+   SET access_token = ?, refresh_token = ?, token_expires_at = ?, label = ?, shop_name = ?, is_active = 1
+   WHERE id = ?`
+);
+const deleteEtsyAccount = db.prepare("DELETE FROM etsy_accounts WHERE id = ?");
+const findEtsyAccountByShop = db.prepare("SELECT * FROM etsy_accounts WHERE shop_id = ? LIMIT 1");
+
 const getCompetitorById = db.prepare("SELECT * FROM competitor_history WHERE id = ?");
 const deleteCompetitorById = db.prepare("DELETE FROM competitor_history WHERE id = ?");
 const insertOrder = db.prepare(
@@ -3131,6 +3258,11 @@ const HELP_FAQ = [
       "Notifications = inbox eBay API (questions acheteurs + My Messages) et ventes à traiter — pas ta boîte mail. Les e-mails marketing / pub / mot de passe eBay n’y apparaissent jamais. Sync auto toutes les 5 min si le compte OAuth est lié.",
   },
   {
+    keys: ["etsy", "handmade"],
+    reply:
+      "Etsy se connecte dans Paramètres (OAuth). Configure ETSY_API_KEYSTRING + ETSY_SHARED_SECRET + EBX_PUBLIC_URL. Auto-Publish → « Aussi publier sur Etsy » crée un brouillon après chaque pub eBay (activation auto seulement si ETSY_AUTO_ACTIVATE=1). Attention : Etsy refuse le dropshipping générique — handmade / vintage / fournitures.",
+  },
+  {
     keys: ["ebay", "oauth", "connecter", "compte"],
     reply:
       "Paramètres → Connecter mon eBay (OAuth navigateur). Les comptes liés apparaissent en dessous — active celui qui publie.",
@@ -3711,6 +3843,8 @@ app.get("/api/auto-publish/history", (_req, res) => {
       data: {
         enabled,
         marketplace: market,
+        etsy: etsyAutoPublishEnabled(),
+        etsyConnected: Boolean(getActiveEtsyAccount.get()),
         quantity: 1,
         minNetPct: 5,
         dailyTarget: DAILY_PUBLISH_TARGET,
@@ -3784,6 +3918,9 @@ app.post("/api/auto-publish/settings", (req, res) => {
     if (req.body?.marketplace) {
       upsertSetting.run("auto_publish_market", String(req.body.marketplace));
     }
+    if (req.body?.etsy != null) {
+      upsertSetting.run("auto_publish_etsy", req.body.etsy ? "1" : "0");
+    }
     const enabled = getSetting.get("auto_publish_enabled")?.value === "1";
     const marketplace = getSetting.get("auto_publish_market")?.value || "France";
     if (enabled && !wasOn) {
@@ -3797,6 +3934,7 @@ app.post("/api/auto-publish/settings", (req, res) => {
       data: {
         enabled,
         marketplace,
+        etsy: etsyAutoPublishEnabled(),
         quantity: 1,
         minNetPct: 5,
         intervalMin,
@@ -4897,6 +5035,218 @@ app.get("/api/accounts-DISABLED-PLACEHOLDER", (_req, res) => {
   res.json({ success: true, data: listEbayAccounts.all() });
 });
 
+/** ——— Etsy OAuth + comptes ——— */
+app.get("/api/etsy/status", (_req, res) => {
+  try {
+    const { isEtsyConfigured, etsyRedirectUri, etsyKeystring } = require("./etsy-api");
+    const account = getActiveEtsyAccount.get();
+    res.json({
+      success: true,
+      data: {
+        configured: isEtsyConfigured(),
+        hasKeystring: Boolean(etsyKeystring()),
+        redirectUri: etsyRedirectUri() || null,
+        autoPublish: etsyAutoPublishEnabled(),
+        account: account
+          ? {
+              id: account.id,
+              shopId: account.shop_id,
+              shopName: account.shop_name,
+              label: account.label,
+            }
+          : null,
+        policyWarning:
+          "Etsy autorise surtout handmade / vintage / fournitures créatives. Le dropshipping Amazon générique peut faire suspendre la boutique.",
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/oauth/etsy/start", (req, res) => {
+  try {
+    const {
+      isEtsyConfigured,
+      createPkcePair,
+      buildEtsyConsentUrl,
+    } = require("./etsy-api");
+    if (!isEtsyConfigured()) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Etsy non configuré : ajoute ETSY_API_KEYSTRING, ETSY_SHARED_SECRET et EBX_PUBLIC_URL (ou ETSY_REDIRECT_URI) dans .env, puis pm2 restart.",
+      });
+    }
+    const pkce = createPkcePair();
+    const state = signOAuthState(
+      {
+        uid: req.webUser ? req.webUser.id : 0,
+        platform: "etsy",
+        codeVerifier: pkce.verifier,
+        exp: Date.now() + 15 * 60 * 1000,
+      },
+      OAUTH_STATE_SECRET
+    );
+    const url = buildEtsyConsentUrl({ state, codeChallenge: pkce.challenge });
+    res.json({ success: true, url });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/oauth/etsy/callback", async (req, res) => {
+  const fail = (msg) => {
+    res
+      .status(400)
+      .send(
+        `<!doctype html><html><body style="font-family:sans-serif;padding:2rem"><h1>Connexion Etsy échouée</h1><p>${String(
+          msg
+        ).replace(/[<>&]/g, "")}</p><p><a href="/">Retour EBX</a></p></body></html>`
+      );
+  };
+  try {
+    const code = String(req.query.code || "").trim();
+    const stateRaw = String(req.query.state || "").trim();
+    if (!code) return fail(req.query.error_description || req.query.error || "Code OAuth manquant");
+    const state = verifyOAuthState(stateRaw, OAUTH_STATE_SECRET);
+    if (!state || state.platform !== "etsy" || !state.codeVerifier) {
+      return fail("State OAuth invalide ou expiré — réessaie depuis Paramètres.");
+    }
+    const {
+      exchangeEtsyAuthCode,
+      getEtsyUserMe,
+      getShopByOwnerUserId,
+    } = require("./etsy-api");
+    const tokens = await exchangeEtsyAuthCode({ code, codeVerifier: state.codeVerifier });
+    const me = await getEtsyUserMe(tokens.accessToken);
+    const userId = String(me?.user_id || me?.userId || "");
+    if (!userId) return fail("Impossible de lire le user_id Etsy");
+    const shops = await getShopByOwnerUserId(tokens.accessToken, userId);
+    const shop =
+      Array.isArray(shops?.results) && shops.results[0]
+        ? shops.results[0]
+        : shops?.shop_id
+          ? shops
+          : null;
+    const shopId = String(shop?.shop_id || shops?.results?.[0]?.shop_id || "");
+    if (!shopId) {
+      return fail("Aucune boutique Etsy trouvée sur ce compte. Ouvre une boutique puis réessaie.");
+    }
+    const shopName = String(shop?.shop_name || shop?.title || `Shop ${shopId}`);
+    const expiresAt = Date.now() + (tokens.expiresIn || 3600) * 1000;
+    clearActiveEtsyAccounts.run();
+    const existing = findEtsyAccountByShop.get(shopId);
+    if (existing) {
+      updateEtsyAccountTokens.run(
+        tokens.accessToken,
+        tokens.refreshToken || existing.refresh_token,
+        expiresAt,
+        shopName,
+        shopName,
+        existing.id
+      );
+      activateEtsyAccount.run(existing.id);
+    } else {
+      const ins = insertEtsyAccount.run(
+        shopName,
+        shopId,
+        shopName,
+        userId,
+        tokens.accessToken,
+        tokens.refreshToken || "",
+        expiresAt
+      );
+      activateEtsyAccount.run(Number(ins.lastInsertRowid));
+    }
+    res.send(`<!doctype html><html><body style="font-family:sans-serif;padding:2rem;background:#f3f3fc">
+      <h1 style="color:#242b52">Etsy connecté ✔</h1>
+      <p>Boutique : <strong>${shopName.replace(/[<>&]/g, "")}</strong> (#${shopId})</p>
+      <p><strong>Rappel :</strong> Etsy n'est pas un clone eBay — privilégie handmade / vintage / fournitures.</p>
+      <script>setTimeout(function(){ location.href="/#settings"; }, 1500);</script>
+      <p><a href="/">Ouvrir EBX</a></p>
+    </body></html>`);
+  } catch (err) {
+    fail(err.message);
+  }
+});
+
+app.get("/api/etsy/accounts", (_req, res) => {
+  try {
+    res.json({ success: true, data: listEtsyAccounts.all() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/etsy/accounts/:id/activate", (req, res) => {
+  try {
+    clearActiveEtsyAccounts.run();
+    activateEtsyAccount.run(Number(req.params.id));
+    const row = getEtsyAccountById.get(Number(req.params.id));
+    res.json({ success: true, data: row });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/etsy/accounts/:id", (req, res) => {
+  try {
+    deleteEtsyAccount.run(Number(req.params.id));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/publish-to-etsy/:id", async (req, res) => {
+  try {
+    const { isEtsyConfigured, publishToEtsy } = require("./etsy-api");
+    if (!isEtsyConfigured()) {
+      return res.status(400).json({
+        success: false,
+        error: "Etsy non configuré (.env ETSY_API_KEYSTRING + ETSY_SHARED_SECRET + redirect URI)",
+      });
+    }
+    let listing = getListingById.get(req.params.id);
+    if (!listing) return res.status(404).json({ success: false, error: "Listing introuvable." });
+    if (listing.etsy_listing_id && !req.body?.force) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_ON_ETSY",
+        error: `Déjà sur Etsy #${listing.etsy_listing_id}`,
+        data: { etsyListingId: listing.etsy_listing_id, link: `https://www.etsy.com/listing/${listing.etsy_listing_id}` },
+      });
+    }
+    const account = getActiveEtsyAccount.get();
+    if (!account) {
+      return res.status(400).json({ success: false, error: "Connecte ta boutique Etsy dans Paramètres." });
+    }
+    listing = await ensureListingImages(listing);
+    if (countCachedMediaImagesInHtml(listing.html_description || "") < 1) {
+      return res.status(400).json({
+        success: false,
+        error: "Aucune image /media/ — Etsy exige au moins une photo produit.",
+      });
+    }
+    const activate = req.body?.activate === true || process.env.ETSY_AUTO_ACTIVATE === "1";
+    const result = await publishToEtsy(listing, account, {
+      activate,
+      quantity: Number(req.body?.quantity) || 1,
+      onTokenRefresh: (ref) => {
+        db.prepare(
+          `UPDATE etsy_accounts SET access_token = ?, refresh_token = COALESCE(NULLIF(?, ''), refresh_token), token_expires_at = ? WHERE id = ?`
+        ).run(ref.accessToken, ref.refreshToken || "", Date.now() + (ref.expiresIn || 3600) * 1000, account.id);
+      },
+    });
+    rememberEtsyPublish(listing.id, result);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("[EBX] Etsy publish:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 const server = app.listen(PORT, "0.0.0.0", () => {
   const { isProduction, describeAuthState } = require("./ebay-api");
   const authOn =
@@ -4924,6 +5274,10 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   }
   console.log(`🌐 Mode: live scrapers + fallbacks`);
   console.log(`🔒 Basic auth: ${authOn ? "ON" : "OFF (déconseillé en public)"}`);
+  try {
+    const { isEtsyConfigured } = require("./etsy-api");
+    console.log(`🎀 Etsy API: ${isEtsyConfigured() ? "clés OK" : "non configuré (optionnel)"}`);
+  } catch (_) {}
   trimAutoPublishLogNoise();
   purgeDeadAutoPublishQueue();
   reviveQuarantinedPublishables({ force: true });
