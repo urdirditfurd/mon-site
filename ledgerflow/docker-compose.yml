@@ -1,0 +1,23 @@
+# PostgreSQL local pour LedgerFlow (Windows / Mac / Linux)
+# Démarrage : docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ledgerflow-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ledgerflow
+      POSTGRES_PASSWORD: ledgerflow
+      POSTGRES_DB: ledgerflow
+    volumes:
+      - ledgerflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerflow -d ledgerflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ledgerflow_pgdata:
