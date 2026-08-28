@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f5f7fa;
+  --foreground: #0b1f33;
+  --navy: #0b1f33;
+  --navy-soft: #16324d;
+  --accent: #c8a45a;
+  --surface: #ffffff;
+  --muted: #64748b;
+  --success: #059669;
+  --danger: #e11d48;
+  --grid-line: rgba(15, 23, 42, 0.04);
+}
+
+body {
+  color: var(--foreground);
+  background:
+    radial-gradient(ellipse 80% 50% at 100% -20%, rgba(200, 164, 90, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 0% 100%, rgba(11, 31, 51, 0.05), transparent),
+    linear-gradient(180deg, #f8fafc 0%, #f5f7fa 40%, #eef2f6 100%);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Soft paper texture for atmosphere without flat fill */
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes lf-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lf-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-up {
+  animation: lf-fade-up 0.45s ease-out both;
+}
+
+.animate-fade-in {
+  animation: lf-fade-in 0.35s ease-out both;
+}
+
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+.stagger-2 {
+  animation-delay: 0.1s;
+}
+.stagger-3 {
+  animation-delay: 0.15s;
+}
+.stagger-4 {
+  animation-delay: 0.2s;
+}
