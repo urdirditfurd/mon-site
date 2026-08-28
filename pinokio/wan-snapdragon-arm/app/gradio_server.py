@@ -1,6 +1,5 @@
 """
-Interface Gradio Wan 2.1 — Snapdragon X Elite / sans NVIDIA.
-Contournement Pinokio : CPU ARM local (0 €) ou lien Colab GPU gratuit.
+Interface Gradio Wan 2.1 — NVIDIA CUDA ou CPU/Snapdragon.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import gradio as gr
+import torch
 
 from wan_engine import (
     RESOLUTION_PRESETS,
@@ -30,15 +30,33 @@ COLAB_URL = os.environ.get(
 )
 
 _env = check_environment()
-_IS_SNAPDRAGON = is_snapdragon_pc()
+_HAS_CUDA = bool(_env.get("cuda")) or torch.cuda.is_available()
+_IS_SNAPDRAGON = is_snapdragon_pc() and not _HAS_CUDA
+_GPU_NAME = ""
+if _HAS_CUDA:
+    try:
+        _GPU_NAME = torch.cuda.get_device_name(0)
+    except Exception:
+        _GPU_NAME = "NVIDIA GPU"
 
 
 def _status_header() -> str:
-    mode = "Snapdragon X Elite (CPU ARM)" if _IS_SNAPDRAGON else "CPU / sans NVIDIA"
+    if _HAS_CUDA:
+        mode = f"NVIDIA CUDA — {_GPU_NAME}"
+        tip = (
+            "**Mode GPU actif.** Sur RTX 3080 10 Go : offload CPU + float16 "
+            "(sinon VRAM saturée → 2–4 min/step). Cible ~1–3 min / clip court."
+        )
+    elif _IS_SNAPDRAGON:
+        mode = "Snapdragon X Elite (CPU ARM)"
+        tip = "**Astuce :** génération locale = 5–15 min/scène. Pour aller vite : onglet **Colab gratuit**."
+    else:
+        mode = "CPU (sans GPU détecté)"
+        tip = "**Astuce :** sans NVIDIA local, préfère Colab GPU ou une carte NVIDIA."
     return (
         f"### Wan 2.1 T2V 1.3B — mode {mode}\n"
         f"```\n{format_check_message()}\n```\n"
-        "**Astuce :** génération locale = 5–15 min/scène. Pour aller vite : onglet **Colab gratuit**."
+        f"{tip}"
     )
 
 
@@ -54,18 +72,20 @@ def run_generation(
     if not prompt:
         raise gr.Error("Entrez un prompt.")
 
-    if is_snapdragon_pc():
+    # Limites CPU / Snapdragon seulement
+    if _IS_SNAPDRAGON or not _HAS_CUDA:
         num_frames = min(int(num_frames), 33)
         steps = min(int(steps), 20)
 
-    # Wan exige un nombre de frames 4n+1
     nf = int(num_frames)
     if nf % 4 != 1:
         nf = max(17, (nf // 4) * 4 + 1)
 
     out_name = f"wan_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
     out_path = OUTPUT_DIR / out_name
-    cache_dir = os.environ.get("WAN_MODEL_CACHE") or str(Path(__file__).resolve().parent.parent / "models")
+    cache_dir = os.environ.get("WAN_MODEL_CACHE") or str(
+        Path(__file__).resolve().parent.parent / "models"
+    )
 
     def on_progress(value: float, desc: str):
         progress(value, desc=desc)
@@ -86,19 +106,34 @@ def run_generation(
         detail = traceback.format_exc()
         raise gr.Error(f"{exc}\n\n--- détail ---\n{detail}") from exc
 
-    return str(out_path), f"OK — {result['device']} — {result['width']}x{result['height']} — {result['numFrames']} frames"
+    return (
+        str(out_path),
+        f"OK — {result['device']} — {result['width']}x{result['height']} — {result['numFrames']} frames",
+    )
 
 
-with gr.Blocks(title="Wan Snapdragon — Pinokio", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# Wan 2.1 sur Snapdragon — sans NVIDIA")
+_title = "Wan 2.1 NVIDIA" if _HAS_CUDA else "Wan 2.1 (CPU / Snapdragon)"
+_heading = (
+    f"# Wan 2.1 — NVIDIA ({_GPU_NAME})"
+    if _HAS_CUDA
+    else "# Wan 2.1 — mode CPU / Snapdragon"
+)
+_local_help = (
+    f"Génération **locale sur {_GPU_NAME}** (CUDA). "
+    "Première génération = téléchargement du modèle (~3–5 Go)."
+    if _HAS_CUDA
+    else "Génération locale CPU. Plus lent — branche le secteur. Colab = plus rapide."
+)
+_default_frames = 13 if _HAS_CUDA else 33
+_default_steps = 10 if _HAS_CUDA else 20
+
+with gr.Blocks(title=_title, theme=gr.themes.Soft()) as demo:
+    gr.Markdown(_heading)
     gr.Markdown(_status_header())
 
     with gr.Tabs():
         with gr.Tab("Text to Video (local)"):
-            gr.Markdown(
-                "Génération **100 % gratuite** sur votre Surface. "
-                "Branchez le secteur : la génération utilise le CPU (pas le NPU pour l'instant)."
-            )
+            gr.Markdown(_local_help)
             with gr.Row():
                 with gr.Column(scale=2):
                     prompt = gr.Textbox(
@@ -112,8 +147,12 @@ with gr.Blocks(title="Wan Snapdragon — Pinokio", theme=gr.themes.Soft()) as de
                         value="480p 16:9",
                     )
                     with gr.Row():
-                        num_frames = gr.Slider(17, 49, value=33, step=4, label="Frames (4n+1, ex. 33)")
-                        steps = gr.Slider(12, 24, value=20, step=1, label="Steps")
+                        num_frames = gr.Slider(
+                            9, 49, value=_default_frames, step=4, label="Frames (4n+1)"
+                        )
+                        steps = gr.Slider(
+                            8, 30 if _HAS_CUDA else 24, value=_default_steps, step=1, label="Steps"
+                        )
                     seed = gr.Number(label="Seed (0 = aléatoire)", value=0, precision=0)
                     btn = gr.Button("Générer la vidéo", variant="primary")
                 with gr.Column(scale=2):
@@ -124,20 +163,18 @@ with gr.Blocks(title="Wan Snapdragon — Pinokio", theme=gr.themes.Soft()) as de
                 fn=run_generation,
                 inputs=[prompt, resolution, num_frames, steps, seed],
                 outputs=[video, status],
+                api_name="generate",
             )
 
         with gr.Tab("Colab gratuit (GPU cloud)"):
             gr.Markdown(
                 f"""
-### Détour technique recommandé pour la vitesse
+### Option cloud (si besoin)
 
-1. Cliquez le lien ci-dessous → ouvre Google Colab
-2. **Exécution → Modifier le type d'exécution → GPU (T4)**
-3. **Exécution → Tout exécuter**
-4. Collez votre prompt dans le notebook
-5. Téléchargez le MP4 généré
+Utile surtout **sans** carte NVIDIA locale.
 
-C'est le même modèle **Wan 2.1 1.3B**, mais le GPU NVIDIA est **dans le cloud** (gratuit).
+1. Lien ci-dessous → Google Colab  
+2. Exécution → GPU T4 → Tout exécuter  
 
 [{COLAB_URL}]({COLAB_URL})
 """
@@ -146,25 +183,19 @@ C'est le même modèle **Wan 2.1 1.3B**, mais le GPU NVIDIA est **dans le cloud*
                 f'<a href="{COLAB_URL}" target="_blank" '
                 f'style="display:inline-block;padding:12px 24px;background:#f9ab00;color:#000;'
                 f'border-radius:8px;font-weight:bold;text-decoration:none;">'
-                f"Ouvrir Colab Wan 2.1 (gratuit)</a>"
+                f"Ouvrir Colab Wan 2.1</a>"
             )
 
         with gr.Tab("À propos"):
             gr.Markdown(
                 """
-**Pourquoi pas Wan2GP classique ?**  
-Wan2GP officiel exige CUDA NVIDIA. Ce script Pinokio est un **pont** pour Snapdragon :
+| Mode | Vitesse |
+|------|---------|
+| **NVIDIA local (ton cas)** | Rapide |
+| CPU / Snapdragon | Lent |
+| Colab T4 | Moyen / gratuit |
 
-| Mode | Coût | Vitesse |
-|------|------|---------|
-| Local CPU ARM | 0 € | Lent (5–15 min/scène) |
-| Google Colab T4 | 0 € | Rapide (~2–5 min/scène) |
-| FAL.ai (optionnel) | Crédits offerts | Très rapide |
-
-**Variables d'environnement (optionnel) :**
-- `HF_TOKEN` — accès Hugging Face si modèle gated
-- `WAN_MODEL_CACHE` — dossier cache modèles
-- `WAN_SNAPDRAGON_COLAB_URL` — lien notebook personnalisé
+Variables optionnelles : `HF_TOKEN`, `WAN_MODEL_CACHE`, `GRADIO_SERVER_PORT`
 """
             )
 

@@ -2,6 +2,19 @@
 
 Application fullstack de génération de clips courts “social-ready”, inspirée d’un workflow type Klap (sans copie de code propriétaire).
 
+## Nouveau : Conte Factory (vidéos longues YouTube — trame IA)
+
+Pipeline : script → storyboard → **Wan 2.1 Pinokio** → montage → **publish auto** → icône bureau **video ia**.
+
+→ [`conte-factory/GUIDE.md`](conte-factory/GUIDE.md) · app Pinokio [`pinokio/wan-snapdragon-arm`](pinokio/wan-snapdragon-arm)
+
+```bash
+cd conte-factory && ./scripts/install.sh
+# Windows : powershell -File scripts\install-desktop-shortcut.ps1
+./scripts/install-desktop-shortcut.sh   # Linux → Bureau « video ia »
+python main.py --estimate
+```
+
 ## Nouveautés V4
 
 - Pipeline FFmpeg complet (clips MP4 avec audio conservé)

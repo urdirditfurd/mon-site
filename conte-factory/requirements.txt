@@ -1,0 +1,14 @@
+# Conte Factory — pipeline vidéos longues YouTube (enfants)
+# Python 3.11+ recommandé
+
+edge-tts>=6.1.18
+Pillow>=10.4.0
+streamlit>=1.39.0
+requests>=2.32.0
+python-dotenv>=1.0.1
+gradio_client>=1.0.0
+
+# Optionnel — publication YouTube (Phase 3)
+# google-api-python-client>=2.149.0
+# google-auth-oauthlib>=1.2.1
+# google-auth-httplib2>=0.2.0
