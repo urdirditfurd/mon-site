@@ -7,3 +7,11 @@ storage/jobs-db.json
 !storage/jobs/.gitkeep
 **/__pycache__/
 *.pyc
+conte-factory/.venv/
+conte-factory/.env
+conte-factory/data/videos/
+conte-factory/data/exports/
+conte-factory/data/cache/
+conte-factory/data/*.db
+conte-factory/data/*.log
+conte-factory/secrets/*.json

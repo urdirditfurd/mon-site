@@ -1,0 +1,23 @@
+{
+  "little_red_riding_hood": {
+    "reference_image": "assets/characters/red_hood_ref.png",
+    "description": "7-year-old girl, bright red hooded cloak, blue dress underneath, brown braided pigtails, rosy cheeks, big expressive eyes, wicker basket with bread and flowers, 3D Pixar style character design, same outfit every scene",
+    "style": "3D Pixar animation, cute, expressive eyes",
+    "colors": {
+      "hood": "#DC143C",
+      "dress": "#4169E1",
+      "hair": "#8B4513"
+    }
+  },
+  "wolf": {
+    "reference_image": "assets/characters/wolf_ref.png",
+    "description": "Anthropomorphic grey wolf, friendly-looking fairy-tale villain, soft fur, cunning but not scary expression, 3D Pixar style",
+    "style": "3D Pixar, not horror, children's animation"
+  },
+  "grandmother": {
+    "description": "Kind elderly grandmother, white hair, nightcap, gentle smile, 3D Pixar style"
+  },
+  "woodcutter": {
+    "description": "Kind woodcutter with axe at belt, warm trustworthy face, 3D Pixar style"
+  }
+}

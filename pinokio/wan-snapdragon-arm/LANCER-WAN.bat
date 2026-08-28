@@ -1,12 +1,13 @@
 @echo off
-REM Lancement manuel Wan Snapdragon (si Pinokio Run ne demarre pas Gradio)
+REM Lancement manuel Wan Snapdragon (si Pinokio Install/Run plante)
 cd /d "%~dp0app"
 if exist "env\Scripts\activate.bat" (
   call env\Scripts\activate.bat
 ) else if exist "..\env\Scripts\activate.bat" (
   call ..\env\Scripts\activate.bat
 ) else (
-  echo Erreur: environnement Python introuvable. Relancez Install dans Pinokio.
+  echo Erreur: environnement Python introuvable.
+  echo Lance d'abord: powershell -ExecutionPolicy Bypass -File "%~dp0INSTALL-MANUEL.ps1"
   pause
   exit /b 1
 )

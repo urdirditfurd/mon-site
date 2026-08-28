@@ -1,0 +1,7 @@
+# Cron — lance une vidéo chaque nuit à 2h00 (après install)
+# crontab -e  puis colle :
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+0 2 * * * cd /home/ubuntu/mon-site/conte-factory && source .venv/bin/activate && python main.py >> data/cron.log 2>&1

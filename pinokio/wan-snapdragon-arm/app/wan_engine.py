@@ -1,6 +1,5 @@
 """
-Moteur Wan 2.1 pour Snapdragon X Elite / Windows ARM64 — sans NVIDIA.
-Utilise PyTorch CPU + diffusers (WanPipeline).
+Moteur Wan 2.1 — NVIDIA CUDA (prioritaire) ou CPU/Snapdragon.
 """
 
 from __future__ import annotations
@@ -8,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import time
 import traceback
 from pathlib import Path
 
@@ -77,16 +77,85 @@ def device_label(device: str) -> str:
 
 
 _PIPE = None
+_PIPE_META: dict | None = None
+
+
+def _log(msg: str) -> None:
+    """Print ASCII-safe logs (Windows cp1252 console breaks on ≤, —, …)."""
+    safe = (
+        msg.replace("≤", "<=")
+        .replace("≥", ">=")
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("…", "...")
+        .replace("×", "x")
+    )
+    try:
+        print(safe, flush=True)
+    except UnicodeEncodeError:
+        print(safe.encode("ascii", "replace").decode("ascii"), flush=True)
+
+
+def _cuda_dtype() -> torch.dtype:
+    """RTX 30xx : float16 >> bfloat16 (BF16 peut être 10–50× plus lent)."""
+    override = (os.environ.get("WAN_DTYPE") or "").strip().lower()
+    if override in ("float16", "fp16", "half"):
+        return torch.float16
+    if override in ("bfloat16", "bf16"):
+        return torch.bfloat16
+    if override in ("float32", "fp32"):
+        return torch.float32
+    if not torch.cuda.is_available():
+        return torch.float32
+    return torch.float16
+
+
+def _tune_cuda() -> None:
+    if not torch.cuda.is_available():
+        return
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
+
+
+def _vram_gb() -> tuple[float, float]:
+    if not torch.cuda.is_available():
+        return 0.0, 0.0
+    free, total = torch.cuda.mem_get_info(0)
+    return free / 1e9, total / 1e9
+
+
+def _want_cpu_offload(total_gb: float) -> bool:
+    """Sur ≤12 Go VRAM, garder tout le modèle en GPU sature (0 Go libre) → swap ultra lent."""
+    env = (os.environ.get("SULPHUR_CPU_OFFLOAD") or "").strip().lower()
+    if env in ("0", "false", "no", "off"):
+        return False
+    if env in ("1", "true", "yes", "on"):
+        return True
+    return total_gb > 0 and total_gb <= 12.5
 
 
 def get_pipe(cache_dir: str | None, device: str):
-    global _PIPE
+    global _PIPE, _PIPE_META
     if _PIPE is not None:
         return _PIPE
 
     from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanPipeline
 
-    dtype = torch.bfloat16 if device != "cpu" else torch.float32
+    _tune_cuda()
+    dtype = _cuda_dtype() if device == "cuda" else torch.float32
+    free_b, total_b = _vram_gb()
+    _log(
+        f"[wan_engine] device={device} dtype={dtype} "
+        f"cuda={torch.cuda.is_available()} "
+        f"gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a'} "
+        f"VRAM={free_b:.1f}/{total_b:.1f}Go"
+    )
+
     vae = AutoencoderKLWan.from_pretrained(
         MODEL_ID,
         subfolder="vae",
@@ -106,17 +175,46 @@ def get_pipe(cache_dir: str | None, device: str):
         flow_shift=3.0,
     )
 
+    placement = "cpu"
     if device == "cpu":
         # Sur CPU pur (Surface Snapdragon) : pas de cpu_offload (bug diffusers 0.38+)
         pipe.to("cpu")
         if hasattr(pipe, "enable_attention_slicing"):
             pipe.enable_attention_slicing("max")
     else:
-        pipe = pipe.to(device)
-        if os.environ.get("SULPHUR_CPU_OFFLOAD", "").lower() in ("1", "true", "yes"):
+        use_offload = _want_cpu_offload(total_b)
+        if use_offload:
+            # T5 + DiT ne tiennent pas ensemble confortablement en 10 Go.
+            # Offload : un module à la fois sur le GPU → évite le swap (139–270 s/step).
             pipe.enable_model_cpu_offload()
+            placement = "cuda+cpu_offload"
+            _log(f"[wan_engine] enable_model_cpu_offload (GPU {total_b:.0f}Go <=12Go)")
+        else:
+            pipe = pipe.to(device)
+            placement = "cuda_full"
+
+        for enabler in ("enable_vae_slicing", "enable_vae_tiling", "enable_attention_slicing"):
+            fn = getattr(pipe, enabler, None)
+            if callable(fn):
+                try:
+                    if enabler == "enable_attention_slicing":
+                        fn("auto")
+                    else:
+                        fn()
+                except Exception:
+                    pass
+
+    free_a, total_a = _vram_gb()
+    _log(
+        f"[wan_engine] pipe ready placement={placement} VRAM free={free_a:.1f}/{total_a:.1f}Go"
+    )
 
     _PIPE = pipe
+    _PIPE_META = {
+        "device": device,
+        "dtype": str(dtype).replace("torch.", ""),
+        "placement": placement,
+    }
     return _PIPE
 
 
@@ -125,10 +223,10 @@ def generate_video(
     prompt: str,
     output_path: str,
     resolution_key: str = "480p 16:9",
-    num_frames: int = 49,
+    num_frames: int = 17,
     fps: int = 16,
-    steps: int = 24,
-    guidance: float = 6.0,
+    steps: int = 12,
+    guidance: float = 5.0,
     negative_prompt: str = DEFAULT_NEGATIVE,
     cache_dir: str | None = None,
     seed: int | None = None,
@@ -137,11 +235,18 @@ def generate_video(
     device = pick_device()
     width, height = RESOLUTION_PRESETS.get(resolution_key, RESOLUTION_PRESETS["480p 16:9"])
 
-    if is_snapdragon_pc():
+    if is_snapdragon_pc() and device == "cpu":
         num_frames = min(num_frames, 33)
         steps = min(steps, 20)
     if num_frames % 4 != 1:
-        num_frames = max(17, (num_frames // 4) * 4 + 1)
+        num_frames = max(9, (num_frames // 4) * 4 + 1)
+
+    # Sur GPU ≤12 Go : clips ultra-courts (bouclés au montage)
+    if device == "cuda":
+        _, total_b = _vram_gb()
+        if total_b and total_b <= 12.5:
+            num_frames = min(num_frames, 13)
+            steps = min(steps, 10)
 
     if progress_callback:
         progress_callback(0.05, "Chargement du modèle Wan 2.1 1.3B…")
@@ -151,8 +256,25 @@ def generate_video(
     if seed is not None:
         generator = torch.Generator(device="cpu").manual_seed(seed)
 
+    dtype_label = (_PIPE_META or {}).get("dtype", "?")
+    placement = (_PIPE_META or {}).get("placement", "?")
     if progress_callback:
-        progress_callback(0.15, f"Génération sur {device_label(device)} (patience sur Snapdragon)…")
+        progress_callback(
+            0.15,
+            f"Génération {device_label(device)}/{dtype_label} — {num_frames}f × {steps} steps…",
+        )
+
+    _log(
+        f"[wan_engine] generate start device={device_label(device)} dtype={dtype_label} "
+        f"placement={placement} {width}x{height} frames={num_frames} steps={steps}"
+    )
+    if device == "cuda":
+        free, total = _vram_gb()
+        _log(f"[wan_engine] VRAM free={free:.1f}Go / total={total:.1f}Go")
+        if free < 0.5 and "offload" not in placement:
+            _log(
+                "[wan_engine] WARNING: VRAM almost full without offload - swap risk"
+            )
 
     kwargs = {
         "prompt": prompt,
@@ -166,8 +288,16 @@ def generate_video(
     if generator is not None:
         kwargs["generator"] = generator
 
-    result = pipe(**kwargs)
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        result = pipe(**kwargs)
     frames = result.frames[0]
+    elapsed = time.perf_counter() - t0
+    per_step = elapsed / max(1, steps)
+    _log(
+        f"[wan_engine] denoising done in {elapsed:.1f}s "
+        f"({per_step:.1f}s/step) - target <15s/step on RTX 3080 10GB + offload"
+    )
 
     if progress_callback:
         progress_callback(0.9, "Export MP4…")
@@ -185,10 +315,15 @@ def generate_video(
         "ok": True,
         "outputPath": str(out.resolve()),
         "device": device_label(device),
+        "dtype": dtype_label,
+        "placement": placement,
         "width": width,
         "height": height,
         "numFrames": num_frames,
         "fps": fps,
+        "steps": steps,
+        "seconds": round(elapsed, 1),
+        "secondsPerStep": round(per_step, 2),
         "model": MODEL_ID,
     }
 
@@ -196,10 +331,15 @@ def generate_video(
 def check_environment() -> dict:
     profile = platform_profile()
     device = pick_device()
+    free_b, total_b = _vram_gb()
     info = {
         "ok": True,
         "device": device_label(device),
         "cuda": torch.cuda.is_available(),
+        "dtype": str(_cuda_dtype()).replace("torch.", "") if device == "cuda" else "float32",
+        "vramFreeGb": round(free_b, 2),
+        "vramTotalGb": round(total_b, 2),
+        "cpuOffloadDefault": _want_cpu_offload(total_b),
         "snapdragon": is_snapdragon_pc(),
         "arm64": profile["arm64"],
         "torch": torch.__version__,
@@ -207,6 +347,11 @@ def check_environment() -> dict:
         "hfToken": bool(hf_token()),
         "platform": profile,
     }
+    if torch.cuda.is_available():
+        try:
+            info["gpu"] = torch.cuda.get_device_name(0)
+        except Exception:
+            info["gpu"] = None
     try:
         import diffusers
 
@@ -222,11 +367,20 @@ def format_check_message() -> str:
     lines = [
         f"PyTorch: {info['torch']}",
         f"Appareil: {info['device']}",
+        f"Dtype: {info.get('dtype', '?')}",
         f"Snapdragon ARM64: {'oui' if info['snapdragon'] else 'non'}",
         f"CUDA: {'oui' if info['cuda'] else 'non (normal sur Surface)'}",
         f"Modèle: Wan 2.1 T2V 1.3B",
         f"Token Hugging Face: {'configuré' if info['hfToken'] else 'optionnel'}",
     ]
+    if info.get("gpu"):
+        lines.insert(2, f"GPU: {info['gpu']}")
+    if info.get("vramTotalGb"):
+        lines.insert(
+            3,
+            f"VRAM: {info['vramFreeGb']}/{info['vramTotalGb']} Go "
+            f"(offload={'oui' if info.get('cpuOffloadDefault') else 'non'})",
+        )
     if info.get("diffusers"):
         lines.append(f"Diffusers: {info['diffusers']}")
     return "\n".join(lines)
@@ -242,8 +396,9 @@ if __name__ == "__main__":
     gen.add_argument("--prompt", required=True)
     gen.add_argument("--output", required=True)
     gen.add_argument("--resolution", default="480p 16:9")
-    gen.add_argument("--frames", type=int, default=49)
+    gen.add_argument("--frames", type=int, default=13)
     gen.add_argument("--fps", type=int, default=16)
+    gen.add_argument("--steps", type=int, default=10)
     gen.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
 
@@ -251,14 +406,20 @@ if __name__ == "__main__":
         print(json.dumps(check_environment(), indent=2))
     else:
         try:
-            print(json.dumps(generate_video(
-                prompt=args.prompt,
-                output_path=args.output,
-                resolution_key=args.resolution,
-                num_frames=args.frames,
-                fps=args.fps,
-                seed=args.seed,
-            ), indent=2))
+            print(
+                json.dumps(
+                    generate_video(
+                        prompt=args.prompt,
+                        output_path=args.output,
+                        resolution_key=args.resolution,
+                        num_frames=args.frames,
+                        fps=args.fps,
+                        steps=args.steps,
+                        seed=args.seed,
+                    ),
+                    indent=2,
+                )
+            )
         except Exception as exc:
             print(json.dumps({"ok": False, "error": str(exc), "trace": traceback.format_exc()}))
             raise SystemExit(1) from exc
