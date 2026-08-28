@@ -1,0 +1,49 @@
+{
+  "_comment": "Copiez en config.json sur le VPS OVH et adaptez les valeurs.",
+
+  "tower": {
+    "tailscale_ip": "100.64.0.5",
+    "hostname": "tower-pc",
+    "ping_failures_before_alert": 3,
+    "boot_wait_seconds": 300
+  },
+
+  "checks": {
+    "interval_seconds": 60,
+    "pinokio_remote_url": "http://100.64.0.5:8000/api/health",
+    "pinokio_ui_url": "http://100.64.0.5:4069",
+    "http_timeout_seconds": 8,
+    "service_failures_before_restart": 3
+  },
+
+  "ssh_restart": {
+    "enabled": true,
+    "command": "tailscale ssh tower-pc -- powershell -Command \"Start-Process '%LOCALAPPDATA%\\Pinokio\\Pinokio.exe'\"",
+    "timeout_seconds": 30
+  },
+
+  "smart_plug": {
+    "enabled": true,
+    "provider": "shelly",
+    "_provider_info": "shelly | tuya | http_generic",
+    "shelly_ip": "192.168.1.50",
+    "tuya_device_id": "",
+    "tuya_local_key": "",
+    "tuya_ip": "",
+    "http_off_url": "https://api.example.com/plug/off",
+    "http_on_url": "https://api.example.com/plug/on",
+    "http_method": "POST",
+    "http_headers": {},
+    "off_seconds": 15,
+    "cooldown_seconds": 600,
+    "max_resets_per_day": 6
+  },
+
+  "notifications": {
+    "discord_webhook": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": ""
+  },
+
+  "state_file": "/var/lib/tower-watchdog/state.json"
+}
