@@ -666,41 +666,70 @@ function draftSavReplyTemplate({ buyer, subject, body, product } = {}) {
   };
 }
 
+/**
+ * Prix de vente eBay sous 2 contraintes OBLIGATOIRES :
+ * 1) marge nette ≥ minNetPct (après frais eBay)
+ * 2) strictement moins cher que le concurrent neuf comparable le moins cher
+ *
+ * Si le plancher 5 % est ≥ au moins cher eBay → competitive=false (ne pas publier).
+ */
 function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebayFeeRate = 0.13 } = {}) {
   const c = Number(cost) || 0;
   const denom = 1 - ebayFeeRate - minNetPct / 100;
   const minSell = c > 0 && denom > 0.2 ? Number((c / denom).toFixed(2)) : 0;
-  let prices = (competitorPrices || [])
+  // Concurrents déjà filtrés (neuf + titre comparable) — on garde tous les prix crédibles.
+  const prices = (competitorPrices || [])
     .map((p) => Number(p))
     .filter((p) => p >= 1.99 && p < 2000)
     .sort((a, b) => a - b);
-  // Occasions / autre conditionnement : plus bas que ~75 % du coût fournisseur ≠ même produit.
-  if (c >= 1.99) {
-    const sameProduct = prices.filter((p) => p >= Number((c * 0.75).toFixed(2)));
-    if (sameProduct.length) prices = sameProduct;
-  }
-  if (prices.length >= 4) {
-    const med = prices[Math.floor(prices.length / 2)];
-    const trimmed = prices.filter((p) => p >= med * 0.5);
-    if (trimmed.length >= 3) prices = trimmed;
-  }
   const cheapest = prices[0] || null;
   const median = prices.length ? prices[Math.floor(prices.length / 2)] : null;
-  const market = prices.length ? prices[Math.floor((prices.length - 1) * 0.25)] : null;
+  // « market » = référence concurrentielle = le moins cher (plus le P25).
+  const market = cheapest;
+
   let sell = minSell;
-  if (market > 0) {
-    sell = Math.max(minSell, Number((market * 0.99).toFixed(2)));
-  } else if (median > 0) {
-    sell = Math.max(minSell, median);
+  let competitive = true;
+
+  if (cheapest != null && cheapest > 0) {
+    // Être le moins cher : 1 centime sous le concurrent le plus bas (min. 1 %).
+    const undercut = Number(Math.min(cheapest - 0.01, cheapest * 0.99).toFixed(2));
+    if (undercut >= minSell && undercut > 0) {
+      sell = undercut;
+      competitive = sell < cheapest;
+    } else {
+      // Impossible : plancher 5 % ≥ prix du moins cher eBay
+      sell = minSell;
+      competitive = false;
+    }
+  } else {
+    // Aucun concurrent comparable trouvé → publier au plancher marge uniquement
+    sell = minSell;
+    competitive = true;
   }
-  if (!(sell > 0) && median > 0) sell = median;
+
   let margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
-  // Arrondi : plancher exact peut donner 4.9 % — on pousse de 5–10 cts pour passer ≥ 5 %
-  if (sell > 0 && margin.netPct < minNetPct && margin.netPct >= minNetPct - 0.25 && minSell > 0) {
-    sell = Number((Math.max(sell, minSell) + 0.1).toFixed(2));
-    margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+  // Arrondi : plancher exact peut donner 4.9 % — pousse de quelques cts si on reste sous le moins cher
+  if (
+    sell > 0 &&
+    margin.netPct < minNetPct &&
+    margin.netPct >= minNetPct - 0.25 &&
+    minSell > 0
+  ) {
+    const bumped = Number((Math.max(sell, minSell) + 0.1).toFixed(2));
+    if (cheapest == null || bumped < cheapest) {
+      sell = bumped;
+      margin = estimateMargin({ cost: c, sellPrice: sell, ebayFeeRate });
+    }
   }
-  const competitive = market == null || sell <= Number((market * 1.12).toFixed(2));
+
+  // Revalidation stricte des 2 critères
+  const profitable = margin.netPct >= minNetPct - 0.2;
+  if (cheapest != null) {
+    competitive = profitable && sell > 0 && sell < cheapest;
+  } else {
+    competitive = profitable;
+  }
+
   return {
     sell: Number((sell || 0).toFixed(2)),
     minSell,
@@ -709,7 +738,7 @@ function competitiveSellPrice({ cost, competitorPrices = [], minNetPct = 5, ebay
     market,
     competitorCount: prices.length,
     netPct: margin.netPct,
-    profitable: margin.netPct >= minNetPct - 0.2,
+    profitable,
     competitive,
   };
 }

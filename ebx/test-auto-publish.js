@@ -98,7 +98,19 @@ check(rolled.day === "2026-08-14" && rolled.preparedToday === 0, "reset compteur
 check(languageForMarket("France") === "fr" && languageForMarket("DE") === "de" && languageForMarket("US") === "en", "langue marché");
 
 const floor = competitiveSellPrice({ cost: 10, competitorPrices: [8], minNetPct: 5 });
-check(floor.sell >= floor.minSell && !((8 * 0.99) >= floor.minSell && floor.sell < floor.minSell), "plancher 5% jamais cassé");
+check(floor.sell >= floor.minSell && floor.competitive === false, "plancher 5% > moins cher eBay → refus concurrentiel");
+
+const win = competitiveSellPrice({ cost: 4, competitorPrices: [12, 14, 11], minNetPct: 5 });
+check(
+  win.competitive && win.profitable && win.sell < win.cheapest && win.sell >= win.minSell,
+  `moins cher obligatoire → sell=${win.sell} < ${win.cheapest}`
+);
+
+const cheerble = competitiveSellPrice({ cost: 45.99, competitorPrices: [29.99, 35, 69], minNetPct: 5 });
+check(
+  cheerble.competitive === false && cheerble.minSell > cheerble.cheapest,
+  `Cheerble-like: plancher ${cheerble.minSell}€ > moins cher ${cheerble.cheapest}€ → skip`
+);
 
 const mixedEbay = competitorMarketPrices(
   [
@@ -117,10 +129,10 @@ check(
 const amazonCrochet = [
   { title: "24 crochets", url: "https://www.amazon.fr/dp/B0F5WWWZC8", price: 5.57, source: "amazon" },
 ];
-const dumped = pickMostProfitableOffer(amazonCrochet, [2.99, 3.1, 8.5, 9.2, 10], 5);
+const dumped = pickMostProfitableOffer(amazonCrochet, [8.5, 9.2, 10], 5);
 check(
-  dumped && dumped.profitable && dumped.priced.sell >= dumped.priced.minSell,
-  `dump eBay ignoré, Amazon 5.57€ accepté → sell=${dumped ? dumped.priced.sell : "null"} competitive=${dumped && dumped.priced.competitive}`
+  dumped && dumped.profitable && dumped.priced.sell < dumped.priced.cheapest && dumped.priced.sell >= dumped.priced.minSell,
+  `moins cher + marge → sell=${dumped ? dumped.priced.sell : "null"} < ${dumped && dumped.priced.cheapest}`
 );
 
 check(titleOverlapsQuery("Lot 24 crochets muraux adhésifs", "crochet mural adhésif"), "titre concurrent proche OK");
@@ -128,6 +140,9 @@ check(!titleOverlapsQuery("Serviette de bain coton", "crochet mural adhésif"), 
 
 const tight = pickMostProfitableOffer(amazonCrochet, [3.2, 3.4, 3.5], 5);
 check(tight == null, "marché neuf plus bas que le plancher 5% → rejeté");
+
+const dumpPrices = pickMostProfitableOffer(amazonCrochet, [2.99, 3.1, 8.5], 5);
+check(dumpPrices == null, "moins cher eBay 2.99€ < plancher marge → rejeté (pas de pub hors prix)");
 
 check(isSupplierUrl("https://www.amazon.fr/Nom-Produit/dp/B0DSHZXYY2"), "URL Amazon /titre/dp OK");
 

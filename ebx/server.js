@@ -897,17 +897,21 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
 
       send({
         type: "log",
-        message: `[PRICE] coût ${Number(priced.cost).toFixed(2)}€ · min ${Number(priced.minSell).toFixed(2)}€ · concurrent ${
+        message: `[PRICE] coût ${Number(priced.cost).toFixed(2)}€ · min ${Number(priced.minSell).toFixed(2)}€ · moins cher eBay ${
           priced.cheapest != null ? Number(priced.cheapest).toFixed(2) + "€" : "n/a"
-        } (${priced.competitorCount}) · vente ${Number(priced.sell).toFixed(2)}€ · net ${priced.netPct}%`,
+        } (${priced.competitorCount}) · vente ${Number(priced.sell).toFixed(2)}€ · net ${priced.netPct}% · ${
+          priced.competitive ? "OK moins cher" : "PAS le moins cher"
+        }`,
       });
 
-      if (!(priced.sell > 0) || !priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
+      // Critères obligatoires : marge ≥ 5 % ET (aucun concurrent OU strictement moins cher)
+      if (!(priced.sell > 0) || !priced.profitable || !priced.competitive) {
         stats.skipped += 1;
-        const why =
-          priced.competitorCount > 0 && priced.competitive === false
-            ? `Pas assez concurrentiel (plancher ${priced.minSell}€ vs eBay ${priced.cheapest}€)`
-            : `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`;
+        const why = !priced.profitable
+          ? `Rentabilité < 5% (net ${priced.netPct}%, min ${priced.minSell}€)`
+          : priced.competitorCount > 0
+            ? `Pas le moins cher (vente ${priced.sell}€ ≥ concurrent ${priced.cheapest}€) — plancher marge ${priced.minSell}€`
+            : `Critères prix non respectés (net ${priced.netPct}%)`;
         quarantineListing(listing.id, why);
         send({ type: "log", message: `[SKIP] ${why} — retiré de la file auto` });
         continue;
@@ -1312,13 +1316,15 @@ async function runAutoPrepareBatch({ marketplace = "France", limit = DEFAULT_PRE
         competitorPrices,
         minNetPct: 5,
       });
-      if (!priced.profitable || (priced.competitorCount > 0 && priced.competitive === false)) {
+      if (!priced.profitable || !priced.competitive) {
         stats.skipped += 1;
         state.skippedToday += 1;
         state.failedQueries[kw.query] = (state.failedQueries[kw.query] || 0) + 1;
-        const why = `Après scrape: plancher ${priced.minSell}€ vs eBay ${
-          priced.market != null ? priced.market + "€" : "n/a"
-        } (net ${priced.netPct}%)`;
+        const why = !priced.competitive && priced.cheapest != null
+          ? `Après scrape: plancher ${priced.minSell}€ ≥ moins cher eBay ${priced.cheapest}€ (net ${priced.netPct}%)`
+          : `Après scrape: plancher ${priced.minSell}€ vs eBay ${
+              priced.market != null ? priced.market + "€" : "n/a"
+            } (net ${priced.netPct}%)`;
         send({ type: "log", message: `[PREPARE] fiche écartée — ${why}` });
         continue;
       }
@@ -3245,7 +3251,7 @@ const HELP_FAQ = [
   {
     keys: ["auto-publish", "autopublish", "publication auto", "auto publish"],
     reply:
-      "Auto-Publish enchaîne en boucle jusqu’à 200 publications / jour, tous marchés (FR DE GB US) : tendances → sniper → fiche → net ≥ 5 % → eBay quantité adaptée à ta limite de vente. Un mot-clé sans fournisseur n’est plus retenté le même jour. Auto-Order OFF ne bloque pas. Coche Automatisation ; PM2 + eBay lié.",
+      "Auto-Publish enchaîne en boucle jusqu’à 200 publications / jour, tous marchés (FR DE GB US) : tendances → sniper → fiche → net ≥ 5 % ET strictement moins cher que le concurrent eBay comparable → eBay. Si le plancher marge dépasse le moins cher eBay, la fiche est écartée. Auto-Order OFF ne bloque pas. Coche Automatisation ; PM2 + eBay lié.",
   },
   {
     keys: ["listing", "publier", "publication", "mes listings"],

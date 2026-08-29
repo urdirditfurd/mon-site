@@ -196,12 +196,16 @@ if (!decoyOk) failed += 1;
 
 const { competitiveSellPrice } = require("./business-engine");
 const priced = competitiveSellPrice({ cost: 4, competitorPrices: [12, 14, 11], minNetPct: 5 });
-const pricedOk = priced.sell >= priced.minSell && priced.sell <= 12 && priced.profitable;
+const pricedOk =
+  priced.sell >= priced.minSell &&
+  priced.sell < priced.cheapest &&
+  priced.profitable &&
+  priced.competitive;
 console.log(`${pricedOk ? "OK" : "FAIL"}  auto-publish prix ${JSON.stringify(priced)}`);
 if (!pricedOk) failed += 1;
 const floor = competitiveSellPrice({ cost: 10, competitorPrices: [8, 8.5], minNetPct: 5 });
-const floorOk = floor.sell >= floor.minSell && floor.sell > 8;
-console.log(`${floorOk ? "OK" : "FAIL"}  plancher 5% ${floor.sell} (min ${floor.minSell}) vs concurrent 8`);
+const floorOk = floor.sell >= floor.minSell && floor.competitive === false;
+console.log(`${floorOk ? "OK" : "FAIL"}  plancher 5% ${floor.sell} (min ${floor.minSell}) vs concurrent 8 → skip`);
 if (!floorOk) failed += 1;
 
 const noComp = competitiveSellPrice({ cost: 5, competitorPrices: [], minNetPct: 5 });

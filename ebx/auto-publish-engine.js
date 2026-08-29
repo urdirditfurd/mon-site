@@ -298,7 +298,8 @@ function rankOffersByProfit(offers, competitorPrices = [], minNetPct = MIN_NET_P
     if (!(cost >= 1.99)) continue;
     const priced = competitiveSellPrice({ cost, competitorPrices, minNetPct });
     const margin = estimateMargin({ cost, sellPrice: priced.sell });
-    const ok = Boolean(priced.profitable && (priced.competitorCount === 0 || priced.competitive));
+    // Les 2 critères : marge ≥ minNetPct ET (pas de concurrent OU strictement moins cher)
+    const ok = Boolean(priced.profitable && priced.competitive);
     rows.push({
       offer,
       priced,
@@ -392,9 +393,9 @@ function explainUnprofitable(ranked, competitorPrices = []) {
   if (n <= 0) {
     return `${src} ${cost.toFixed(2)}€ — coût ou URL invalide`;
   }
-  return `${src} ${cost.toFixed(2)}€ → plancher ${Number(minSell).toFixed(2)}€ vs eBay neuf ${
+  return `${src} ${cost.toFixed(2)}€ → plancher ${Number(minSell).toFixed(2)}€ vs moins cher eBay ${
     market != null ? Number(market).toFixed(2) + "€" : "n/a"
-  } (${n} concurrent${n > 1 ? "s" : ""}) — pas concurrentiel à net ≥ 5%`;
+  } (${n} concurrent${n > 1 ? "s" : ""}) — impossible d'être le moins cher avec net ≥ 5%`;
 }
 
 function isSupplierUrl(url) {
