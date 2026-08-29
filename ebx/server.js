@@ -922,6 +922,21 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
 
       try {
         await antiBanDelay({ testMode: false, label: "auto-publish" });
+        // Dernière étape avant eBay : neuromarketing (copy + badge 1ʳᵉ image)
+        try {
+          const { customizeListingForPublish } = require("./neuro-listing");
+          const customized = await customizeListingForPublish(listing, { send });
+          if (customized?.seo_title && customized.seo_title !== listing.seo_title) {
+            updateListingTitle.run(customized.seo_title, listing.id);
+            listing.seo_title = customized.seo_title;
+          }
+          if (customized?.html_description) {
+            updateListingHtml.run(customized.html_description, listing.id);
+            listing.html_description = customized.html_description;
+          }
+        } catch (neuroErr) {
+          send({ type: "log", message: `[NEURO] skip: ${neuroErr.message}` });
+        }
         const result = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
         if (result?.listingId) {
           rememberListingPublish(listing.id, result);
@@ -4508,6 +4523,24 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
           "3) Republie\n\n" +
           "Note : une vignette ebayimg.com déjà trop petite ne peut PAS être agrandie.",
       });
+    }
+    try {
+      const { customizeListingForPublish } = require("./neuro-listing");
+      const customized = await customizeListingForPublish(listing, {
+        send: (o) => {
+          if (o?.message) console.log("[NEURO]", o.message);
+        },
+      });
+      if (customized?.seo_title) {
+        updateListingTitle.run(customized.seo_title, listing.id);
+        listing.seo_title = customized.seo_title;
+      }
+      if (customized?.html_description) {
+        updateListingHtml.run(customized.html_description, listing.id);
+        listing.html_description = customized.html_description;
+      }
+    } catch (neuroErr) {
+      console.warn("[EBX] neuro pre-publish:", neuroErr.message);
     }
     const {
       isProduction,
