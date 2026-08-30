@@ -95,6 +95,7 @@ const {
   verifyOAuthState,
 } = require("./web-auth");
 const { cleanEnvToken } = require("./load-env");
+const { verifyListingMatchesSource } = require("./publish-guard");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -372,22 +373,68 @@ function listingCost(listing) {
   return 0;
 }
 
-async function resolveListingCost(listing) {
+async function resolveListingCost(listing, { forceRefresh = false } = {}) {
   let cost = listingCost(listing);
   const sourceUrl = String(listing?.source_url || "");
-  if (!(cost >= 1.99) && sourceUrl && isSupplierProductUrl(sourceUrl)) {
+  const needScrape =
+    sourceUrl &&
+    isSupplierProductUrl(sourceUrl) &&
+    (forceRefresh || !(cost >= 1.99));
+  if (needScrape) {
     try {
       const scraped = await scrapeProduct(sourceUrl);
       const p = Number(scraped?.price) || 0;
       if (p >= 1.99) {
-        cost = p;
-        db.prepare("UPDATE listings SET cost_price = ? WHERE id = ?").run(p, listing.id);
+        // Si coût stocké diverge fortement du live, on aligne (évite 10€ vs 87€)
+        if (!forceRefresh || !(cost >= 1.99) || cost < p * 0.55 || cost > p * 1.45) {
+          cost = p;
+          db.prepare("UPDATE listings SET cost_price = ? WHERE id = ?").run(p, listing.id);
+          listing.cost_price = p;
+        }
       }
     } catch (e) {
       console.warn(`[EBX] cost scrape #${listing.id}:`, e.message);
     }
   }
   return cost;
+}
+
+/**
+ * Double vérification identité + prix vs source fournisseur (bloquante).
+ * @returns {Promise<{ok:boolean, code?:string, message?:string}>}
+ */
+async function runPublishDoubleCheck(listing, { send = () => {}, force = false } = {}) {
+  if (force) {
+    send({ type: "log", message: "[GUARD] force=true — double vérif contournée" });
+    return { ok: true, code: "FORCED", message: "forcé" };
+  }
+  send({ type: "log", message: `[GUARD] Double vérification vs source…` });
+  const check = await verifyListingMatchesSource(listing, {
+    scrapeProduct,
+    isSupplierProductUrl,
+  });
+  if (check.ok) {
+    send({ type: "log", message: `[GUARD] ${check.message}` });
+    // Aligne le coût si le live est fiable et diverge
+    const live = Number(check.livePrice) || 0;
+    if (live >= 1.99 && listing?.id) {
+      const c = Number(listing.cost_price) || 0;
+      if (!(c >= 1.99) || c < live * 0.55 || c > live * 1.45) {
+        db.prepare("UPDATE listings SET cost_price = ? WHERE id = ?").run(live, listing.id);
+        listing.cost_price = live;
+      }
+    }
+    return check;
+  }
+  send({ type: "log", message: `[GUARD] BLOCAGE ${check.code}: ${check.message}` });
+  // Corrige le coût en base même en échec (prochaine tentative partira du bon prix)
+  if (check.livePrice >= 1.99 && listing?.id) {
+    try {
+      db.prepare("UPDATE listings SET cost_price = ? WHERE id = ?").run(check.livePrice, listing.id);
+      listing.cost_price = check.livePrice;
+    } catch (_) {}
+  }
+  return check;
 }
 
 async function loadCompetitorMarket(query, { marketplace = "FR", send = () => {} } = {}) {
@@ -886,6 +933,13 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         continue;
       }
 
+      // Rafraîchit le coût depuis la source avant pricing (évite coût fantôme)
+      try {
+        await resolveListingCost(listing, { forceRefresh: true });
+        const freshCost = getListingById.get(listing.id);
+        if (freshCost) listing.cost_price = freshCost.cost_price;
+      } catch (_) {}
+
       let priced;
       try {
         priced = await priceListingForEbay(listing, { marketplace: marketCode, minNetPct: 5 });
@@ -937,6 +991,16 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
         } catch (neuroErr) {
           send({ type: "log", message: `[NEURO] skip: ${neuroErr.message}` });
         }
+
+        // Double vérif identité + prix vs source (bloquante)
+        const guard = await runPublishDoubleCheck(listing, { send });
+        if (!guard.ok) {
+          stats.skipped += 1;
+          quarantineListing(listing.id, `GUARD ${guard.code}: ${guard.message}`);
+          send({ type: "log", message: `[SKIP] Double vérif échouée — retiré de la file` });
+          continue;
+        }
+
         const result = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
         if (result?.listingId) {
           rememberListingPublish(listing.id, result);
@@ -1001,6 +1065,11 @@ async function runAutoPublishBatch({ marketplace = "FR", limit = 5, send = () =>
             listing = await ensureListingImages(listing);
             if (countCachedMediaImagesInHtml(listing.html_description || "") < 1) {
               throw new Error("Photos non cachees localement apres reparation");
+            }
+            const guard2 = await runPublishDoubleCheck(listing, { send });
+            if (!guard2.ok) {
+              quarantineListing(listing.id, `GUARD ${guard2.code}: ${guard2.message}`);
+              throw new Error(`Double vérif après réparation: ${guard2.message}`);
             }
             const result2 = await publishToEbay(listing, listing.id, { quantity: 1, variations: { enabled: false } });
             if (result2?.listingId) {
@@ -4542,6 +4611,27 @@ app.post("/api/publish-to-ebay/:id", async (req, res) => {
     } catch (neuroErr) {
       console.warn("[EBX] neuro pre-publish:", neuroErr.message);
     }
+
+    const skipGuard = req.body?.skipGuard === true;
+    const guard = await runPublishDoubleCheck(listing, {
+      send: (o) => {
+        if (o?.message) console.log(o.message);
+      },
+      force: skipGuard,
+    });
+    if (!guard.ok) {
+      return res.status(400).json({
+        success: false,
+        code: guard.code || "PUBLISH_GUARD",
+        error:
+          `⛔ Double vérification échouée — publication bloquée\n\n` +
+          `${guard.message}\n\n` +
+          `La fiche ne correspond pas à la source fournisseur (identité ou prix). ` +
+          `Corrige le titre / le coût / le prix, ou réimporte depuis l'URL produit.`,
+        guard,
+      });
+    }
+
     const {
       isProduction,
       getSellerIdentity,

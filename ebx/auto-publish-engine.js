@@ -360,9 +360,19 @@ function isUsedListing(item = {}) {
 /**
  * Prix eBay comparables : neuf, titre proche, hors occasions / lots dump.
  * Accepte des nombres ou des objets { price, title, condition }.
+ * Si la requête contient une marque/modèle fort (logitech, nike…),
+ * le concurrent DOIT aussi le porter — évite de matcher une trackball no-name à 12 €
+ * contre une Logitech MX Ergo à 87 €.
  */
 function competitorMarketPrices(items = [], query = "") {
   const rows = [];
+  const qToks = queryToks(query);
+  const GENERIC = new Set([
+    "souris", "trackball", "mouse", "clavier", "keyboard", "cable", "chargeur", "support",
+    "etui", "housse", "noir", "blanc", "sans", "fil", "wireless", "bluetooth", "usb",
+    "ergonomique", "ergonomic", "advanced", "graphite", "rechargeable", "portable",
+  ]);
+  const brandLike = qToks.filter((t) => t.length >= 5 && !GENERIC.has(t));
   for (const it of items || []) {
     if (typeof it === "number" || (it != null && typeof it !== "object")) {
       const p = Number(it);
@@ -374,6 +384,11 @@ function competitorMarketPrices(items = [], query = "") {
     if (isUsedListing(it)) continue;
     const title = String(it.title || "");
     if (title && query && !titleOverlapsQuery(title, query)) continue;
+    if (brandLike.length && title) {
+      const nt = normalizeMatch(title);
+      const brandHit = brandLike.some((b) => nt.includes(b));
+      if (!brandHit) continue;
+    }
     rows.push(p);
   }
   rows.sort((a, b) => a - b);
