@@ -173,7 +173,7 @@
           hintEl.classList.remove('hidden');
         } else {
           setStatus('offline');
-          hintText.textContent = data.hint || 'ComfyUI hors ligne. Relancez LTX_Studio.bat ou LTX_Studio_Debug.bat.';
+          hintText.textContent = data.hint || 'ComfyUI hors ligne. Double-cliquez LTX_Studio_Debug.bat pour voir l\'erreur.';
           hintEl.classList.remove('hidden');
         }
       } catch {
@@ -282,7 +282,7 @@
         showProgress('Démarrage de ComfyUI, patientez…', 0.01);
         const ok = await tryStartComfy();
         if (!ok) {
-          showError('ComfyUI ne répond pas. Relancez LTX_Studio.bat et attendez 2 minutes.');
+          showError('ComfyUI ne répond pas. Lancez LTX_Studio_Debug.bat et attendez 5 minutes.');
           return;
         }
       }

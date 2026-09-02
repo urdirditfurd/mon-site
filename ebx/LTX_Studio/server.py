@@ -9,9 +9,6 @@ import asyncio
 import copy
 import json
 import random
-import subprocess
-import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,6 +19,8 @@ import websockets
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+import comfy_boot
 
 # ---------------------------------------------------------------------------
 # Chemins (auto-détection depuis l'emplacement de server.py)
@@ -126,7 +125,7 @@ EMBEDDED_WORKFLOW: dict[str, Any] = {
     },
 }
 
-_comfy_process: subprocess.Popen[Any] | None = None
+_comfy_process = None  # legacy, géré par comfy_boot
 
 
 class GenerateRequest(BaseModel):
@@ -137,16 +136,19 @@ app = FastAPI(title="LTX Video Studio", docs_url=None, redoc_url=None)
 
 
 def log(message: str) -> None:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with (LOG_DIR / "server.log").open("a", encoding="utf-8") as handle:
-        handle.write(f"{message}\n")
+    comfy_boot.log(message)
 
 
-def read_log_tail(path: Path, lines: int = 12) -> str:
-    if not path.is_file():
-        return ""
-    content = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    return "\n".join(content[-lines:])
+async def comfy_is_ready() -> bool:
+    return await asyncio.to_thread(comfy_boot.is_ready)
+
+
+def diagnose_comfy_error() -> str:
+    return comfy_boot.diagnose()
+
+
+async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
+    return await asyncio.to_thread(comfy_boot.wait_until_ready, timeout_seconds)
 
 
 def find_workflow_path() -> Path | None:
@@ -154,87 +156,6 @@ def find_workflow_path() -> Path | None:
         if candidate.is_file():
             return candidate
     return None
-
-
-def diagnose_comfy_error() -> str:
-    tail = read_log_tail(LOG_DIR / "comfyui.log", 20)
-    upper = tail.upper()
-    if "CUDA" in upper or "TORCH NOT COMPILED" in upper:
-        return "ComfyUI plante (erreur CUDA). Relancez avec --cpu via LTX_Studio.bat."
-    if "NO MODULE" in upper or "MODULENOTFOUND" in upper:
-        return "Module Python manquant dans ComfyUI. Consultez logs/comfyui.log."
-    if not COMFY_PYTHON.is_file():
-        return f"Python ComfyUI introuvable : {COMFY_PYTHON}"
-    if not (COMFY_DIR / "main.py").is_file():
-        return f"ComfyUI introuvable : {COMFY_DIR}"
-    if _comfy_process and _comfy_process.poll() is not None:
-        return f"ComfyUI s'est arrêté (code {_comfy_process.returncode}). Voir logs/comfyui.log."
-    return "ComfyUI démarre… le premier lancement peut prendre 5 minutes."
-
-
-async def comfy_is_ready() -> bool:
-    timeout = aiohttp.ClientTimeout(total=4)
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(f"{COMFY_HTTP}/system_stats") as response:
-                if response.status != 200:
-                    return False
-                body = await response.json()
-                return isinstance(body.get("system"), dict)
-    except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError):
-        return False
-
-
-def start_comfyui_background() -> None:
-    global _comfy_process
-
-    if not COMFY_PYTHON.is_file():
-        log(f"ERREUR: Python introuvable {COMFY_PYTHON}")
-        return
-
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOG_DIR / "comfyui.log"
-    cmd = [
-        str(COMFY_PYTHON),
-        "main.py",
-        "--cpu",
-        "--force-fp16",
-        "--port",
-        "8190",
-        "--database-url",
-        "sqlite:///C:/ComfyUI-ARM/comfyui_ltx.db",
-    ]
-    log(f"Démarrage ComfyUI: {' '.join(cmd)}")
-
-    with log_file.open("a", encoding="utf-8") as handle:
-        _comfy_process = subprocess.Popen(
-            cmd,
-            cwd=str(COMFY_DIR),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-
-
-async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
-    if await comfy_is_ready():
-        return True
-
-    if _comfy_process is None or _comfy_process.poll() is not None:
-        start_comfyui_background()
-
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if await comfy_is_ready():
-            log("ComfyUI prêt.")
-            return True
-        if _comfy_process and _comfy_process.poll() is not None:
-            log(f"ComfyUI arrêté (code {_comfy_process.returncode}), nouvel essai...")
-            start_comfyui_background()
-        await asyncio.sleep(3)
-
-    log("Timeout attente ComfyUI")
-    return False
 
 
 def load_workflow_template() -> dict[str, Any]:
@@ -358,7 +279,7 @@ async def status() -> JSONResponse:
     return JSONResponse(
         {
             "status": "offline",
-            "starting": _comfy_process is not None and _comfy_process.poll() is None,
+            "starting": comfy_boot.process_alive() and not await comfy_is_ready(),
             "hint": diagnose_comfy_error(),
         }
     )
@@ -373,9 +294,9 @@ async def diag() -> JSONResponse:
             "comfy_dir_exists": COMFY_DIR.is_dir(),
             "python_exists": COMFY_PYTHON.is_file(),
             "studio_dir": str(BASE_DIR),
-            "comfy_process": _comfy_process.poll() if _comfy_process else None,
+            "comfy_process": comfy_boot.process_exit_code(),
             "hint": diagnose_comfy_error(),
-            "comfy_log_tail": read_log_tail(LOG_DIR / "comfyui.log", 8),
+            "comfy_log_tail": comfy_boot.read_log_tail("comfyui.log", 8),
         }
     )
 
