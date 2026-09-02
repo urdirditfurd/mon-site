@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LTX Video Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; }
+    .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased">
+
+  <div id="error-banner" class="hidden fixed top-0 inset-x-0 z-50 bg-red-950/90 border-b border-red-800 text-red-200 text-sm text-center py-2 px-4">
+    <span id="error-text">Une erreur est survenue.</span>
+  </div>
+
+  <div class="max-w-lg mx-auto px-4 py-12 space-y-8">
+
+    <header class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold tracking-tight">LTX Video Studio</h1>
+      <span id="status-badge" class="flex items-center gap-2 text-xs text-zinc-400">
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-zinc-500"></span>
+        <span id="status-label">…</span>
+      </span>
+    </header>
+
+    <main class="space-y-6">
+      <textarea id="prompt" rows="4"
+        class="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-4 py-3 text-sm placeholder-zinc-600 focus:outline-none focus:border-indigo-600 resize-none"
+        placeholder="Décrivez votre vidéo…"></textarea>
+
+      <button id="btn-generate"
+        class="w-full py-3 rounded-xl font-medium text-sm bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed transition flex items-center justify-center gap-2">
+        <svg id="spinner" class="hidden w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span id="btn-label">Générer</span>
+      </button>
+
+      <div id="progress-section" class="hidden space-y-2">
+        <p id="progress-message" class="text-sm text-zinc-400">Génération en cours sur CPU, patience…</p>
+        <div class="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+          <div id="progress-bar" class="h-full bg-indigo-500 transition-all duration-500 ease-out" style="width:2%"></div>
+        </div>
+        <p id="progress-percent" class="text-xs text-zinc-600 text-right">0 %</p>
+      </div>
+
+      <div id="result-section" class="hidden fade-in space-y-3">
+        <video id="player" class="w-full rounded-xl bg-black" controls autoplay loop playsinline></video>
+        <div class="flex justify-end">
+          <a id="download-btn" href="#" download
+            class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition">
+            Télécharger
+          </a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const promptEl = $('prompt');
+    const btnGenerate = $('btn-generate');
+    const btnLabel = $('btn-label');
+    const spinner = $('spinner');
+    const progressSection = $('progress-section');
+    const progressBar = $('progress-bar');
+    const progressPercent = $('progress-percent');
+    const progressMessage = $('progress-message');
+    const resultSection = $('result-section');
+    const player = $('player');
+    const downloadBtn = $('download-btn');
+    const errorBanner = $('error-banner');
+    const errorText = $('error-text');
+    const statusDot = $('status-dot');
+    const statusLabel = $('status-label');
+
+    let ws = null;
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
+    let generating = false;
+    let wsParams = null;
+
+    function showError(msg) {
+      errorText.textContent = msg;
+      errorBanner.classList.remove('hidden');
+    }
+
+    function hideError() {
+      errorBanner.classList.add('hidden');
+    }
+
+    function setGenerating(on) {
+      generating = on;
+      btnGenerate.disabled = on;
+      spinner.classList.toggle('hidden', !on);
+      btnLabel.textContent = on ? 'En cours…' : 'Générer';
+    }
+
+    function showProgress(message, ratio) {
+      progressSection.classList.remove('hidden');
+      resultSection.classList.add('hidden');
+      progressMessage.textContent = message || 'Génération en cours sur CPU, patience…';
+      const pct = Math.round((ratio || 0) * 100);
+      progressBar.style.width = Math.max(pct, 2) + '%';
+      progressPercent.textContent = pct + ' %';
+    }
+
+    function showResult(url, filename) {
+      progressSection.classList.add('hidden');
+      resultSection.classList.remove('hidden');
+      player.src = url;
+      downloadBtn.href = url;
+      downloadBtn.download = filename;
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.status === 'ready') {
+          statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+          statusLabel.textContent = 'Prêt';
+        } else {
+          statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
+          statusLabel.textContent = 'Hors ligne';
+        }
+      } catch {
+        statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
+        statusLabel.textContent = 'Hors ligne';
+      }
+    }
+
+    checkStatus();
+    setInterval(checkStatus, 5000);
+
+    function connectWebSocket(clientId, promptId) {
+      wsParams = { clientId, promptId };
+      reconnectAttempts = 0;
+      openWebSocket();
+    }
+
+    function openWebSocket() {
+      if (!wsParams) return;
+
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocol}//${location.host}/ws?client_id=${wsParams.clientId}&prompt_id=${wsParams.promptId}`;
+
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        reconnectAttempts = 0;
+        showProgress('Génération en cours sur CPU, patience…', 0.05);
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'error') {
+          setGenerating(false);
+          showError(msg.message || 'La génération a échoué.');
+          ws.close();
+          return;
+        }
+
+        if (msg.type === 'complete') {
+          setGenerating(false);
+          hideError();
+          showResult(msg.video_url, msg.filename);
+          ws.close();
+          return;
+        }
+
+        if (msg.type === 'progress' || msg.type === 'status') {
+          const ratio = msg.progress ?? (msg.percent != null ? msg.percent / 100 : 0.05);
+          showProgress(msg.message, ratio);
+        }
+      };
+
+      ws.onerror = () => {
+        if (generating) {
+          scheduleReconnect();
+        }
+      };
+
+      ws.onclose = () => {
+        if (generating && wsParams) {
+          scheduleReconnect();
+        }
+      };
+    }
+
+    function scheduleReconnect() {
+      if (reconnectAttempts >= 10) {
+        setGenerating(false);
+        showError('Connexion perdue. Réessayez.');
+        return;
+      }
+      reconnectAttempts += 1;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(openWebSocket, Math.min(2000 * reconnectAttempts, 10000));
+    }
+
+    btnGenerate.addEventListener('click', async () => {
+      const text = promptEl.value.trim();
+      if (!text) return;
+
+      hideError();
+      setGenerating(true);
+      resultSection.classList.add('hidden');
+      showProgress('Lancement…', 0.02);
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: text }),
+        });
+
+        if (!res.ok) {
+          throw new Error('Impossible de lancer la génération.');
+        }
+
+        const data = await res.json();
+        connectWebSocket(data.client_id, data.prompt_id);
+      } catch {
+        setGenerating(false);
+        showError('Impossible de lancer la génération.');
+      }
+    });
+  </script>
+</body>
+</html>
