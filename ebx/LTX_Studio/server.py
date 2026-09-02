@@ -1,6 +1,6 @@
 """
 LTX Video Studio — serveur web local (port 8191).
-Lancé automatiquement par LTX_Studio.bat via pythonw.exe.
+Démarre ComfyUI automatiquement si nécessaire.
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ import asyncio
 import copy
 import json
 import random
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -21,14 +23,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# Chemins fixes (outil local personnel)
+# Chemins fixes
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(r"C:\ComfyUI-ARM\LTX_Studio")
 INDEX_PATH = BASE_DIR / "index.html"
 WORKFLOW_PATH = Path(r"C:\ComfyUI-ARM\ltxv_text_to_video_0.9.5.json")
 OUTPUT_DIR = Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows\output")
+LOG_DIR = BASE_DIR / "logs"
 
+COMFY_DIR = Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows")
+COMFY_PYTHON = COMFY_DIR / "venv" / "Scripts" / "python.exe"
 COMFY_HTTP = "http://127.0.0.1:8190"
 COMFY_WS = "ws://127.0.0.1:8190"
 
@@ -44,11 +49,7 @@ DEFAULT_NEGATIVE = "blur, watermark, low quality, distorted"
 EMBEDDED_WORKFLOW: dict[str, Any] = {
     "69": {
         "class_type": "LTXVConditioning",
-        "inputs": {
-            "positive": ["6", 0],
-            "negative": ["7", 0],
-            "frame_rate": 25,
-        },
+        "inputs": {"positive": ["6", 0], "negative": ["7", 0], "frame_rate": 25},
     },
     "71": {
         "class_type": "LTXVScheduler",
@@ -67,11 +68,7 @@ EMBEDDED_WORKFLOW: dict[str, Any] = {
     },
     "38": {
         "class_type": "CLIPLoader",
-        "inputs": {
-            "clip_name": "t5xxl_fp16.safetensors",
-            "type": "ltxv",
-            "device": "default",
-        },
+        "inputs": {"clip_name": "t5xxl_fp16.safetensors", "type": "ltxv", "device": "default"},
     },
     "72": {
         "class_type": "SamplerCustom",
@@ -120,6 +117,8 @@ EMBEDDED_WORKFLOW: dict[str, Any] = {
     },
 }
 
+_comfy_process: subprocess.Popen[Any] | None = None
+
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=2)
@@ -128,19 +127,89 @@ class GenerateRequest(BaseModel):
 app = FastAPI(title="LTX Video Studio", docs_url=None, redoc_url=None)
 
 
+def log(message: str) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    line = f"{message}\n"
+    (LOG_DIR / "server.log").open("a", encoding="utf-8").write(line)
+
+
+async def comfy_is_ready() -> bool:
+    timeout = aiohttp.ClientTimeout(total=4)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{COMFY_HTTP}/system_stats") as response:
+                if response.status != 200:
+                    return False
+                body = await response.json()
+                return isinstance(body.get("system"), dict)
+    except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError):
+        return False
+
+
+def start_comfyui_background() -> None:
+    global _comfy_process
+
+    if not COMFY_PYTHON.is_file():
+        log(f"ERREUR: Python introuvable {COMFY_PYTHON}")
+        return
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / "comfyui.log"
+    cmd = [
+        str(COMFY_PYTHON),
+        "main.py",
+        "--cpu",
+        "--force-fp16",
+        "--port",
+        "8190",
+        "--database-url",
+        "sqlite:///C:/ComfyUI-ARM/comfyui_ltx.db",
+    ]
+    log(f"Démarrage ComfyUI: {' '.join(cmd)}")
+
+    with log_file.open("a", encoding="utf-8") as handle:
+        _comfy_process = subprocess.Popen(
+            cmd,
+            cwd=str(COMFY_DIR),
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+
+async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
+    if await comfy_is_ready():
+        return True
+
+    if _comfy_process is None or _comfy_process.poll() is not None:
+        start_comfyui_background()
+
+    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    while asyncio.get_event_loop().time() < deadline:
+        if await comfy_is_ready():
+            log("ComfyUI prêt.")
+            return True
+        if _comfy_process and _comfy_process.poll() is not None:
+            log(f"ComfyUI arrêté (code {_comfy_process.returncode})")
+            return False
+        await asyncio.sleep(3)
+
+    log("Timeout attente ComfyUI")
+    return False
+
+
 def load_workflow_template() -> dict[str, Any]:
     if WORKFLOW_PATH.is_file():
         with WORKFLOW_PATH.open(encoding="utf-8") as handle:
             data = json.load(handle)
         if isinstance(data.get("prompt"), dict):
-            return data["prompt"]
+            return copy.deepcopy(data["prompt"])
         if isinstance(data.get("nodes"), list):
             return ui_workflow_to_api(data)
     return copy.deepcopy(EMBEDDED_WORKFLOW)
 
 
 def ui_workflow_to_api(data: dict[str, Any]) -> dict[str, Any]:
-    """Convertit un workflow ComfyUI UI (nodes/links) en format API /prompt."""
     nodes_by_id = {str(node["id"]): node for node in data["nodes"]}
     link_lookup: dict[int, tuple[str, int]] = {}
     for link in data.get("links", []):
@@ -169,9 +238,6 @@ def ui_workflow_to_api(data: dict[str, Any]) -> dict[str, Any]:
                 inputs[name] = widgets[widget_index]
                 widget_index += 1
 
-        while widget_index < len(widgets):
-            widget_index += 1
-
         prompt[node_id] = {"class_type": class_type, "inputs": inputs}
 
     return prompt
@@ -195,14 +261,20 @@ def build_prompt(positive: str) -> dict[str, Any]:
 async def comfy_queue(prompt: dict[str, Any], client_id: str) -> str:
     payload = {"prompt": prompt, "client_id": client_id}
     timeout = aiohttp.ClientTimeout(total=60)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(f"{COMFY_HTTP}/prompt", json=payload) as response:
-            body = await response.json(content_type=None)
-            if response.status >= 400:
-                raise HTTPException(status_code=502, detail="generation_failed")
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(f"{COMFY_HTTP}/prompt", json=payload) as response:
+                body = await response.json(content_type=None)
+                if response.status >= 400:
+                    log(f"ComfyUI refuse: {body}")
+                    raise HTTPException(status_code=502, detail="comfy_refused")
+    except aiohttp.ClientError as exc:
+        log(f"ComfyUI injoignable: {exc}")
+        raise HTTPException(status_code=503, detail="comfy_offline") from exc
+
     prompt_id = body.get("prompt_id")
     if not prompt_id:
-        raise HTTPException(status_code=502, detail="generation_failed")
+        raise HTTPException(status_code=502, detail="comfy_invalid_response")
     return prompt_id
 
 
@@ -226,6 +298,12 @@ async def comfy_history_filename(prompt_id: str) -> str:
     return media[0]["filename"]
 
 
+@app.on_event("startup")
+async def startup() -> None:
+    log("LTX Studio démarré")
+    asyncio.create_task(ensure_comfyui(timeout_seconds=600))
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     if not INDEX_PATH.is_file():
@@ -235,19 +313,24 @@ async def index() -> HTMLResponse:
 
 @app.get("/api/status")
 async def status() -> JSONResponse:
-    timeout = aiohttp.ClientTimeout(total=3)
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(f"{COMFY_HTTP}/system_stats") as response:
-                if response.status == 200:
-                    return JSONResponse({"status": "ready"})
-    except aiohttp.ClientError:
-        pass
+    if await comfy_is_ready():
+        return JSONResponse({"status": "ready"})
+    return JSONResponse({"status": "offline", "starting": _comfy_process is not None})
+
+
+@app.post("/api/start-comfy")
+async def start_comfy() -> JSONResponse:
+    ok = await ensure_comfyui(timeout_seconds=300)
+    if ok:
+        return JSONResponse({"status": "ready"})
     return JSONResponse({"status": "offline"})
 
 
 @app.post("/api/generate")
 async def generate(body: GenerateRequest) -> JSONResponse:
+    if not await ensure_comfyui(timeout_seconds=120):
+        raise HTTPException(status_code=503, detail="comfy_offline")
+
     client_id = str(uuid.uuid4())
     workflow = build_prompt(body.prompt)
     prompt_id = await comfy_queue(workflow, client_id)
@@ -270,7 +353,7 @@ async def ws_bridge(websocket: WebSocket, client_id: str, prompt_id: str) -> Non
     comfy_url = f"{COMFY_WS}/ws?clientId={client_id}"
 
     try:
-        async with websockets.connect(comfy_url, open_timeout=10) as comfy_ws:
+        async with websockets.connect(comfy_url, open_timeout=15) as comfy_ws:
             await websocket.send_json(
                 {"type": "status", "message": "Génération en cours sur CPU, patience...", "progress": 0.05}
             )
@@ -324,7 +407,8 @@ async def ws_bridge(websocket: WebSocket, client_id: str, prompt_id: str) -> Non
 
     except WebSocketDisconnect:
         return
-    except Exception:
+    except Exception as exc:
+        log(f"WebSocket erreur: {exc}")
         await websocket.send_json({"type": "error", "message": "Connexion interrompue."})
 
 

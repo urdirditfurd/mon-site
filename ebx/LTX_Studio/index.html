@@ -25,8 +25,8 @@
     <header class="flex items-center justify-between">
       <h1 class="text-xl font-semibold tracking-tight">LTX Video Studio</h1>
       <span id="status-badge" class="flex items-center gap-2 text-xs text-zinc-400">
-        <span id="status-dot" class="w-2 h-2 rounded-full bg-zinc-500"></span>
-        <span id="status-label">…</span>
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-zinc-500 animate-pulse"></span>
+        <span id="status-label">Vérification…</span>
       </span>
     </header>
 
@@ -88,6 +88,15 @@
     let reconnectAttempts = 0;
     let generating = false;
     let wsParams = null;
+    let comfyReady = false;
+    let startingComfy = false;
+
+    const ERROR_MSG = {
+      comfy_offline: 'ComfyUI démarre… réessayez dans 1 à 2 minutes.',
+      comfy_refused: 'ComfyUI a refusé le workflow. Vérifiez les modèles LTX.',
+      comfy_invalid_response: 'Réponse ComfyUI invalide.',
+      default: 'Impossible de lancer la génération.',
+    };
 
     function showError(msg) {
       errorText.textContent = msg;
@@ -100,7 +109,7 @@
 
     function setGenerating(on) {
       generating = on;
-      btnGenerate.disabled = on;
+      btnGenerate.disabled = on || (!comfyReady && !startingComfy);
       spinner.classList.toggle('hidden', !on);
       btnLabel.textContent = on ? 'En cours…' : 'Générer';
     }
@@ -122,25 +131,64 @@
       downloadBtn.download = filename;
     }
 
+    function setStatus(state) {
+      if (state === 'ready') {
+        comfyReady = true;
+        startingComfy = false;
+        statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        statusLabel.textContent = 'Prêt';
+        btnGenerate.disabled = generating;
+      } else if (state === 'starting') {
+        comfyReady = false;
+        startingComfy = true;
+        statusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+        statusLabel.textContent = 'Démarrage…';
+        btnGenerate.disabled = true;
+      } else {
+        comfyReady = false;
+        startingComfy = false;
+        statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
+        statusLabel.textContent = 'Hors ligne';
+        btnGenerate.disabled = generating;
+      }
+    }
+
     async function checkStatus() {
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
         if (data.status === 'ready') {
-          statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
-          statusLabel.textContent = 'Prêt';
+          setStatus('ready');
+        } else if (data.starting) {
+          setStatus('starting');
         } else {
-          statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
-          statusLabel.textContent = 'Hors ligne';
+          setStatus('offline');
         }
       } catch {
-        statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
-        statusLabel.textContent = 'Hors ligne';
+        setStatus('offline');
       }
+    }
+
+    async function tryStartComfy() {
+      setStatus('starting');
+      try {
+        await fetch('/api/start-comfy', { method: 'POST' });
+      } catch { /* ignore */ }
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        await checkStatus();
+        if (comfyReady) return true;
+      }
+      return false;
     }
 
     checkStatus();
     setInterval(checkStatus, 5000);
+
+    (async () => {
+      await checkStatus();
+      if (!comfyReady) await tryStartComfy();
+    })();
 
     function connectWebSocket(clientId, promptId) {
       wsParams = { clientId, promptId };
@@ -191,15 +239,11 @@
       };
 
       ws.onerror = () => {
-        if (generating) {
-          scheduleReconnect();
-        }
+        if (generating) scheduleReconnect();
       };
 
       ws.onclose = () => {
-        if (generating && wsParams) {
-          scheduleReconnect();
-        }
+        if (generating && wsParams) scheduleReconnect();
       };
     }
 
@@ -219,6 +263,16 @@
       if (!text) return;
 
       hideError();
+
+      if (!comfyReady) {
+        showProgress('Démarrage de ComfyUI, patientez…', 0.01);
+        const ok = await tryStartComfy();
+        if (!ok) {
+          showError('ComfyUI ne répond pas. Relancez LTX_Studio.bat et attendez 2 minutes.');
+          return;
+        }
+      }
+
       setGenerating(true);
       resultSection.classList.add('hidden');
       showProgress('Lancement…', 0.02);
@@ -231,14 +285,15 @@
         });
 
         if (!res.ok) {
-          throw new Error('Impossible de lancer la génération.');
+          const err = await res.json().catch(() => ({}));
+          throw new Error(ERROR_MSG[err.detail] || ERROR_MSG.default);
         }
 
         const data = await res.json();
         connectWebSocket(data.client_id, data.prompt_id);
-      } catch {
+      } catch (err) {
         setGenerating(false);
-        showError('Impossible de lancer la génération.');
+        showError(err.message || ERROR_MSG.default);
       }
     });
   </script>
