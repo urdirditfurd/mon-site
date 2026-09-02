@@ -11,6 +11,7 @@ import json
 import random
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -23,17 +24,25 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# Chemins fixes
+# Chemins (auto-détection depuis l'emplacement de server.py)
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path(r"C:\ComfyUI-ARM\LTX_Studio")
+BASE_DIR = Path(__file__).resolve().parent
 INDEX_PATH = BASE_DIR / "index.html"
-WORKFLOW_PATH = Path(r"C:\ComfyUI-ARM\ltxv_text_to_video_0.9.5.json")
-OUTPUT_DIR = Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows\output")
 LOG_DIR = BASE_DIR / "logs"
 
-COMFY_DIR = Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows")
+# ComfyUI : dossier frère par défaut, ou chemin fixe connu
+_candidate_comfy = BASE_DIR.parent / "ComfyUI-ARM-Windows"
+COMFY_DIR = _candidate_comfy if _candidate_comfy.is_dir() else Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows")
 COMFY_PYTHON = COMFY_DIR / "venv" / "Scripts" / "python.exe"
+OUTPUT_DIR = COMFY_DIR / "output"
+
+WORKFLOW_CANDIDATES = [
+    BASE_DIR / "workflow_ltx.json",
+    BASE_DIR.parent / "ltxv_text_to_video_0.9.5.json",
+    Path(r"C:\ComfyUI-ARM\ltxv_text_to_video_0.9.5.json"),
+    COMFY_DIR / "ltxv_text_to_video_0.9.5.json",
+]
 COMFY_HTTP = "http://127.0.0.1:8190"
 COMFY_WS = "ws://127.0.0.1:8190"
 
@@ -129,8 +138,38 @@ app = FastAPI(title="LTX Video Studio", docs_url=None, redoc_url=None)
 
 def log(message: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    line = f"{message}\n"
-    (LOG_DIR / "server.log").open("a", encoding="utf-8").write(line)
+    with (LOG_DIR / "server.log").open("a", encoding="utf-8") as handle:
+        handle.write(f"{message}\n")
+
+
+def read_log_tail(path: Path, lines: int = 12) -> str:
+    if not path.is_file():
+        return ""
+    content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(content[-lines:])
+
+
+def find_workflow_path() -> Path | None:
+    for candidate in WORKFLOW_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def diagnose_comfy_error() -> str:
+    tail = read_log_tail(LOG_DIR / "comfyui.log", 20)
+    upper = tail.upper()
+    if "CUDA" in upper or "TORCH NOT COMPILED" in upper:
+        return "ComfyUI plante (erreur CUDA). Relancez avec --cpu via LTX_Studio.bat."
+    if "NO MODULE" in upper or "MODULENOTFOUND" in upper:
+        return "Module Python manquant dans ComfyUI. Consultez logs/comfyui.log."
+    if not COMFY_PYTHON.is_file():
+        return f"Python ComfyUI introuvable : {COMFY_PYTHON}"
+    if not (COMFY_DIR / "main.py").is_file():
+        return f"ComfyUI introuvable : {COMFY_DIR}"
+    if _comfy_process and _comfy_process.poll() is not None:
+        return f"ComfyUI s'est arrêté (code {_comfy_process.returncode}). Voir logs/comfyui.log."
+    return "ComfyUI démarre… le premier lancement peut prendre 5 minutes."
 
 
 async def comfy_is_ready() -> bool:
@@ -184,14 +223,14 @@ async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
     if _comfy_process is None or _comfy_process.poll() is not None:
         start_comfyui_background()
 
-    deadline = asyncio.get_event_loop().time() + timeout_seconds
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
         if await comfy_is_ready():
             log("ComfyUI prêt.")
             return True
         if _comfy_process and _comfy_process.poll() is not None:
-            log(f"ComfyUI arrêté (code {_comfy_process.returncode})")
-            return False
+            log(f"ComfyUI arrêté (code {_comfy_process.returncode}), nouvel essai...")
+            start_comfyui_background()
         await asyncio.sleep(3)
 
     log("Timeout attente ComfyUI")
@@ -199,8 +238,9 @@ async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
 
 
 def load_workflow_template() -> dict[str, Any]:
-    if WORKFLOW_PATH.is_file():
-        with WORKFLOW_PATH.open(encoding="utf-8") as handle:
+    workflow_path = find_workflow_path()
+    if workflow_path:
+        with workflow_path.open(encoding="utf-8") as handle:
             data = json.load(handle)
         if isinstance(data.get("prompt"), dict):
             return copy.deepcopy(data["prompt"])
@@ -315,7 +355,29 @@ async def index() -> HTMLResponse:
 async def status() -> JSONResponse:
     if await comfy_is_ready():
         return JSONResponse({"status": "ready"})
-    return JSONResponse({"status": "offline", "starting": _comfy_process is not None})
+    return JSONResponse(
+        {
+            "status": "offline",
+            "starting": _comfy_process is not None and _comfy_process.poll() is None,
+            "hint": diagnose_comfy_error(),
+        }
+    )
+
+
+@app.get("/api/diag")
+async def diag() -> JSONResponse:
+    return JSONResponse(
+        {
+            "comfy_ready": await comfy_is_ready(),
+            "comfy_dir": str(COMFY_DIR),
+            "comfy_dir_exists": COMFY_DIR.is_dir(),
+            "python_exists": COMFY_PYTHON.is_file(),
+            "studio_dir": str(BASE_DIR),
+            "comfy_process": _comfy_process.poll() if _comfy_process else None,
+            "hint": diagnose_comfy_error(),
+            "comfy_log_tail": read_log_tail(LOG_DIR / "comfyui.log", 8),
+        }
+    )
 
 
 @app.post("/api/start-comfy")
@@ -323,7 +385,7 @@ async def start_comfy() -> JSONResponse:
     ok = await ensure_comfyui(timeout_seconds=300)
     if ok:
         return JSONResponse({"status": "ready"})
-    return JSONResponse({"status": "offline"})
+    return JSONResponse({"status": "offline", "hint": diagnose_comfy_error()})
 
 
 @app.post("/api/generate")

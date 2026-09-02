@@ -30,6 +30,10 @@
       </span>
     </header>
 
+    <div id="offline-hint" class="hidden rounded-lg bg-amber-950/40 border border-amber-800/40 px-4 py-3 text-xs text-amber-200/90">
+      <span id="offline-hint-text">ComfyUI démarre…</span>
+    </div>
+
     <main class="space-y-6">
       <textarea id="prompt" rows="4"
         class="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-4 py-3 text-sm placeholder-zinc-600 focus:outline-none focus:border-indigo-600 resize-none"
@@ -157,15 +161,25 @@
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
+        const hintEl = $('offline-hint');
+        const hintText = $('offline-hint-text');
+
         if (data.status === 'ready') {
           setStatus('ready');
+          hintEl.classList.add('hidden');
         } else if (data.starting) {
           setStatus('starting');
+          hintText.textContent = data.hint || 'ComfyUI démarre… patientez 2 à 5 minutes.';
+          hintEl.classList.remove('hidden');
         } else {
           setStatus('offline');
+          hintText.textContent = data.hint || 'ComfyUI hors ligne. Relancez LTX_Studio.bat ou LTX_Studio_Debug.bat.';
+          hintEl.classList.remove('hidden');
         }
       } catch {
         setStatus('offline');
+        $('offline-hint-text').textContent = 'Serveur LTX Studio injoignable. Relancez LTX_Studio.bat.';
+        $('offline-hint').classList.remove('hidden');
       }
     }
 
@@ -183,7 +197,7 @@
     }
 
     checkStatus();
-    setInterval(checkStatus, 5000);
+    setInterval(checkStatus, 3000);
 
     (async () => {
       await checkStatus();
