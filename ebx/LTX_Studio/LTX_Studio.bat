@@ -42,6 +42,9 @@ if errorlevel 1 (
 echo Lancement...
 echo Correction huggingface-hub (conflit transformers)...
 "%PYTHON%" -m pip install -q "huggingface-hub>=0.23.2,<1.0" "transformers>=4.45.0"
+echo Liberation des ports 8191 et 8190...
+powershell -NoProfile -Command "foreach($p in 8191,8190){$c=Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue; if($c){$c.OwningProcess|Sort-Object -Unique|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}}"
+timeout /t 2 /nobreak >nul
 "%PYTHON%" "%STUDIO_DIR%\launcher.py"
 echo.
 echo LTX Studio s'est arrete. Laissez cette fenetre ouverte pour lire l'erreur.

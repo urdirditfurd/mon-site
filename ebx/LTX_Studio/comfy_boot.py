@@ -147,7 +147,7 @@ def kill_port(port: int = COMFY_PORT) -> None:
     if sys.platform != "win32":
         return
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
                 "powershell",
                 "-NoProfile",
@@ -162,8 +162,19 @@ def kill_port(port: int = COMFY_PORT) -> None:
             text=True,
             timeout=15,
         )
+        log(f"kill_port({port}) rc={result.returncode}")
     except Exception as exc:  # noqa: BLE001
-        log(f"kill_port: {exc}")
+        log(f"kill_port failed: {exc}")
+
+
+def free_studio_ports() -> None:
+    """Libère 8191 (UI) et 8190 (ComfyUI) avant démarrage."""
+    for port in (8191, 8190):
+        if port_in_use(port):
+            log(f"Port {port} occupe — liberation...")
+            print(f"Liberation du port {port}...")
+            kill_port(port)
+    time.sleep(1.5)
 
 
 def stop_comfy() -> None:

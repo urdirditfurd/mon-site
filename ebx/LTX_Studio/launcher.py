@@ -67,15 +67,25 @@ def main() -> None:
     comfy_boot.log(f"Python={sys.executable}")
     comfy_boot.log(f"ComfyUI={comfy_boot.COMFY_DIR}")
 
-    print("LTX Studio launcher v4")
+    print("LTX Studio launcher v5")
     print("Interface : http://127.0.0.1:8191")
-    print("Correction deps puis demarrage ComfyUI...")
+    print("Liberation des ports puis demarrage...")
+    comfy_boot.free_studio_ports()
 
     threading.Thread(target=boot_comfy_background, daemon=True).start()
     if not args.no_browser:
         threading.Thread(target=open_browser_later, daemon=True).start()
 
-    uvicorn.run("server:app", host="127.0.0.1", port=8191, reload=False, log_level="warning")
+    try:
+        uvicorn.run("server:app", host="127.0.0.1", port=8191, reload=False, log_level="warning")
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 10048 or "10048" in str(exc):
+            print("Port 8191 encore occupe — nouvel essai...")
+            comfy_boot.free_studio_ports()
+            time.sleep(2)
+            uvicorn.run("server:app", host="127.0.0.1", port=8191, reload=False, log_level="warning")
+        else:
+            raise
 
 
 if __name__ == "__main__":
