@@ -13,7 +13,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, IO
 
@@ -39,11 +38,11 @@ _attempt_history: list[str] = []
 _log_lock = threading.Lock()
 
 
-@dataclass
 class LaunchProfile:
-    name: str
-    args: list[str]
-    env: dict[str, str] = field(default_factory=dict)
+    def __init__(self, name: str, args: list[str], env: dict[str, str] | None = None) -> None:
+        self.name = name
+        self.args = args
+        self.env = env if env is not None else {}
 
 
 # Uniquement des flags ComfyUI standards (les flags inconnus font crasher au boot).

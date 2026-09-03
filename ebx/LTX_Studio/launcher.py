@@ -63,6 +63,7 @@ def main() -> None:
     comfy_boot.log(f"Python={sys.executable}")
     comfy_boot.log(f"ComfyUI={comfy_boot.COMFY_DIR}")
 
+    print("LTX Studio launcher v3")
     print("Interface : http://127.0.0.1:8191")
     print("ComfyUI demarre en parallele (ne fermez pas cette fenetre).")
 
