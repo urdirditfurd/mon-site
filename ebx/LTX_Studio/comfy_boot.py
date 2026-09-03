@@ -102,6 +102,8 @@ def is_ready() -> bool:
 
 def classify_error(tail: str) -> str:
     u = tail.upper()
+    if "CLIPTOKENIZER" in u:
+        return "clip_tokenizer_broken"
     if "HUGGINGFACE-HUB" in u and ("REQUIRED" in u or "IMPORTERROR" in u):
         return "hf_hub_conflict"
     if "UNRECOGNIZED ARGUMENTS" in u or "UNRECOGNIZED ARGUMENT" in u:
@@ -110,7 +112,7 @@ def classify_error(tail: str) -> str:
         return "cuda_assert"
     if "FLOAT64" in u:
         return "float64"
-    if "MODULENOTFOUNDERROR" in u or "NO MODULE NAMED" in u:
+    if "MODULENOTFOUNDERROR" in u or "NO MODULE NAMED" in u or "CANNOT IMPORT NAME" in u:
         return "missing_module"
     if "ADDRESS ALREADY IN USE" in u or "ERRNO 10048" in u:
         return "port_busy"
@@ -119,28 +121,88 @@ def classify_error(tail: str) -> str:
     return "silent_exit"
 
 
-def repair_comfy_deps() -> None:
-    """Corrige le conflit transformers / huggingface-hub (cause actuelle du crash)."""
+def repair_comfy_deps() -> bool:
+    """
+    Reparation complete de la pile transformers/tokenizers/huggingface-hub.
+    Cause actuelle: CLIPTokenizer introuvable + distribution ~okenizers cassee.
+    """
     if not COMFY_PYTHON.is_file():
-        return
+        return False
     if ERROR_REPORT.is_file():
         ERROR_REPORT.unlink(missing_ok=True)
 
-    log("Reparation deps ComfyUI: huggingface-hub<1.0 + transformers")
-    print("Correction du conflit huggingface-hub / transformers...")
-    cmds = [
-        [str(COMFY_PYTHON), "-m", "pip", "install", "-q", "huggingface-hub>=0.23.2,<1.0"],
-        [str(COMFY_PYTHON), "-m", "pip", "install", "-q", "transformers>=4.45.0"],
+    # Verifier d'abord si deja OK
+    probe = subprocess.run(
+        [str(COMFY_PYTHON), "-c", "from transformers import CLIPTokenizer; print('OK')"],
+        cwd=str(COMFY_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if probe.returncode == 0 and "OK" in (probe.stdout or ""):
+        log("transformers/CLIPTokenizer deja OK")
+        return True
+
+    log("Reparation FORCEE: tokenizers + transformers + huggingface-hub")
+    print("Reparation transformers/tokenizers (CLIPTokenizer)...")
+
+    site = COMFY_DIR / "venv" / "Lib" / "site-packages"
+    # Nettoyer les dossiers pip corrompus (~okenizers, etc.)
+    if site.is_dir():
+        for item in site.iterdir():
+            name = item.name.lower()
+            if name.startswith("~") or name in {"~okenizers", "~ransformers", "~uggingface_hub"}:
+                try:
+                    if item.is_dir():
+                        import shutil
+
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                    log(f"Supprime package corrompu: {item.name}")
+                except Exception as exc:  # noqa: BLE001
+                    log(f"Nettoyage {item.name}: {exc}")
+
+    steps = [
+        [str(COMFY_PYTHON), "-m", "pip", "uninstall", "-y", "transformers", "tokenizers", "huggingface-hub"],
+        [
+            str(COMFY_PYTHON),
+            "-m",
+            "pip",
+            "install",
+            "--force-reinstall",
+            "--no-cache-dir",
+            "huggingface-hub==0.26.5",
+            "tokenizers==0.20.3",
+            "transformers==4.46.3",
+        ],
     ]
-    for cmd in cmds:
+    for cmd in steps:
         try:
-            result = subprocess.run(cmd, cwd=str(COMFY_DIR), timeout=300, capture_output=True, text=True)
-            log(f"pip {' '.join(cmd[4:])} -> {result.returncode}")
-            if result.returncode != 0 and result.stderr:
-                log(result.stderr[-400:])
+            print(" ", " ".join(cmd[3:]))
+            result = subprocess.run(cmd, cwd=str(COMFY_DIR), timeout=600, capture_output=True, text=True)
+            log(f"pip {' '.join(cmd[3:])} -> {result.returncode}")
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "")[-500:]
+                log(err)
         except Exception as exc:  # noqa: BLE001
-            log(f"repair_comfy_deps: {exc}")
-    print("Correction terminee.")
+            log(f"repair step failed: {exc}")
+
+    verify = subprocess.run(
+        [str(COMFY_PYTHON), "-c", "from transformers import CLIPTokenizer; print('OK')"],
+        cwd=str(COMFY_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    ok = verify.returncode == 0 and "OK" in (verify.stdout or "")
+    if ok:
+        log("CLIPTokenizer OK apres reparation")
+        print("Reparation OK.")
+    else:
+        log(f"CLIPTokenizer TOUJOURS CASSE: {(verify.stderr or verify.stdout or '')[-400:]}")
+        print("Reparation incomplete — voir logs.")
+    return ok
 
 
 def kill_port(port: int = COMFY_PORT) -> None:

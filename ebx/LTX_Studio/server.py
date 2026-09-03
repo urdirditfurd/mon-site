@@ -9,6 +9,7 @@ import asyncio
 import copy
 import json
 import random
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -148,10 +149,18 @@ def diagnose_comfy_error() -> str:
 
 
 async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
+    # Ne pas relancer repair/relance en boucle depuis l'API :
+    # le launcher s'en charge une seule fois.
     if await comfy_is_ready():
         return True
-    await asyncio.to_thread(comfy_boot.repair_comfy_deps)
-    return await asyncio.to_thread(comfy_boot.wait_until_ready, timeout_seconds)
+    if comfy_boot.process_alive():
+        deadline = time.monotonic() + min(timeout_seconds, 90)
+        while time.monotonic() < deadline:
+            if await comfy_is_ready():
+                return True
+            await asyncio.sleep(2)
+        return await comfy_is_ready()
+    return False
 
 
 def find_workflow_path() -> Path | None:
@@ -265,8 +274,7 @@ async def comfy_history_filename(prompt_id: str) -> str:
 @app.on_event("startup")
 async def startup() -> None:
     log("LTX Studio démarré")
-    if not comfy_boot.process_alive() and not await comfy_is_ready():
-        asyncio.create_task(ensure_comfyui(timeout_seconds=180))
+    # Le launcher démarre déjà ComfyUI — ne pas relancer en boucle ici.
 
 
 @app.get("/", response_class=HTMLResponse)
