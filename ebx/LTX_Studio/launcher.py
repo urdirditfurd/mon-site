@@ -50,6 +50,7 @@ def open_browser_later(delay: float = 1.2) -> None:
 
 def boot_comfy_background() -> None:
     comfy_boot.log("Thread ComfyUI demarre")
+    comfy_boot.repair_comfy_deps()
     comfy_boot.wait_until_ready(timeout_seconds=180, max_attempts=3)
 
 
@@ -60,12 +61,15 @@ def main() -> None:
     args = parser.parse_args()
 
     comfy_boot.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if comfy_boot.ERROR_REPORT.is_file():
+        comfy_boot.ERROR_REPORT.unlink(missing_ok=True)
+
     comfy_boot.log(f"Python={sys.executable}")
     comfy_boot.log(f"ComfyUI={comfy_boot.COMFY_DIR}")
 
-    print("LTX Studio launcher v3")
+    print("LTX Studio launcher v4")
     print("Interface : http://127.0.0.1:8191")
-    print("ComfyUI demarre en parallele (ne fermez pas cette fenetre).")
+    print("Correction deps puis demarrage ComfyUI...")
 
     threading.Thread(target=boot_comfy_background, daemon=True).start()
     if not args.no_browser:

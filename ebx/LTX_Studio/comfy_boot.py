@@ -102,6 +102,8 @@ def is_ready() -> bool:
 
 def classify_error(tail: str) -> str:
     u = tail.upper()
+    if "HUGGINGFACE-HUB" in u and ("REQUIRED" in u or "IMPORTERROR" in u):
+        return "hf_hub_conflict"
     if "UNRECOGNIZED ARGUMENTS" in u or "UNRECOGNIZED ARGUMENT" in u:
         return "bad_flag"
     if "TORCH NOT COMPILED WITH CUDA" in u or ("ASSERTIONERROR" in u and "CUDA" in u):
@@ -115,6 +117,30 @@ def classify_error(tail: str) -> str:
     if tail.strip():
         return "unknown_crash"
     return "silent_exit"
+
+
+def repair_comfy_deps() -> None:
+    """Corrige le conflit transformers / huggingface-hub (cause actuelle du crash)."""
+    if not COMFY_PYTHON.is_file():
+        return
+    if ERROR_REPORT.is_file():
+        ERROR_REPORT.unlink(missing_ok=True)
+
+    log("Reparation deps ComfyUI: huggingface-hub<1.0 + transformers")
+    print("Correction du conflit huggingface-hub / transformers...")
+    cmds = [
+        [str(COMFY_PYTHON), "-m", "pip", "install", "-q", "huggingface-hub>=0.23.2,<1.0"],
+        [str(COMFY_PYTHON), "-m", "pip", "install", "-q", "transformers>=4.45.0"],
+    ]
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, cwd=str(COMFY_DIR), timeout=300, capture_output=True, text=True)
+            log(f"pip {' '.join(cmd[4:])} -> {result.returncode}")
+            if result.returncode != 0 and result.stderr:
+                log(result.stderr[-400:])
+        except Exception as exc:  # noqa: BLE001
+            log(f"repair_comfy_deps: {exc}")
+    print("Correction terminee.")
 
 
 def kill_port(port: int = COMFY_PORT) -> None:

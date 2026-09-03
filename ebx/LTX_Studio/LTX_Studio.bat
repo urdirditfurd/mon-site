@@ -40,6 +40,8 @@ if errorlevel 1 (
 )
 
 echo Lancement...
+echo Correction huggingface-hub (conflit transformers)...
+"%PYTHON%" -m pip install -q "huggingface-hub>=0.23.2,<1.0" "transformers>=4.45.0"
 "%PYTHON%" "%STUDIO_DIR%\launcher.py"
 echo.
 echo LTX Studio s'est arrete. Laissez cette fenetre ouverte pour lire l'erreur.

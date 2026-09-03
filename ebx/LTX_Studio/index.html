@@ -206,25 +206,26 @@
     }
 
     async function tryStartComfy() {
+      // Une seule tentative : pas de boucle de redemarrage
       setStatus('starting');
       try {
         await fetch('/api/start-comfy', { method: 'POST' });
       } catch { /* ignore */ }
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
         await checkStatus();
         if (comfyReady) return true;
-        if (!startingComfy && $('error-report').textContent) return false;
+        if ($('error-report').textContent.trim()) return false;
       }
       return false;
     }
 
     checkStatus();
-    setInterval(checkStatus, 3000);
+    setInterval(checkStatus, 4000);
 
+    // Pas de relance automatique en boucle — le launcher gere ComfyUI
     (async () => {
       await checkStatus();
-      if (!comfyReady) await tryStartComfy();
     })();
 
     function connectWebSocket(clientId, promptId) {

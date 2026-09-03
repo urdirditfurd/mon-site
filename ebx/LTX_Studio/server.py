@@ -148,6 +148,9 @@ def diagnose_comfy_error() -> str:
 
 
 async def ensure_comfyui(timeout_seconds: int = 300) -> bool:
+    if await comfy_is_ready():
+        return True
+    await asyncio.to_thread(comfy_boot.repair_comfy_deps)
     return await asyncio.to_thread(comfy_boot.wait_until_ready, timeout_seconds)
 
 
