@@ -74,4 +74,20 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        print("\nErreur au demarrage. La fenetre reste ouverte.")
+        try:
+            input("Appuyez sur Entree pour fermer...")
+        except EOFError:
+            time.sleep(60)
+    else:
+        print("\nServeur arrete.")
+        try:
+            input("Appuyez sur Entree pour fermer...")
+        except EOFError:
+            time.sleep(30)

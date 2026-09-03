@@ -1,70 +1,50 @@
 @echo off
-title LTX Studio
+title LTX Studio - NE PAS FERMER
 cd /d "%~dp0"
 
-REM Si lance depuis un ZIP / dossier temporaire Windows → message clair
-echo %~dp0 | findstr /I "\\Temp\\ AppData\\Local\\Temp" >nul
-if not errorlevel 1 (
-    echo.
-    echo ========================================================
-    echo  ERREUR : vous lancez LTX_Studio depuis le ZIP.
-    echo.
-    echo  1. Fermez cette fenetre
-    echo  2. Clic droit sur LTX_Studio.zip → Extraire tout
-    echo  3. Extraire vers : C:\ComfyUI-ARM\LTX_Studio\
-    echo  4. Ouvrez CE dossier, puis double-cliquez LTX_Studio.bat
-    echo ========================================================
-    echo.
-    pause
-    exit /b 1
+REM Relance dans une fenetre qui ne peut PAS se fermer toute seule (cmd /k)
+if /I not "%~1"=="KEEPOPEN" (
+    start "LTX Studio - NE PAS FERMER" cmd /k "%~f0" KEEPOPEN
+    exit /b 0
 )
 
 set "STUDIO_DIR=%~dp0"
 set "STUDIO_DIR=%STUDIO_DIR:~0,-1%"
 set "PYTHON=C:\ComfyUI-ARM\ComfyUI-ARM-Windows\venv\Scripts\python.exe"
-set "LOG_DIR=%STUDIO_DIR%\logs"
-
-if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
-
-if not exist "%PYTHON%" (
-    echo.
-    echo Python ComfyUI introuvable :
-    echo   %PYTHON%
-    echo.
-    echo Verifiez que ComfyUI est installe dans :
-    echo   C:\ComfyUI-ARM\ComfyUI-ARM-Windows\
-    echo.
-    pause
-    exit /b 1
-)
-
-if not exist "%STUDIO_DIR%\launcher.py" (
-    echo.
-    echo Fichier launcher.py manquant dans :
-    echo   %STUDIO_DIR%
-    echo.
-    echo Extraire TOUT le zip dans C:\ComfyUI-ARM\LTX_Studio\
-    echo.
-    pause
-    exit /b 1
-)
 
 echo.
 echo ========================================================
 echo  LTX Studio
-echo  Le navigateur s'ouvre maintenant.
-echo  Ne fermez PAS cette fenetre.
+echo  CETTE FENETRE DOIT RESTER OUVERTE
+echo  Interface : http://127.0.0.1:8191
 echo ========================================================
 echo.
 
-cd /d "%STUDIO_DIR%"
-"%PYTHON%" -c "import uvicorn,fastapi,websockets" 2>nul
-if errorlevel 1 (
-    echo Installation des composants...
-    "%PYTHON%" -m pip install -q -r "%STUDIO_DIR%\requirements.txt"
+if not exist "%PYTHON%" (
+    echo ERREUR : Python introuvable
+    echo %PYTHON%
+    goto :keep
 )
 
+if not exist "%STUDIO_DIR%\launcher.py" (
+    echo ERREUR : launcher.py manquant
+    echo Dossier : %STUDIO_DIR%
+    goto :keep
+)
+
+cd /d "%STUDIO_DIR%"
+"%PYTHON%" -c "import uvicorn,fastapi,websockets" 1>nul 2>nul
+if errorlevel 1 (
+    echo Installation des composants...
+    "%PYTHON%" -m pip install -r "%STUDIO_DIR%\requirements.txt"
+)
+
+echo Lancement...
 "%PYTHON%" "%STUDIO_DIR%\launcher.py"
 echo.
-echo LTX Studio s'est arrete. Consultez logs\boot.log
-pause
+echo LTX Studio s'est arrete. Laissez cette fenetre ouverte pour lire l'erreur.
+
+:keep
+echo.
+echo Tapez exit pour fermer.
+echo.
