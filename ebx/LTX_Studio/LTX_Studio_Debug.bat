@@ -9,11 +9,9 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-echo.
-echo LTX Studio - mode diagnostic
-echo ComfyUI s'ouvrira dans une fenetre separee.
-echo Patientez 5-10 minutes au premier lancement.
+echo LTX Studio - Self-Healing Debug
+echo Logs: %~dp0logs\comfyui.log
 echo.
 
-"%PYTHON%" launcher.py --debug
+"%PYTHON%" launcher.py --debug --no-browser
 pause

@@ -30,8 +30,9 @@
       </span>
     </header>
 
-    <div id="offline-hint" class="hidden rounded-lg bg-amber-950/40 border border-amber-800/40 px-4 py-3 text-xs text-amber-200/90">
-      <span id="offline-hint-text">ComfyUI démarre…</span>
+    <div id="offline-hint" class="hidden rounded-lg bg-amber-950/40 border border-amber-800/40 px-4 py-3 text-xs text-amber-200/90 space-y-2">
+      <p id="offline-hint-text">ComfyUI démarre…</p>
+      <pre id="error-report" class="hidden max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/40 p-2 text-[10px] text-amber-100/80"></pre>
     </div>
 
     <main class="space-y-6">
@@ -86,6 +87,7 @@
     const errorText = $('error-text');
     const statusDot = $('status-dot');
     const statusLabel = $('status-label');
+    const errorReportEl = $('error-report');
 
     let ws = null;
     let reconnectTimer = null;
@@ -113,7 +115,7 @@
 
     function setGenerating(on) {
       generating = on;
-      btnGenerate.disabled = on || (!comfyReady && !startingComfy);
+      btnGenerate.disabled = on || !comfyReady;
       spinner.classList.toggle('hidden', !on);
       btnLabel.textContent = on ? 'En cours…' : 'Générer';
     }
@@ -142,6 +144,7 @@
         statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
         statusLabel.textContent = 'Prêt';
         btnGenerate.disabled = generating;
+        errorReportEl.classList.add('hidden');
       } else if (state === 'starting') {
         comfyReady = false;
         startingComfy = true;
@@ -153,32 +156,51 @@
         startingComfy = false;
         statusDot.className = 'w-2 h-2 rounded-full bg-red-400';
         statusLabel.textContent = 'Hors ligne';
-        btnGenerate.disabled = generating;
+        btnGenerate.disabled = true;
       }
+    }
+
+    function showReport(report) {
+      if (!report) {
+        errorReportEl.classList.add('hidden');
+        errorReportEl.textContent = '';
+        return;
+      }
+      errorReportEl.textContent = report;
+      errorReportEl.classList.remove('hidden');
     }
 
     async function checkStatus() {
       try {
         const res = await fetch('/api/status');
+        if (!res.ok) throw new Error('bad status');
         const data = await res.json();
         const hintEl = $('offline-hint');
         const hintText = $('offline-hint-text');
 
-        if (data.status === 'ready') {
+        // Prêt UNIQUEMENT si status ready + réponse HTTP 200
+        if (data.status === 'ready' && data.http_ok !== false) {
           setStatus('ready');
           hintEl.classList.add('hidden');
-        } else if (data.starting) {
-          setStatus('starting');
-          hintText.textContent = data.hint || 'ComfyUI démarre… patientez 2 à 5 minutes.';
-          hintEl.classList.remove('hidden');
-        } else {
-          setStatus('offline');
-          hintText.textContent = data.hint || 'ComfyUI hors ligne. Double-cliquez LTX_Studio_Debug.bat pour voir l\'erreur.';
-          hintEl.classList.remove('hidden');
+          showReport(null);
+          return;
         }
+
+        if (data.starting) {
+          setStatus('starting');
+          hintText.textContent = data.hint || 'Auto-réparation en cours… patientez jusqu\'à 10 minutes.';
+          hintEl.classList.remove('hidden');
+          showReport(null);
+          return;
+        }
+
+        setStatus('offline');
+        hintText.textContent = data.hint || 'ComfyUI hors ligne après auto-correction.';
+        hintEl.classList.remove('hidden');
+        showReport(data.error_report || null);
       } catch {
         setStatus('offline');
-        $('offline-hint-text').textContent = 'Serveur LTX Studio injoignable. Relancez LTX_Studio.bat.';
+        $('offline-hint-text').textContent = 'Interface en attente du serveur…';
         $('offline-hint').classList.remove('hidden');
       }
     }
@@ -188,10 +210,11 @@
       try {
         await fetch('/api/start-comfy', { method: 'POST' });
       } catch { /* ignore */ }
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 60; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         await checkStatus();
         if (comfyReady) return true;
+        if (!startingComfy && $('error-report').textContent) return false;
       }
       return false;
     }
@@ -212,15 +235,9 @@
 
     function openWebSocket() {
       if (!wsParams) return;
-
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const url = `${protocol}//${location.host}/ws?client_id=${wsParams.clientId}&prompt_id=${wsParams.promptId}`;
-
-      if (ws) {
-        ws.onclose = null;
-        ws.close();
-      }
-
+      if (ws) { ws.onclose = null; ws.close(); }
       ws = new WebSocket(url);
 
       ws.onopen = () => {
@@ -230,14 +247,12 @@
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-
         if (msg.type === 'error') {
           setGenerating(false);
           showError(msg.message || 'La génération a échoué.');
           ws.close();
           return;
         }
-
         if (msg.type === 'complete') {
           setGenerating(false);
           hideError();
@@ -245,26 +260,20 @@
           ws.close();
           return;
         }
-
         if (msg.type === 'progress' || msg.type === 'status') {
           const ratio = msg.progress ?? (msg.percent != null ? msg.percent / 100 : 0.05);
           showProgress(msg.message, ratio);
         }
       };
 
-      ws.onerror = () => {
-        if (generating) scheduleReconnect();
-      };
-
-      ws.onclose = () => {
-        if (generating && wsParams) scheduleReconnect();
-      };
+      ws.onerror = () => { if (generating) scheduleReconnect(); };
+      ws.onclose = () => { if (generating && wsParams) scheduleReconnect(); };
     }
 
     function scheduleReconnect() {
       if (reconnectAttempts >= 10) {
         setGenerating(false);
-        showError('Connexion perdue. Réessayez.');
+        showError('Connexion perdue.');
         return;
       }
       reconnectAttempts += 1;
@@ -275,14 +284,13 @@
     btnGenerate.addEventListener('click', async () => {
       const text = promptEl.value.trim();
       if (!text) return;
-
       hideError();
 
       if (!comfyReady) {
-        showProgress('Démarrage de ComfyUI, patientez…', 0.01);
+        showProgress('Auto-démarrage ComfyUI…', 0.01);
         const ok = await tryStartComfy();
         if (!ok) {
-          showError('ComfyUI ne répond pas. Lancez LTX_Studio_Debug.bat et attendez 5 minutes.');
+          showError('ComfyUI inaccessible après auto-correction.');
           return;
         }
       }
@@ -297,12 +305,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: text }),
         });
-
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(ERROR_MSG[err.detail] || ERROR_MSG.default);
         }
-
         const data = await res.json();
         connectWebSocket(data.client_id, data.prompt_id);
       } catch (err) {

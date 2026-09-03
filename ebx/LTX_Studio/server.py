@@ -272,15 +272,29 @@ async def index() -> HTMLResponse:
     return HTMLResponse(content=INDEX_PATH.read_text(encoding="utf-8"))
 
 
+def _error_report_text() -> str | None:
+    path = comfy_boot.ERROR_REPORT
+    if path.is_file():
+        return path.read_text(encoding="utf-8", errors="replace")
+    return None
+
+
 @app.get("/api/status")
 async def status() -> JSONResponse:
     if await comfy_is_ready():
-        return JSONResponse({"status": "ready"})
+        return JSONResponse({"status": "ready", "http_ok": True})
+
+    alive = comfy_boot.process_alive()
+    report = _error_report_text()
     return JSONResponse(
         {
             "status": "offline",
-            "starting": comfy_boot.process_alive() and not await comfy_is_ready(),
+            "http_ok": False,
+            "starting": alive,
             "hint": diagnose_comfy_error(),
+            "error_report": report,
+            "profile": comfy_boot._active_profile,
+            "attempts": list(comfy_boot._attempt_history),
         }
     )
 
@@ -296,9 +310,19 @@ async def diag() -> JSONResponse:
             "studio_dir": str(BASE_DIR),
             "comfy_process": comfy_boot.process_exit_code(),
             "hint": diagnose_comfy_error(),
-            "comfy_log_tail": comfy_boot.read_log_tail("comfyui.log", 8),
+            "error_report": _error_report_text(),
+            "comfy_log_tail": comfy_boot.read_log_tail("comfyui.log", 20),
+            "attempts": list(comfy_boot._attempt_history),
         }
     )
+
+
+@app.get("/api/error-report")
+async def error_report() -> JSONResponse:
+    report = _error_report_text()
+    if not report:
+        return JSONResponse({"status": "none", "report": None})
+    return JSONResponse({"status": "error", "report": report})
 
 
 @app.post("/api/start-comfy")
@@ -306,7 +330,13 @@ async def start_comfy() -> JSONResponse:
     ok = await ensure_comfyui(timeout_seconds=300)
     if ok:
         return JSONResponse({"status": "ready"})
-    return JSONResponse({"status": "offline", "hint": diagnose_comfy_error()})
+    return JSONResponse(
+        {
+            "status": "offline",
+            "hint": diagnose_comfy_error(),
+            "error_report": _error_report_text(),
+        }
+    )
 
 
 @app.post("/api/generate")
