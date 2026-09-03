@@ -262,7 +262,8 @@ async def comfy_history_filename(prompt_id: str) -> str:
 @app.on_event("startup")
 async def startup() -> None:
     log("LTX Studio démarré")
-    asyncio.create_task(ensure_comfyui(timeout_seconds=600))
+    if not comfy_boot.process_alive() and not await comfy_is_ready():
+        asyncio.create_task(ensure_comfyui(timeout_seconds=180))
 
 
 @app.get("/", response_class=HTMLResponse)
