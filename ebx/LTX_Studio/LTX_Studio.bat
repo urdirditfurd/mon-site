@@ -52,6 +52,7 @@ if not exist "%STUDIO_DIR%\launcher.py" (
 echo.
 echo ========================================================
 echo  LTX Studio demarre...
+echo  Installation des composants si besoin...
 echo  Le navigateur va s'ouvrir sur http://127.0.0.1:8191
 echo  Premier lancement : 5 a 10 minutes possibles.
 echo  Vous pouvez minimiser cette fenetre (ne pas la fermer).
@@ -59,6 +60,14 @@ echo ========================================================
 echo.
 
 cd /d "%STUDIO_DIR%"
+"%PYTHON%" -m pip install -r "%STUDIO_DIR%\requirements.txt"
+if errorlevel 1 (
+    echo.
+    echo Echec pip. Consultez logs\setup.log
+    pause
+    exit /b 1
+)
+
 "%PYTHON%" "%STUDIO_DIR%\launcher.py"
 echo.
 echo LTX Studio s'est arrete. Consultez logs\boot.log
