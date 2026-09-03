@@ -1,11 +1,13 @@
 """
-Self-healing ComfyUI boot — Snapdragon X Elite (Windows ARM + Python x64).
+ComfyUI boot — Snapdragon X Elite (Windows ARM + Python x64 émulé).
+Ne JAMAIS importer torchaudio : le .pyd déclenche une MessageBox Windows.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -20,23 +22,68 @@ from typing import Any, IO
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 ERROR_REPORT = BASE_DIR / "error_report.txt"
+SITECUSTOMIZE_SRC = BASE_DIR / "sitecustomize.py"
 
 _candidate = BASE_DIR.parent / "ComfyUI-ARM-Windows"
 COMFY_DIR = _candidate if _candidate.is_dir() else Path(r"C:\ComfyUI-ARM\ComfyUI-ARM-Windows")
 COMFY_PYTHON = COMFY_DIR / "venv" / "Scripts" / "python.exe"
+SITE_PACKAGES = COMFY_DIR / "venv" / "Lib" / "site-packages"
 COMFY_HTTP = "http://127.0.0.1:8190"
 COMFY_PORT = 8190
+CHECKPOINT_NAME = "ltx-video-2b-v0.9.5.safetensors"
+CHECKPOINT_DIR = COMFY_DIR / "models" / "checkpoints"
+CHECKPOINT_PATH = CHECKPOINT_DIR / CHECKPOINT_NAME
 
-READY_MARKERS = (
-    "to see the gui go to",
-    "starting server",
-    "listening on",
-)
+BANNED_PACKAGES = ("torchaudio", "xformers")
+WIN127_BLOCKLIST = frozenset(BANNED_PACKAGES)
+
+COMFY_ARGS = [
+    "--cpu",
+    "--force-fp16",
+    "--listen",
+    "127.0.0.1",
+    "--port",
+    "8190",
+    "--disable-smart-memory",
+]
 
 _comfy_process: subprocess.Popen[Any] | None = None
 _active_profile: str = "none"
 _attempt_history: list[str] = []
 _log_lock = threading.Lock()
+
+_COMFY_BOOTSTRAP = r"""
+import ctypes
+import runpy
+import sys
+import types
+from importlib.abc import Loader, MetaPathFinder
+from importlib.machinery import ModuleSpec
+
+try:
+    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
+except Exception:
+    pass
+
+_BLOCKED = frozenset({"torchaudio", "xformers"})
+
+class _FailLoader(Loader):
+    def create_module(self, spec):
+        raise ImportError(spec.name + " disabled by LTX Studio (ARM x64)")
+    def exec_module(self, module):
+        raise ImportError("disabled by LTX Studio")
+
+class _BlockNativeExtFinder(MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        root = fullname.split(".", 1)[0]
+        if root not in _BLOCKED:
+            return None
+        return ModuleSpec(fullname, _FailLoader(), is_package=True, origin="ltx-stub")
+
+sys.meta_path.insert(0, _BlockNativeExtFinder())
+sys.argv = ["main.py"] + sys.argv[1:]
+runpy.run_path("main.py", run_name="__main__")
+"""
 
 
 class LaunchProfile:
@@ -46,22 +93,11 @@ class LaunchProfile:
         self.env = env if env is not None else {}
 
 
-# Uniquement des flags ComfyUI standards (les flags inconnus font crasher au boot).
 PROFILES: list[LaunchProfile] = [
     LaunchProfile(
-        name="cpu_fp16",
-        args=["--cpu", "--force-fp16", "--listen", "127.0.0.1", "--port", "8190"],
-        env={"CUDA_VISIBLE_DEVICES": "-1", "PYTHONUNBUFFERED": "1"},
-    ),
-    LaunchProfile(
         name="cpu_fp16_lowmem",
-        args=["--cpu", "--force-fp16", "--listen", "127.0.0.1", "--port", "8190", "--disable-smart-memory"],
+        args=list(COMFY_ARGS),
         env={"CUDA_VISIBLE_DEVICES": "-1", "PYTHONUNBUFFERED": "1", "OMP_NUM_THREADS": "4"},
-    ),
-    LaunchProfile(
-        name="cpu_fp16_simple",
-        args=["--cpu", "--force-fp16", "--port", "8190"],
-        env={"CUDA_VISIBLE_DEVICES": "-1", "PYTHONUNBUFFERED": "1"},
     ),
 ]
 
@@ -101,6 +137,21 @@ def is_ready() -> bool:
         return False
 
 
+def checkpoint_status() -> dict[str, Any]:
+    found = CHECKPOINT_PATH.is_file()
+    return {
+        "ok": found,
+        "name": CHECKPOINT_NAME,
+        "path": str(CHECKPOINT_PATH),
+        "dir": str(CHECKPOINT_DIR),
+        "message": (
+            None
+            if found
+            else f"Modèle manquant dans {CHECKPOINT_DIR}"
+        ),
+    }
+
+
 def classify_error(tail: str) -> str:
     u = tail.upper()
     if "CLIPTOKENIZER" in u:
@@ -109,10 +160,11 @@ def classify_error(tail: str) -> str:
         "TORCHAUDIO" in u
         or "TORCH_LIBRARY_IMPL" in u
         or "0XC0000139" in u
-        or "ENTRYPOINT" in u
         or "_TORCHAUDIO.PYD" in u
     ):
         return "torchaudio_abi"
+    if "WINERROR 127" in u or "ERROR 127" in u or "0XC0000139" in u:
+        return "winerror_127"
     if "HUGGINGFACE-HUB" in u and ("REQUIRED" in u or "IMPORTERROR" in u):
         return "hf_hub_conflict"
     if "UNRECOGNIZED ARGUMENTS" in u or "UNRECOGNIZED ARGUMENT" in u:
@@ -130,34 +182,6 @@ def classify_error(tail: str) -> str:
     return "silent_exit"
 
 
-_TORCHAUDIO_PROBE = r"""
-import ctypes
-import sys
-try:
-    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
-except Exception:
-    pass
-try:
-    import torchaudio
-    print("OK", getattr(torchaudio, "__version__", "?"))
-except Exception as exc:
-    print("FAIL", type(exc).__name__, exc)
-    sys.exit(1)
-"""
-
-_COMFY_BOOTSTRAP = r"""
-import ctypes
-import runpy
-import sys
-try:
-    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
-except Exception:
-    pass
-sys.argv = ["main.py"] + sys.argv[1:]
-runpy.run_path("main.py", run_name="__main__")
-"""
-
-
 def _pip(cmd_tail: list[str], timeout: int = 600) -> int:
     cmd = [str(COMFY_PYTHON), "-m", "pip", *cmd_tail]
     try:
@@ -172,80 +196,119 @@ def _pip(cmd_tail: list[str], timeout: int = 600) -> int:
         return 1
 
 
-def _probe_torchaudio() -> bool:
+def install_sitecustomize_block() -> None:
+    """Copie le bloqueur + fichier .pth (exécuté par site.py, plus fiable que sitecustomize)."""
+    if not SITE_PACKAGES.is_dir():
+        return
+    if not SITECUSTOMIZE_SRC.is_file():
+        log("ltx_block_audio source manquant")
+        return
+
+    src = SITECUSTOMIZE_SRC.read_text(encoding="utf-8")
+    dest_mod = SITE_PACKAGES / "ltx_block_audio.py"
+    dest_mod.write_text(src, encoding="utf-8")
+    pth = SITE_PACKAGES / "ltx_block_audio.pth"
+    pth.write_text("import ltx_block_audio\n", encoding="utf-8")
+
+    dest_site = SITE_PACKAGES / "sitecustomize.py"
+    marker = "ltx-stub"
+    if dest_site.is_file():
+        existing = dest_site.read_text(encoding="utf-8", errors="replace")
+        if marker not in existing and "_BlockNativeExtFinder" not in existing:
+            dest_site.write_text(
+                "import ltx_block_audio\n\n" + existing,
+                encoding="utf-8",
+            )
+            log("sitecustomize: import ltx_block_audio prepend")
+    else:
+        dest_site.write_text("import ltx_block_audio\n", encoding="utf-8")
+        log("sitecustomize: import ltx_block_audio")
+    log("bloqueur ltx_block_audio.py + .pth installe")
+
+
+def nuke_banned_packages() -> None:
+    """
+    Retire torchaudio et xformers du disque SANS les importer.
+    Un import de _torchaudio.pyd ouvre la MessageBox Windows (point d'entrée introuvable).
+    """
+    print("Nettoyage torchaudio + xformers (sans import)...")
+    log("nuke_banned_packages: pip uninstall puis suppression dossiers")
+    _pip(["uninstall", "-y", "torchaudio", "xformers"])
+
+    if not SITE_PACKAGES.is_dir():
+        return
+
+    removed: list[str] = []
+    for item in list(SITE_PACKAGES.iterdir()):
+        name = item.name.lower()
+        banned = False
+        for pkg in BANNED_PACKAGES:
+            if name == pkg or name.startswith(pkg + "-") or name.startswith(pkg + "."):
+                banned = True
+                break
+        if "_torchaudio" in name or name.endswith("torchaudio.pyd"):
+            banned = True
+        if not banned:
+            continue
+        try:
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink(missing_ok=True)
+            removed.append(item.name)
+        except Exception as exc:  # noqa: BLE001
+            log(f"impossible de supprimer {item.name}: {exc}")
+
+    for pyd in SITE_PACKAGES.rglob("*torchaudio*.pyd"):
+        try:
+            pyd.unlink(missing_ok=True)
+            removed.append(str(pyd.relative_to(SITE_PACKAGES)))
+        except Exception as exc:  # noqa: BLE001
+            log(f"pyd leftover {pyd}: {exc}")
+
+    if removed:
+        log("supprime: " + ", ".join(removed[:20]))
+        print("  retire:", ", ".join(removed[:8]))
+    else:
+        log("aucun dossier torchaudio/xformers restant")
+        print("  torchaudio/xformers absents.")
+
+
+def ensure_torch_cpu() -> None:
     probe = subprocess.run(
-        [str(COMFY_PYTHON), "-c", _TORCHAUDIO_PROBE],
+        [str(COMFY_PYTHON), "-c", "import torch; print(torch.__version__)"],
         cwd=str(COMFY_DIR),
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=60,
     )
-    out = (probe.stdout or "") + (probe.stderr or "")
-    return probe.returncode == 0 and "OK" in out
+    version = (probe.stdout or "").strip()
+    if probe.returncode == 0 and version:
+        log(f"Torch version OK: {version}")
+        print(f"Torch version OK: {version}")
+        return
+
+    log("CRITICAL: Torch is broken. Reinstalling CPU wheels...")
+    print("CRITICAL: Torch is broken. Reinstalling...")
+    _pip(
+        [
+            "install",
+            "--no-cache-dir",
+            "torch==2.4.1",
+            "torchvision==0.19.1",
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
+        ],
+        timeout=1200,
+    )
+    nuke_banned_packages()
 
 
-def repair_torchaudio() -> bool:
-    """
-    Corrige l'ABI torchaudio vs torch (popup Windows torch_library_impl / 0xc0000139).
-    LTX Video n'a pas besoin de torchaudio (ACE/MMAudio seulement) :
-    si la reinstall echoue, on desinstalle pour un import propre (ModuleNotFoundError).
-    """
-    if not COMFY_PYTHON.is_file():
-        return False
-
-    if _probe_torchaudio():
-        log("torchaudio deja compatible")
-        return True
-
-    log("Reparation torchaudio (ABI incompatible avec torch)")
-    print("Reparation torchaudio (DLL torch_library_impl)...")
-
-    _pip(["uninstall", "-y", "torchaudio"])
-
-    torch_ver = ""
-    try:
-        tv = subprocess.run(
-            [
-                str(COMFY_PYTHON),
-                "-c",
-                "import torch; print(torch.__version__.split('+')[0].strip())",
-            ],
-            cwd=str(COMFY_DIR),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        torch_ver = (tv.stdout or "").strip()
-    except Exception as exc:  # noqa: BLE001
-        log(f"lecture torch version: {exc}")
-
-    if torch_ver:
-        # Meme serie que torch 2.4.1+cpu
-        _pip(
-            [
-                "install",
-                "--no-cache-dir",
-                f"torchaudio=={torch_ver}",
-                "--index-url",
-                "https://download.pytorch.org/whl/cpu",
-            ],
-            timeout=900,
-        )
-        if _probe_torchaudio():
-            log(f"torchaudio=={torch_ver} OK")
-            print("torchaudio reinstalle et OK.")
-            return True
-        log("reinstall torchaudio toujours casse — desinstallation finale")
-        _pip(["uninstall", "-y", "torchaudio"])
-
-    # Sans torchaudio : ComfyUI loggue "ACE/MMAudio will be broken" mais LTX Video tourne.
-    log("torchaudio retire (non requis pour LTX Video)")
-    print("torchaudio retire — OK pour LTX Video (pas d'audio ACE/MMAudio).")
-    return True
+def pin_numpy() -> None:
+    _pip(["install", "numpy>=1.24.0,<2.0.0"])
 
 
 def repair_transformers() -> bool:
-    """Reparation transformers/tokenizers/huggingface-hub (+ dossiers ~okenizers)."""
     if not COMFY_PYTHON.is_file():
         return False
 
@@ -260,14 +323,13 @@ def repair_transformers() -> bool:
         log("transformers/CLIPTokenizer deja OK")
         return True
 
-    log("Reparation FORCEE: tokenizers + transformers + huggingface-hub")
-    print("Reparation transformers/tokenizers (CLIPTokenizer)...")
+    log("Reparation tokenizers + transformers + huggingface-hub")
+    print("Reparation transformers/tokenizers...")
 
-    site = COMFY_DIR / "venv" / "Lib" / "site-packages"
-    if site.is_dir():
-        for item in site.iterdir():
+    if SITE_PACKAGES.is_dir():
+        for item in SITE_PACKAGES.iterdir():
             name = item.name.lower()
-            if name.startswith("~") or name in {"~okenizers", "~ransformers", "~uggingface_hub"}:
+            if name.startswith("~"):
                 try:
                     if item.is_dir():
                         shutil.rmtree(item, ignore_errors=True)
@@ -298,24 +360,58 @@ def repair_transformers() -> bool:
     )
     ok = verify.returncode == 0 and "OK" in (verify.stdout or "")
     if ok:
-        log("CLIPTokenizer OK apres reparation")
+        log("CLIPTokenizer OK")
         print("Reparation transformers OK.")
     else:
-        log(f"CLIPTokenizer TOUJOURS CASSE: {(verify.stderr or verify.stdout or '')[-400:]}")
-        print("Reparation transformers incomplete — voir logs.")
+        log(f"CLIPTokenizer KO: {(verify.stderr or verify.stdout or '')[-400:]}")
+        print("Reparation transformers incomplete.")
     return ok
 
 
-def repair_comfy_deps() -> bool:
-    """Repare transformers puis torchaudio. CLIPTokenizer est bloquant ; torchaudio non."""
+def repair_winerror_127(tail: str) -> None:
+    """Force-reinstall du module cité, sauf torchaudio/xformers (on les nuke)."""
+    u = tail.lower()
+    if "torchaudio" in u or "_torchaudio" in u:
+        nuke_banned_packages()
+        install_sitecustomize_block()
+        return
+
+    match = re.search(
+        r"site-packages[\\/]([a-zA-Z0-9_]+)[\\/].+\.(?:pyd|dll)",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    module = match.group(1).lower() if match else ""
+    aliases = {"cv2": "opencv-python", "pil": "pillow", "av": "av", "sklearn": "scikit-learn"}
+    pip_name = aliases.get(module, module)
+    if not pip_name or pip_name in WIN127_BLOCKLIST:
+        nuke_banned_packages()
+        return
+    log(f"WinError 127 — force-reinstall {pip_name}")
+    print(f"WinError 127 — reinstall {pip_name}...")
+    _pip(["install", "--force-reinstall", "--no-cache-dir", pip_name])
+
+
+def preflight() -> bool:
+    """Pré-vol : bloqueur, purge torchaudio, torch CPU, numpy, transformers."""
     if not COMFY_PYTHON.is_file():
+        log(f"Python introuvable: {COMFY_PYTHON}")
         return False
     if ERROR_REPORT.is_file():
         ERROR_REPORT.unlink(missing_ok=True)
 
+    install_sitecustomize_block()
+    nuke_banned_packages()
+    ensure_torch_cpu()
+    pin_numpy()
+    nuke_banned_packages()
     clip_ok = repair_transformers()
-    repair_torchaudio()
+    nuke_banned_packages()
     return clip_ok
+
+
+def repair_comfy_deps() -> bool:
+    return preflight()
 
 
 def kill_port(port: int = COMFY_PORT) -> None:
@@ -343,7 +439,6 @@ def kill_port(port: int = COMFY_PORT) -> None:
 
 
 def free_studio_ports() -> None:
-    """Libère 8191 (UI) et 8190 (ComfyUI) avant démarrage."""
     for port in (8191, 8190):
         if port_in_use(port):
             log(f"Port {port} occupe — liberation...")
@@ -391,15 +486,15 @@ def start_with_profile(profile: LaunchProfile) -> subprocess.Popen[Any] | None:
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "comfyui.log"
-    # Bootstrap Windows: masque les MessageBox DLL (0xc0000139) puis lance main.py
     cmd = [str(COMFY_PYTHON), "-u", "-c", _COMFY_BOOTSTRAP, *profile.args]
     _active_profile = profile.name
-    log(f"Lancement ComfyUI [{profile.name}]: {COMFY_PYTHON} main.py {' '.join(profile.args)}")
+    log(f"Lancement ComfyUI [{profile.name}]: main.py {' '.join(profile.args)}")
 
     env = os.environ.copy()
     env.update(profile.env)
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONUTF8"] = "1"
+    env["CUDA_VISIBLE_DEVICES"] = "-1"
 
     kwargs: dict[str, Any] = {
         "cwd": str(COMFY_DIR),
@@ -451,6 +546,9 @@ def write_error_report(reason: str) -> None:
 
 
 def diagnose() -> str:
+    ckpt = checkpoint_status()
+    if not ckpt["ok"]:
+        return ckpt["message"] or f"Modèle manquant dans {CHECKPOINT_DIR}"
     if is_ready():
         return "ComfyUI prêt."
     if process_alive():
@@ -464,7 +562,7 @@ def diagnose() -> str:
     return "ComfyUI hors ligne."
 
 
-def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
+def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 2) -> bool:
     global _attempt_history
     _attempt_history = []
 
@@ -481,7 +579,7 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
 
     last_error = ""
     for attempt in range(max_attempts):
-        profile = PROFILES[min(attempt, len(PROFILES) - 1)]
+        profile = PROFILES[0]
         stop_comfy()
         if port_in_use() and not is_ready():
             kill_port(COMFY_PORT)
@@ -493,7 +591,7 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
             last_error = "chemin_invalide"
             continue
 
-        deadline = time.monotonic() + max(45, timeout_seconds // max_attempts)
+        deadline = time.monotonic() + max(60, timeout_seconds // max_attempts)
         while time.monotonic() < deadline:
             if is_ready():
                 log(f"ComfyUI pret [{profile.name}]")
@@ -502,10 +600,11 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
                 return True
             code = process_exit_code()
             if code is not None:
-                last_error = classify_error(read_log_tail())
+                tail = read_log_tail()
+                last_error = classify_error(tail)
                 log(f"Crash [{profile.name}] code={code} {last_error}")
-                if last_error == "torchaudio_abi":
-                    repair_torchaudio()
+                if last_error in {"torchaudio_abi", "winerror_127"}:
+                    repair_winerror_127(tail)
                 break
             time.sleep(1)
         else:
@@ -513,8 +612,6 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
                 return True
             last_error = classify_error(read_log_tail()) or "timeout"
             log(f"Timeout [{profile.name}] {last_error}")
-            if last_error == "torchaudio_abi":
-                repair_torchaudio()
             stop_comfy()
 
     write_error_report(f"Echec apres {max_attempts} essais ({last_error})")

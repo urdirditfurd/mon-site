@@ -13,7 +13,7 @@ set "PYTHON=C:\ComfyUI-ARM\ComfyUI-ARM-Windows\venv\Scripts\python.exe"
 
 echo.
 echo ========================================================
-echo  LTX Studio v7
+echo  LTX Studio v8
 echo  CETTE FENETRE DOIT RESTER OUVERTE
 echo  Interface : http://127.0.0.1:8191
 echo ========================================================
@@ -36,11 +36,8 @@ echo Liberation ports 8191 / 8190...
 powershell -NoProfile -Command "foreach($p in 8191,8190){$c=Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue; if($c){$c.OwningProcess|Sort-Object -Unique|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}}"
 timeout /t 2 /nobreak >nul
 
-"%PYTHON%" -c "import uvicorn,fastapi,websockets" 1>nul 2>nul
-if errorlevel 1 (
-    echo Installation composants UI...
-    "%PYTHON%" -m pip install -q -r "%STUDIO_DIR%\requirements.txt"
-)
+echo Retrait force torchaudio + xformers (avant tout import)...
+"%PYTHON%" -m pip uninstall -y torchaudio xformers 1>nul 2>nul
 
 echo Lancement launcher.py ...
 "%PYTHON%" "%STUDIO_DIR%\launcher.py"

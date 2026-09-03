@@ -9,8 +9,8 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-echo LTX Studio - Self-Healing Debug
-echo Logs: %~dp0logs\comfyui.log
+echo LTX Studio v8 - Debug
+echo Logs: %~dp0logs\
 echo.
 
 "%PYTHON%" launcher.py --debug --no-browser

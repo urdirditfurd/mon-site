@@ -293,8 +293,16 @@ def _error_report_text() -> str | None:
 
 @app.get("/api/status")
 async def status() -> JSONResponse:
+    ckpt = comfy_boot.checkpoint_status()
     if await comfy_is_ready():
-        return JSONResponse({"status": "ready", "http_ok": True})
+        return JSONResponse(
+            {
+                "status": "ready",
+                "http_ok": True,
+                "checkpoint_ok": ckpt["ok"],
+                "hint": None if ckpt["ok"] else ckpt["message"],
+            }
+        )
 
     alive = comfy_boot.process_alive()
     report = _error_report_text()
@@ -303,6 +311,7 @@ async def status() -> JSONResponse:
             "status": "offline",
             "http_ok": False,
             "starting": alive,
+            "checkpoint_ok": ckpt["ok"],
             "hint": diagnose_comfy_error(),
             "error_report": report,
             "profile": comfy_boot._active_profile,
@@ -353,6 +362,10 @@ async def start_comfy() -> JSONResponse:
 
 @app.post("/api/generate")
 async def generate(body: GenerateRequest) -> JSONResponse:
+    ckpt = comfy_boot.checkpoint_status()
+    if not ckpt["ok"]:
+        raise HTTPException(status_code=400, detail="model_missing")
+
     if not await ensure_comfyui(timeout_seconds=120):
         raise HTTPException(status_code=503, detail="comfy_offline")
 
