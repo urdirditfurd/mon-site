@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -104,6 +105,14 @@ def classify_error(tail: str) -> str:
     u = tail.upper()
     if "CLIPTOKENIZER" in u:
         return "clip_tokenizer_broken"
+    if (
+        "TORCHAUDIO" in u
+        or "TORCH_LIBRARY_IMPL" in u
+        or "0XC0000139" in u
+        or "ENTRYPOINT" in u
+        or "_TORCHAUDIO.PYD" in u
+    ):
+        return "torchaudio_abi"
     if "HUGGINGFACE-HUB" in u and ("REQUIRED" in u or "IMPORTERROR" in u):
         return "hf_hub_conflict"
     if "UNRECOGNIZED ARGUMENTS" in u or "UNRECOGNIZED ARGUMENT" in u:
@@ -121,17 +130,125 @@ def classify_error(tail: str) -> str:
     return "silent_exit"
 
 
-def repair_comfy_deps() -> bool:
+_TORCHAUDIO_PROBE = r"""
+import ctypes
+import sys
+try:
+    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
+except Exception:
+    pass
+try:
+    import torchaudio
+    print("OK", getattr(torchaudio, "__version__", "?"))
+except Exception as exc:
+    print("FAIL", type(exc).__name__, exc)
+    sys.exit(1)
+"""
+
+_COMFY_BOOTSTRAP = r"""
+import ctypes
+import runpy
+import sys
+try:
+    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
+except Exception:
+    pass
+sys.argv = ["main.py"] + sys.argv[1:]
+runpy.run_path("main.py", run_name="__main__")
+"""
+
+
+def _pip(cmd_tail: list[str], timeout: int = 600) -> int:
+    cmd = [str(COMFY_PYTHON), "-m", "pip", *cmd_tail]
+    try:
+        print(" ", " ".join(cmd_tail))
+        result = subprocess.run(cmd, cwd=str(COMFY_DIR), timeout=timeout, capture_output=True, text=True)
+        log(f"pip {' '.join(cmd_tail)} -> {result.returncode}")
+        if result.returncode != 0:
+            log((result.stderr or result.stdout or "")[-500:])
+        return result.returncode
+    except Exception as exc:  # noqa: BLE001
+        log(f"pip failed: {exc}")
+        return 1
+
+
+def _probe_torchaudio() -> bool:
+    probe = subprocess.run(
+        [str(COMFY_PYTHON), "-c", _TORCHAUDIO_PROBE],
+        cwd=str(COMFY_DIR),
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    out = (probe.stdout or "") + (probe.stderr or "")
+    return probe.returncode == 0 and "OK" in out
+
+
+def repair_torchaudio() -> bool:
     """
-    Reparation complete de la pile transformers/tokenizers/huggingface-hub.
-    Cause actuelle: CLIPTokenizer introuvable + distribution ~okenizers cassee.
+    Corrige l'ABI torchaudio vs torch (popup Windows torch_library_impl / 0xc0000139).
+    LTX Video n'a pas besoin de torchaudio (ACE/MMAudio seulement) :
+    si la reinstall echoue, on desinstalle pour un import propre (ModuleNotFoundError).
     """
     if not COMFY_PYTHON.is_file():
         return False
-    if ERROR_REPORT.is_file():
-        ERROR_REPORT.unlink(missing_ok=True)
 
-    # Verifier d'abord si deja OK
+    if _probe_torchaudio():
+        log("torchaudio deja compatible")
+        return True
+
+    log("Reparation torchaudio (ABI incompatible avec torch)")
+    print("Reparation torchaudio (DLL torch_library_impl)...")
+
+    _pip(["uninstall", "-y", "torchaudio"])
+
+    torch_ver = ""
+    try:
+        tv = subprocess.run(
+            [
+                str(COMFY_PYTHON),
+                "-c",
+                "import torch; print(torch.__version__.split('+')[0].strip())",
+            ],
+            cwd=str(COMFY_DIR),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        torch_ver = (tv.stdout or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        log(f"lecture torch version: {exc}")
+
+    if torch_ver:
+        # Meme serie que torch 2.4.1+cpu
+        _pip(
+            [
+                "install",
+                "--no-cache-dir",
+                f"torchaudio=={torch_ver}",
+                "--index-url",
+                "https://download.pytorch.org/whl/cpu",
+            ],
+            timeout=900,
+        )
+        if _probe_torchaudio():
+            log(f"torchaudio=={torch_ver} OK")
+            print("torchaudio reinstalle et OK.")
+            return True
+        log("reinstall torchaudio toujours casse — desinstallation finale")
+        _pip(["uninstall", "-y", "torchaudio"])
+
+    # Sans torchaudio : ComfyUI loggue "ACE/MMAudio will be broken" mais LTX Video tourne.
+    log("torchaudio retire (non requis pour LTX Video)")
+    print("torchaudio retire — OK pour LTX Video (pas d'audio ACE/MMAudio).")
+    return True
+
+
+def repair_transformers() -> bool:
+    """Reparation transformers/tokenizers/huggingface-hub (+ dossiers ~okenizers)."""
+    if not COMFY_PYTHON.is_file():
+        return False
+
     probe = subprocess.run(
         [str(COMFY_PYTHON), "-c", "from transformers import CLIPTokenizer; print('OK')"],
         cwd=str(COMFY_DIR),
@@ -147,15 +264,12 @@ def repair_comfy_deps() -> bool:
     print("Reparation transformers/tokenizers (CLIPTokenizer)...")
 
     site = COMFY_DIR / "venv" / "Lib" / "site-packages"
-    # Nettoyer les dossiers pip corrompus (~okenizers, etc.)
     if site.is_dir():
         for item in site.iterdir():
             name = item.name.lower()
             if name.startswith("~") or name in {"~okenizers", "~ransformers", "~uggingface_hub"}:
                 try:
                     if item.is_dir():
-                        import shutil
-
                         shutil.rmtree(item, ignore_errors=True)
                     else:
                         item.unlink(missing_ok=True)
@@ -163,30 +277,17 @@ def repair_comfy_deps() -> bool:
                 except Exception as exc:  # noqa: BLE001
                     log(f"Nettoyage {item.name}: {exc}")
 
-    steps = [
-        [str(COMFY_PYTHON), "-m", "pip", "uninstall", "-y", "transformers", "tokenizers", "huggingface-hub"],
+    _pip(["uninstall", "-y", "transformers", "tokenizers", "huggingface-hub"])
+    _pip(
         [
-            str(COMFY_PYTHON),
-            "-m",
-            "pip",
             "install",
             "--force-reinstall",
             "--no-cache-dir",
             "huggingface-hub==0.26.5",
             "tokenizers==0.20.3",
             "transformers==4.46.3",
-        ],
-    ]
-    for cmd in steps:
-        try:
-            print(" ", " ".join(cmd[3:]))
-            result = subprocess.run(cmd, cwd=str(COMFY_DIR), timeout=600, capture_output=True, text=True)
-            log(f"pip {' '.join(cmd[3:])} -> {result.returncode}")
-            if result.returncode != 0:
-                err = (result.stderr or result.stdout or "")[-500:]
-                log(err)
-        except Exception as exc:  # noqa: BLE001
-            log(f"repair step failed: {exc}")
+        ]
+    )
 
     verify = subprocess.run(
         [str(COMFY_PYTHON), "-c", "from transformers import CLIPTokenizer; print('OK')"],
@@ -198,11 +299,23 @@ def repair_comfy_deps() -> bool:
     ok = verify.returncode == 0 and "OK" in (verify.stdout or "")
     if ok:
         log("CLIPTokenizer OK apres reparation")
-        print("Reparation OK.")
+        print("Reparation transformers OK.")
     else:
         log(f"CLIPTokenizer TOUJOURS CASSE: {(verify.stderr or verify.stdout or '')[-400:]}")
-        print("Reparation incomplete — voir logs.")
+        print("Reparation transformers incomplete — voir logs.")
     return ok
+
+
+def repair_comfy_deps() -> bool:
+    """Repare transformers puis torchaudio. CLIPTokenizer est bloquant ; torchaudio non."""
+    if not COMFY_PYTHON.is_file():
+        return False
+    if ERROR_REPORT.is_file():
+        ERROR_REPORT.unlink(missing_ok=True)
+
+    clip_ok = repair_transformers()
+    repair_torchaudio()
+    return clip_ok
 
 
 def kill_port(port: int = COMFY_PORT) -> None:
@@ -278,9 +391,10 @@ def start_with_profile(profile: LaunchProfile) -> subprocess.Popen[Any] | None:
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "comfyui.log"
-    cmd = [str(COMFY_PYTHON), "-u", "main.py", *profile.args]
+    # Bootstrap Windows: masque les MessageBox DLL (0xc0000139) puis lance main.py
+    cmd = [str(COMFY_PYTHON), "-u", "-c", _COMFY_BOOTSTRAP, *profile.args]
     _active_profile = profile.name
-    log(f"Lancement ComfyUI [{profile.name}]: {' '.join(cmd)}")
+    log(f"Lancement ComfyUI [{profile.name}]: {COMFY_PYTHON} main.py {' '.join(profile.args)}")
 
     env = os.environ.copy()
     env.update(profile.env)
@@ -390,6 +504,8 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
             if code is not None:
                 last_error = classify_error(read_log_tail())
                 log(f"Crash [{profile.name}] code={code} {last_error}")
+                if last_error == "torchaudio_abi":
+                    repair_torchaudio()
                 break
             time.sleep(1)
         else:
@@ -397,6 +513,8 @@ def wait_until_ready(timeout_seconds: int = 180, max_attempts: int = 3) -> bool:
                 return True
             last_error = classify_error(read_log_tail()) or "timeout"
             log(f"Timeout [{profile.name}] {last_error}")
+            if last_error == "torchaudio_abi":
+                repair_torchaudio()
             stop_comfy()
 
     write_error_report(f"Echec apres {max_attempts} essais ({last_error})")

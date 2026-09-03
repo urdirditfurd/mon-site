@@ -1,6 +1,6 @@
 """
-LTX Studio — lanceur one-click v6.
-Reparations deps une seule fois, UI immediate, ComfyUI en parallele.
+LTX Studio — lanceur one-click v7.
+Reparations deps (transformers + torchaudio), UI immediate, ComfyUI en parallele.
 """
 
 from __future__ import annotations
@@ -75,9 +75,9 @@ def main() -> None:
     if comfy_boot.ERROR_REPORT.is_file():
         comfy_boot.ERROR_REPORT.unlink(missing_ok=True)
 
-    print("LTX Studio launcher v6")
+    print("LTX Studio launcher v7")
     print("Interface : http://127.0.0.1:8191")
-    print("Liberation ports + reparation transformers...")
+    print("Liberation ports + reparation transformers/torchaudio...")
     comfy_boot.free_studio_ports()
 
     threading.Thread(target=boot_comfy_background, daemon=True).start()

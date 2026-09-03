@@ -13,7 +13,7 @@ set "PYTHON=C:\ComfyUI-ARM\ComfyUI-ARM-Windows\venv\Scripts\python.exe"
 
 echo.
 echo ========================================================
-echo  LTX Studio v6
+echo  LTX Studio v7
 echo  CETTE FENETRE DOIT RESTER OUVERTE
 echo  Interface : http://127.0.0.1:8191
 echo ========================================================
